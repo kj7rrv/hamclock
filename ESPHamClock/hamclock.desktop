@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=HamClock
+Exec=hamclock
+Icon=/home/pi/.hamclock/hamclock.png
+Terminal=false
+Type=Application
