@@ -5,6 +5,9 @@
 // glue
 #include "HamClock.h"
 
+// current version
+const char *hc_version = HC_VERSION;
+
 // default backend server
 const char *svr_host = "clearskyinstitute.com";
 
@@ -196,7 +199,7 @@ void setup()
         wdDelay(500);
     } while (!Serial);
     Serial.print(F("\nHamClock version "));
-    Serial.println (F(HC_VERSION));
+    Serial.println (hc_version);
 
     // record whether our FLASH CRC is correct -- takes about half a second
     flash_crc_ok = ESP.checkFlashCRC();
@@ -331,8 +334,8 @@ void setup()
     // draw version just below
     tft.setTextColor (RA8875_WHITE);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setCursor (cs_info.box.x+(cs_info.box.w-getTextWidth(HC_VERSION))/2, cs_info.box.y+cs_info.box.h+10);
-    tft.print (HC_VERSION);
+    tft.setCursor (cs_info.box.x+(cs_info.box.w-getTextWidth(hc_version))/2, cs_info.box.y+cs_info.box.h+10);
+    tft.print (hc_version);
 
     // position the map box in lower right -- border is drawn outside
     map_b.w = EARTH_W;
@@ -657,6 +660,17 @@ static void drawOneTimeDX()
     dx_c = dx_c_save;
 }
 
+/* round to whole degrees.
+ * used to remove spurious fractions
+ */
+static void roundLL (LatLong &ll)
+{
+    ll.lat_d = roundf (ll.lat_d);
+    ll.lng_d = roundf (ll.lng_d);
+    normalizeLL(ll);
+}
+
+
 /* monitor for touch events
  */
 static void checkTouch()
@@ -718,32 +732,20 @@ static void checkTouch()
         eraseDXPath();                  // declutter to emphasize sat track
         drawAllSymbols(false);
     } else if (s2ll (s, ll)) {
+        // subpixel values are meaningless
+        roundLL (ll);
         if (tt == TT_HOLD) {
-            // map hold, update DE
-            s.x -= DE_R+1;
-            s.y += DE_R+1;
+            // map hold: update DE
             // assume op wants city, if showing
-            LatLong city_ll;
-            const char *city = NULL;
             if (names_on)
-                city = getNearestCity (ll, city_ll);
-            if (city)
-                newDE (city_ll, NULL);
-            else
-                newDE (ll, NULL);
+                (void) getNearestCity (ll, ll);
+            newDE (ll, NULL);
         } else {
-            // just an ordinary map location, update DX
-            s.x -= DX_R+1;
-            s.y += DX_R+1;
+            // just an ordinary map location: update DX
             // assume op wants city, if showing
-            LatLong city_ll;
-            const char *city = NULL;
             if (names_on)
-                city = getNearestCity (ll, city_ll);
-            if (city)
-                newDX (city_ll, NULL, NULL);
-            else
-                newDX (ll, NULL, NULL);
+                (void) getNearestCity (ll, ll);
+            newDX (ll, NULL, NULL);
         }
     } else if (inBox (s, de_title_b)) {
         toggleDETimeFormat();
@@ -757,6 +759,7 @@ static void checkTouch()
         drawTZ (de_tz);
         drawDEInfo();
         updateMoonPane(true);
+        newBC();
     } else if (!dx_info_for_sat && checkTZTouch (s, dx_tz, dx_ll)) {
         // N.B. don't even call checkTZTouch if !dx_info_for_sat
         NVWriteInt32 (NV_DX_TZ, dx_tz.tz_secs);
@@ -1326,7 +1329,7 @@ static void drawVersion(bool force)
     // show current version, but highlight if new version is available
     uint16_t col = new_avail ? RA8875_RED : GRAY;
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    snprintf (line, sizeof(line), _FX("Ver %s"), HC_VERSION);
+    snprintf (line, sizeof(line), _FX("Ver %s"), hc_version);
     uint16_t vw = getTextWidth (line);
     tft.setTextColor (col);
     tft.setCursor (version_b.x+version_b.w-vw, version_b.y);        // right justify
@@ -1339,34 +1342,42 @@ static void drawWiFiInfo()
 {
     resetWatchdog();
 
-    static bool prev_rssi;
+    // show in red if wifi signal strength less than this -- not a hard cutoff but -70 is definitely dead.
+    #define MIN_WIFI_RSSI (-60)
 
     // just once every few seconds, wary about overhead calling RSSI()
     static uint32_t prev_ms;
     if (!timesUp(&prev_ms, 5000))
         return;
 
-    // show info or error, toggling each time
+    // toggle rssi and ip, or just ip if no wifi
+    static bool rssi_ip_toggle;
     char str[30];
-    if (prev_rssi) {
+    if (rssi_ip_toggle) {
+        // show RSSI, if working
+        int16_t rssi = WiFi.RSSI();
+        if (rssi < 10) {
+            sprintf (str, _FX("  WiFi %4d dBm"), rssi);
+            tft.setTextColor (rssi < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
+        } else {
+            // no wifi, just leave IP showing
+            str[0] = '\0';
+        }
+    } else {
+        // show IP
         IPAddress ip = WiFi.localIP();
         bool net_ok = ip[0] != '\0';
-        if (net_ok)
+        if (net_ok) {
             sprintf (str, _FX("IP %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
-        else
+            tft.setTextColor (GRAY);
+        } else {
             strcpy (str, "    No Network");
-    } else {
-        int16_t rssi = WiFi.RSSI();
-        bool rssi_ok = rssi < 10;
-        if (rssi_ok)
-            sprintf (str, _FX("  WiFi %4d dBm"), rssi);
-        else
-            str[0] = '\0';      // just leave IP showing if no wifi
+            tft.setTextColor (RA8875_RED);
+        }
     }
 
     if (str[0]) {
         selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor (GRAY);
         int16_t x = cs_info.box.x + 68;         // a little past Uptime
         int16_t y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
         uint16_t w = cs_info.box.w - version_b.w - 68 - 2;
@@ -1376,7 +1387,7 @@ static void drawWiFiInfo()
     }
 
     // toggle
-    prev_rssi = !prev_rssi;
+    rssi_ip_toggle = !rssi_ip_toggle;
 
 }
 
@@ -1479,15 +1490,22 @@ static void drawUptime(bool force)
  */
 static bool overMaidKey (const SCoord &s)
 {
-        return (!azm_on && mapgrid_choice == MAPGRID_MAID && (inBox(s,maidlbltop_b) || inBox(s,maidlblright_b)));
+    return (!azm_on && mapgrid_choice == MAPGRID_MAID       
+                        && (inBox(s,maidlbltop_b) || inBox(s,maidlblright_b)) );
+}
+
+/* return whether coordinate s is over an active DRAP scale
+ */
+static bool overDRAPScale (const SCoord &s)
+{
+    return (DRAPScaleIsUp() && inBox(s,drap_b));
 }
 
 /* return whether coordinate s is over a usable map location
  */
 bool overMap (const SCoord &s)
 {
-    return (inBox(s, map_b) && !overRSS(s) && !inBox(s, view_btn_b) && !overMaidKey(s)
-                && (core_map != CM_DRAP || !inBox(s,drap_b)));
+    return (inBox(s, map_b) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overDRAPScale(s));
 }
 
 /* return whether coordinate s is over any symbol
@@ -1497,8 +1515,16 @@ bool overAnySymbol (const SCoord &s)
     return (inCircle(s, de_c) || inCircle(s, dx_c) || inCircle(s, deap_c)
                 || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
-                || (core_map == CM_DRAP && inBox(s,drap_b)));
+                || overDRAPScale(s));
 }
+
+/* return whether the DRAP scale is (or should be) visible now
+ */
+bool DRAPScaleIsUp(void)
+{
+    return (core_map == CM_DRAP && prop_map == PROP_MAP_OFF);
+}
+
 
 /* draw all symbols, order establishes layering priority
  * N.B. called by updateBeacons(): beware recursion
@@ -1508,7 +1534,7 @@ void drawAllSymbols(bool erase_too)
     updateClocks(false);
     resetWatchdog();
 
-    if (core_map == CM_DRAP)
+    if (DRAPScaleIsUp())
         drawDRAPScale();
     if (!overRSS(sun_c.s))
         drawSun();
@@ -1978,25 +2004,37 @@ static void shutdown(void)
     const uint16_t h = 50;
     uint16_t y = tft.height()/4;
 
-    // define each possibility
+    // define each possibility -- set depends on platform
     typedef struct {
         const char *prompt;
         SBox box;
         uint16_t color;
-        bool yes;
     } ShutDownCtrl;
-    ShutDownCtrl sdc[] = {
-        {"Never mind -- resume",        {x0, y,                 w, h}, RA8875_GREEN, false}, // must be first
-        {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW, false},
+    enum {
+        _SDC_RESUME,
+        _SDC_RESTART,
+        _SDC_EXIT,
+        _SDC_REBOOT,
+        _SDC_SHUTDOWN
+    };
+    ShutDownCtrl sdc[] = {              // N.B. must be in order of _SDC_* enum
+        {"Never mind -- resume",        {x0, y,                 w, h}, RA8875_GREEN},
+        {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW},
         #if defined(_IS_UNIX)
-            {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA, false},
-            {"Reboot",                  {x0, (uint16_t)(y+3*h), w, h}, RA8875_RED, false},
-            {"Shutdown",                {x0, (uint16_t)(y+4*h), w, h}, RGB565(255,125,0), false},
+            {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA},
+            {"Reboot",                  {x0, (uint16_t)(y+3*h), w, h}, RA8875_RED},
+            {"Shutdown",                {x0, (uint16_t)(y+4*h), w, h}, RGB565(255,125,0)},
         #endif // _IS_UNIX
     };
 
-    // number of options depends on whether we are UNIX and then whether full screen
-    unsigned n_sdc = getX11FullScreen() ? NARRAY(sdc) : NARRAY(sdc)-2;
+    // number of options
+    #if defined(_IS_UNIX)
+        // os control only when full screen
+        unsigned n_sdc = getX11FullScreen() ? NARRAY(sdc) : NARRAY(sdc)-2;
+    #else
+        // only restart makes sense
+        unsigned n_sdc = NARRAY(sdc);
+    #endif
 
     // main loop that displays choices until one is confirmed
     int selection = -1;
@@ -2026,32 +2064,28 @@ static void shutdown(void)
 
     // engage selection action
     switch (selection) {
-    case 0:
-        // resume unchanged
+    case _SDC_RESUME:
         initScreen();
         return;
-    case 1:
-        // restart
+    case _SDC_RESTART:
         Serial.print (_FX("Restarting\n"));
+        eraseScreen();  // fast touch feedback
         reboot();
         break;
  #if defined(_IS_UNIX)
-    case 2:
-        // exit
+    case _SDC_EXIT:
         Serial.print (_FX("Exiting\n"));
         setFullBrightness();
         eraseScreen();
         wdDelay(200);
         exit(0);
-    case 3:
-        // reboot
+    case _SDC_REBOOT:
         drawStringInBox ("Rebooting...", sdc[3].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Rebooting\n"));
         system ("sudo reboot");
         for(;;);
-    case 4:
-        // shutdown
+    case _SDC_SHUTDOWN:
         drawStringInBox ("Shutting down...", sdc[4].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Shutting down\n"));
@@ -2059,8 +2093,7 @@ static void shutdown(void)
         for(;;);
  #endif // _IS_UNIX
     default:
-        Serial.println ("Shutdown choice bug!");
-        initScreen();
+        fatalError ("Shutdown choice bug: %d", selection);
         return;
 
     }
