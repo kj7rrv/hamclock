@@ -170,12 +170,14 @@
 
 // Raspberry Pi GPIO definitions, not header pins
 
-#define SW_RED_GPIO             13
-#define SW_GRN_GPIO             19
-#define SW_COUNTDOWN_GPIO       26
-#define Elecraft_GPIO           14
-#define SATALARM_GPIO           20
-#define ONAIR_GPIO              21
+#define SW_RED_GPIO             13      // header 33
+#define SW_GRN_GPIO             19      // header 35
+#define SW_COUNTDOWN_GPIO       26      // header 37
+#define SW_ALARMOUT_GPIO        06      // header 31
+#define SW_ALARMOFF_GPIO        05      // header 29
+#define Elecraft_GPIO           14      // header 8
+#define SATALARM_GPIO           20      // header 38
+#define ONAIR_GPIO              21      // header 40
 
 #endif
 
@@ -198,8 +200,8 @@
 #define HTTPPORT        80
 #define SERVERPORT      8080
 
-// menu timeout, millis
-#define MENU_TO         30000
+// default menu timeout, millis
+#define MENU_TO         20000
 
 // maidenhead character arrey length, including EOS
 #define MAID_CHARLEN     7
@@ -521,6 +523,8 @@ extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
 extern void drawCallsign (bool all);
 extern void logState (void);
+extern bool DRAPScaleIsUp(void);
+extern const char *hc_version;
 
 
 
@@ -670,6 +674,7 @@ extern const char *gpsd_server, *ntp_server;
 
 #define GRAY    RGB565(140,140,140)
 #define BRGRAY  RGB565(200,200,200)
+#define DYELLOW RGB565(255,212,112)
 
 extern void hsvtorgb(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t h, uint8_t s, uint8_t v);
 extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t b);
@@ -935,6 +940,7 @@ extern bool getDemoMode(void);
 extern void setDemoMode(bool on);
 extern uint16_t getGridColor(void);
 extern int16_t getCenterLng(void);
+extern void setCenterLng(int16_t);
 
 
 
@@ -1022,6 +1028,7 @@ typedef enum {
     MENU_1OFN,                  // exactly 1 of this set, round selector
     MENU_AL1OFN,                // at least 1 of this set, square selector
     MENU_TOGGLE,                // simple on/off with no grouping, square selector
+    MENU_IGNORE,                // ignore this entry
 } MenuFieldType;
 
 typedef enum {
@@ -1039,11 +1046,12 @@ typedef struct {
 
 typedef struct {
     uint8_t n_cols;             // number of columns to display items
-    uint8_t n_items;            // items[]
+    uint8_t n_rows;             // number of non-IGNORE items[]
+    uint8_t n_items;            // number of items[]
     MenuItem *items;            // list -- user must manage memory
 } Menu;
 
-extern bool runMenu (Menu &menu, SBox &menu_b, SBox &ok_b);
+extern bool runMenu (Menu &menu, const SBox &outside_b, SBox &menu_b, SBox &ok_b);
 extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
 
 
@@ -1177,7 +1185,7 @@ typedef enum {
     NV_SATFOOTCOLOR,            // satellite footprint color as RGB 565
     NV_X11FLAGS,                // set if want full screen
 
-    NV_SWFLAGS,                 // Big Clock bitmask: 1=show date; 2=show wx; 4=digital; 8=12 hr
+    NV_BCFLAGS,                 // Big Clock bitmask: 1=date; 2=wx; 4=digital; 8=12 hr; 16=no sec hand
     NV_DAILYONOFF,              // 7 2-byte on times then 7 off times, each mins from midnight
     NV_TEMPCORR2,               // BME280 77 temperature correction, NV_METRIC_ON units
     NV_PRESCORR2,               // BME280 77 pressure correction, NV_METRIC_ON units
@@ -1194,8 +1202,10 @@ typedef enum {
     NV_NAMES_ON,                // whether to show roving place names
     NV_PANE1ROTSET,             // PlotChoice bitmask of pane 1 rotation choices
     NV_PANE2ROTSET,             // PlotChoice bitmask of pane 2 rotation choices
+
     NV_PANE3ROTSET,             // PlotChoice bitmask of pane 3 rotation choices
     NV_DOY_ON,                  // whether showing day of year instead of month day
+    NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if off
 
     NV_N
 } NV_Name;
@@ -1256,7 +1266,11 @@ extern void getNVMaidenhead (NV_Name nv, char maid[MAID_CHARLEN]);
  *
  */
 
-extern void plotBandConditions (const SBox &box, int busy, float rel_table[PROP_MAP_N], char *config_str);
+#define BMTRX_ROWS      24                              // time: UTC 0 .. 23
+#define BMTRX_COLS      PROP_MAP_N                      // bands: 80-40-30-20-17-15-12-10
+typedef uint8_t BandMatrix[BMTRX_ROWS][BMTRX_COLS];     // percent circuit reliability
+
+extern void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *config_str);
 extern bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt);
 extern bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
         const char *ylabel, uint16_t color, float y_min, float y_max, float big_value);
@@ -1300,6 +1314,7 @@ extern void showRotatingBorder (bool soon, PlotPane pp);
 extern void initPlotPanes(void);
 extern void savePlotOps(void);
 extern bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color);
+extern bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32_t to_ms, SCoord &tap);
 
 
 
@@ -1407,6 +1422,15 @@ extern SCoord wifi_tt_s;
  *
  */
 
+// bit mask values for NV_BCFLAGS
+typedef enum {
+    SW_BCDATEBIT =  1,                          // showing bigclock date
+    SW_BCWXBIT   =  2,                          // showing bigclock weather
+    SW_BCDIGBIT  =  4,                          // big clock is digital else analog
+    SW_DB12HBIT  =  8,                          // digital clock is 12 else 24
+    SW_ANOSHBIT  =  16,                         // set if not showing analog second hand
+} SWBCBits;
+
 // state of stopwatch engine, _not_ what is being display
 typedef enum {
     SWE_RESET,                                  // showing 0, ready to run
@@ -1424,6 +1448,13 @@ typedef enum {
     SWD_BCANALOG,                               // Big Clock, analog
 } SWDisplayState;
 
+// alarm state
+typedef enum {
+    ALMS_OFF,
+    ALMS_ARMED,
+    ALMS_RINGING
+} AlarmState;
+
 extern SBox stopwatch_b;                        // clock icon on main display
 
 extern void initStopwatch(void);
@@ -1433,6 +1464,10 @@ extern void drawMainPageStopwatch (bool force);
 extern bool setSWEngineState (SWEngineState nsws, uint32_t ms);
 extern SWEngineState getSWEngineState (uint32_t &ms_left);
 extern SWDisplayState getSWDisplayState (void);
+extern void getAlarmState (AlarmState &as, uint16_t &hr, uint16_t &mn);
+extern void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn);
+extern SWBCBits getBigClockBits(void);
+
 
 
 
@@ -1467,6 +1502,14 @@ extern void runNextDemoCommand(void);
  *
  */
 
+
+typedef struct {
+    const char *server;                         // name of server
+    int rsp_time;                               // last known response time, millis()
+} NTPServer;
+#define NTP_TOO_LONG 5000U                      // too long response time, millis()
+
+
 extern void initSys (void);
 extern void initWiFiRetry(void);
 extern void newBC(void);
@@ -1487,6 +1530,7 @@ extern bool httpSkipHeader (WiFiClient &client);
 extern bool httpSkipHeader (WiFiClient &client, uint32_t *lastmodp);
 extern void FWIFIPR (WiFiClient &client, const __FlashStringHelper *str);
 extern void FWIFIPRLN (WiFiClient &client, const __FlashStringHelper *str);
+extern int getNTPServers (const NTPServer **listp);
 extern uint16_t bc_power;
 
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, 
