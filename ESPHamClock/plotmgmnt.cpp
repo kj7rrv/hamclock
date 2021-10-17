@@ -184,8 +184,10 @@ PlotChoice askPaneChoice (PlotPane pp)
 
     // init menu descriptor
     Menu menu;
-    memset (&menu, 0, sizeof(menu));
     menu.n_cols = 2;
+    menu.n_rows = 0;
+    menu.n_items = 0;
+    menu.items = NULL;
 
     // collect all candidates suitable for this pane
     for (int i = 0; i < PLOT_CH_N; i++) {
@@ -202,14 +204,15 @@ PlotChoice askPaneChoice (PlotPane pp)
             mi.indent = 4;
         }
     }
+    menu.n_rows = menu.n_items; // no MENU_IGNORE
 
     // nice sort by label
     qsort (menu.items, menu.n_items, sizeof(MenuItem), menuChoiceQS);
 
-    // run the menu in our box so height is not changed
+    // run the menu in copy of plot box so its height is not changed
     SBox pb = plot_b[pp];
     SBox ok_b;
-    bool menu_ok = runMenu (menu, pb, ok_b);
+    bool menu_ok = runMenu (menu, plot_b[pp], pb, ok_b);
 
     // return current choice by default
     PlotChoice return_ch = plot_ch[pp];
@@ -663,4 +666,42 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
 out:
     client.stop();
     return (ok);
+}
+
+/* wait until:
+ *   a tap occurs inside the given box,
+ *   a tap occurs outside the given box,
+ *   the given function (if not NULL) returns true or
+ *   the given timeout occurs.
+ * if tap inbox return location and true, else false for all other cases.
+ * while waiting we update clocks and allow some web server commands.
+ */
+bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32_t to_ms, SCoord &tap)
+{
+    drainTouch();
+
+    uint32_t t0 = millis();
+    for(;;) {
+
+        SCoord s;
+        if (readCalTouchWS(s) != TT_NONE) {
+            drainTouch();
+            if (inBox (s, inbox)) {
+                tap = s;
+                return(true);
+            }
+            if (!inBox (s, outbox))
+                return (false);
+            t0 = millis();
+        }
+
+        if (timesUp (&t0, to_ms))
+            return (false);
+
+        if (fp && (*fp)())
+            return (false);
+
+        updateClocks(false);
+        wdDelay (100);
+    }
 }

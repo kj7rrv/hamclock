@@ -306,9 +306,9 @@ static void engageRow (DXClusterSpot &s)
             return;
         }
 
-        // do it
-        newDX (ll, NULL, s.call);
+        // do it -- HB9CEY wants his KX3 to change ASAP
         setRadioSpot(s.freq);
+        newDX (ll, NULL, s.call);
 }
 
 static void setDXClusterSpotMapPosition (DXClusterSpot &s)

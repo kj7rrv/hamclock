@@ -329,6 +329,138 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     // printFreeHeap (F("plotWX"));
 }
 
+
+/* this function draws the Band Conditions pane. It can be called in two quite different ways:
+ *   1. when called by updateBandConditions(), we are given a table containing relative propagation values
+ *      for each band and a summary line to be drawn across the bottom.
+ *   2. we can also be called just to update annotation as indicated by bmp or cfg_str being NULL. In this
+ *      case we only draw the band indicators showing prop_map according to busy with the others normal
+ *      and we redraw the time line.
+ * matrix is 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
+ * we rotate matrix so rows go up from 80 and cols are DE local time 0 .. 23.
+ * busy: <0 err, 0 idle, >0 active.
+ * N.B. coordinate the layout geometry with checkBCTouch()
+ */
+void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *cfg_str)
+{
+    resetWatchdog();
+
+    // whether full or just updating labels
+    bool draw_all = bmp != NULL && cfg_str != NULL;
+
+    // prep box if all
+    if (draw_all)
+        prepPlotBox (box);
+
+    // layout
+    #define PFONT_H 6                                   // plot labels font height
+    #define PLOT_ROWS BMTRX_COLS                        // plot rows
+    #define PLOT_COLS BMTRX_ROWS                        // plot columns
+    #define TOP_B 27                                    // top border -- match VOACAP
+    #define PGAP 5                                      // gap between title and plot
+    #define PBOT_B 20                                   // plot bottom border -- room for config and time
+    #define PLEFT_B 18                                  // left border -- room for band
+    #define PTOP_Y (box.y + TOP_B + PGAP)               // plot top y
+    #define PBOT_Y (box.y+box.h-PBOT_B)                 // plot bottom y
+    #define PLEFT_X (box.x + PLEFT_B)                   // plot left x
+    #define PRIGHT_X (box.x+box.w-2)                    // plot right x
+    #define PLOT_W (PRIGHT_X - PLEFT_X)                 // plot width
+    #define PLOT_H (PBOT_Y - PTOP_Y)                    // plot height
+    #define PCOL_W (PLOT_W/PLOT_COLS-1)                 // plot column width
+    #define PROW_H (PLOT_H/PLOT_ROWS-1)                 // plot row height
+
+    // to help organize the matrix rotation, p_ variables refer to plot indices, m_ matrix
+
+    // label band names -- indicate current voacap map, if any
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor(GRAY);
+    for (int p_row = 0; p_row < PLOT_ROWS; p_row++) {
+        uint16_t y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
+        if (p_row == prop_map) {
+            uint16_t rect_col = busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE);
+            tft.fillRect (box.x+1, y+1, PLEFT_B-4, PFONT_H+4, rect_col);
+        } else if (!draw_all) {
+            tft.fillRect (box.x+1, y+1, PLEFT_B-4, PFONT_H+4, RA8875_BLACK);
+        }
+        tft.setCursor (box.x+2, y + 2);
+        tft.print (propMap2Band((PropMapSetting)p_row));
+    }
+
+    // erase timeline if not drawing all
+    if (!draw_all)
+        tft.fillRect (box.x + 1, PBOT_Y, box.w-2, PFONT_H+1, RA8875_BLACK);
+
+    // mark local time now on UTC scale
+    int de_hrs = (nowWO()/3600 + 48) % 24;
+    uint16_t now_x = PLEFT_X + PLOT_W*de_hrs/PLOT_COLS;
+    tft.fillRect (now_x, PBOT_Y, PCOL_W, PFONT_H, RA8875_WHITE);
+
+    // label DE time -- utc 0 always on left end
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    for (int utc = 0; utc < BMTRX_ROWS; utc += 4) {
+        uint16_t x = PLEFT_X + PLOT_W*utc/PLOT_COLS;
+        uint16_t y = PBOT_Y-1;
+        int de_lt = (utc + de_tz.tz_secs/3600 + 48) % 24;
+        if (de_lt >= 10) {
+            // close packing centered
+            tft.setCursor (x-3, y);
+            tft.print (de_lt/10);
+            tft.setCursor (x+1, y);
+            tft.print (de_lt%10);
+        } else {
+            tft.setCursor (x-1, y);
+            tft.print (de_lt);
+        }
+    }
+
+    // that's it unless drawing all
+    if (!draw_all)
+        return;
+
+    // center title across the top
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor(RA8875_WHITE);
+    const char *title = "VOACAP DE-DX";
+    uint16_t tw = getTextWidth (title);
+    tft.setCursor (box.x+(box.w-tw)/2, box.y + TOP_B);
+    tft.print ((char*)title);
+
+    // center the config across the bottom
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor(BRGRAY);
+    uint16_t cw = maxStringW (cfg_str, box.w);
+    tft.setCursor (box.x+(box.w-cw)/2, box.y + box.h - 10);
+    tft.print ((char*)cfg_str);
+
+    // scan matrix in row-major order but plot in col-major order to affect rotation
+    for (int m_row = 0; m_row < BMTRX_ROWS; m_row++) {
+        int p_col = m_row;                              // plot column
+        uint16_t x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
+        for (int m_col = 0; m_col < BMTRX_COLS; m_col++) {
+            // get reliability
+            uint8_t rel = (*bmp)[m_row][m_col];
+
+            // choose color similar to fetchVOACAPArea.pl
+            // rel:    0     10         33         66          100
+            // color: black   |   red    |  yellow  |   green
+            uint8_t h, s = 210, v, r, g, b;
+            v = rel < 10 ? 0 : 210;
+            h = rel < 33 ? 0 : (rel < 66 ? 43 : 85);
+            hsvtorgb (&r, &g, &b, h, s, v);
+            uint16_t color = RGB565 (r, g, b);
+
+            // draw color box
+            int p_row = m_col;
+            uint16_t y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
+            tft.fillRect (x, y, PCOL_W, PROW_H, color);
+        }
+    }
+
+    printFreeHeap (F("plotBandConditions"));
+}
+
+#if defined(_OLD_TABLE_STYLE)
+
 /* this function handles the actual drawing of the Band Conditions pane. It can be called in two quite
  * different ways:
  * 1. when called by updateBandConditions(), we are given a table containing relative propagation values
@@ -413,6 +545,8 @@ void plotBandConditions (const SBox &box, int busy, float rel_tbl[PROP_MAP_N], c
     printFreeHeap (F("plotBandConditions"));
 }
 
+#endif // _OLD_TABLE_STYLE
+
 /* print the NOAA RSG Space Weather Scales in the given box.
  */
 void plotNOAASWx (const SBox &box, const NOAASpaceWx &noaaspw)
@@ -450,6 +584,7 @@ void plotNOAASWx (const SBox &box, const NOAASpaceWx &noaaspw)
         }
     }
 }
+
 
 /* print a message in a (plot?) box, take care not to go outside
  */
