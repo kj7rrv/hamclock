@@ -42,22 +42,22 @@ static void connectSensors(bool all)
     for (int i = 0; i < MAX_N_BME; i++) {
 
         // skip unless all or succeeded before
-        if (!all && bme_data[i] == NULL)
+        if (!all && !bme_data[i])
             continue;
 
         uint8_t addr = bme_i2c[i];
-        Serial.printf (_FX("BME280 trying 0x%x ... "), addr);
+        Serial.printf (_FX("BME %strying 0x%x\n"), !bme_data[i] ? "" : "re", addr);
         Adafruit_BME280 &bme = bme_io[i];
         if (!bme.begin(addr)) {
-            Serial.println (F("fail"));
+            Serial.println (F("BME init fail"));
             continue;
         }
 
-        // looks good: insure empty queues
-        if (!bme_data[i])
-            bme_data[i] = (BMEData *) malloc (sizeof(BMEData));
-        memset (bme_data[i], 0, sizeof(BMEData));
-        bme_data[i]->i2c = addr;
+        // open worked: init if first time
+        if (!bme_data[i]) {
+            bme_data[i] = (BMEData *) calloc (1, sizeof(BMEData));
+            bme_data[i]->i2c = addr;
+        }
 
         // Forced mode sleeps until read; normal mode runs continuously and warms the sensor
         bme.setSampling(Adafruit_BME280::MODE_FORCED,
@@ -67,24 +67,32 @@ static void connectSensors(bool all)
                     Adafruit_BME280::FILTER_OFF,
                     Adafruit_BME280::STANDBY_MS_1000);
 
-        // initial readings are a little flakey, read and discard temp until fairly stable
-        int nsmall = 0;
+        // initial readings are a little flaky, read and discard temp until fairly stable
+        #define _N_OK 10
+        #define _N_TRY (5*_N_OK)
+        #define _TOT_DT 5000    // max millis for entire test
+        int n_stable = 0;
         float prev_t = 1e6;
-        for (int i = 0; i < 50 && nsmall < 10; i++) {
+        for (int i = 0; i < _N_TRY && n_stable < _N_OK; i++) {
             float t = bme.readTemperature();
-            if (fabsf(t-prev_t) < 1)
-                nsmall++;
-            else
-                nsmall = 0;
-            prev_t = t;
-            wdDelay(100);
+            if (!isnan(t) && t > -40) {
+                if (fabsf(t-prev_t) < 1)
+                    n_stable++;
+                else
+                    n_stable = 0;
+                prev_t = t;
+            }
+            wdDelay(_TOT_DT/_N_TRY);
         }
 
-        Serial.println (F("success"));
+        if (n_stable == _N_OK)
+            Serial.println (F("BME init success"));
+        else
+            Serial.println (F("BME not stable"));
     }
 
     if (getNBMEConnected() == 0)
-        Serial.println(F("BME280 none found"));
+        Serial.println(F("BME none found"));
 
 #endif // _SUPPORT_ENVSENSOR
 }
@@ -115,7 +123,7 @@ static bool readSensors ()
         float h = bme.readHumidity();                                   // percent
         if (isnan(t) || t < -40 || isnan(p) || isnan(h)) {
             // try restarting
-            Serial.printf (_FX("BME280 %x read err\n"), dp->i2c);
+            Serial.printf (_FX("BME %x read err\n"), dp->i2c);
             connectSensors(false);
         } else {
             // all good
@@ -131,7 +139,7 @@ static bool readSensors ()
             dp->h[dp->q_head] = h;
             dp->u[dp->q_head] = now();
 
-            // Serial.printf (_FX("BME280 %u %x %7.2f %7.2f %7.2f\n"), dp->u[dp->q_head], dp->i2c,
+            // Serial.printf (_FX("BME %u %x %7.2f %7.2f %7.2f\n"), dp->u[dp->q_head], dp->i2c,
                         // dp->t[dp->q_head], dp->p[dp->q_head], dp->h[dp->q_head]); 
 
             // advance q
