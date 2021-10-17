@@ -69,7 +69,6 @@ static void onProgressCB (int sofar, int total)
 bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
 {
     WiFiClient v_client;
-    char line[100];
     bool found_newer = false;
 
     Serial.print (svr_host); Serial.println (v_page);
@@ -86,6 +85,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
         }
 
         // next line is new version number
+        char line[100];
         if (!getTCPLine (v_client, line, sizeof(line), NULL)) {
             Serial.println (F("Version query timed out"));
             goto out;
@@ -93,9 +93,9 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
 
         // non-rc accepts newer non-rc; rc accepts newer or any rc
         Serial.printf (_FX("found version %s\n"), line);
-        float this_v = atof(hc_version);
+        float this_v = atof(HC_VERSION);
         float new_v = atof(line);
-        bool this_rc = strstr (hc_version, "rc");
+        bool this_rc = strstr (HC_VERSION, "rc");
         bool new_rc = strstr (line, "rc");
         // Serial.printf ("V %g >? %g\n", new_v, this_v);
         if ((!this_rc && !new_rc && new_v > this_v) || (this_rc && (new_rc || new_v >= this_v))) {
@@ -105,7 +105,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
 
         // just log next few lines for debug
         for (int i = 0; i < 2 && getTCPLine (v_client, line, sizeof(line), NULL); i++)
-            Serial.printf ("  %s\n", line);
+            Serial.println (line);
     }
 
 out:
@@ -243,12 +243,12 @@ void doOTAupdate(const char *newver)
     WiFiClient client;
     char url[200];
   #if defined(_IS_ESP8266)
-    if (strstr(hc_version, "rc") && strstr (newver, "rc"))
+    if (strstr(HC_VERSION, "rc") && strstr (newver, "rc"))
         snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.ino.bin"), svr_host, newver);
     else
         snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock.ino.bin"), svr_host);
   #else
-    if (strstr(hc_version, "rc") && strstr (newver, "rc"))
+    if (strstr(HC_VERSION, "rc") && strstr (newver, "rc"))
         snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.zip"), svr_host, newver);
     else
         snprintf (url, sizeof(url), _FX("https://%s/ham/HamClock/ESPHamClock.zip"), svr_host);

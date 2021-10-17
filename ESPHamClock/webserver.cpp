@@ -89,17 +89,11 @@ static void reportPaneChoices (WiFiClient *clientp, PlotPane pp)
     // always start with current then any others in rotset
     PlotChoice pc_now = plot_ch[pp];
     clientp->print(plot_names[pc_now]);
-    if (pc_now == PLOT_CH_BC) {
-        snprintf (buf, sizeof(buf), "/%dW", bc_power);
-        clientp->print(buf);
-    }
     if (paneIsRotating(pp)) {
         time_t t0 = now();
         PlotChoice pc_next = pc_now;
         while ((pc_next = getNextRotationChoice (pp, pc_next)) != pc_now) {
-            size_t l = snprintf (buf, sizeof(buf), ",%s", plot_names[pc_next]);
-            if (pc_next == PLOT_CH_BC)
-                snprintf (buf+l, sizeof(buf)-l, "/%dW", bc_power);
+            snprintf (buf, sizeof(buf), ",%s", plot_names[pc_next]);
             clientp->print(buf);
         }
         int sleft = next_rotationT[pp] - t0;
@@ -292,34 +286,22 @@ static bool getWiFiDEDXInfo_helper (WiFiClient *clientp, char *unused, bool want
 
     // report prefix and path if dx else de call
     if (want_de) {
-        // show prefix
         char prefix[MAX_PREF_LEN+1];
         if (getDXPrefix(prefix)) {
             snprintf (buf, sizeof(buf), "DX_prefix     %s\n", prefix);
             clientp->print(buf);
         }
 
-        // show short path info
         float dist, B;
-        propDEDXPath (false, dx_ll, &dist, &B);
+        propDEDXPath (show_lp, dx_ll, &dist, &B);
         dist *= ERAD_M;                             // radians to miles
         B *= 180/M_PIF;                             // radians to degrees
         if (show_km)
             dist *= 1.609344F;                      // mi - > km
-        FWIFIPR (*clientp, F("DX_path_SP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg\n"), dist, show_km ? "km" : "mi", B);
+        FWIFIPR (*clientp, F("DX_path       "));
+        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, show_km ? "km" : "mi",
+                                    B, show_lp ? "LP" : "SP");
         clientp->print (buf);
-
-        // show long path info
-        propDEDXPath (true, dx_ll, &dist, &B);
-        dist *= ERAD_M;                             // radians to miles
-        B *= 180/M_PIF;                             // radians to degrees
-        if (show_km)
-            dist *= 1.609344F;                      // mi - > km
-        FWIFIPR (*clientp, F("DX_path_LP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg\n"), dist, show_km ? "km" : "mi", B);
-        clientp->print (buf);
-
     } else {
         snprintf (buf, sizeof(buf), _FX("Call          %s\n"), getCallsign());
         clientp->print (buf);
@@ -552,10 +534,10 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
     // report grid overlay
     FWIFIPR (*clientp, F("MapGrid   "));
     switch (mapgrid_choice) {
-    case MAPGRID_OFF:       FWIFIPRLN (*clientp, F("None")); break;
-    case MAPGRID_TROPICS:   FWIFIPRLN (*clientp, F("Tropics")); break;
-    case MAPGRID_LATLNG:    FWIFIPRLN (*clientp, F("Lat/Long")); break;
-    case MAPGRID_MAID:      FWIFIPRLN (*clientp, F("Maidenhead")); break;
+    case MAPGRID_OFF:           FWIFIPRLN (*clientp, F("None")); break;
+    case MAPGRID_TROPICS:       FWIFIPRLN (*clientp, F("Tropics")); break;
+    case MAPGRID_LATLNG:           FWIFIPRLN (*clientp, F("Lat/Long")); break;
+    case MAPGRID_MAID:          FWIFIPRLN (*clientp, F("Maidenhead")); break;
     default:                FWIFIPRLN (*clientp, F("unknown")); break;
     }
 
@@ -615,26 +597,6 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
     } else
         FWIFIPRLN (*clientp, not_sup);
 
-
-    // report alarm
-    FWIFIPR (*clientp, F("Alarm     "));
-    AlarmState as;
-    uint16_t hr, mn;
-    getAlarmState (as, hr, mn);
-    switch (as) {
-    case ALMS_OFF:
-        snprintf (buf, sizeof(buf), "Off (%02d:%02d)\n", hr, mn);
-        break;
-    case ALMS_ARMED:
-        snprintf (buf, sizeof(buf), "Armed for %02d:%02d\n", hr, mn);
-        break;
-    case ALMS_RINGING:
-        snprintf (buf, sizeof(buf), "Ringing since %02d:%02d\n", hr, mn);
-        break;
-    }
-    clientp->print (buf);
-
-
     // time source
     FWIFIPR (*clientp, F("TimeFrom  "));
     if (gpsd_server)
@@ -680,7 +642,7 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
         clientp->println();
     }
 
-    // report rss
+    // rss
     if (rss_on)
         FWIFIPRLN (*clientp, F("RSS       on"));
     else
@@ -1024,9 +986,9 @@ static bool getWiFiSys (WiFiClient *clientp, char *unused)
     int worst_heap, worst_stack;
     getWorstMem (&worst_heap, &worst_stack);
 
-    // show basic info
+    // send info
     resetWatchdog();
-    FWIFIPR (*clientp, F("Version  ")); clientp->println (hc_version);
+    FWIFIPR (*clientp, F("Version  ")); clientp->println (HC_VERSION);
     FWIFIPR (*clientp, F("MaxStack ")); clientp->println (worst_stack);
     FWIFIPR (*clientp, F("MaxWDDT  ")); clientp->println (max_wd_dt);
     FWIFIPR (*clientp, F("Platform ")); clientp->println (platform);
@@ -1049,26 +1011,10 @@ static bool getWiFiSys (WiFiClient *clientp, char *unused)
     // #endif
 #endif
 
-    // show uptime
     uint16_t days; uint8_t hrs, mins, secs;
     if (getUptime (&days, &hrs, &mins, &secs)) {
         snprintf (buf, sizeof(buf), _FX("%dd%02d:%02d:%02d\n"), days, hrs, mins, secs);
         FWIFIPR (*clientp, F("UpTime   ")); clientp->print (buf);
-    }
-
-    // show NTP servers
-    const NTPServer *ntp_list;
-    int n_ntp = getNTPServers (&ntp_list);
-    for (int i = 0; i < n_ntp; i++) {
-        int bl = snprintf (buf, sizeof(buf), "NTP      %s ", ntp_list[i].server);
-        int rsp = ntp_list[i].rsp_time;
-        if (rsp == 0)
-            bl += snprintf (buf+bl, sizeof(buf)-bl, "%s\n", _FX("- Not yet measured"));
-        else if (rsp == NTP_TOO_LONG)
-            bl += snprintf (buf+bl, sizeof(buf)-bl, "%s\n", _FX("- Timed out"));
-        else
-            bl += snprintf (buf+bl, sizeof(buf)-bl, "%d ms\n", rsp);
-        clientp->print (buf);
     }
 
     // show file system info
@@ -1222,60 +1168,9 @@ static bool setWiFiTitle (WiFiClient *clientp, char line[])
     // engage
     drawCallsign (true);
 
-    // ack
     if (clientp) {
         startPlainText (*clientp);
         clientp->print (_FX("ok\n"));
-    }
-
-    return (true);
-}
-
-/* remote command to set up alarm clock
- *   state=off|armed&time=HR:MN
- */
-static bool setWiFiAlarm (WiFiClient *clientp, char line[])
-{
-    // crack
-    char state[10];
-    int hr = 0, mn = 0;
-    int ns = sscanf (line, "%10[^&]&time=%d:%d", state, &hr, &mn);
-
-    // get current state
-    AlarmState as;
-    uint16_t hr16, mn16;
-    getAlarmState (as, hr16, mn16);
-
-    // parse
-    if (ns == 1 && strcmp (state, "off") == 0) {
-        // turn off but retain current time
-        as = ALMS_OFF;
-    } else if (ns == 1 && strcmp (state, "armed") == 0) {
-        // turn on at current time
-        as = ALMS_ARMED;
-    } else if (ns == 3 && strcmp (state, "armed") == 0 && hr >= 0 && hr < 24 && mn >= 0 && mn < 60) {
-        // turn on at given time
-        as = ALMS_ARMED;
-        hr16 = hr;
-        mn16 = mn;
-    } else {
-        strcpy (line, garbcmd);
-        return (false);
-    }
-
-    // engage
-    setAlarmState (as, hr16, mn16);
-
-    // ack
-    if (clientp) {
-        startPlainText (*clientp);
-        if (as == ALMS_OFF)
-            clientp->print (_FX("alarm off\n"));
-        else {
-            char buf[30];
-            snprintf (buf, sizeof(buf), "armed at %02d:%02d\n", hr16, mn16);
-            clientp->print (buf);
-        }
     }
 
     return (true);
@@ -2047,11 +1942,9 @@ static bool setWiFivoacap (WiFiClient *clientp, char line[])
         char buf[50];
         size_t l = sprintf (buf, "VOACAP");
         if (B)
-            l += sprintf (buf+l, " band %d m", propMap2Band(pms));
-        if (P && B)
-            l += sprintf (buf+l, ",");
+            l += sprintf (buf+l, " band %d", propMap2Band(pms));
         if (P)
-            l += sprintf (buf+l, " power %d W", bc_power);
+            l += sprintf (buf+l, " power %d", bc_power);
         if (!P && !B)
             l += sprintf (buf+l, " off");
         clientp->println(buf);
@@ -2097,7 +1990,7 @@ static bool doWiFiUpdate (WiFiClient *clientp, char *unused)
     char ver[50];
     if (newVersionIsAvailable (ver, sizeof(ver))) {
         char msg[100];
-        snprintf (msg, sizeof(msg), "updating from %s to %s ... \n", hc_version, ver);
+        snprintf (msg, sizeof(msg), "updating to %s ... \n", ver);
         clientp->print(msg);
         doOTAupdate(ver);                               // never returns if successful
         FWIFIPRLN (*clientp, F("update failed"));
@@ -2134,10 +2027,10 @@ static bool doWiFiExit (WiFiClient *clientp, char *unused)
 
 /* table of command strings, its implementing function and additional info for help.
  * functions are called with user input string beginning just after the command and sans HTTP.
- * N.B. ! functions returning false shall replace the input string with a brief error message.
- *      ! functions returning true shall send http reply to clientp unless NULL.
- *      ! get_ commands shall include trailing space to detect and prevent trailing garbage.
- *      ! table is down here so all handlers are already conveniently defined above.
+ * N.B. functions returning false shall replace the input string with a brief error message.
+ *      functions returning true shall send http reply to clientp unless NULL.
+ *      get_ commands shall include trailing space to detect and prevent trailing garbage.
+ *      table is down here so all handlers are already conveniently defined above.
  * strings are in arrays so they are in ESP FLASH too.
  */
 #define CT_MAX_CMD      30                              // max command string length
@@ -2162,7 +2055,6 @@ static const CmdTble command_table[] PROGMEM = {
     { "get_stopwatch.txt ", getWiFiStopwatch,      "get stopwatch state" },
     { "get_sys.txt ",       getWiFiSys,            "get system stats" },
     { "get_time.txt ",      getWiFiTime,           "get current time" },
-    { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=DOW&idle=mins" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
@@ -2193,7 +2085,6 @@ static const CmdTble command_table[] PROGMEM = {
 static bool roCommand (const char *cmd)
 {
     return (strncmp (cmd, "get_", 4) == 0
-                    || strncmp (cmd, "set_alarm", 9) == 0
                     || strncmp (cmd, "set_stopwatch", 13) == 0
                     || strncmp (cmd, "set_touch", 9) == 0);
 }
@@ -2391,13 +2282,13 @@ void runNextDemoCommand()
     static const char *map_style[] = {"Countries", "Terrain", "DRAP"};
     static const char *map_grid[] = {"None", "Tropics", "Lat/Long", "Maidenhead"};
 
-    // make a random choice, avoid consecutive dups and save ESP FLASH with fewer style changes
+    // make a random choice, avoid consecutive dups
     #define DEMO_N_CHOICES 14
     static uint8_t prev_choice;
     uint8_t choice;
     do {
         choice = (uint8_t) random(DEMO_N_CHOICES);
-    } while (choice == prev_choice || (choice == 8 && random(10) < 8));
+    } while (choice == prev_choice);
     prev_choice = choice;
 
     // run choice

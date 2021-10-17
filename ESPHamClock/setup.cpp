@@ -52,8 +52,6 @@ static uint16_t dxport;
 static float temp_corr[MAX_N_BME];
 static float pres_corr[MAX_N_BME];
 static int16_t center_lng;
-static int16_t alt_center_lng;
-static bool alt_center_lng_set;
 
 
 // layout constants
@@ -2599,15 +2597,5 @@ void setDemoMode(bool on)
  */
 int16_t getCenterLng()
 {
-    return (alt_center_lng_set ? alt_center_lng : center_lng);
-}
-
-/* set desired mercator map center longitude.
- * N.B. only works for subsequenct calls to getCenterLng(): ignores initSetup() and not stored to NVRAM
- */
-void setCenterLng (int16_t l)
-{
-    l = ((l + (180+360*10)) % 360) - 180;       // enforce [-180, 180)
-    alt_center_lng = l;
-    alt_center_lng_set = true;
+    return (center_lng);
 }

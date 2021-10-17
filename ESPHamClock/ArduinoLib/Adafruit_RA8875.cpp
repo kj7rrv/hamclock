@@ -242,16 +242,16 @@ bool Adafruit_RA8875::begin (int not_used)
         win = XCreateWindow(display, root, 0, 0, fb_si.xres, fb_si.yres, 0, visdepth, InputOutput,
                 visual, value_mask, &wa);
 
-	// create a black GC for this visual
+	// create a matching GC
 	XGCValues gcv;
 	gcv.foreground = black_pixel;
-        black_gc = XCreateGC (display, win, GCForeground, &gcv);
+        gc = XCreateGC(display,win,GCForeground,&gcv);
 
 	// create off-screen pixmap for smoother double-buffering
 	pixmap = XCreatePixmap (display, win, FB_XRES, FB_YRES, visdepth);
 
 	// init with black for first expose
-	XFillRectangle (display, pixmap, black_gc, 0, 0, FB_XRES, FB_YRES);
+	XFillRectangle (display, pixmap, gc, 0, 0, FB_XRES, FB_YRES);
 
 	// set initial and min size
         XSizeHints* win_size_hints = XAllocSizeHints();
@@ -1524,8 +1524,8 @@ void Adafruit_RA8875::drawCanvas()
             // update bounding box (inclusive of both edges)
             int nx = bb_x1-bb_x0+1;
             int ny = bb_y1-bb_y0+1;
-            XPutImage(display, pixmap, black_gc, img, bb_x0, bb_y0, bb_x0, bb_y0, nx, ny);
-            XCopyArea(display, pixmap, win, black_gc, bb_x0, bb_y0, nx, ny, FB_X0+bb_x0, FB_Y0+bb_y0);
+            XPutImage(display, pixmap, gc, img, bb_x0, bb_y0, bb_x0, bb_y0, nx, ny);
+            XCopyArea(display, pixmap, win, gc, bb_x0, bb_y0, nx, ny, FB_X0+bb_x0, FB_Y0+bb_y0);
 
             // struct timeval tv;
             // gettimeofday(&tv, NULL);
@@ -1687,7 +1687,7 @@ void Adafruit_RA8875::fbThread ()
 
 		case Expose:
 		    // printf ("Expose: [%d, %d]  %d x %d \n", event.xexpose.x, event.xexpose.y, event.xexpose.width, event.xexpose.height);
-		    XCopyArea(display, pixmap, win, black_gc,
+		    XCopyArea(display, pixmap, win, gc,
 		    		event.xexpose.x-FB_X0, event.xexpose.y-FB_Y0,
 				event.xexpose.width, event.xexpose.height, event.xexpose.x, event.xexpose.y);
 		    break;
@@ -1767,12 +1767,10 @@ void Adafruit_RA8875::fbThread ()
 		    FB_X0 = (fb_si.xres - FB_XRES)/2;
 		    FB_Y0 = (fb_si.yres - FB_YRES)/2;
 		    // fill in unused border
-		    XFillRectangle (display, win, black_gc, 0, 0, fb_si.xres, FB_Y0);
-		    XFillRectangle (display, win, black_gc, 0, FB_Y0, FB_X0, FB_YRES);
-		    XFillRectangle (display, win, black_gc, FB_X0 + FB_XRES, FB_Y0, FB_X0+1, FB_YRES);
-		    XFillRectangle (display, win, black_gc, 0, FB_Y0 + FB_YRES, fb_si.xres, FB_Y0+1);
-                    // invalidate staging area to get a full refresh
-                    memset (fb_stage, ~0, fb_nbytes);
+		    XFillRectangle (display, win, gc, 0, 0, fb_si.xres, FB_Y0);
+		    XFillRectangle (display, win, gc, 0, FB_Y0, FB_X0, FB_YRES);
+		    XFillRectangle (display, win, gc, FB_X0 + FB_XRES, FB_Y0, FB_X0+1, FB_YRES);
+		    XFillRectangle (display, win, gc, 0, FB_Y0 + FB_YRES, fb_si.xres, FB_Y0+1);
 		    break;
 		}
 	    }

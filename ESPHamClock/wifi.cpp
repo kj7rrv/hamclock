@@ -114,7 +114,11 @@ static bool moon_reverting;                     // flag for revertPlot1();
 
 
 // list of default NTP servers unless user has set their own
-static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
+typedef struct {
+    const char *server;                         // name of server
+    int rsp_time;                               // last known response time, millis()
+} NTPList;
+static NTPList ntp_list[] = {                   // init times to 0 insures all get tried initially
     {"pool.ntp.org", 0},
     {"time.google.com", 0},
     {"time.apple.com", 0},
@@ -122,7 +126,8 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
     {"europe.pool.ntp.org", 0},
     {"asia.pool.ntp.org", 0},
 };
-#define N_NTP NARRAY(ntp_list)                  // number of possible servers
+#define NNTP NARRAY(ntp_list)
+#define NTP_TOO_LONG 3000                       // too long response time, millis()
 
 
 // web site retry interval, secs
@@ -293,26 +298,19 @@ out:
     printFreeHeap (F("geolocateIP"));
 }
 
-/* search ntp_list for the fastest so far, or rotate if all bad.
+/* search ntp_list for the fastest so far.
  * N.B. always return one of ntp_list, never NULL
  */
-static NTPServer *findBestNTP()
+static NTPList *findBestNTP()
 {
-    static uint8_t prev_fixed;
-
-    NTPServer *best_ntp = &ntp_list[0];
     int rsp_min = ntp_list[0].rsp_time;
-
-    for (unsigned i = 1; i < N_NTP; i++) {
-        NTPServer *np = &ntp_list[i];
+    NTPList *best_ntp = &ntp_list[0];
+    for (unsigned i = 0; i < NNTP; i++) {
+        NTPList *np = &ntp_list[i];
         if (np->rsp_time < rsp_min) {
             best_ntp = np;
             rsp_min = np->rsp_time;
         }
-    }
-    if (rsp_min == NTP_TOO_LONG) {
-        prev_fixed = (prev_fixed+1) % N_NTP;
-        best_ntp = &ntp_list[prev_fixed];
     }
     return (best_ntp);
 }
@@ -474,9 +472,9 @@ void initSys()
             SCoord s;
             drainTouch();
             tftMsg (true, 0, _FX("Finding best NTP ..."));
-            NTPServer *best_ntp = NULL;
-            for (unsigned i = 0; i < N_NTP; i++) {
-                NTPServer *np = &ntp_list[i];
+            NTPList *best_ntp = NULL;
+            for (unsigned i = 0; i < NNTP; i++) {
+                NTPList *np = &ntp_list[i];
 
                 // measure the next. N.B. assumes we stay in sync
                 if (getNTPUTC(&ntp_server) == 0)
@@ -560,8 +558,9 @@ void checkBandConditions (const SBox &b, bool force)
     if (!update_bc)
         return;
 
-    if (updateBandConditions(b)) {
-        // worked ok so reschedule later
+    bool ok = updateBandConditions(b);
+    if (ok) {
+        // reschedule later
         next_bc = now() + BC_INTERVAL;
         bc_hour = hour(nowWO());
     } else {
@@ -638,7 +637,7 @@ static void checkMap(void)
 /* check for tap at s known to be within BandConditions box b.
  * tapping a band loads prop map, tapping power cycles bc_power 1-1000 W.
  * return whether tap was useful for us.
- * N.B. coordinate tap positions with plotBandConditions()
+ * N.B. coordinate tap positions with BChelper()
  */
 bool checkBCTouch (const SCoord &s, const SBox &b)
 {
@@ -646,10 +645,10 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     if (s.y < b.y+b.h/5)
         return (false);
 
-    // ll corner for power cycle
+    // ll corner for power cycle -- surround with small deadband
     SBox power_b;
     power_b.x = b.x + 2;
-    power_b.y = b.y + 89*b.h/100;
+    power_b.y = b.y + 89*b.h/100;               // encroaches slightly into 20
     power_b.w = b.w/3;
     power_b.h = b.y + b.h - power_b.y - 1;
     // tft.drawRect (power_b.x, power_b.y, power_b.w, power_b.h, RA8875_WHITE);
@@ -664,7 +663,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
             {MENU_1OFN, bc_power == 100, 5, "100 watts"},
             {MENU_1OFN, bc_power == 1000, 5, "1000 watts"},
         };
-        Menu menu = { 1, N_POW, N_POW, mitems };
+        Menu menu = { 1, N_POW, mitems };
 
         SBox menu_b;
         menu_b.x = b.x + 5;
@@ -675,7 +674,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         // run menu, find selection
         SBox ok_b;
         uint16_t new_power = bc_power;
-        if (runMenu (menu, b, menu_b, ok_b)) {
+        if (runMenu (menu, menu_b, ok_b)) {
             for (int i = 0; i < N_POW; i++) {
                 if (menu.items[i].set) {
                     new_power = powf (10, i);
@@ -695,16 +694,29 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     } else {
 
         // toggle band depending on position, if any.
-        // N.B. coordinate this with plotBandConditions() layout
+        // N.B. we assume plot areas for title and power have already been checked
         PropMapSetting new_prop_map = prop_map;
-        if (s.x < b.x + b.w/4) {
-            int i = (b.y + b.h - 20 - s.y) / ((b.h - 47)/PROP_MAP_N);
-            if (i == prop_map) {
-                // tapped current VOACAP selection: toggle current setting
-                new_prop_map = prop_map == PROP_MAP_OFF ? ((PropMapSetting)i) : PROP_MAP_OFF;
-            } else if (i >= 0 && i < PROP_MAP_N) {
-                // tapped a different VOACAP selection
-                new_prop_map = (PropMapSetting)i;
+        uint16_t ty = b.y + 29;
+        uint16_t cy = b.y+b.h-10;
+        uint16_t col1_x = b.x + 7;
+        uint16_t col2_x = b.x + 5*b.w/9-1;
+        uint16_t row_h = (cy-2-ty)/(PROP_MAP_N/2);
+        for (int i = 0; i < PROP_MAP_N; i++) {
+            SBox tb;
+            tb.x = (i < PROP_MAP_N/2) ? col1_x : col2_x;
+            tb.y = ty + (i%(PROP_MAP_N/2))*row_h;
+            tb.w = b.w/4;
+            tb.h = i == PROP_MAP_20M ? 5*row_h/6 : row_h;      // deadband above power 
+            // tft.drawRect (tb.x, tb.y, tb.w, tb.h, RA8875_WHITE);
+            if (inBox (s, tb)) {
+                if (i == prop_map) {
+                    // tapped current VOACAP selection: toggle current setting
+                    new_prop_map = prop_map == PROP_MAP_OFF ? ((PropMapSetting)i) : PROP_MAP_OFF;
+                } else {
+                    // tapped different VOACAP selection
+                    new_prop_map = (PropMapSetting)i;
+                }
+                break;
             }
         }
 
@@ -720,7 +732,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 
     }
 
-    // ours just because tap was below title
+    // ours
     return (true);
 }
 
@@ -1254,7 +1266,7 @@ time_t getNTPUTC(const char **server)
     // if (!wifiOk())
     //    return (0);
 
-    // create udp endpoint
+    // need udp
     WiFiUDP ntp_udp;
     resetWatchdog();
     if (!ntp_udp.begin(1234)) {                                 // any local port
@@ -1263,7 +1275,7 @@ time_t getNTPUTC(const char **server)
     }
 
     // decide on server: user's else fastest 
-    NTPServer *ntp_use = &ntp_list[0];                          // a place for rsp_time if useLocal
+    NTPList *ntp_use = &ntp_list[0];                            // a place for rsp_time if useLocal
     const char *ntp_server;
     if (useLocalNTPHost()) {
         ntp_server = getLocalNTPHost();
@@ -1301,7 +1313,7 @@ time_t getNTPUTC(const char **server)
     memset(buf, 0, sizeof(buf));
     uint32_t t0 = millis();
     while (!ntp_udp.parsePacket()) {
-        if (timesUp (&t0, NTP_TOO_LONG)) {
+        if (timesUp(&t0,3000U)) {
             Serial.println(F("NTP: UDP timed out"));
             ntp_use->rsp_time = NTP_TOO_LONG;                   // force different choice next time
             ntp_udp.stop();
@@ -1414,8 +1426,6 @@ void sendUserAgent (WiFiClient &client)
 
     if (logUsageOk()) {
 
-        uint32_t cd_timer;
-
         // encode full-screen with fb0
         int use_fb0 = 0;
         #if defined(_USE_FB0)
@@ -1443,15 +1453,6 @@ void sendUserAgent (WiFiClient &client)
             break;
         }
 
-        // alarm clock
-        AlarmState as;
-        uint16_t hr, mn;
-        getAlarmState (as, hr, mn);
-
-        // DOY
-        uint8_t doy = 0;
-        NVReadUInt8 (NV_DOY_ON, &doy);
-
         // encode plot options
         // prior to V2.67: value was either plot_ch or 99
         // since V2.67:    value is 100 + plot_ch
@@ -1468,18 +1469,15 @@ void sendUserAgent (WiFiClient &client)
         }
 
         snprintf (ua, ual,
-            _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
-            platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
+            _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV4 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d\r\n"),
+            platform, HC_VERSION, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb_mode, dx_info_for_sat, rss_on, useMetricUnits(),
             getNBMEConnected(), getKX3Baud(), found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
-            desrss, dxsrss, BUILD_W, use_fb0,
-            // new for LV5:
-            (int)as, getCenterLng(), doy, names_on, getDemoMode(), (int)getSWEngineState(cd_timer), 
-            (int)getBigClockBits(), utcOffset(), 0, 0, 0, 0);
+            desrss, dxsrss, BUILD_W, use_fb0);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
-            platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
+            platform, HC_VERSION, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
     }
 
     // send
@@ -2103,13 +2101,13 @@ static bool updateBandConditions(const SBox &box)
         // query web page
         httpGET (bc_client, svr_host, query);
 
-        // skip header
+        // skip response header
         if (!httpSkipHeader (bc_client)) {
             plotMessage (box, RA8875_RED, _FX("No BC header"));
             goto out;
         }
 
-        // next line is CSV path reliability for the requested time between DX and DE, 9 bands 80-10m
+        // next line is CSV path reliability, 80-10m
         if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
             plotMessage (box, RA8875_RED, _FX("No BC response"));
             goto out;
@@ -2129,60 +2127,17 @@ static bool updateBandConditions(const SBox &box)
         updateClocks(false);
         resetWatchdog();
 
-        // get current utc hour for path_spw
-        int t_hr = hour(t);
-
-        // plot or show error
-        // next 24 lines are reliability matrix.
-        // N.B. col 1 is UTC but runs from 1 .. 24, 24 is really 0
-        // lines include data for 9 bands, 80-10, but we drop 60 for BandMatrix
-        float rel[PROP_MAP_N];          // value are path reliability 0 .. 1
-        BandMatrix bm;
-        for (int i = 0; i < BMTRX_ROWS; i++) {
-
-            // read next row
-            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
-                Serial.println(response);
-                plotMessage (box, RA8875_RED, _FX("No matrix"));
-                goto out;
-            }
-
-            // crack next row, skipping 60 m
-            int utc_hr;
-            if (sscanf(response, _FX("%d %f,%*f,%f,%f,%f,%f,%f,%f,%f"), &utc_hr,
-                        &rel[PROP_MAP_80M], &rel[PROP_MAP_40M], &rel[PROP_MAP_30M], &rel[PROP_MAP_20M],
-                        &rel[PROP_MAP_17M], &rel[PROP_MAP_15M], &rel[PROP_MAP_12M], &rel[PROP_MAP_10M])
-                            != BMTRX_COLS + 1) {
-                Serial.println(response);
-                plotMessage (box, RA8875_RED, _FX("Bad matrix"));
-                goto out;
-            }
-
-            // correct utc
-            utc_hr %= 24;
-
-            // add to bm as integer percent
-            for (int j = 0; j < BMTRX_COLS; j++)
-                bm[utc_hr][j] = 100*rel[j];
-
-            // copy to path_spw if correct time
-            if (utc_hr == t_hr) {
-                memcpy (path_spw, rel, PROP_MAP_N*sizeof(float));
-                path_update = now();
-            }
+        // plot response or show error
+        if (sscanf (response, _FX("%f,%*f,%f,%f,%f,%f,%f,%f,%f"),        // skip 60m
+                        &path_spw[PROP_MAP_80M], &path_spw[PROP_MAP_40M], &path_spw[PROP_MAP_30M],
+                        &path_spw[PROP_MAP_20M], &path_spw[PROP_MAP_17M], &path_spw[PROP_MAP_15M],
+                        &path_spw[PROP_MAP_12M], &path_spw[PROP_MAP_10M]) == PROP_MAP_N) {
+            plotBandConditions (box, 0, path_spw, config);
+            path_update = now();
+            ok = true;
+        } else {
+            plotMessage (box, RA8875_RED, response);
         }
-
-        // #define _TEST_BAND_MATRIX
-        #if defined(_TEST_BAND_MATRIX)
-            for (int r = 0; r < BMTRX_ROWS; r++)                    // time 0 .. 23
-                for (int c = 0; c < BMTRX_COLS; c++)                // band 80 .. 10
-                    bm[r][c] = 100*r*c/BMTRX_ROWS/BMTRX_COLS;
-                    // (*mp)[r][c] = (float)r/BMTRX_ROWS;
-        #endif
-
-        // ok!
-        plotBandConditions (box, 0, &bm, config);
-        ok = true;
 
     } else {
         plotMessage (box, RA8875_RED, _FX("VOACAP connection failed"));
@@ -2700,13 +2655,4 @@ float pathrel[PROP_MAP_N], time_t &pathrel_age)
     for (int i = 0; i < PROP_MAP_N; i++)
         pathrel[i] = path_spw[i];
     pathrel_age = t0 - path_update;
-}
-
-/* return current NTP response time list.
- * N.B. this is the real data, caller must not modify.
- */
-int getNTPServers (const NTPServer **listp)
-{
-    *listp = ntp_list;
-    return (N_NTP);
 }
