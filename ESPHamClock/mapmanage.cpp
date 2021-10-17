@@ -923,7 +923,7 @@ const char *getMapStyle (char s[])
         if (prop_map == PROP_MAP_OFF)
             NVReadString (NV_MAPSTYLE, s);
         else
-            snprintf (s, NV_MAPSTYLE_LEN, "%dm/%dW", propMap2Band(prop_map), bc_power);
+            snprintf (s, NV_MAPSTYLE_LEN, "%dm", propMap2Band(prop_map));
 
         return (s);
 }

@@ -33,9 +33,6 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
     // draw depending on type
     switch (mi.type) {
 
-    case MENU_IGNORE:
-        break;
-
     case MENU_TITLE:
         if (draw_label) {
             tft.setCursor (box.x + mi.indent, box.y);
@@ -83,82 +80,59 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
  */
 static int menuCountItemsSet (Menu &menu, int ii)
 {
-    MenuItem &menu_ii = menu.items[ii];
-    int n_set = menu_ii.type != MENU_IGNORE && menu_ii.set ? 1 : 0;
+    int count = menu.items[ii].set ? 1 : 0;
 
-    for (int i = ii-1; i >= 0; --i) {
-        if (menu.items[i].type == MENU_IGNORE)
-            continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+    for (int i = ii-1; i >= 0 && menu.items[ii].type == menu.items[i].type; --i)
         if (menu.items[i].set)
-            n_set++;
-    }
+            count++;
 
-    for (int i = ii+1; i < menu.n_items; i++) {
-        if (menu.items[i].type == MENU_IGNORE)
-            continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+    for (int i = ii+1; i < menu.n_items && menu.items[ii].type == menu.items[i].type; i++)
         if (menu.items[i].set)
-            n_set++;
-    }
+            count++;
 
-    printf ("nset %d\n", n_set);
-
-    return (n_set);
+    return (count);
 }
 
 /* starting with item ii, turn off all items either side of the same type, including self.
  */
 static void menuItemsAllOff (Menu &menu, SBox *boxes, int ii)
 {
-    MenuItem &menu_ii = menu.items[ii];
-
-    if (menu_ii.type != MENU_IGNORE && menu_ii.set) {
-        menu_ii.set = false;
-        menuDrawItem (menu_ii, boxes[ii], false);
+    if (menu.items[ii].set) {
+        menu.items[ii].set = false;
+        menuDrawItem (menu.items[ii], boxes[ii], false);
     }
 
-    for (int i = ii-1; i >= 0; --i) {
-        if (menu.items[i].type == MENU_IGNORE)
-            continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+    for (int i = ii-1; i >= 0 && menu.items[ii].type == menu.items[i].type; --i) {
         if (menu.items[i].set) {
             menu.items[i].set = false;
-            menuDrawItem (menu.items[i], boxes[i], false);
+            menuDrawItem (menu.items[ii], boxes[i], false);
         }
     }
 
-    for (int i = ii+1; i < menu.n_items; i++) {
-        if (menu.items[i].type == MENU_IGNORE)
-            continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+    for (int i = ii+1; i< menu.n_items && menu.items[ii].type == menu.items[i].type; i++) {
         if (menu.items[i].set) {
             menu.items[i].set = false;
-            menuDrawItem (menu.items[i], boxes[i], false);
+            menuDrawItem (menu.items[ii], boxes[i], false);
         }
     }
 }
 
-/* operate the given menu in the given box and let op use until ok, cancel, timeout or tap outside a box.
+/* operate the given menu in the given box and let op use until ok, cancel or timeout.
  * caller passes a box we use for ok so they can use it later with menuRedrawOk if necessary.
  * N.B. menu_b height will be set to fit menu, other fields unchanged.
- * return true if op clicked ok else false for all other cases.
+ * return true if op clicked ok else false meaning cancelled or timed out.
  */
-bool runMenu (Menu &menu, const SBox &outside_b, SBox &menu_b, SBox &ok_b)
+bool runMenu (Menu &menu, SBox &menu_b, SBox &ok_b)
 {
     // font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (MENU_FGC);
 
-    // number of visible menu rows -- not counting MENU_IGNORE and ok/cancel
-    int n_vrows = (menu.n_rows + menu.n_cols - 1)/menu.n_cols;
+    // number of menu rows -- not counting ok/cancel
+    int n_rows = (menu.n_items + menu.n_cols - 1)/menu.n_cols;
 
     // menu box
-    menu_b.h = MENU_TBM + (n_vrows+1)*MENU_RH + MENU_TBM;
+    menu_b.h = MENU_TBM + (n_rows+1)*MENU_RH + MENU_TBM;
     tft.fillRect (menu_b.x, menu_b.y, menu_b.w, menu_b.h, MENU_BGC);
     tft.drawRect (menu_b.x, menu_b.y, menu_b.w, menu_b.h, MENU_FGC);
 
@@ -186,95 +160,100 @@ bool runMenu (Menu &menu, const SBox &outside_b, SBox &menu_b, SBox &ok_b)
     tft.setCursor (ok_b.x+MENU_BDX, ok_b.y+MENU_BDY);
     tft.print (ok_label);
 
-    // show each non-IGNORE item, creating selection box for each (even IGNORE)
+    // show each item, creating selection box for each
     StackMalloc ibox_mem(menu.n_items*sizeof(SBox));
     SBox *items_b = (SBox *) ibox_mem.getMem();
     uint16_t col_w = menu_b.w/menu.n_cols;
-    uint8_t row_i = 0;                          // visual row, only incremented for non-IGNORE
     for (int i = 0; i < menu.n_items; i++) {
         SBox &ib = items_b[i];
         MenuItem &mi = menu.items[i];
 
-        if (mi.type == MENU_IGNORE) {
-            // unpickable box
-            ib.x = 0;
-            ib.y = 0;
-            ib.w = 0;
-            ib.h = 0;
-        } else {
-            ib.x = menu_b.x + (row_i/n_vrows)*col_w;
-            ib.y = menu_b.y + MENU_TBM + (row_i%n_vrows)*MENU_RH;
-            ib.w = col_w;
-            ib.h = MENU_RH;
-            menuDrawItem (mi, ib, true);
-            row_i++;
-        }
+        ib.x = menu_b.x + (i/n_rows)*col_w;
+        ib.y = menu_b.y + MENU_TBM + (i%n_rows)*MENU_RH;
+        ib.w = col_w;
+        ib.h = MENU_RH;
+
+        menuDrawItem (mi, ib, true);
     }
-    if (row_i != menu.n_rows)
-        fatalError ("Bug! menu row %d != %d / %d", row_i, menu.n_rows, menu.n_items);
 
     tft.drawPR();
 
-    // run
+    // run until ok, cancel or timeout
+    uint32_t t0 = millis();
     bool ok = false;
-    SCoord tap;
-    while (waitForTap (menu_b, outside_b, NULL, MENU_TIMEOUT, tap)) {
+    for (;;) {
 
-        // check for tap in ok or cancel
-        if (inBox (tap, ok_b)) {
-            ok = true;
+        // check for timeout
+        if (timesUp(&t0,MENU_TIMEOUT))
             break;
-        }
-        if (inBox (tap, cancel_b)) {
-            break;
-        }
 
-        // check for tap in menu items
-        for (int i = 0; i < menu.n_items; i++) {
-            SBox &ib = items_b[i];
+        // check for tap
+        SCoord s;
+        if (readCalTouchWS(s) != TT_NONE) {
 
-            if (inBox (tap, ib)) {
-                MenuItem &mi = menu.items[i];
-
-                // implement each type of behavior
-                switch (mi.type) {
-                case MENU_TITLE:        // fallthru
-                case MENU_IGNORE:
-                    break;
-
-                case MENU_1OFN:
-                    // ignore if already set, else turn this one on and all others in this group off
-                    if (!mi.set) {
-                        menuItemsAllOff (menu, items_b, i);
-                        mi.set = true;
-                        menuDrawItem (mi, ib, false);
-                    }
-                    break;
-
-                case MENU_AL1OFN:
-                    // turn on unconditionally, but turn off only if not the last one
-                    if (!mi.set) {
-                        mi.set = true;
-                        menuDrawItem (mi, ib, false);
-                    } else {
-                        if (menuCountItemsSet (menu, i) > 1) {
-                            mi.set = false;
-                            menuDrawItem (mi, ib, false);
-                        }
-                    }
-                    break;
-
-                case MENU_TOGGLE:
-                    // uncondition change
-                    mi.set = !mi.set;
-                    menuDrawItem (mi, ib, false);
-                    break;
-                }
-
-                // tap found
+            // check ok and cancel
+            if (inBox (s, ok_b)) {
+                ok = true;
                 break;
             }
+            if (inBox (s, cancel_b)) {
+                break;
+            }
+
+            // check items
+            for (int i = 0; i < menu.n_items; i++) {
+                SBox &ib = items_b[i];
+
+                if (inBox (s, ib)) {
+                    MenuItem &mi = menu.items[i];
+
+                    // implement each type of behavior
+                    switch (mi.type) {
+                    case MENU_TITLE:
+                        // ignore
+                        break;
+
+                    case MENU_1OFN:
+                        // ignore if already set, else turn this one on and all others in this group off
+                        if (!mi.set) {
+                            menuItemsAllOff (menu, items_b, i);
+                            mi.set = true;
+                            menuDrawItem (mi, ib, false);
+                        }
+                        break;
+
+                    case MENU_AL1OFN:
+                        // turn on unconditionally, but turn off only if not the last one
+                        if (!mi.set) {
+                            mi.set = true;
+                            menuDrawItem (mi, ib, false);
+                        } else {
+                            if (menuCountItemsSet (menu, i) > 1) {
+                                mi.set = false;
+                                menuDrawItem (mi, ib, false);
+                            }
+                        }
+                        break;
+
+                    case MENU_TOGGLE:
+                        // uncondition change
+                        mi.set = !mi.set;
+                        menuDrawItem (mi, ib, false);
+                        break;
+                    }
+
+                    // tap found
+                    break;
+                }
+            }
+
+            // refresh timeout with any tap anywhere
+            t0 = millis();
         }
+
+        // repeat liesurely
+        wdDelay(100);
+        updateClocks(false);
     }
 
     drainTouch();

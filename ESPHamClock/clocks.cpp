@@ -19,7 +19,7 @@ static uint16_t mo_x, dy_x, yr_x;               // x coords of month, day year f
 
 // run flag and progression
 static bool hide_clocks;                        // run but don't display
-static int prev_yr, prev_mo, prev_dy, prev_hr, prev_mn, prev_sc, prev_wd;
+static int last_yr, last_mo, last_dy, last_hr, last_mn, last_sc, last_wd;
 static bool time_was_bad = true;                // used to erase ? when confirmed ok again
 static uint8_t doy_on;                          // show day of year instead of month date.
 
@@ -356,13 +356,13 @@ void showClocks()
 {
     hide_clocks = false;
 
-    prev_yr = 99;
-    prev_mo = 99;
-    prev_dy = 99;
-    prev_hr = 99;
-    prev_mn = 99;
-    prev_sc = 99;
-    prev_wd = 99;
+    last_yr = 99;
+    last_mo = 99;
+    last_dy = 99;
+    last_hr = 99;
+    last_mn = 99;
+    last_sc = 99;
+    last_wd = 99;
 
     drawUTCButton();
 }
@@ -412,7 +412,7 @@ void updateClocks(bool all)
     // get Clock's UTC time now, get out fast if still same second
     time_t t = nowWO();
     int sc = second(t);
-    if (sc == prev_sc && !all)
+    if (sc == last_sc && !all)
         return;
 
     // pull apart the time
@@ -429,7 +429,7 @@ void updateClocks(bool all)
     resetWatchdog();
 
     // always draw seconds because we know it has changed
-    if (all || (sc/10) != (prev_sc/10)) {
+    if (all || (sc/10) != (last_sc/10)) {
 
         // Change in tens digit of seconds process normally W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3;          // right 1/3 for seconds
@@ -479,16 +479,16 @@ void updateClocks(bool all)
         }
 
         // retry every few seconds
-        static uint32_t prev_timeok;
-        if (timesUp(&prev_timeok, TIME_RETRY))
+        static uint32_t last_timeok;
+        if (timesUp(&last_timeok, TIME_RETRY))
             setSyncProvider (getTime);                  // force fresh sync attempt
     }
 
     // persist
-    prev_sc = sc;
+    last_sc = sc;
 
     // draw H:M if either changes
-    if (all || mn != prev_mn || hr != prev_hr) {
+    if (all || mn != last_mn || hr != last_hr) {
 
         resetWatchdog();
 
@@ -502,23 +502,16 @@ void updateClocks(bool all)
         tft.setTextColor(HMS_C);
         tft.print(buf);
 
-        // update BC time marker if new hour and up
-        if (prev_hr != hr) {
-            PlotPane bc_pane = findPaneChoiceNow(PLOT_CH_BC);
-            if (bc_pane != PANE_NONE)
-                plotBandConditions (plot_b[bc_pane], 0, NULL, NULL);
-        }
-
         // update other info
         draw_other_times = true;
 
         // persist
-        prev_mn = mn;
-        prev_hr = hr;
+        last_mn = mn;
+        last_hr = hr;
     }
 
     // draw date if new day
-    if (all || dy != prev_dy || wd != prev_wd || mo != prev_mo || yr != prev_yr) {
+    if (all || dy != last_dy || wd != last_wd || mo != last_mo || yr != last_yr) {
 
         resetWatchdog();
 
@@ -574,10 +567,10 @@ void updateClocks(bool all)
         draw_other_times = true;
 
         // persist
-        prev_yr = yr;
-        prev_mo = mo;
-        prev_dy = dy;
-        prev_wd = wd;
+        last_yr = yr;
+        last_mo = mo;
+        last_dy = dy;
+        last_wd = wd;
     }
 
     if (draw_other_times) {
@@ -596,7 +589,7 @@ void updateClocks(bool all)
         }
     }
 
-    // flash plot panes that are rotating
+    // show time remaining for plot panes that are rotating
     for (int i = 0; i < PANE_N; i++) {
         if (paneIsRotating((PlotPane)i)) {
             showRotatingBorder ((sc&1) == 1, (PlotPane)i);
@@ -649,27 +642,27 @@ bool checkClockTouch (SCoord &s, TouchType tt)
     int16_t dx = s.x - clock_b.x;
     int16_t dy = s.y - clock_b.y;
 
-    // get time now
-    uint32_t real_utc = now();
-    uint32_t user_utc = real_utc + utc_offset;
+    // get time info
+    uint32_t t0 = now();
+    uint32_t t = t0 + utc_offset;
 
     // see how much time changes
     int32_t off0 = utc_offset;
 
     // update depending on where touch occurred
     if (dy < hms_h) {
-        // touched HMS or utc
+        // HMS or utc
         if (dx > clock_b.w-UTC_W) {
-            // touched UTC
+            // touched UTC.. 
             if (utc_offset != 0 || !clockTimeOk()) {
                 utc_offset = 0;
                 setSyncProvider (getTime);
             }
         } else {
-            // touched HMS
+            // HMS
             uint16_t mid_h = hms_h/2;
             if (dx < clock_b.w/3) {
-                // touched hours
+                // touched hours,
                 if (dy < mid_h/2)
                     utc_offset += 2*3600;
                 else if (dy < mid_h)
@@ -690,7 +683,7 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                     utc_offset -= 10*60;
             } else if (dx < clock_b.w-UTC_W-QUESTION_W) {
                 // touched seconds -- chop to whole minute
-                utc_offset = 60*(user_utc/60) - real_utc;
+                utc_offset = 60*(t/60) - t0;
             }
         }
     } else {
@@ -708,10 +701,9 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                 // just toggle DOY, no change in time
                 doy_on = !doy_on;
                 NVWriteUInt8 (NV_DOY_ON, doy_on);
-                logState();
             } else if (!doy_on) {
                 tmElements_t tm;
-                breakTime (user_utc, tm);
+                breakTime (t, tm);
                 if (dy < mid_h) {
                     if (++tm.Month > 12) {
                         tm.Month = 1;
@@ -723,7 +715,7 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                         tm.Year -= 1;
                     }
                 }
-                utc_offset = makeTime(tm) - real_utc;
+                utc_offset = makeTime(tm) - t0;
             }
         } else if (dx < yr_x-clock_b.x) {
             // touched date of month
@@ -731,7 +723,6 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                 // just toggle DOY, no change in time
                 doy_on = !doy_on;
                 NVWriteUInt8 (NV_DOY_ON, doy_on);
-                logState();
             } else {
                 if (dy < mid_h)
                     utc_offset += SECSPERDAY;
@@ -741,12 +732,12 @@ bool checkClockTouch (SCoord &s, TouchType tt)
         } else if (dx < lkscrn_b.x-clock_b.x-10) {
             // touched year
             tmElements_t tm;
-            breakTime (user_utc, tm);
+            breakTime (t, tm);
             if (dy < mid_h)
                 tm.Year += 1;
             else
                 tm.Year -= 1;
-            utc_offset = makeTime(tm) - real_utc;
+            utc_offset = makeTime(tm) - t0;
         }
     }
 

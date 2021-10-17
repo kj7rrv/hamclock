@@ -542,46 +542,53 @@ static void setSatMapNameLoc()
     map_name_b.h = bh;
 
     if (azm_on) {
-        // easy: just print on top between hemispheres
+        // easy: just print between hemispheres
         map_name_b.x = map_b.x + (map_b.w - map_name_b.w)/2 ;
         map_name_b.y = map_b.y + 10;
     } else {
-        // locate name away from current sat location and misc symbols
+        // locate name far from current location and potential obstacles.
+        // N.B. start choice above RSS and possible drap and below sun and moon
 
-        // start in south pacific
-        #define _SP_LNG (-160)          // South Pacific longitude
-        #define _SP_LAT (-30)           // " latitude above RSS and DRAP
-        SCoord name_l_s, name_r_s;      // left and right box candidate location
-        ll2s (deg2rad(_SP_LAT), deg2rad(_SP_LNG), name_l_s, 0);
-        name_r_s.x = name_l_s.x + map_name_b.w;
-        name_r_s.y = name_l_s.y;
-
-        // avoid any symbols
-        #define _EDGE_GUARD 20
-        while (overAnySymbol (name_l_s) || overAnySymbol(name_r_s)) {
-            name_l_s.x += _EDGE_GUARD;
-            name_r_s.x = name_l_s.x + map_name_b.w;
+        // start in farthest ocean
+        #define _SA_LNG (-35)           // South Atlantic ocean longitude
+        #define _SP_LNG (-160)          // South Pacific 
+        #define _OC_LAT (-30)           // latitude to use (doesn't really matter on mercator)
+        SCoord loc_xy = sat_path[0];    // large head area
+        LatLong loc_ll;
+        if (!s2ll (loc_xy, loc_ll)) {
+            Serial.printf (_FX("satloc %d %d not over map??\n"), loc_xy.x, loc_xy.y);
+            return;
+        }
+        float sa_diff = lngDiff(loc_ll.lng_d - _SA_LNG);
+        float sp_diff = lngDiff(loc_ll.lng_d - _SP_LNG);
+        if (sp_diff < sa_diff) {
+            ll2s (deg2rad(_OC_LAT), deg2rad(_SA_LNG), loc_xy, 20);
+            map_name_b.x = loc_xy.x;
+            map_name_b.y = rss_bnr_b.y - drap_b.h - map_name_b.h - 5;
+        } else {
+            ll2s (deg2rad(_OC_LAT), deg2rad(_SP_LNG), loc_xy, 20);
+            map_name_b.x = loc_xy.x;
+            map_name_b.y = rss_bnr_b.y - drap_b.h - map_name_b.h - 5;
         }
 
-        // avoid current sat footprint
-        #define _SAT_FOOT_R 75          // typical footprint??
-        SCoord &sat_s = sat_path[0];
-        uint16_t dy = sat_s.y > name_l_s.y ? sat_s.y - name_l_s.y : name_l_s.y - sat_s.y;
-        if (dy < _SAT_FOOT_R && name_r_s.x >= sat_s.x - _SAT_FOOT_R && name_l_s.x < sat_s.x + _SAT_FOOT_R) {
-            name_l_s.x = sat_s.x + _SAT_FOOT_R + _EDGE_GUARD;
-            name_r_s.x = name_l_s.x + map_name_b.w;
+        // check it's not on the path 
+        for (uint16_t p = 0; p < n_path; p++) {
+            SCoord s = sat_path[p];
+            if (inBox (s, map_name_b))
+                map_name_b.x = s.x + 20;
         }
 
-        // check for going off the right edge
-        if (name_r_s.x > map_b.x + map_b.w - _EDGE_GUARD) {
-            name_l_s.x = map_b.x + _EDGE_GUARD;
-            name_r_s.x = name_l_s.x + map_name_b.w;
-        }
+        // avoid antipode and markers
+        if (inBox (deap_c.s, map_name_b))
+            map_name_b.x = deap_c.s.x + DEAP_R + 20;
+        if (inBox (de_c.s, map_name_b))
+            map_name_b.x = de_c.s.x + DE_R + 20;
+        if (inBox (dx_c.s, map_name_b))
+            map_name_b.x = dx_c.s.x + DX_R + 20;
 
-        // ok
-        map_name_b.x = name_l_s.x;
-        map_name_b.y = name_l_s.y;
-
+        // wrap if any of these corrections went too far right
+        if (map_name_b.x + map_name_b.w > map_b.x + map_b.w)
+            map_name_b.x = map_b.x + 20;
     }
 }
 
@@ -825,9 +832,9 @@ static bool askSat()
     // don't inherit anything lingering after the tap that got us here
     drainTouch();
 
-    // if stop while listing record as if it was a tap on that item
-    SCoord s_stop;
-    bool stop_tap = false;
+    // tap info
+    SCoord s_tap;
+    bool loading_tap = false;
 
     // erase screen and set font
     eraseScreen();
@@ -900,8 +907,8 @@ static bool askSat()
         uint16_t y = TBORDER + r*CELL_H;
 
         // allow early stop if tap
-        if (readCalTouchWS(s_stop) != TT_NONE) {
-            stop_tap = true;
+        if (readCalTouchWS(s_tap) != TT_NONE) {
+            loading_tap = true;
             tft.setTextColor (RA8875_WHITE);
             tft.setCursor (x, y + FONT_H);        // match below
             tft.print (F("Listing stopped"));
@@ -970,29 +977,23 @@ static bool askSat()
     if (n_sat == 0)
         goto out;
 
-    // make box for whole screen so we can use waitForTap()
-    SBox screen_b;
-    screen_b.x = 0;
-    screen_b.y = 0;
-    screen_b.w = tft.width();
-    screen_b.h = tft.height();
-
     // follow touches to make selection, done when tap Ok
     selectFontStyle (BOLD_FONT, SMALL_FONT);
-    SCoord s_tap;
-    while (stop_tap || waitForTap (screen_b, screen_b, NULL, MENU_TO, s_tap)) {
+    while (true) {
 
-        // use stop tap first time if set
-        if (stop_tap) {
-            s_tap = s_stop;
-            stop_tap = false;
+        // use loading tap else wait for new
+        if (loading_tap) {
+            loading_tap = false;
+        } else {
+            while (readCalTouchWS(s_tap) == TT_NONE)
+                wdDelay(50);
         }
 
         // tap Ok button?
         if (inBox (s_tap, ok_b)) {
             // show Ok button toggle
             drawStringInBox ("Ok", ok_b, true, RA8875_WHITE);
-            goto out;
+            break;
         }
 
         // else toggle tapped sat, if any
@@ -1650,9 +1651,6 @@ int nextSatRSEvents (time_t **rises, time_t **sets)
 
             break;
         }
-
-        // don't go completely dead
-        updateClocks(false);
     }
 
     // return count
@@ -1672,7 +1670,7 @@ void showNextSatEvents ()
     #define _SNS_TOP_B    9             // top border
     #define _SNS_DAY_W    60            // width of day column
     #define _SNS_HHMM_W   70            // width of HH:MM columns
-    #define _SNS_TIMEOUT  MENU_TO       // ms
+    #define _SNS_TIMEOUT  30000         // ms
 
     // init scan coords
     uint16_t x = map_b.x + _SNS_LR_B;
@@ -1694,18 +1692,15 @@ void showNextSatEvents ()
     drawStringInBox (button_name, resume_b, false, RA8875_GREEN);
 
     // ready for table
+    tft.setTextColor (RA8875_WHITE);
     tft.drawPR();
 
     // advance to first data row
     y += CELL_H;
 
-    // get list of times
+    // get list of times, if any 
     time_t *rises, *sets;
     int n_times = nextSatRSEvents (&rises, &sets);
-
-    // show list, if any
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (RA8875_WHITE);
     if (n_times == 0) {
 
         tft.setCursor (x, y);
@@ -1786,8 +1781,22 @@ void showNextSatEvents ()
     }
 
     // wait for fresh tap or timeout
-    SCoord tap;
-    (void) waitForTap (resume_b, map_b, NULL, _SNS_TIMEOUT, tap);
+    drainTouch();
+    uint32_t to = millis();
+    SCoord s_tap;
+    for(;;) {
+        if (readCalTouchWS(s_tap) != TT_NONE) {
+            // done if tap in resume or outside map
+            if (inBox (s_tap, resume_b) || !inBox (s_tap, map_b))
+                break;
+            to = millis();
+        }
+        if (timesUp (&to, _SNS_TIMEOUT))
+            break;
+        updateClocks(false);
+        wdDelay (200);
+    }
+    drainTouch();
 
     // ack
     drawStringInBox (button_name, resume_b, true, RA8875_GREEN);

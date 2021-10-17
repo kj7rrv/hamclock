@@ -88,7 +88,6 @@ extern std::string our_dir;
 // glue with parent program
 extern void setX11FullScreen (bool);
 extern void setDemoMode(bool on);
-extern void setCenterLng (int16_t l);
 extern void fatalError (const char *fmt, ...);
 extern const char *svr_host;
 extern int svr_port;
