@@ -170,18 +170,16 @@ static void usage (const char *errfmt, ...)
             va_end (ap);
             if (!strchr(errfmt, '\n'))
                 fprintf (stderr, "\n");
-        }
-
-        fprintf (stderr, "Purpose: display time and other information useful to amateur radio operators\n");
+        } else
+            fprintf (stderr, "Purpose: display real-time info useful to amateur radio operators\n");
         fprintf (stderr, "Usage: %s [options]\n", me);
         fprintf (stderr, "Options:\n");
         fprintf (stderr, " -b h : set backend host to h instead of %s\n", svr_host);
         fprintf (stderr, " -d d : set working dir d instead of %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -f o : display full screen initially \"on\" or \"off\"\n");
-        fprintf (stderr, " -g   : init DE using geolocation with our IP; requires -k\n");
-        fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
+        fprintf (stderr, " -f o : display full screen initially to \"on\" or \"off\"\n");
+        fprintf (stderr, " -g   : init DE using our IP geolocation; requires -k\n");
+        fprintf (stderr, " -i i : init DE using the given IP geolocation; requires -k\n");
         fprintf (stderr, " -k   : don't offer Setup or wait for Skips\n");
-        fprintf (stderr, " -l l : set mercator center lng to l degs; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
         fprintf (stderr, " -w p : set web server port p instead of %d\n", svr_port);
@@ -197,7 +195,6 @@ static void crackArgs (int ac, char *av[])
         bool full_screen = false;
         bool fs_set = false;
         const char *new_appdir = NULL;
-        bool cl_set = false;
 
          while (--ac && **++av == '-') {
             char *s = *av;
@@ -242,13 +239,6 @@ static void crackArgs (int ac, char *av[])
                 case 'k':
                     skip_skip = true;
                     break;
-                case 'l':
-                    if (ac < 2)
-                        usage ("missing longitude for -l");
-                    setCenterLng(atoi(*++av));
-                    cl_set = true;
-                    ac--;
-                    break;
                 case 'm':
                     setDemoMode(true);
                     break;
@@ -270,13 +260,11 @@ static void crackArgs (int ac, char *av[])
         if (ac > 0)
             usage ("extra args");
         if (init_iploc && init_locip)
-            usage ("can not use both -g and -i");
+            usage ("can use both -g and -i");
         if (init_iploc && !skip_skip)
             usage ("-g requires -k");
         if (init_locip && !skip_skip)
             usage ("-i requires -k");
-        if (cl_set && !skip_skip)
-            usage ("-l requires -k");
 
         // prepare our working directory in our_dir
         mkAppDir (new_appdir);

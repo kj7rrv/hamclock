@@ -89,7 +89,7 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_SATPATHCOLOR
     2,                          // NV_SATFOOTCOLOR
     2,                          // NV_X11FLAGS
-    2,                          // NV_BCFLAGS
+    2,                          // NV_SWFLAGS
     NV_DAILYONOFF_LEN,          // NV_DAILYONOFF
     4,                          // NV_TEMPCORR2
     4,                          // NV_PRESCORR2
@@ -106,7 +106,6 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_PANE2ROTSET
     4,                          // NV_PANE3ROTSET
     1,                          // NV_DOY_ON
-    2,                          // NV_ALARMCLOCK
 };
 
 

@@ -242,7 +242,7 @@ class Adafruit_RA8875 {
 	Window win;
         Visual *visual;
         int visdepth;
-	GC black_gc;
+	GC gc;
 	XImage *img;
 	Pixmap pixmap;
 
