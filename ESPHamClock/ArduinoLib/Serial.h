@@ -16,6 +16,7 @@ class Serial {
 
 	void begin (int baud);
         void print (void);
+	void print (char c);
 	void print (char *s);
 	void print (const char *s);
 	void print (int i);

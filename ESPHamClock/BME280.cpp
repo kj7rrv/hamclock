@@ -97,60 +97,79 @@ static void connectSensors(bool all)
 #endif // _SUPPORT_ENVSENSOR
 }
 
-/* read current temperature, pressure and humidity in units determined by useMetricUnits() into
- * next q enttry. if ok advance q and return if either ok.
+/* read the given temperature, pressure and humidity in units determined by useMetricUnits() into
+ * next q enttry. if ok advance q and return if ok.
  */
-static bool readSensors ()
+static bool readSensor (int device)
 {
     // skip if don't want any external IO
     if (!GPIOOk())
         return (false);
 
+    // get data pointer, skip if not used
+    BMEData *dp = bme_data[device];
+    if (!dp)
+        return (false);
+    Adafruit_BME280 &bme = bme_io[device];
+
+    // note attempt time whether or not we succeed
+    last_reading = millis();
+
+    // success?
     bool ok = false;
 
-    for (int i = 0; i < MAX_N_BME; i++) {
-
-        // get data pointer, skip if not used
-        BMEData *dp = bme_data[i];
-        if (!dp)
-            continue;
-        Adafruit_BME280 &bme = bme_io[i];
-
-        resetWatchdog();
-        bme.takeForcedMeasurement();
-        float t = bme.readTemperature();                                // C
-        float p = bme.readPressure();                                   // Pascals
-        float h = bme.readHumidity();                                   // percent
-        if (isnan(t) || t < -40 || isnan(p) || isnan(h)) {
-            // try restarting
-            Serial.printf (_FX("BME %x read err\n"), dp->i2c);
-            connectSensors(false);
+    // go
+    resetWatchdog();
+    bme.takeForcedMeasurement();
+    float t = bme.readTemperature();                                    // C
+    float p = bme.readPressure();                                       // Pascals
+    float h = bme.readHumidity();                                       // percent
+    if (isnan(t) || t < -40 || isnan(p) || isnan(h)) {
+        // try restarting
+        Serial.printf (_FX("BME %x read err\n"), dp->i2c);
+        connectSensors(false);
+    } else {
+        // all good
+        if (useMetricUnits()) {
+            // want C and hPa
+            dp->t[dp->q_head] = t + getBMETempCorr(device);              // already C
+            dp->p[dp->q_head] = p/100 + getBMEPresCorr(device);          // Pascals to hPa
         } else {
-            // all good
-            if (useMetricUnits()) {
-                // want C and hPa
-                dp->t[dp->q_head] = t + getBMETempCorr(i);              // already C
-                dp->p[dp->q_head] = p/100 + getBMEPresCorr(i);          // Pascals to hPa
-            } else {
-                // want F and inches Hg
-                dp->t[dp->q_head] = 1.8*t + 32.0 + getBMETempCorr(i);   // C to F
-                dp->p[dp->q_head] = p / 3386.39 + getBMEPresCorr(i);    // Pascals to inches Hg
-            }
-            dp->h[dp->q_head] = h;
-            dp->u[dp->q_head] = now();
-
-            // Serial.printf (_FX("BME %u %x %7.2f %7.2f %7.2f\n"), dp->u[dp->q_head], dp->i2c,
-                        // dp->t[dp->q_head], dp->p[dp->q_head], dp->h[dp->q_head]); 
-
-            // advance q
-            dp->q_head = (dp->q_head+1)%N_BME_READINGS;
-            ok = true;
+            // want F and inches Hg
+            dp->t[dp->q_head] = 1.8*t + 32.0 + getBMETempCorr(device);   // C to F
+            dp->p[dp->q_head] = p / 3386.39 + getBMEPresCorr(device);    // Pascals to inches Hg
         }
+        dp->h[dp->q_head] = h;
+        dp->u[dp->q_head] = now();
+
+        // Serial.printf (_FX("BME %u %x %7.2f %7.2f %7.2f\n"), dp->u[dp->q_head], dp->i2c,
+                    // dp->t[dp->q_head], dp->p[dp->q_head], dp->h[dp->q_head]); 
+
+        // advance q
+        dp->q_head = (dp->q_head+1)%N_BME_READINGS;
+        ok = true;
+
+        // note fresh data is available
+        new_t = new_p = new_h = new_d = true;
     }
 
-    // return whether either success
+    // return whether success
     return (ok);
 }
+
+/* read all sensors, return whether either was successful
+ */
+static bool readSensors(void)
+{
+    bool ok = false;
+
+    for (int device = 0; device < MAX_N_BME; device++)
+        if (readSensor (device))
+            ok = true;
+
+    return (ok);
+}
+
 
 /* convert temperature and relative humidity to dewpoint.
  * both temp units are as per useMetricUnits().
@@ -288,11 +307,15 @@ void initBME280()
 
 
 /* retrieve pointer to the given sensor data if connected, else NULL.
+ * make a fresh read if desired.
  * index 0 always for 76, 1 for 77.
  */
-const BMEData *getBMEData (int i)
+const BMEData *getBMEData (int device, bool fresh_read)
 {
-    return (bme_data[i%MAX_N_BME]);
+    if (fresh_read)
+        (void) readSensor (device);
+
+    return (bme_data[device]);
 }
 
 /* take a new reading if it's time.
@@ -309,14 +332,8 @@ void readBME280 ()
 
         if (!last_reading || t0 - last_reading >= readDT) {
 
-            // note attempt time whether to not we succeed
-            last_reading = millis();
-
-            // read new values into queues and advance
+            // read new values into queues and advance cadence
             if (readSensors()) {
-
-                // note type
-                new_t = new_p = new_h = new_d = true;
 
                 // gradually slow
                 switch (readDT) {

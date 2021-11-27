@@ -81,7 +81,7 @@ static time_t getTime(void)
                 gpsd_server ? gpsd_server : ntp_server,
                 year(t), month(t), day(t), hour(t), minute(t), second(t));
     } else
-        Serial.println (F("getTime failed\n"));
+        Serial.print (F("getTime failed\n"));
 
     return (t);
 }
@@ -169,11 +169,11 @@ static void drawRiseSet(time_t t0, time_t trise, time_t tset, SBox &b, uint8_t s
     }
 }
 
-/* given DE time_t with user offset draw local time clock in de_info_b
+/* given DE time_t with user offset draw local analog time clock in de_info_b
  */
 static void drawAnalogClock (time_t delocal_t)
 {
-    // find center of largest inscribed circle
+    // find center of largest inscribed circle sitting at the bottom
     int x0, y0, r;
     if (de_info_b.w > de_info_b.h) {
         r = de_info_b.h/2 - 3;
@@ -244,6 +244,53 @@ static void drawAnalogClock (time_t delocal_t)
         tft.setCursor (tx, y0-r+rowh);
         tft.print (dy);
     }
+}
+
+/* given DE time_t with user offset draw local digital time clock in de_info_b
+ */
+static void drawDigitalClock (time_t delocal_t)
+{
+    // break out
+    int hr = hour(delocal_t);
+    int mn = minute(delocal_t);
+    int wd = weekday(delocal_t);
+    int dy = day(delocal_t);
+    int mo = month(delocal_t);
+    int yr = year(delocal_t);
+
+    // prep
+    tft.fillRect (de_info_b.x, de_info_b.y, de_info_b.w, de_info_b.h-1, RA8875_BLACK);
+    selectFontStyle (BOLD_FONT, LARGE_FONT);
+    tft.setTextColor (DE_COLOR);
+
+    // format time
+    char buf[50];
+    if (de_time_fmt == DETIME_DIGITAL_12) {
+        int hr12 = hr%12;
+        if (hr12 == 0)
+            hr12 = 12;
+        snprintf (buf, sizeof(buf), _FX("%d:%02d"), hr12, mn);
+    } else {
+        snprintf (buf, sizeof(buf), _FX("%02d:%02d"), hr, mn);
+    }
+
+    // print time
+    uint16_t bw = getTextWidth(buf);
+    tft.setCursor (de_info_b.x+(de_info_b.w-bw)/2-4, de_info_b.y + de_info_b.h/2);
+    tft.print (buf);
+
+    // other info
+    // N.B. dayShortStr and monthShort return same static pointer
+    size_t bl = 0;
+    bl += snprintf (buf+bl, sizeof(buf)-bl, "%s ", dayShortStr(wd));
+    bl += snprintf (buf+bl, sizeof(buf)-bl, "%s ", monthShortStr(mo));
+    bl += snprintf (buf+bl, sizeof(buf)-bl, "%d, %d", dy, yr);
+    if (de_time_fmt == DETIME_DIGITAL_12)
+        bl += snprintf (buf+bl, sizeof(buf)-bl, " %s", hr < 12 ? "AM" : "PM");
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    bw = getTextWidth(buf);
+    tft.setCursor (de_info_b.x + (de_info_b.w-bw)/2, de_info_b.y + 4*de_info_b.h/5);
+    tft.print (buf);
 }
 
 /* draw a calendar in de_info_b below time
@@ -391,11 +438,19 @@ int32_t utcOffset()
 }
 
 
-/* return whether time is working for the clock
+/* return whether time is working for the clock.
+ * if not goose occasionally.
  */
 bool clockTimeOk()
 {
-    return (timeStatus() == timeSet);
+    bool time_ok = timeStatus() == timeSet;
+    if (!time_ok) {
+        static uint32_t prev_timeok;
+        if (timesUp(&prev_timeok, TIME_RETRY))
+            setSyncProvider (getTime);                  // force fresh sync attempt
+        time_ok = timeStatus() == timeSet;
+    }
+    return (time_ok);
 }
 
 /* draw all clocks if time system has been initialized.
@@ -477,11 +532,6 @@ void updateClocks(bool all)
 
             time_was_bad = true;
         }
-
-        // retry every few seconds
-        static uint32_t prev_timeok;
-        if (timesUp(&prev_timeok, TIME_RETRY))
-            setSyncProvider (getTime);                  // force fresh sync attempt
     }
 
     // persist
@@ -581,15 +631,31 @@ void updateClocks(bool all)
     }
 
     if (draw_other_times) {
-        if (de_time_fmt == DETIME_CAL) {
-            drawDETime(true);
+
+        // DE pane
+        switch (de_time_fmt) {
+        case DETIME_CAL:
+            drawDECalTime(true);
             drawCalendar(false);
-        } else if (de_time_fmt == DETIME_ANALOG || de_time_fmt == DETIME_ANALOG_DTTM) {
+            break;
+        case DETIME_ANALOG:     // fallthru
+        case DETIME_ANALOG_DTTM:
             drawAnalogClock (t + de_tz.tz_secs);
-        } else if (de_time_fmt == DETIME_INFO) {
-            drawDETime(false);
+            break;
+        case DETIME_INFO:
+            drawDECalTime(false);
             drawDESunRiseSetInfo();
+            break;
+        case DETIME_DIGITAL_12: // fallthru
+        case DETIME_DIGITAL_24: // fallthru
+            drawDigitalClock (t + de_tz.tz_secs);
+            break;
+        default:
+            fatalError ("Bug! unknown de fmt %d", de_time_fmt);
+            break;
         }
+
+        // DX pane
         if (!dx_info_for_sat) {
             drawDXTime();
             drawDXSunRiseSetInfo();
@@ -801,20 +867,57 @@ void changeTime (time_t t)
     updateMoonPane (false);
 }
 
-/* if touch point is within its bounding box, roll the given TZInfo +-2 hours from getTZ() and return true.
- * return false if not in box.
+/* show menu of timezone offsets +- 2 from nominal.
+ * if user taps ok update tzi.tz_secs and return true, else false.
  */
-bool checkTZTouch (const SCoord &s, TZInfo &tzi, const LatLong &ll)
+bool TZMenu (TZInfo &tzi, const LatLong &ll)
 {
-    if (inBox (s, tzi.box)) {
-        int32_t tz0_secs = getTZ (ll);                  // nominal timezone offset
-        if (tzi.tz_secs <= tz0_secs + 3600)
-            tzi.tz_secs += 3600;                        // forward as much as +2 hrs
-        else
-            tzi.tz_secs = tz0_secs - 2*3600;            // reset back to -2 hrs
-        return (true);
+    // get nominal TZ for this location
+    int32_t tz0_secs = getTZ (ll);
+
+    // create menu
+    #define N_NEW_TZ 5
+    #define MAX_NEW_TZ 20
+    #define TZ_MENU_INDENT 10
+    MenuItem mitems[N_NEW_TZ];
+    char tz_label[N_NEW_TZ][MAX_NEW_TZ];
+    for (int i = 0; i < N_NEW_TZ; i++) {
+        int32_t tz = tz0_secs + 3600*(i-N_NEW_TZ/2);
+        snprintf (tz_label[i], MAX_NEW_TZ, "UTC%+g", tz/3600.0F);
+        MenuItem &mi = mitems[i];
+        mi.type = MENU_1OFN;
+        mi.set = tz == tzi.tz_secs;
+        mi.indent = TZ_MENU_INDENT;
+        mi.label = tz_label[i];
     }
-    return (false);
+
+    // boxes
+    SBox menu_b;
+    menu_b.x = tzi.box.x - 20;
+    menu_b.y = tzi.box.y + tzi.box.h+2;
+    // w/h are set dynamically by runMenu()
+
+    // run
+    SBox ok_b;
+    Menu menu = {menu_b, ok_b, false, 1, N_NEW_TZ, mitems};
+    bool menu_ok = runMenu (menu);
+
+    // erase our box regardless
+    tft.fillRect (menu_b.x, menu_b.y, menu_b.w, menu_b.h, RA8875_BLACK);
+
+    // done if cancelled
+    if (!menu_ok)
+        return (false);
+
+    // update tzi from set item
+    for (int i = 0; i < N_NEW_TZ; i++) {
+        if (mitems[i].set) {
+            tzi.tz_secs = tz0_secs + 3600*(i-N_NEW_TZ/2);
+            break;
+        }
+    }
+
+    return (true);
 }
 
 /* draw a TZ control box with current state

@@ -135,12 +135,11 @@ static void drawUptime(bool force);
 static void drawWiFiInfo(void);
 static void drawScreenLock(void);
 static void toggleLockScreen(void);
-static void toggleDETimeFormat(void);
+static void drawDEFormatMenu(void);
 static bool checkCallsignTouchFG (SCoord &b);
 static bool checkCallsignTouchBG (SCoord &b);
 static void eraseDXPath(void);
 static void eraseDXMarker(void);
-static void drawOneTimeDX(void);
 static uint16_t getNextColor(uint16_t current);
 static void drawRainbow (SBox &box);
 static void drawDXCursorPrefix (void);
@@ -215,6 +214,7 @@ void setup()
         Serial.println(_FX("RA8875 Not Found!"));
         while (1);
     }
+    Serial.println(_FX("RA8875 found"));
 
     // must set rotation now from nvram setting .. too early to query setup options
     // N.B. don't save in EEPROM yet.
@@ -222,6 +222,9 @@ void setup()
     if (!NVReadUInt8 (NV_ROTATE_SCRN, &rot))
         rot = 0;
     tft.setRotation(rot ? 2 : 0);
+
+    // Adafruit's GFX defaults to wrap which breaks getTextBounds if string longer than tft.width()
+    tft.setTextWrap(false);
 
     // Adafruit assumed ESP8266 would run at 80 MHz, but we run it at 160
     extern uint32_t spi_speed;
@@ -496,6 +499,10 @@ void setup()
     rss_bnr_b.w = map_b.w;
     rss_bnr_b.h = 2*GB_H;
     NVReadUInt8 (NV_RSS_ON, &rss_on);
+    if (!NVReadUInt8 (NV_RSS_INTERVAL, &rss_interval)) {
+        rss_interval = RSS_MIN_INT;
+        NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
+    }
 
     // set up az-merc state
     NVReadUInt8 (NV_AZIMUTHAL_ON, &azm_on);
@@ -570,6 +577,50 @@ void loop()
 }
 
 
+/* draw the one-time portion of de_info either because we just booted or because
+ * we are transitioning back from being in sat mode
+ */
+static void drawOneTimeDE()
+{
+    selectFontStyle (BOLD_FONT, SMALL_FONT);
+    tft.setTextColor(DE_COLOR);
+    tft.setCursor(de_info_b.x, de_tz.box.y+18);
+    tft.print(F("DE:"));
+
+    // save/restore de_c so it can be used for marker in box
+    SCircle de_c_save = de_c;
+    de_c.s.x = de_info_b.x+62;
+    de_c.s.y = de_tz.box.y+8;
+    drawDEMarker(true);
+    de_c = de_c_save;
+}
+
+/* draw the one-time portion of dx_info either because we just booted or because
+ * we are transitioning back from being in sat mode
+ */
+static void drawOneTimeDX()
+{
+    if (dx_info_for_sat) {
+        // sat
+        displaySatInfo();
+    } else {
+        // fresh
+        tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);
+
+        // title
+        selectFontStyle (BOLD_FONT, SMALL_FONT);
+        tft.setTextColor(DX_COLOR);
+        tft.setCursor(dx_info_b.x, dx_tz.box.y+18);
+        tft.print(F("DX:"));
+
+        // save/restore dx_c so it can be used for marker in box
+        SCircle dx_c_save = dx_c;
+        dx_c = dx_marker_c;
+        drawDXMarker(true);
+        dx_c = dx_c_save;
+    }
+}
+
 /* assuming basic hw init is complete setup everything for the screen.
  * called once at startup and after each time returning from other full-screen options.
  * The overall layout is establihed by setting the various SBox values.
@@ -589,22 +640,6 @@ void initScreen()
     drawVersion(true);
     drawCallsign(true);
 
-    // DE info
-    selectFontStyle (BOLD_FONT, SMALL_FONT);
-    tft.setTextColor(DE_COLOR);
-    tft.setCursor(de_info_b.x, de_tz.box.y+18);
-    tft.print(F("DE:"));
-    de_c.s.x = de_info_b.x+62;
-    de_c.s.y = de_tz.box.y+8;
-    drawDEMarker(true);
-    drawDEInfo();
-
-    // DX info
-    drawOneTimeDX();
-    drawDXInfo();
-
-    resetWatchdog();
-
     // draw section borders
     tft.drawLine (0, map_b.y-1, tft.width()-1, map_b.y-1, GRAY);                        // top
     tft.drawLine (0, tft.height()-1, tft.width()-1, tft.height()-1, GRAY);              // bottom
@@ -616,6 +651,10 @@ void initScreen()
     // init each pane
     for (int i = 0; i < PANE_N; i++)
         setPlotChoice ((PlotPane)i, plot_ch[i]);
+
+    // one-time info
+    drawOneTimeDE();
+    drawOneTimeDX();
 
     // set up beacon box
     resetWatchdog();
@@ -630,34 +669,11 @@ void initScreen()
     initEarthMap();
     initWiFiRetry();
     drawBME280Panes();
-    displaySatInfo();
     drawUptime(true);
     drawScreenLock();
 
     // flush any stale touchs
     drainTouch();
-}
-
-/* draw the one-time portion of dx_info either because we just booted or because
- * we are transitioning back from being in sat mode
- */
-static void drawOneTimeDX()
-{
-    if (dx_info_for_sat)
-        return;
-
-    tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);
-
-    selectFontStyle (BOLD_FONT, SMALL_FONT);
-    tft.setTextColor(DX_COLOR);
-    tft.setCursor(dx_info_b.x, dx_tz.box.y+18);
-    tft.print(F("DX:"));
-
-    // save/restore dx_c so it can be used
-    SCircle dx_c_save = dx_c;
-    dx_c = dx_marker_c;
-    drawDXMarker(true);
-    dx_c = dx_c_save;
 }
 
 /* round to whole degrees.
@@ -748,23 +764,26 @@ static void checkTouch()
             newDX (ll, NULL, NULL);
         }
     } else if (inBox (s, de_title_b)) {
-        toggleDETimeFormat();
+        drawDEFormatMenu();
     } else if (inBox (s, stopwatch_b)) {
         // check this before checkClockTouch
         checkStopwatchTouch(tt);
     } else if (checkClockTouch(s, tt)) {
         updateClocks(true);
-    } else if (checkTZTouch (s, de_tz, de_ll)) {
-        NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
-        drawTZ (de_tz);
-        drawDEInfo();
-        updateMoonPane(true);
-        newBC();
-    } else if (!dx_info_for_sat && checkTZTouch (s, dx_tz, dx_ll)) {
-        // N.B. don't even call checkTZTouch if !dx_info_for_sat
-        NVWriteInt32 (NV_DX_TZ, dx_tz.tz_secs);
-        drawTZ (dx_tz);
-        drawDXInfo();
+    } else if (inBox (s, de_tz.box)) {
+        if (TZMenu (de_tz, de_ll)) {
+            NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
+            drawTZ (de_tz);
+            updateMoonPane(true);
+            newBC();
+        }
+        drawDEInfo();   // erase regardless
+    } else if (!dx_info_for_sat && inBox (s, dx_tz.box)) {
+        if (TZMenu (dx_tz, dx_ll)) {
+            NVWriteInt32 (NV_DX_TZ, dx_tz.tz_secs);
+            drawTZ (dx_tz);
+        }
+        drawDXInfo();   // erase regardless
     } else if (checkCallsignTouchFG(s)) {
         NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
         drawCallsign (false);   // just foreground
@@ -1191,7 +1210,7 @@ void drawDXMarker (bool force)
 void getTextBounds (const char str[], uint16_t *wp, uint16_t *hp)
 {
     int16_t x, y;
-    tft.getTextBounds ((char*)str, 0, 0, &x, &y, wp, hp);
+    tft.getTextBounds ((char*)str, 100, 100, &x, &y, wp, hp);
 }
 
 
@@ -1355,6 +1374,7 @@ static void drawWiFiInfo()
     char str[30];
     if (rssi_ip_toggle) {
         // show RSSI, if working
+        static int16_t prev_rssi;
         int16_t rssi = WiFi.RSSI();
         if (rssi < 10) {
             sprintf (str, _FX("  WiFi %4d dBm"), rssi);
@@ -1362,6 +1382,11 @@ static void drawWiFiInfo()
         } else {
             // no wifi, just leave IP showing
             str[0] = '\0';
+        }
+        if (abs(rssi-prev_rssi) > 3) {
+            // log if changed more than 3 db
+            Serial.printf (_FX("Up %lu s: RSSI %d\n"), millis()/1000U, rssi);
+            prev_rssi = rssi;
         }
     } else {
         // show IP
@@ -1690,13 +1715,42 @@ static void drawScreenLock()
     }
 }
 
-static void toggleDETimeFormat()
+/* offer menu of DE format options and engage selection
+ */
+static void drawDEFormatMenu()
 {
-    // cycle and persist
-    de_time_fmt = (de_time_fmt + 1) % DETIME_N;
-    NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
+    // menu of each DETIME_*
+    #define _MI_INDENT  5
+    MenuItem mitems[DETIME_N] = {
+        {MENU_1OFN, de_time_fmt == DETIME_INFO,        _MI_INDENT, "All info"},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      _MI_INDENT, "Simple analog"},
+        {MENU_1OFN, de_time_fmt == DETIME_CAL,         _MI_INDENT, "Calendar"},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, _MI_INDENT, "Annotated analog"},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  _MI_INDENT, "Digital 12 hour"},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  _MI_INDENT, "Digital 24 hour"},
+    };
 
-    // draw new state
+    // create a box for the menu
+    SBox menu_b;
+    menu_b.x = de_info_b.x + 4;
+    menu_b.y = de_info_b.y;
+    // w/h are set dynamically by runMenu()
+
+    // run menu
+    SBox ok_b;
+    Menu menu = {menu_b, ok_b, false, 1, NARRAY(mitems), mitems};
+    if (runMenu (menu)) {
+        // capture and save new value
+        for (int i = 0; i < DETIME_N; i++) {
+            if (mitems[i].set) {
+                de_time_fmt = i;
+                break;
+            }
+        }
+        NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
+    }
+
+    // draw new state, even if no change in order to erase
     drawDEInfo();
 }
 
@@ -1950,10 +2004,10 @@ void logState()
 }
 
 
-/* shutdown helper that asks RU Sure in the given box.
+/* shutdown helper that asks Are You Sure in the given box.
  * return answer.
  */
-static bool shutdown_rus (const SBox &b, uint16_t color)
+static bool shutdownRUS (const SBox &b, uint16_t color)
 {
     // cursor y
     uint16_t cur_y = b.y + 7*b.h/10;
@@ -1995,6 +2049,9 @@ static bool shutdown_rus (const SBox &b, uint16_t color)
  */
 static void shutdown(void)
 {
+    closeDXCluster();       // prevent inbound msgs from clogging network
+    closeGimbal();          // avoid dangling connection
+
     eraseScreen();
 
     // prep
@@ -2060,7 +2117,7 @@ static void shutdown(void)
             }
         }
 
-    } while (selection > 0 && !shutdown_rus (sdc[selection].box, sdc[selection].color));
+    } while (selection > 0 && !shutdownRUS (sdc[selection].box, sdc[selection].color));
 
     // engage selection action
     switch (selection) {

@@ -67,8 +67,12 @@ static bool support_onoff;                      // whether we support display on
 static bool support_dim;                        // whether we support display fine brightness control
 static bool support_phot;                       // whether we support a photoresistor
 
+#if defined(_IS_LINUX_RPI) || defined(_USE_FB0)
 // RPi path to set DSI brightness, write 0 .. 255
-static const char dsi_path[] = "/sys/class/backlight/rpi_backlight/brightness";
+static const char dsi_path_buster[] = "/sys/class/backlight/rpi_backlight/brightness";
+static const char dsi_path_bullseye[] = "/sys/class/backlight/10-0045/brightness";
+#endif
+static const char *dsi_path;                    // one of above if one works
 
 // forward references
 static void engageDisplayBrightness(bool log);
@@ -88,10 +92,14 @@ static void setDisplayBrightness(bool log)
         // ESP: control backlight
         tft.PWM1out(bpwm);
 
+        // lint
+        (void) dsi_path;
+
     #else
 
         if (support_dim) {
             // control DSI backlight
+            // could use 'vcgencmd set_backlight x' but still need a way to check whether bl is controllable
             int dsifd = open (dsi_path, O_WRONLY);
             if (dsifd < 0) {
                 Serial.printf ("BR: %s: %s\n", dsi_path, strerror(errno));
@@ -100,7 +108,7 @@ static void setDisplayBrightness(bool log)
                     Serial.printf ("BR: setting bpwm %d\n", bpwm);
                 FILE *dsifp = fdopen (dsifd, "w");
                 fprintf (dsifp, "%d\n", bpwm);
-                fclose (dsifp);
+                fclose (dsifp); // also closes dsifd
             }
         } else if (support_onoff) {
             // control HDMI on or off
@@ -560,27 +568,37 @@ static void engageDisplayBrightness(bool log)
  */
 static bool isRPiDSI()
 {
-        static bool know, isdsi;
+        static bool know;
 
 
         if (!know) {
 
             resetWatchdog();
 
-            int dsifd = open (dsi_path, O_WRONLY);
+            // try both
+            int dsifd = open (dsi_path_buster, O_WRONLY);
             if (dsifd >= 0) {
-                Serial.print (_FX("BR: found DSI display\n"));
+                dsi_path = dsi_path_buster;
                 close (dsifd);
-                isdsi = true;
             } else {
-                Serial.print (_FX("BR: no DSI display\n"));
-                isdsi = false;
+                dsifd = open (dsi_path_bullseye, O_WRONLY);
+                if (dsifd >= 0) {
+                    dsi_path = dsi_path_bullseye;
+                    close (dsifd);
+                }
             }
 
+            // report
+            if (dsi_path)
+                Serial.printf (_FX("BR: found DSI display at %s\n"), dsi_path);
+            else
+                Serial.print (_FX("BR: no DSI display\n"));
+
+            // don't have to test again
             know = true;
         }
 
-        return (isdsi);
+        return (dsi_path != NULL);
 }
 
 #endif // defined(_IS_LINUX_RPI) || defined(_USE_FB0)

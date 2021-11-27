@@ -163,7 +163,8 @@
 #include "version.h"
 #include "P13.h"
 
-// GPIO.h for unix systems only
+
+// GPIO pins for unix systems
 #if defined(_SUPPORT_GPIO) && defined(_IS_UNIX)
 
 #include "GPIO.h"
@@ -180,6 +181,16 @@
 #define ONAIR_GPIO              21      // header 40
 
 #endif
+
+
+// GPIO pins for ESP Huzzah
+#if defined (_GPIO_ESP)
+
+#define Elecraft_GPIO           15
+
+#endif
+
+
 
 // handy nelements in array
 // N.B. call with real array, not a pointer
@@ -411,7 +422,6 @@ extern SBox drap_b;                     // DRAP scale
 
 #define VIEWBTN_W       40              // map View button width
 #define VIEWBTN_H       13              // map View button height
-#define VIEWMENU_W      85              // map View menu width
 #define MOUSELOC_H      62              // height of mouse loc box
 
 extern const SBox skip_b;               // common "Skip" button
@@ -438,6 +448,8 @@ extern const char *_FX_helper(const __FlashStringHelper *flash_string);
 
 #define RSS_BG_COLOR    RGB565(0,40,80) // RSS banner background color
 #define RSS_FG_COLOR    RA8875_WHITE    // RSS banner text color
+#define RSS_DEF_INT     15              // RSS default interval, secs
+#define RSS_MIN_INT     5               // RSS minimum interval, secs
 
 extern char *stack_start;               // used to estimate stack usage
 
@@ -629,21 +641,23 @@ extern const char *getNearestCity (const LatLong &ll, LatLong &city_ll);
 
 
 enum {
-    DETIME_INFO,
-    DETIME_ANALOG,
-    DETIME_CAL,
-    DETIME_ANALOG_DTTM,
+    DETIME_INFO,                // lots of goodies
+    DETIME_ANALOG,              // just analog clock
+    DETIME_CAL,                 // calendar
+    DETIME_ANALOG_DTTM,         // analog with date info
+    DETIME_DIGITAL_12,          // 12 hour digital with date info
+    DETIME_DIGITAL_24,          // 24 hour digital
     DETIME_N,
 };
 
-extern uint8_t de_time_fmt;
+extern uint8_t de_time_fmt;     // one of DETIME_*
 extern void initTime(void);
 extern time_t nowWO(void);
 extern void updateClocks(bool all);
 extern bool clockTimeOk(void);
 extern void changeTime (time_t t);
 extern bool checkClockTouch (SCoord &s, TouchType tt);
-extern bool checkTZTouch (const SCoord &s, TZInfo &tzi, const LatLong &ll);
+extern bool TZMenu (TZInfo &tzi, const LatLong &ll);
 extern void enableSyncProvider(void);
 extern void drawDESunRiseSetInfo(void);
 extern void drawCalendar(bool force);
@@ -694,7 +708,7 @@ typedef struct {
     char call[MAX_SPOTCALL_LEN];        // call
     float freq;                         // kHz
     char grid[MAID_CHARLEN];            // used only with WSJT-X
-    uint16_t uts;                       // UT spotted
+    uint16_t utcs;                      // UTC spotted
     LatLong ll;                         // lat, long
     SBox map_b;                         // map label
 } DXClusterSpot;
@@ -766,7 +780,7 @@ extern void eraseDEAPMarker (void);
 extern void drawDEMarker (bool force);
 extern void drawDEAPMarker (void);
 extern void drawDEInfo (void);
-extern void drawDETime (bool center);
+extern void drawDECalTime (bool center);
 extern void drawDXTime (void);
 extern void initEarthMap (void);
 extern void antipode (LatLong &to, const LatLong &from);
@@ -824,7 +838,7 @@ extern void readBME280 (void);
 extern void drawBME280Panes(void);
 extern void drawOneBME280Pane (const SBox &box, PlotChoice ch);
 extern bool newBME280data (PlotChoice ch);
-extern const BMEData *getBMEData (int i);
+extern const BMEData *getBMEData (int i, bool fresh_read);
 extern int getNBMEConnected (void);
 extern float dewPoint (float T, float RH);
 
@@ -919,6 +933,8 @@ extern bool plotSpotCallsigns(void);
 extern bool rotateScreen(void);
 extern float getBMETempCorr(int i);
 extern float getBMEPresCorr(int i);
+extern bool setBMETempCorr(int i, float delta);
+extern bool setBMEPresCorr(int i, float delta);
 extern const char *getGPSDHost(void);
 extern bool useLocalNTPHost(void);
 extern bool GPIOOk(void);
@@ -1024,11 +1040,13 @@ extern FS_Info *getConfigDirInfo (int *n_info, char **fs_name, uint64_t *fs_size
 
 
 typedef enum {
-    MENU_TITLE,                 // insensitive string
+    MENU_LABEL,                 // insensitive string
     MENU_1OFN,                  // exactly 1 of this set, round selector
+    MENU_01OFN,                 // exactly 0 or 1 of this set, round selector
     MENU_AL1OFN,                // at least 1 of this set, square selector
     MENU_TOGGLE,                // simple on/off with no grouping, square selector
-    MENU_IGNORE,                // ignore this entry
+    MENU_IGNORE,                // ignore this entry entirely
+    MENU_BLANK,                 // empty space
 } MenuFieldType;
 
 typedef enum {
@@ -1045,13 +1063,15 @@ typedef struct {
 } MenuItem;
 
 typedef struct {
-    uint8_t n_cols;             // number of columns to display items
-    uint8_t n_rows;             // number of non-IGNORE items[]
-    uint8_t n_items;            // number of items[]
+    SBox &menu_b;               // initial menu box -- sized automatically and may be moved
+    SBox &ok_b;                 // box for Ok button -- user may use later with menuRedrawOk()
+    bool update_clocks;         // whether to update clocks while waiting
+    int n_cols;                 // number of columns in which to display items
+    int n_items;                // number of items[]
     MenuItem *items;            // list -- user must manage memory
 } Menu;
 
-extern bool runMenu (Menu &menu, const SBox &outside_b, SBox &menu_b, SBox &ok_b);
+extern bool runMenu (Menu &menu);
 extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
 
 
@@ -1063,6 +1083,7 @@ extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
  */
 
 extern void updateMoonPane (bool force);
+extern void drawMoonElPlot (void);
 extern const uint16_t moon_image[HC_MOON_W*HC_MOON_H] PROGMEM;
 
 
@@ -1110,7 +1131,7 @@ typedef enum {
     NV_TOUCH_CAL_F,             // touch calibration coefficient
     NV_TOUCH_CAL_DIV,           // touch calibration normalization
     NV_DE_DST,                  // deprecated
-    NV_DE_TIMEFMT,              // DE pane: 0=full info; 1=analog clock; 2=calendar; 3=analog+day
+    NV_DE_TIMEFMT,              // DE: 0=info; 1=analog; 2=cal; 3=analog+day; 4=dig 12hr; 5=dig 24hr
     NV_DE_LAT,                  // DE latitude, degrees N
 
     NV_DE_LNG,                  // DE longitude, degrees E
@@ -1206,6 +1227,8 @@ typedef enum {
     NV_PANE3ROTSET,             // PlotChoice bitmask of pane 3 rotation choices
     NV_DOY_ON,                  // whether showing day of year instead of month day
     NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if off
+    NV_BC_UTCTIMELINE,          // band conditions timeline labeled in UTC else DE
+    NV_RSS_INTERVAL,            // RSS update interval, seconds
 
     NV_N
 } NV_Name;
@@ -1271,7 +1294,6 @@ extern void getNVMaidenhead (NV_Name nv, char maid[MAID_CHARLEN]);
 typedef uint8_t BandMatrix[BMTRX_ROWS][BMTRX_COLS];     // percent circuit reliability
 
 extern void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *config_str);
-extern bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt);
 extern bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
         const char *ylabel, uint16_t color, float y_min, float y_max, float big_value);
 extern bool plotXYstr (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
@@ -1302,6 +1324,7 @@ extern uint32_t plot_rotset[PANE_N];            // bitmask of all PlotChoice rot
 #define PLOT_ROT_WARNING        5               // show rotation about to occur, secs
 
 extern void insureCountdownPaneSensible(void);
+extern bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt);
 extern PlotChoice askPaneChoice(PlotPane pp);
 extern PlotPane findPaneForChoice (PlotChoice pc);
 extern PlotPane findPaneChoiceNow (PlotChoice pc);
@@ -1314,7 +1337,7 @@ extern void showRotatingBorder (bool soon, PlotPane pp);
 extern void initPlotPanes(void);
 extern void savePlotOps(void);
 extern bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color);
-extern bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32_t to_ms, SCoord &tap);
+extern bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap);
 
 
 
@@ -1424,11 +1447,12 @@ extern SCoord wifi_tt_s;
 
 // bit mask values for NV_BCFLAGS
 typedef enum {
-    SW_BCDATEBIT =  1,                          // showing bigclock date
-    SW_BCWXBIT   =  2,                          // showing bigclock weather
-    SW_BCDIGBIT  =  4,                          // big clock is digital else analog
-    SW_DB12HBIT  =  8,                          // digital clock is 12 else 24
-    SW_ANOSHBIT  =  16,                         // set if not showing analog second hand
+    SW_BCDATEBIT =  (1<<0),                     // showing bigclock date
+    SW_BCWXBIT   =  (1<<1),                     // showing bigclock weather
+    SW_BCDIGBIT  =  (1<<2),                     // big clock is digital else analog
+    SW_DB12HBIT  =  (1<<3),                     // digital clock is 12 else 24
+    SW_ANOSHBIT  =  (1<<4),                     // set if not showing analog second hand
+    SW_UTCBIT    =  (1<<5),                     // set if Big Clock showing 24 hr UTC 
 } SWBCBits;
 
 // state of stopwatch engine, _not_ what is being display
@@ -1531,7 +1555,10 @@ extern bool httpSkipHeader (WiFiClient &client, uint32_t *lastmodp);
 extern void FWIFIPR (WiFiClient &client, const __FlashStringHelper *str);
 extern void FWIFIPRLN (WiFiClient &client, const __FlashStringHelper *str);
 extern int getNTPServers (const NTPServer **listp);
+extern bool setRSSTitle (const char *title, int &n_titles, int &max_titles);
 extern uint16_t bc_power;
+extern uint8_t bc_utc;
+extern uint8_t rss_interval;
 
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, 
     SPWxValue &drap, NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,

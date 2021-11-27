@@ -164,11 +164,6 @@ static void setAlarmPin (bool set) { (void) set; }
 #define SW_CH           SW_BH                   // color scale height
 #define SW_HSV_S        200                     // color scale HSV saturation, 0..255
 #define SW_HSV_V        255                     // color scale HSV value, 0..255
-#define SW_BCDATEBIT    1                       // NV_BCFLAGS bit mask for showing bigclock date
-#define SW_BCWXBIT      2                       // NV_BCFLAGS bit mask for showing bigclock weather
-#define SW_BCDIGBIT     4                       // NV_BCFLAGS bit mask for whether big clock is digital
-#define SW_DB12HBIT     8                       // NV_BCFLAGS bit mask for whether digital clock is 12 else 24
-#define SW_ANOSHBIT     16                      // NV_BCFLAGS bit mask for whether no analog second hand
 
 // alarm clock params
 #define ALM_X0          180                     // alarm control button x
@@ -800,10 +795,17 @@ static void drawBCDate (int hr, int dy, int wd, int mo)
     else
         tft.printf (_FX("%s %d"), monthStr(mo), dy);
 
-    // AM/PM only for analog or 12 hour digital
-    if (sws_display == SWD_BCANALOG || (bc_bits & SW_DB12HBIT)) {
-        tft.setCursor (bcdate_b.x, bcdate_b.y + 125);
+    // AM/PM/UTC
+    tft.setCursor (bcdate_b.x, bcdate_b.y + 125);
+    if (sws_display == SWD_BCANALOG || (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
+        // AM/PM always for analog or 12 hour digital
         tft.print (hr < 12 ? "AM" : "PM");
+    } else if (sws_display == SWD_BCDIGITAL && (bc_bits & SW_UTCBIT)) {
+        // UTC
+        tft.print ("UTC");
+    } else if (sws_display == SWD_BCDIGITAL && !(bc_bits & SW_UTCBIT)) {
+        // UTC + TZ
+        tft.printf ("UTC%+g", de_tz.tz_secs/3600.0F);
     }
 
     #if defined(_SHOW_ALL)
@@ -853,8 +855,12 @@ static void drawDigitalBigClock (bool all)
     static uint8_t prev_mnten, prev_mnmn;               // previous mins tens and unit
     static uint8_t prev_hr, prev_mo, prev_dy;           // previous drawn date info
 
-    // get local time now, including any user offset
-    time_t t0 = nowWO() + de_tz.tz_secs;
+    // get time now, including any user offset
+    time_t t0 = nowWO();
+
+    // local unless utc digital
+    if (!(bc_bits & SW_UTCBIT))
+        t0 += de_tz.tz_secs;
 
     // done if same second unless all
     if (!all && t0 == prev_t0)
@@ -906,7 +912,8 @@ static void drawDigitalBigClock (bool all)
     // update hour every hour
     if (all || hr != prev_hr) {
         prev_hr = hr;
-        if (bc_bits & SW_DB12HBIT) {
+        if ((bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
+            // 12 hours don't show leading 0
             uint8_t hr12 = hr%12;
             if (hr12 == 0)
                 hr12 = 12;
@@ -1124,7 +1131,7 @@ static void drawAnalogBigClock (bool all)
 
 }
 
-/* draw stopwatch in any possible display state
+/* update stopwatch in any possible display state
  */
 static void drawSWState()
 {
@@ -1205,7 +1212,7 @@ static void drawBigClock (bool all)
 {
     if (sws_display == SWD_BCDIGITAL)
         drawDigitalBigClock (all);
-    else
+    else if (sws_display == SWD_BCANALOG)
         drawAnalogBigClock (all);
 }
 
@@ -1299,9 +1306,9 @@ static void showAlarmRinging()
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         drawStringInBox (" Cancel ", dismiss_b, false, BRGRAY);
 
-        // wait for tap or timeout
+        // wait for tap or timeout anywhere in pane
         SCoord s;
-        (void) waitForTap (dismiss_b, b, checkExternalTurnOff, ALM_RINGTO, s);
+        (void) waitForTap (b, checkExternalTurnOff, ALM_RINGTO, true, s);
 
         // off
         alarm_state = ALMS_ARMED;
@@ -1320,6 +1327,110 @@ static void showAlarmRinging()
     }
 }
 
+/* display a Big Clock menu anchored at the given screen loc.
+ * return with bc_bits and/or sws_display possibly changed.
+ * we do NOT redraw the clock.
+ */
+static void runBCMenu (const SCoord &s)
+{
+    // handy enumeration of fields
+    enum MIName {
+        MI_FMT_TTL, MI_FMT_ANA, MI_FMT_DIG,
+        MI_ANA_TTL, MI_ANA_SHD,
+        MI_DIG_TTL, MI_DIG_UTC, MI_DIG_12H, MI_DIG_24H,
+        MI_ALL_TTL, MI_ALL_SDT, MI_ALL_SWX, MI_ALL_CDW, MI_ALL_ALM,
+        MI_EXT,
+        MI_BLK,
+        MI_N,
+    };
+
+    // items
+    #define PRI_INDENT 4
+    #define SEC_INDENT 10
+    MenuItem mitems[MI_N] = {
+        {MENU_LABEL, false, PRI_INDENT, "Format:"},
+            {MENU_1OFN, !(bc_bits & SW_BCDIGBIT), SEC_INDENT, "Analog"},
+            {MENU_1OFN, !!(bc_bits & SW_BCDIGBIT), SEC_INDENT, "Digital"},
+        {MENU_LABEL, false, PRI_INDENT, "Analog options:"},
+            {MENU_TOGGLE, !(bc_bits & SW_ANOSHBIT), SEC_INDENT, "Show second hand"},
+        {MENU_LABEL, false, PRI_INDENT, "Digital options:"},
+            {MENU_1OFN, !!(bc_bits & SW_UTCBIT), SEC_INDENT, "UTC"},
+            {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT, SEC_INDENT, "DE 12 hour"},
+            {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == 0, SEC_INDENT, "DE 24 hour"},
+        {MENU_LABEL, false, PRI_INDENT, "Shared options:"},
+            {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), SEC_INDENT, "Show date info"},
+            {MENU_TOGGLE, !!(bc_bits & SW_BCWXBIT), SEC_INDENT, "Show DE weather"},
+            {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, SEC_INDENT, "Count down"},
+            {MENU_TOGGLE, alarm_state != ALMS_OFF, SEC_INDENT, "Alarm armed"},
+        {MENU_TOGGLE, false, PRI_INDENT, "Exit Big Clock"},
+        {MENU_BLANK, false, PRI_INDENT, NULL},
+    };
+
+    // box for menu anchored at s
+    SBox menu_b;
+    menu_b.x = s.x;
+    menu_b.y = s.y;
+    // w/h are set dynamically by runMenu()
+
+    // run, do nothing more if cancelled
+    SBox ok_b;
+    Menu menu = {menu_b, ok_b, false, 1, MI_N, mitems};
+    if (!runMenu (menu))
+        return;
+
+    // engage each selection.
+
+    if (menu.items[MI_FMT_ANA].set) {
+        bc_bits &= ~SW_BCDIGBIT;
+        sws_display = SWD_BCANALOG;
+    } else {
+        bc_bits |= SW_BCDIGBIT;
+        sws_display = SWD_BCDIGITAL;
+    }
+
+    // N.B. check exit AFTER other sws_display possibilities
+    if (menu.items[MI_EXT].set)
+        sws_display = SWD_MAIN;
+
+    if (menu.items[MI_ANA_SHD].set)
+        bc_bits &= ~SW_ANOSHBIT;
+    else
+        bc_bits |= SW_ANOSHBIT;
+
+    if (menu.items[MI_DIG_UTC].set)
+        bc_bits |= SW_UTCBIT;
+    else
+        bc_bits &= ~SW_UTCBIT;
+
+    if (menu.items[MI_DIG_12H].set)
+        bc_bits |= SW_DB12HBIT;
+    else
+        bc_bits &= ~SW_DB12HBIT;
+
+    if (menu.items[MI_ALL_SDT].set)
+        bc_bits |= SW_BCDATEBIT;
+    else
+        bc_bits &= ~SW_BCDATEBIT;
+
+    if (sws_engine == SWE_COUNTDOWN && !menu.items[MI_ALL_CDW].set)
+        sws_engine = SWE_RESET;
+    if (sws_engine != SWE_COUNTDOWN && menu.items[MI_ALL_CDW].set) {
+        sws_engine = SWE_COUNTDOWN;
+        start_t = millis();
+    }
+
+    if (alarm_state == ALMS_OFF && menu.items[MI_ALL_ALM].set)
+        alarm_state = ALMS_ARMED;
+    if (alarm_state != ALMS_OFF && !menu.items[MI_ALL_ALM].set)
+        alarm_state = ALMS_OFF;
+
+    if (menu.items[MI_ALL_SWX].set)
+        bc_bits |= SW_BCWXBIT;
+    else
+        bc_bits &= ~SW_BCWXBIT;
+
+}
+
 
 /* check our touch controls, update state.
  * works for all stopwatch pages: main and either big clock
@@ -1334,8 +1445,6 @@ static void checkSWPageTouch()
     // update idle timer, ignore if this tap is restoring full brightness
     if (brightnessOn())
         return;
-
-    // check each box depending on which page is up
 
     if (sws_display == SWD_MAIN) {
 
@@ -1513,89 +1622,33 @@ static void checkSWPageTouch()
 
     } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
 
-        // bigclock boxes
-
-        // toggle analog/digital if tap near center
-        SBox center_b;
-        center_b.w = 100;
-        center_b.h = 100;
-        center_b.x = (800-center_b.w)/2;
-        center_b.y = (480-center_b.h)/2;
-
-        // toggle digital 12/24 if tap over hours digits
-        SBox hr12_b;
-        hr12_b.w = 2*BDC_W;
-        hr12_b.h = BDC_H;
-        hr12_b.x = BDC_X0;
-        hr12_b.y = BDC_Y0;
-        
-        // toggle analog second hand if towards the right side
-        SBox sec_hand_b;
-        sec_hand_b.w = 100;
-        sec_hand_b.h = 100;
-        sec_hand_b.x = 600;
-        sec_hand_b.y = (480-center_b.h)/2;
-
-        #if defined(_SHOW_ALL)
-            tft.drawRect (center_b.x, center_b.y, center_b.w, center_b.h, RA8875_WHITE);
-            tft.drawRect (hr12_b.x, hr12_b.y, hr12_b.w, hr12_b.h, RA8875_WHITE);
-            tft.drawRect (sec_hand_b.x, sec_hand_b.y, sec_hand_b.w, sec_hand_b.h, RA8875_WHITE);
-            tft.drawRect (bcwx_b.x, bcwx_b.y, bcwx_b.w, bcwx_b.h, RA8875_WHITE);
-            tft.drawRect (BC_EXIT_X, BC_EXIT_Y, 800-BC_EXIT_X, 480-BC_EXIT_Y, RA8875_WHITE);
-            tft.drawRect (BC_BAD_X, BC_BAD_Y, BC_BAD_W, BC_BAD_H, RA8875_RED);
-        #endif
-
-        if (inBox (s, bcdate_b)) {
-            // toggle showing date
-            bc_bits ^= SW_BCDATEBIT;
-            drawBigClock (true);
-            saveSWNV();
-        } else if (inBox (s, bcwx_b)) {
-            // toggle showing weather
-            bc_bits ^= SW_BCWXBIT;
-            drawBigClock (true);
-            saveSWNV();
-        } else if (sws_display == SWD_BCDIGITAL && inBox (s, hr12_b)) {
-            // toggle 12/24 hour
-            bc_bits ^= SW_DB12HBIT;
-            drawBigClock (true);
-            saveSWNV();
-        } else if (sws_display == SWD_BCANALOG && inBox (s, sec_hand_b)) {
-            // toggle sec hand
-            bc_bits ^= SW_ANOSHBIT;
-            saveSWNV();
-        } else if (sws_engine == SWE_COUNTDOWN && inBox (s, bccd_b)) {
+        // first check the optional display controls
+        if (sws_engine == SWE_COUNTDOWN && inBox (s, bccd_b)) {
             // reset cd time but stay in SWE_COUNTDOWN state
             start_t = millis();
-        } else if (inBox (s, center_b)) {
-            // toggle digital/analog
-            if (sws_display == SWD_BCDIGITAL) {
-                sws_display = SWD_BCANALOG;
-                bc_bits &= ~SW_BCDIGBIT;
-            } else {
-                sws_display = SWD_BCDIGITAL;
-                bc_bits |= SW_BCDIGBIT;
-            }
-            saveSWNV();
-            drawBigClock(true);
-        } else if (inBox (s, bcalarm_b)) {
+        } else if (alarm_state != ALMS_OFF && inBox (s, bcalarm_b)) {
+            // don't run menu if click alarm even if not ringing
             if (alarm_state == ALMS_RINGING) {
                 alarm_state = ALMS_ARMED;
                 drawAlarmIndicator(false);
                 logState();
             }
-        } else if (s.x > BC_EXIT_X && s.y > BC_EXIT_Y) {
-            // tap anywhere in lower right to return to main stopwatch
-            Serial.println(F("SW: BigClock exit"));
-            sws_display = SWD_MAIN;
-            eraseScreen();
-            drawSWMainPage();
+        } else {
+            // show menu and redraw to engage any changes even if cancelled just to erase menu
+            runBCMenu (s);
+            if (sws_display == SWD_MAIN) {
+                Serial.println(F("SW: BigClock exit"));
+                eraseScreen();
+                drawSWMainPage();
+            } else {
+                drawBigClock (true);
+            }
+            saveSWNV();
         }
-
     }
 }
 
-/* init one-time prep
+/* one-time prep
  */
 void initStopwatch()
 {

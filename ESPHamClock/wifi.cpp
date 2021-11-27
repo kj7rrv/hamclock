@@ -6,9 +6,12 @@
 
 
 // RSS info
-#define RSS_INTERVAL    15                      // polling period, secs
-static const char rss_page[] = "/ham/HamClock/RSS/web15rss.pl";
 #define NRSS            15                      // max number RSS entries to cache
+static const char rss_page[] = "/ham/HamClock/RSS/web15rss.pl";
+static char *rss_titles[NRSS];                  // malloced titles
+static uint8_t n_rss_titles, rss_title_i;       // n titles and rolling index
+static bool rss_local;                          // if set: don't poll server, assume local titles
+uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
 
 // kp historical and predicted info, new data posted every 3 hours
 #define KP_INTERVAL     3500                    // polling period, secs
@@ -58,6 +61,7 @@ static const char bc_page[] = "/ham/HamClock/fetchBandConditions.pl";
 static bool bc_reverting;                       // set while waiting for BC after WX
 static int bc_hour, map_hour;                   // hour when valid
 uint16_t bc_power;                              // VOACAP power setting
+uint8_t bc_utc;                                 // label band conditions timeline in utc else DE local
 PropMapSetting prop_map = PROP_MAP_OFF;         // whether/how showing background prop map
 
 // background map update intervals
@@ -546,9 +550,11 @@ void initSys()
     }
 
 
-    // handy place to init bc_power
+    // handy place to init bc_power and bc_utc
     if (bc_power == 0 && !NVReadUInt16 (NV_BCPOWER, &bc_power))
         bc_power = 100;
+    if (!NVReadUInt8 (NV_BC_UTCTIMELINE, &bc_utc))
+        bc_utc = 0;
 }
 
 /* update BandConditions pane in box b if needed or requested.
@@ -636,7 +642,7 @@ static void checkMap(void)
 
 
 /* check for tap at s known to be within BandConditions box b.
- * tapping a band loads prop map, tapping power cycles bc_power 1-1000 W.
+ * tapping a band loads prop map; tapping timeline toggle bc_utc; tapping power cycles bc_power 1-1000 W.
  * return whether tap was useful for us.
  * N.B. coordinate tap positions with plotBandConditions()
  */
@@ -648,11 +654,19 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 
     // ll corner for power cycle
     SBox power_b;
-    power_b.x = b.x + 2;
-    power_b.y = b.y + 89*b.h/100;
-    power_b.w = b.w/3;
-    power_b.h = b.y + b.h - power_b.y - 1;
+    power_b.x = b.x + 1;
+    power_b.y = b.y + 13*b.h/14;
+    power_b.w = b.w/5;
+    power_b.h = b.h/12;
     // tft.drawRect (power_b.x, power_b.y, power_b.w, power_b.h, RA8875_WHITE);
+
+    // timeline strip
+    SBox tl_b;
+    tl_b.x = b.x + 1;
+    tl_b.y = b.y + 12*b.h/14;
+    tl_b.w = b.w - 2;
+    tl_b.h = b.h/12;
+    // tft.drawRect (tl_b.x, tl_b.y, tl_b.w, tl_b.h, RA8875_WHITE);
 
     if (inBox (s, power_b)) {
 
@@ -664,18 +678,17 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
             {MENU_1OFN, bc_power == 100, 5, "100 watts"},
             {MENU_1OFN, bc_power == 1000, 5, "1000 watts"},
         };
-        Menu menu = { 1, N_POW, N_POW, mitems };
 
         SBox menu_b;
         menu_b.x = b.x + 5;
         menu_b.y = b.y + b.h/2;
-        menu_b.w = 100;
-        menu_b.h = 0;   // set automatically
+        // w/h are set dynamically by runMenu()
 
         // run menu, find selection
         SBox ok_b;
+        Menu menu = {menu_b, ok_b, true, 1, N_POW, mitems};
         uint16_t new_power = bc_power;
-        if (runMenu (menu, b, menu_b, ok_b)) {
+        if (runMenu (menu)) {
             for (int i = 0; i < N_POW; i++) {
                 if (menu.items[i].set) {
                     new_power = powf (10, i);
@@ -691,11 +704,17 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         checkBandConditions (b, true);
         if (power_changed)
             newVOACAPMap(prop_map);
+    
+    } else if (inBox (s, tl_b)) {
+
+        // toggle bc_utc and redraw
+        bc_utc = !bc_utc;
+        NVWriteUInt8 (NV_BC_UTCTIMELINE, bc_utc);
+        plotBandConditions (b, 0, NULL, NULL);
 
     } else {
 
         // toggle band depending on position, if any.
-        // N.B. coordinate this with plotBandConditions() layout
         PropMapSetting new_prop_map = prop_map;
         if (s.x < b.x + b.w/4) {
             int i = (b.y + b.h - 20 - s.y) / ((b.h - 47)/PROP_MAP_N);
@@ -1228,7 +1247,7 @@ void updateWiFi(void)
     // freshen RSS
     if (t0 >= next_rss) {
         if (updateRSS())
-            next_rss = now() + RSS_INTERVAL;
+            next_rss = now() + rss_interval;
         else
             next_rss = nextWiFiRetry();
     }
@@ -1380,9 +1399,8 @@ bool getChar (WiFiClient &client, char *cp)
     // wait for char
     uint32_t t0 = millis();
     while (!client.available()) {
-        resetWatchdog();
         if (!client.connected()) {
-            // Serial.print (F("surprise getChar disconnect\n"));
+            Serial.print (F("surprise getChar disconnect\n"));
             return (false);
         }
         if (timesUp(&t0,GET_TO)) {
@@ -1476,7 +1494,7 @@ void sendUserAgent (WiFiClient &client)
             desrss, dxsrss, BUILD_W, use_fb0,
             // new for LV5:
             (int)as, getCenterLng(), doy, names_on, getDemoMode(), (int)getSWEngineState(cd_timer), 
-            (int)getBigClockBits(), utcOffset(), 0, 0, 0, 0);
+            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, 0, 0);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
@@ -2122,8 +2140,8 @@ static bool updateBandConditions(const SBox &box)
             goto out;
         }
 
-        Serial.printf (_FX("BC response: %s\n"), response);
-        Serial.printf (_FX("BC config: %s\n"), config);
+        // Serial.printf (_FX("BC response: %s\n"), response);
+        // Serial.printf (_FX("BC config: %s\n"), config);
 
         // keep time fresh
         updateClocks(false);
@@ -2132,7 +2150,6 @@ static bool updateBandConditions(const SBox &box)
         // get current utc hour for path_spw
         int t_hr = hour(t);
 
-        // plot or show error
         // next 24 lines are reliability matrix.
         // N.B. col 1 is UTC but runs from 1 .. 24, 24 is really 0
         // lines include data for 9 bands, 80-10, but we drop 60 for BandMatrix
@@ -2140,9 +2157,10 @@ static bool updateBandConditions(const SBox &box)
         BandMatrix bm;
         for (int i = 0; i < BMTRX_ROWS; i++) {
 
-            // read next row
-            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
-                Serial.println(response);
+            // read next row -- not sure why but second attempt needed about 1/5 times on ESP
+            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)
+                        && !getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
+                Serial.printf (_FX("Matrix fail row %d\n"), i);
                 plotMessage (box, RA8875_RED, _FX("No matrix"));
                 goto out;
             }
@@ -2349,15 +2367,13 @@ void scheduleRSSNow()
  */
 static bool updateRSS ()
 {
-    // persistent list of malloced titles
-    static char *titles[NRSS];
-    static uint8_t n_titles, title_i;
-
-    // skip and clear cache if off
+    // skip if not on and clear list if not local
     if (!rss_on) {
-        while (n_titles > 0) {
-            free (titles[--n_titles]);
-            titles[n_titles] = NULL;
+        if (!rss_local) {
+            while (n_rss_titles > 0) {
+                free (rss_titles[--n_rss_titles]);
+                rss_titles[n_rss_titles] = NULL;
+            }
         }
         return (true);
     }
@@ -2366,15 +2382,15 @@ static bool updateRSS ()
     StackMalloc line_mem(150);
     char *line = line_mem.getMem();
 
-    // prepare background
+    // prepare background to show life before possibly lengthy net update
     tft.fillRect (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.w, rss_bnr_b.h, RSS_BG_COLOR);
     tft.drawLine (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.x+rss_bnr_b.w, rss_bnr_b.y, GRAY);
 
-    // fill titles[] if empty
-    if (title_i >= n_titles) {
+    // fill rss_titles[] from network if empty and wanted
+    if (!rss_local && rss_title_i >= n_rss_titles) {
 
         // reset count and index
-        n_titles = title_i = 0;
+        n_rss_titles = rss_title_i = 0;
 
         // TCP client
         WiFiClient rss_client;
@@ -2395,22 +2411,22 @@ static bool updateRSS ()
                 goto out;
             }
 
-            // get up to NRSS more titles[]
-            for (n_titles = 0; n_titles < NRSS; n_titles++) {
+            // get up to NRSS more rss_titles[]
+            for (n_rss_titles = 0; n_rss_titles < NRSS; n_rss_titles++) {
                 if (!getTCPLine (rss_client, line, line_mem.getSize(), NULL))
                     goto out;
-                if (titles[n_titles])
-                    free (titles[n_titles]);
-                titles[n_titles] = strdup (line);
-                // Serial.printf (_FX("RSS[%d] len= %d\n"), n_titles, strlen(titles[n_titles]));
+                if (rss_titles[n_rss_titles])
+                    free (rss_titles[n_rss_titles]);
+                rss_titles[n_rss_titles] = strdup (line);
+                // Serial.printf (_FX("RSS[%d] len= %d\n"), n_rss_titles, strlen(rss_titles[n_rss_titles]));
             }
         }
 
       out:
         rss_client.stop();
 
-        // real trouble if still no titles
-        if (n_titles == 0) {
+        // real trouble if still no rss_titles
+        if (n_rss_titles == 0) {
             // report error 
             selectFontStyle (LIGHT_FONT, SMALL_FONT);
             tft.setTextColor (RSS_FG_COLOR);
@@ -2422,52 +2438,74 @@ static bool updateRSS ()
         printFreeHeap (F("updateRSS"));
     }
 
-    // draw next title
-    char *title = titles[title_i];
-    size_t ll = strlen(title);
+    // done if no titles
+    if (n_rss_titles == 0)
+        return (true);
+
+    resetWatchdog();
+
+    // draw next rss_title
+    char *title = rss_titles[rss_title_i];
 
     // usable banner drawing x and width
     uint16_t ubx = rss_bnr_b.x + 5;
     uint16_t ubw = rss_bnr_b.w - 10;
 
-    resetWatchdog();
-
-    // find pixel width of title
+    // get title width in pixels
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (RSS_FG_COLOR);
-    uint16_t bw = getTextWidth (title);
+    uint16_t tw = getTextWidth (title);
 
     // draw as 1 or 2 lines to fit within ubw
-    if (bw < ubw) {
+    tft.setTextColor (RSS_FG_COLOR);
+    if (tw < ubw) {
         // title fits on one row, draw centered horizontally and vertically
-        tft.setCursor (ubx + (ubw-bw)/2, rss_bnr_b.y + 2*rss_bnr_b.h/3-1);
+        tft.setCursor (ubx + (ubw-tw)/2, rss_bnr_b.y + 2*rss_bnr_b.h/3-1);
         tft.print (title);
     } else {
-        // title too long, split near center
-        char *row2 = strchr (title+ll/2, ' ');
-        if (!row2)
-            row2 = title+ll/2;          // no blanks! just split in half?
-        *row2++ = '\0';                 // replace with EOS and move to start of row 2
-        uint16_t r1w, r2w;              // row 1 and 2 pixel widths
-        r1w = getTextWidth (title);
-        r2w = getTextWidth (row2);
+        // title too long, keep shrinking until it fits
+        for (bool fits = false; !fits; ) {
 
-        // draw if fits
-        if (r1w <= ubw && r2w <= ubw) {
-            tft.setCursor (ubx + (ubw-r1w)/2, rss_bnr_b.y + rss_bnr_b.h/2 - 8);
-            tft.print (title);
-            tft.setCursor (ubx + (ubw-r2w)/2, rss_bnr_b.y + rss_bnr_b.h - 9);
-            tft.print (row2);
-        } else {
-            Serial.printf (_FX("RSS not fit: '%s' '%s'\n"), title, row2);
+            // split at center blank
+            size_t tl = strlen(title);
+            char *row2 = strchr (title+tl/2, ' ');
+            if (!row2)
+                row2 = title+tl/2;          // no blanks! just split in half?
+            char sep_char = *row2;          // save to restore
+            *row2++ = '\0';                 // replace blank with EOS and move to start of row 2 -- restore!
+            uint16_t r1w = getTextWidth (title);
+            uint16_t r2w = getTextWidth (row2);
+
+            // draw if fits
+            if (r1w <= ubw && r2w <= ubw) {
+                tft.setCursor (ubx + (ubw-r1w)/2, rss_bnr_b.y + rss_bnr_b.h/2 - 8);
+                tft.print (title);
+                tft.setCursor (ubx + (ubw-r2w)/2, rss_bnr_b.y + rss_bnr_b.h - 9);
+                tft.print (row2);
+
+                // got it
+                fits = true;
+            }
+
+            // restore zerod char
+            row2[-1] = sep_char;
+
+            if (!fits) {
+                Serial.printf (_FX("RSS shrink from %d %d "), tw, tl);
+                tw = maxStringW (title, 9*tw/10);       // modifies title
+                tl = strlen(title);
+                Serial.printf (_FX("to %d %d\n"), tw, tl);
+            }
         }
     }
 
-    // remove from list and advance to next title
-    free (titles[title_i]);
-    titles[title_i++] = NULL;
+    // if local just cycle to next title, else remove from list and advance
+    if (rss_local) {
+        rss_title_i = (rss_title_i + 1) % n_rss_titles;
+    } else {
+        free (rss_titles[rss_title_i]);
+        rss_titles[rss_title_i++] = NULL;
+    }
  
-    // too often: printFreeHeap (F("updateRSS"));
     resetWatchdog();
     return (true);
 }
@@ -2709,4 +2747,63 @@ int getNTPServers (const NTPServer **listp)
 {
     *listp = ntp_list;
     return (N_NTP);
+}
+
+/* used by web server to control local RSS title list.
+ * if title == NULL
+ *   restore normal network operation
+ * else if title[0] == '\0'
+ *   turn off network and empty the local title list
+ * else
+ *   turn off network and add the given title to the local list
+ * always report the current number of titles in the list and max number possible.
+ * return whether ok
+ */
+bool setRSSTitle (const char *title, int &n_titles, int &max_titles)
+
+{
+    if (!title) {
+
+        // restore network operation
+        rss_local = false;
+        n_rss_titles = rss_title_i = 0;
+
+    } else {
+
+        // erase list if network on or asked to do so
+        if (!rss_local || title[0] == '\0') {
+            n_rss_titles = rss_title_i = 0;
+            for (int i = 0; i < NRSS; i++) {
+                if (rss_titles[i]) {
+                    free (rss_titles[i]);
+                    rss_titles[i] = NULL;
+                }
+            }
+        }
+
+        // turn off network
+        rss_local = true;
+
+        // add title if room unless blank
+        if (title[0] != '\0') {
+            if (n_rss_titles < NRSS) {
+                if (rss_titles[n_rss_titles])       // just paranoid
+                    free (rss_titles[n_rss_titles]);
+                rss_titles[n_rss_titles] = strdup (title);
+                rss_title_i = n_rss_titles++;       // show new title
+            } else {
+                n_titles = NRSS;
+                max_titles = NRSS;
+                return (false);
+            }
+        }
+    }
+
+    // update info and refresh
+    n_titles = n_rss_titles;
+    max_titles = NRSS;
+    scheduleRSSNow();
+
+    // ok
+    return (true);
 }

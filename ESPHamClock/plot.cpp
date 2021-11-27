@@ -335,22 +335,15 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
  *      for each band and a summary line to be drawn across the bottom.
  *   2. we can also be called just to update annotation as indicated by bmp or cfg_str being NULL. In this
  *      case we only draw the band indicators showing prop_map according to busy with the others normal
- *      and we redraw the time line.
- * matrix is 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
- * we rotate matrix so rows go up from 80 and cols are DE local time 0 .. 23.
- * busy: <0 err, 0 idle, >0 active.
+ *      and we redraw the time line according to bc_utc.
+ * bmp is a matrix of 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
+ * we draw the matrix rotated so rows go up from 80 and cols start on the left at the current DE hour.
+ * busy means <0 err, 0 idle, >0 active.
  * N.B. coordinate the layout geometry with checkBCTouch()
  */
 void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *cfg_str)
 {
     resetWatchdog();
-
-    // whether full or just updating labels
-    bool draw_all = bmp != NULL && cfg_str != NULL;
-
-    // prep box if all
-    if (draw_all)
-        prepPlotBox (box);
 
     // layout
     #define PFONT_H 6                                   // plot labels font height
@@ -369,7 +362,14 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     #define PCOL_W (PLOT_W/PLOT_COLS-1)                 // plot column width
     #define PROW_H (PLOT_H/PLOT_ROWS-1)                 // plot row height
 
-    // to help organize the matrix rotation, p_ variables refer to plot indices, m_ matrix
+    // to help organize the matrix rotation, p_ variables refer to plot indices, m_ to matrix indices
+
+    // detect whether full or just updating labels
+    bool draw_all = bmp != NULL && cfg_str != NULL;
+
+    // prep box if all
+    if (draw_all)
+        prepPlotBox (box);
 
     // label band names -- indicate current voacap map, if any
     selectFontStyle (LIGHT_FONT, FAST_FONT);
@@ -386,30 +386,46 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
         tft.print (propMap2Band((PropMapSetting)p_row));
     }
 
-    // erase timeline if not drawing all
+    // find utc and DE hour now. these will be the matrix row in plot column 0.
+    int utc_hour_now = hour (nowWO());
+    int de_hour_now = hour (nowWO() + de_tz.tz_secs);
+    int hr_now = bc_utc ? utc_hour_now : de_hour_now;
+
+    // erase timeline if not drawing all (because prepPlotBox() already erased everything if draw_all)
+    uint16_t timeline_y = PBOT_Y+1;
     if (!draw_all)
-        tft.fillRect (box.x + 1, PBOT_Y, box.w-2, PFONT_H+1, RA8875_BLACK);
+        tft.fillRect (box.x + 1, timeline_y, box.w-2, PFONT_H+1, RA8875_BLACK);
 
-    // mark local time now on UTC scale
-    int de_hrs = (nowWO()/3600 + 48) % 24;
-    uint16_t now_x = PLEFT_X + PLOT_W*de_hrs/PLOT_COLS;
-    tft.fillRect (now_x, PBOT_Y, PCOL_W, PFONT_H, RA8875_WHITE);
-
-    // label DE time -- utc 0 always on left end
+    // label timeline local or utc wth local DE now always on left end
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    for (int utc = 0; utc < BMTRX_ROWS; utc += 4) {
-        uint16_t x = PLEFT_X + PLOT_W*utc/PLOT_COLS;
-        uint16_t y = PBOT_Y-1;
-        int de_lt = (utc + de_tz.tz_secs/3600 + 48) % 24;
-        if (de_lt >= 10) {
+    tft.setCursor (box.x+2, timeline_y);
+    if (bc_utc) {
+        // squeeze UTC label
+        tft.setTextColor(GRAY);
+        tft.print ((char)'U');
+        tft.setCursor (box.x+6, timeline_y);
+        tft.print ((char)'T');
+        tft.setCursor (box.x+10, timeline_y);
+        tft.print ((char)'C');
+    } else {
+        // normal DE label fits ok
+        tft.setTextColor(DE_COLOR);
+        tft.print ("DE");
+    }
+    for (int p_col = 0; p_col < BMTRX_ROWS; p_col++) {
+        int hr = (hr_now + p_col) % 24;
+        if ((hr%4) != 0)
+            continue;
+        uint16_t x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
+        if (hr >= 10) {
             // close packing centered
-            tft.setCursor (x-3, y);
-            tft.print (de_lt/10);
-            tft.setCursor (x+1, y);
-            tft.print (de_lt%10);
+            tft.setCursor (x-3, timeline_y);
+            tft.print (hr/10);
+            tft.setCursor (x+1, timeline_y);
+            tft.print (hr%10);
         } else {
-            tft.setCursor (x-1, y);
-            tft.print (de_lt);
+            tft.setCursor (x-1, timeline_y);
+            tft.print (hr);
         }
     }
 
@@ -432,10 +448,10 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     tft.setCursor (box.x+(box.w-cw)/2, box.y + box.h - 10);
     tft.print ((char*)cfg_str);
 
-    // scan matrix in row-major order but plot in col-major order to affect rotation
+    // scan matrix by rows but plot as columns to affect rotation
     for (int m_row = 0; m_row < BMTRX_ROWS; m_row++) {
-        int p_col = m_row;                              // plot column
-        uint16_t x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
+        int p_col = (m_row - utc_hour_now + 48) % 24;
+        uint16_t p_x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
         for (int m_col = 0; m_col < BMTRX_COLS; m_col++) {
             // get reliability
             uint8_t rel = (*bmp)[m_row][m_col];
@@ -443,109 +459,22 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
             // choose color similar to fetchVOACAPArea.pl
             // rel:    0     10         33         66          100
             // color: black   |   red    |  yellow  |   green
-            uint8_t h, s = 210, v, r, g, b;
-            v = rel < 10 ? 0 : 210;
+            // hue:      x         0          43          85
+            uint8_t h, s = 250, v, r, g, b;
+            v = rel < 10 ? 0 : 250;
             h = rel < 33 ? 0 : (rel < 66 ? 43 : 85);
             hsvtorgb (&r, &g, &b, h, s, v);
             uint16_t color = RGB565 (r, g, b);
 
             // draw color box
             int p_row = m_col;
-            uint16_t y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
-            tft.fillRect (x, y, PCOL_W, PROW_H, color);
+            uint16_t p_y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
+            tft.fillRect (p_x, p_y, PCOL_W, PROW_H, color);
         }
     }
 
     printFreeHeap (F("plotBandConditions"));
 }
-
-#if defined(_OLD_TABLE_STYLE)
-
-/* this function handles the actual drawing of the Band Conditions pane. It can be called in two quite
- * different ways:
- * 1. when called by updateBandConditions(), we are given a table containing relative propagation values
- *    for each band and a summary line to be drawn across the bottom.
- * 2. we can also be called just to update the visual appearance of one of the band indicators as indicated
- *    by the table and summary line are NULL. In this case we only draw the band indicators showing
- *    prop_map according to busy and the others normal.
- * N.B. coordinate the layout geometry with checkBCTouch()
- */
-void plotBandConditions (const SBox &box, int busy, float rel_tbl[PROP_MAP_N], char *cfg_str)
-{
-    // handy conversion of rel to text color
-    #define RELCOL(r)       ((r) < 0.33 ? RA8875_RED : ((r) < 0.66 ? RA8875_YELLOW : RA8875_GREEN))
-
-    // prep layout
-    uint16_t ty = box.y + 27;           // BOTTOM of title; match DX Cluster title
-    uint16_t cy = box.y+box.h-10;       // TOP of config string; beware comma descender
-    uint16_t br_gap = box.w/5;
-    uint16_t col1_x = box.x + 10;
-    uint16_t col2_x = box.x + 5*box.w/9;
-    uint16_t row_h = (cy-2-ty)/(PROP_MAP_N/2);
-
-    // start over of we have a new table
-    if (rel_tbl && cfg_str) {
-
-        // prep
-        prepPlotBox (box);
-
-        // center title across the top
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
-        tft.setTextColor(RA8875_WHITE);
-        const char *title = "VOACAP DE-DX";
-        uint16_t bw = getTextWidth (title);
-        tft.setCursor (box.x+(box.w-bw)/2, ty);
-        tft.print ((char*)title);
-
-        // center the config across the bottom
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor(GRAY);
-        bw = maxStringW (cfg_str, box.w);
-        tft.setCursor (box.x+(box.w-bw)/2, cy);
-        tft.print ((char*)cfg_str);
-
-        // draw each rel_tab entry, 4 rows between ty and cy
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
-        for (int i = 0; i < PROP_MAP_N; i++) {
-            uint16_t row_x = (i < PROP_MAP_N/2) ? col1_x : col2_x;
-            uint16_t row_y = ty + row_h + (i%(PROP_MAP_N/2))*row_h;              // this is bottom of string
-
-            char buf[10];
-            tft.setTextColor(RELCOL(rel_tbl[i]));
-            tft.setCursor (row_x + br_gap, row_y);
-            snprintf (buf, sizeof(buf), "%2.0f", 99*rel_tbl[i]); // 100 doesn't fit
-            tft.print (buf);
-            if (i == PROP_MAP_80M)
-                tft.print("%");
-        }
-
-    } 
-
-    // always draw each band number
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    for (int i = 0; i < PROP_MAP_N; i++) {
-        uint16_t row_x = (i < PROP_MAP_N/2) ? col1_x : col2_x;
-        uint16_t row_y = ty + row_h + (i%(PROP_MAP_N/2))*row_h;
-
-        // background square then number
-        if (i == prop_map) {
-            // show highlighted as per busy
-            uint16_t rect_col = busy > 0 ? RA8875_YELLOW : (busy < 0 ? RA8875_RED : GRAY);
-            tft.fillRect (row_x-1, row_y-row_h+4, box.w/6, row_h-2, rect_col);
-            tft.setTextColor(RA8875_BLACK);
-        } else {
-            // show plain
-            tft.fillRect (row_x-1, row_y-row_h+4, box.w/6, row_h-2, RA8875_BLACK);
-            tft.setTextColor(BRGRAY);
-        }
-        tft.setCursor (row_x, row_y);
-        tft.print (propMap2Band((PropMapSetting)i));
-    }
-
-    printFreeHeap (F("plotBandConditions"));
-}
-
-#endif // _OLD_TABLE_STYLE
 
 /* print the NOAA RSG Space Weather Scales in the given box.
  */
@@ -638,107 +567,6 @@ void prepPlotBox (const SBox &box)
     tft.drawLine (box.x, box.y, box.x, by, BORDER_COLOR);               // left
     tft.drawLine (box.x, box.y, rx, box.y, BORDER_COLOR);               // top
     tft.drawLine (rx, box.y, rx, by, BORDER_COLOR);                     // right
-}
-
-/* check for touch in the given pane, return whether ours.
- * N.B. accommodate a few choices that have their own touch features.
- */
-bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
-{
-    // out fast if not ours
-    SBox &box = plot_b[pp];
-    if (!inBox (s, box))
-        return (false);
-
-    // reserver top 20% for bringing up choice menu
-    bool in_top = s.y < box.y + box.h/5;
-
-    // check a few choices that have their own active areas
-    switch (plot_ch[pp]) {
-    case PLOT_CH_DXCLUSTER:
-        if (checkDXClusterTouch (s, box))
-            return (true);
-        break;
-    case PLOT_CH_BC:
-        if (checkBCTouch (s, box))
-            return (true);
-        break;
-    case PLOT_CH_GIMBAL:
-        if (checkGimbalTouch (s, box))
-            return (true);
-        break;
-    case PLOT_CH_COUNTDOWN:
-        if (!in_top) {
-            checkStopwatchTouch(tt);
-            return (true);
-        }
-        break;
-
-    // tapping a BME below top rotates just among other BME and disables auto rotate.
-    // try all possibilities because they might be on other panes.
-    case PLOT_CH_TEMPERATURE:
-        if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_PRESSURE)
-                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)
-                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)) {
-                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
-                savePlotOps();
-                return (true);
-            }
-        }
-        break;
-    case PLOT_CH_PRESSURE:
-        if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_HUMIDITY)
-                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)
-                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)) {
-                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
-                savePlotOps();
-                return (true);
-            }
-        }
-        break;
-    case PLOT_CH_HUMIDITY:
-        if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_DEWPOINT)
-                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)
-                            || setPlotChoice (pp, PLOT_CH_PRESSURE)) {
-                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
-                savePlotOps();
-                return (true);
-            }
-        }
-        break;
-    case PLOT_CH_DEWPOINT:
-        if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_TEMPERATURE)
-                            || setPlotChoice (pp, PLOT_CH_PRESSURE)
-                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)) {
-                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
-                savePlotOps();
-                return (true);
-            }
-        }
-        break;
-
-    default:
-        break;
-    }
-
-    if (!in_top)
-        return (false);
-
-    // draw menu with choices for this pane
-    PlotChoice ch = askPaneChoice(pp);
-
-    // always engage even if same to erase menu
-    if (!setPlotChoice (pp, ch)) {
-        fatalError (_FX("Bug! checkPlotTouch bad choice %d pane %d"), (int)ch, (int)pp+1);
-        // never returns
-    }
-
-    // it was ours
-    return (true);
 }
 
 /* given min and max and an approximate number of divisions desired,

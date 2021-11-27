@@ -354,9 +354,9 @@ static bool installFilePixels (const char *dfile, const char *nfile)
             day_fbytes = BHDRSZ + HC_MAP_W*HC_MAP_H*2;          // n bytes of 16 bit RGB565 pixels
             night_fbytes = BHDRSZ + HC_MAP_W*HC_MAP_H*2;
             day_pixels = (char *)                               // allow OS to choose addrs
-                    mmap (NULL, day_fbytes, PROT_READ, MAP_FILE|MAP_PRIVATE, day_file.fileno(), 0);
+                    mmap (NULL, day_fbytes, PROT_READ, MAP_PRIVATE, day_file.fileno(), 0);
             night_pixels = (char *)
-                    mmap (NULL, night_fbytes, PROT_READ, MAP_FILE|MAP_PRIVATE, night_file.fileno(), 0);
+                    mmap (NULL, night_fbytes, PROT_READ, MAP_PRIVATE, night_file.fileno(), 0);
 
             ok = day_pixels != MAP_FAILED && night_pixels != MAP_FAILED;
         }
@@ -923,7 +923,7 @@ const char *getMapStyle (char s[])
         if (prop_map == PROP_MAP_OFF)
             NVReadString (NV_MAPSTYLE, s);
         else
-            snprintf (s, NV_MAPSTYLE_LEN, "%dm/%dW", propMap2Band(prop_map), bc_power);
+            sprintf (s, "%dm/%dW", propMap2Band(prop_map), bc_power);
 
         return (s);
 }

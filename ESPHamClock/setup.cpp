@@ -2500,12 +2500,52 @@ bool GPIOOk ()
     return (bool_pr[GPIOOK_BPR].state);
 }
 
+
+
+/* set temp correction, i is BME_76 or BME_77.
+ * caller should establish units according to useMetricUnits().
+ * save in NV if ok.
+ * return whether appropriate.
+ */
+bool setBMETempCorr(int i, float delta)
+{
+    if ((i != BME_76 && i != BME_77) || !getBMEData(i, false))
+        return (false);
+
+    // engage
+    temp_corr[i] = delta;
+
+    // persist
+    NVWriteFloat (i == BME_76 ? NV_TEMPCORR : NV_TEMPCORR2, temp_corr[i]);
+
+    return (true);
+}
+
 /* return temperature correction for sensor given BME_76 or BME_77.
  * at this point it's just a number, caller should interpret according to useMetricUnits()
  */
 float getBMETempCorr(int i)
 {
     return (temp_corr[i % MAX_N_BME]);
+}
+
+/* set pressure correction, i is BME_76 or BME_77.
+ * caller should establish units according to useMetricUnits().
+ * save in NV if ok.
+ * return whether appropriate.
+ */
+bool setBMEPresCorr(int i, float delta)
+{
+    if ((i != BME_76 && i != BME_77) || !getBMEData(i, false))
+        return (false);
+
+    // engage
+    pres_corr[i] = delta;
+
+    // persist
+    NVWriteFloat (i == BME_76 ? NV_PRESCORR : NV_PRESCORR2, pres_corr[i]);
+
+    return (true);
 }
 
 /* return pressure correction for sensor given BME_76 or BME_77.
@@ -2515,6 +2555,8 @@ float getBMEPresCorr(int i)
 {
     return (pres_corr[i % MAX_N_BME]);
 }
+
+
 
 /* return KX3 baud rate, 0 if off or no GPIO
  */

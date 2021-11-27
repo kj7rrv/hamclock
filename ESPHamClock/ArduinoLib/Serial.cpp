@@ -14,6 +14,11 @@ void Serial::print (void)
 {
 }
 
+void Serial::print (char c)
+{
+    printf ("%c", c);
+}
+
 void Serial::print (char *s)
 {
     printf ("%s", s);

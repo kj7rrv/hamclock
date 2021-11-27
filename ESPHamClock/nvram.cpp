@@ -107,6 +107,8 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_PANE3ROTSET
     1,                          // NV_DOY_ON
     2,                          // NV_ALARMCLOCK
+    1,                          // NV_BC_UTCTIMELINE
+    1,                          // NV_RSS_INTERVAL
 };
 
 

@@ -23,7 +23,7 @@ static char cleanup_cmds[] = ";SB0;FR0;FT0;RT0;XT0;RC;";
 static char setfreq_fmt[] = ";FA%011.0f;";
 
 
-#if defined(_IS_ESP8266)
+#if defined(_GPIO_ESP)
 
 
 /**********************************************************************************
@@ -36,8 +36,6 @@ static char setfreq_fmt[] = ";FA%011.0f;";
  */
  
 
-
-#define Elecraft_GPIO   15
 
 
 

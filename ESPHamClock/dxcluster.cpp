@@ -16,6 +16,9 @@
 // uncomment if want to try AR Cluster support
 // #define _SUPPORT_ARCLUSTER
 
+// uncomment to prefill list with show/dx but see prefillDXList() for why this is not the default
+// #define _USE_SHOWDX
+
 /* AR-Cluster commands are inconsistent but we have attempted to implement version 6. But worse, results
  * from "show heading" are unreliable, often, but not always, due to a sign error in longitude. This is not
  * likely to get fixed because it seems the author is SK : https://www.qrz.com/db/ab5k
@@ -154,31 +157,77 @@ static void strtolower (char *str)
                 *str = tolower(c);
 }
 
-static void dxcTrace (const char *buf)
+/* log the given message, adding trailing \n if not already in message.
+ * N.B. remove any \a characters
+ */
+static void dxcLog (const char *fmt, ...)
 {
-        Serial.printf (_FX("DXC: %s\n"), buf);
+        // format
+        char msg[128];
+        va_list ap;
+        va_start (ap, fmt);
+        int ml = vsnprintf (msg, sizeof(msg), fmt, ap);
+        va_end (ap);
+
+        // note whether ends with newline
+        bool has_nl = msg[ml-1] == '\n';
+
+        // print with boilerplate and w/o bell
+        Serial.print (F("DXC: "));
+        for (char *mp = msg; *mp != '\0'; mp++)
+            if (*mp != '\a')
+                Serial.print (*mp);
+
+        // insure trailing newline
+        if (!has_nl)
+            Serial.print ('\n');
 }
 
-/* read cluster into buf until see a line containing the given string. 
+/* return whether the given spider response line looks like their prompt.
+ * N.B. line ending with > is not good enough, e.g., w6kk.zapto.org 7300 says "<your name>" in banner.
+ */
+static bool isSpiderPrompt (const char *line, int ll)
+{
+        return (ll >= 2 && line[ll-1] == '>' && line [ll-2] == ' ');
+}
+
+/* read cluster until find next line that looks like a prompt.
+ * return whether found
+ */
+static bool lookForDXClusterPrompt()
+{
+        char line[120];
+        uint16_t ll;
+
+        while (getTCPLine (dx_client, line, sizeof(line), &ll))
+            if (isSpiderPrompt (line, ll))
+                return (true);
+
+        dxcLog (_FX("Can not find prompt"));
+        return (false);
+}
+
+/* read lines from cluster. if find one containing str return it in buf and skip to next prompt.
  * intended for seeking command responses.
  */
 static bool lookForDXClusterString (char *buf, uint16_t bufl, const char *str)
 {
-        // bale right away if first read gets nothing at all
-        if (!getTCPLine (dx_client, buf, bufl, NULL))
-            return (false);
-
-        // cluster is talking, check a few more lines
-        for (int i = 0; i < 3; i++) {
-            if (strstr (buf, str))
-                return (true);
-            if (!getTCPLine (dx_client, buf, bufl, NULL))
-                return (false);
+        // expect within next few lines
+        bool found = false;
+        for (int i = 0; !found && i < 5; i++) {
+            if (getTCPLine (dx_client, buf, bufl, NULL) && strstr (buf, str) != NULL)
+                found = true;
         }
 
-        // still not found
-        dxcTrace (_FX("Failed to find cluster response"));
-        return (false);
+        // log if failure
+        if (!found)
+            dxcLog (_FX("Failed to find cluster response '%s'"), str);
+
+        // always try to skip to next prompt
+        (void) lookForDXClusterPrompt();
+
+        // return whether successful
+        return (found);
 }
 
 /* search through buf for " <number> str" followed by non-alnum.
@@ -230,7 +279,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
             // ask for heading 
             snprintf (buf, sizeof(buf), _FX("show/heading %s"), call);
-            dxcTrace (buf);
+            dxcLog (buf);
             dx_client.println (buf);
 
             // find response
@@ -243,7 +292,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
             // ask for heading 
             snprintf (buf, sizeof(buf), _FX("show heading %s"), call);
-            dxcTrace (buf);
+            dxcLog (buf);
             dx_client.println (buf);
 
             // find response
@@ -254,7 +303,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
         } else {
 
-            Serial.printf (_FX("Bug! cl_type= %d\n"), cl_type);
+            fatalError (_FX("Bug! cluster cl_type= %d\n"), cl_type);
             return (false);
         }
 
@@ -262,15 +311,15 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
         // if get here we should have a line containing <heading> deg .. <miles> mi
         // strcpy(buf,"9miW8WTS Michigan-K: 71 degs - dist: 790 mi, 1272 km Reciprocal heading: 261 degs");
-        dxcTrace (buf);
+        dxcLog (buf);
         strtolower(buf);
         int heading, miles;
         if (findLabeledValue (buf, &heading, "degs") && findLabeledValue (buf, &miles, "mi")) {
             findLLFromDEHeadingDist (heading, miles, ll);
-            Serial.printf (_FX("DXC: %s heading= %d miles= %d lat= %g lon= %g\n"), call,
+            dxcLog (_FX("%s heading= %d miles= %d lat= %g lon= %g\n"), call,
                                                                     heading, miles, ll.lat_d, ll.lng_d);
         } else {
-            Serial.println (F("DXC: No heading"));
+            dxcLog (_FX("No heading"));
             return (false);
         }
 
@@ -297,12 +346,12 @@ static void engageRow (DXClusterSpot &s)
             LatLong ll;
             char maid[MAID_CHARLEN];
             if (!maidenhead2ll (ll, s.grid)) {
-                Serial.printf (_FX("DXC: bogus grid %s for %s\n"), maid, s.call);
+                dxcLog (_FX("bogus grid %s for %s\n"), maid, s.call);
                 return;
             }
         } else {
 
-            Serial.printf (_FX("Bug! cl_type= %d\n"), cl_type);
+            fatalError (_FX("Bug! cluster cl_type= %d\n"), cl_type);
             return;
         }
 
@@ -361,7 +410,7 @@ static void drawSpotOnList (const SBox &box, uint8_t row)
         (void) sprintf (line, f_fmt, sp->freq);
 
         // add remaining fields
-        snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, sp->call, sp->uts);
+        snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, sp->call, sp->utcs);
         tft.print (line);
 }
 
@@ -392,7 +441,7 @@ static bool addDXClusterSpot (const SBox &box, float kHz, const char call[], con
         // store the easy info
         spot.freq = kHz;
         memcpy (spot.call, call, MAX_SPOTCALL_LEN-1);      // preserve existing EOS
-        spot.uts = ut;
+        spot.utcs = ut;
 
         // find ll and grid some way
         char errmsg[50] = "";
@@ -402,7 +451,7 @@ static bool addDXClusterSpot (const SBox &box, float kHz, const char call[], con
             strcpy (spot.grid, grid);
             ok = maidenhead2ll (spot.ll, spot.grid);
             if (ok)
-                Serial.printf (_FX("DXC: %s %s lat= %g lng= %g\n"),
+                dxcLog (_FX("%s %s lat= %g lng= %g\n"),
                                         spot.call, spot.grid, spot.ll.lat_d, spot.ll.lng_d);
             else
                 snprintf (errmsg, sizeof(errmsg), _FX("%s bad grid: %s"), call, grid);
@@ -414,11 +463,10 @@ static bool addDXClusterSpot (const SBox &box, float kHz, const char call[], con
             else
                 snprintf (errmsg, sizeof(errmsg), _FX("%s ll lookup failed"), call);
         }
+
+        // abandon if trouble
         if (!ok) {
-            // error set grid and ll to 0/0
-            dxcTrace (errmsg);
-            memset (&spot.ll, 0, sizeof(spot.ll));
-            ll2maidenhead (spot.grid, spot.ll);
+            dxcLog (errmsg);
             return (false);
         }
 
@@ -474,7 +522,7 @@ static char *wsjtx_utf8 (uint8_t **bpp)
         memmove (bp0, bp0+4, len);
         bp0[len] = '\0';
 
-        // Serial.printf (_FX("DXC: utf8 %d '%s'\n"), len, (char*)bp0);
+        // dxcLog (_FX("utf8 %d '%s'\n"), len, (char*)bp0);
 
         // return address of content now within packet
         return ((char *)bp0);
@@ -501,9 +549,9 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
 
         // crack magic header
         uint32_t magic = wsjtx_quint32 (bpp);
-        // Serial.printf (_FX("DXC: magic 0x%x\n"), magic);
+        // dxcLog (_FX("magic 0x%x\n"), magic);
         if (magic != 0xADBCCBDA) {
-            Serial.println (F("DXC: packet received but wrong magic"));
+            dxcLog (_FX("packet received but wrong magic"));
             return (false);
         }
 
@@ -512,7 +560,7 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
 
         // crack message type. we only care about Status messages which are type 1
         uint32_t msgtype = wsjtx_quint32 (bpp);
-        // Serial.printf (_FX("DXC: type %d\n"), msgtype);
+        // dxcLog (_FX("type %d\n"), msgtype);
         if (msgtype != 1)
             return (false);
 
@@ -520,7 +568,7 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
         // crack ID but ignore to allow compatibility with clones.
         volatile char *id = wsjtx_utf8 (bpp);
         (void)id;           // lint
-        // Serial.printf (_FX("DXC: id '%s'\n"), id);
+        // dxcLog (_FX("id '%s'\n"), id);
         // if (strcmp ("WSJT-X", id) != 0)
             // return (false);
 
@@ -535,7 +583,7 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
 static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 {
         resetWatchdog();
-        // Serial.println (_FX("DXC: Parsing status"));
+        // dxcLog (_FX("Parsing status"));
 
         // crack remaining fields down to grid
         uint64_t dial_freq = wsjtx_quint64 (bpp);           // capture Hz
@@ -552,9 +600,9 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
         (void) wsjtx_utf8 (bpp);                            // skip over DE grid
         char *dx_grid = wsjtx_utf8 (bpp);                   // capture grid
 
-        // Serial.printf (_FX("DXC: dial freq %lu\n"), dial_freq);
-        // Serial.printf (_FX("DXC: dx call %s\n"), dx_call);
-        // Serial.printf (_FX("DXC: dx grid %s\n"), dx_grid);
+        // dxcLog (_FX("dial freq %lu\n"), dial_freq);
+        // dxcLog (_FX("dx call %s\n"), dx_call);
+        // dxcLog (_FX("dx grid %s\n"), dx_grid);
 
         // ignore if frequency is clearly bogus (which I have seen)
         if (dial_freq == 0)
@@ -563,7 +611,7 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
         // get ll from grid valid
         LatLong ll;
         if (!maidenhead2ll (ll, dx_grid)) {
-            // Serial.printf (_FX("DXC: %s invalid grid: %s\n"), dx_call, dx_grid);
+            // dxcLog (_FX("%s invalid grid: %s\n"), dx_call, dx_grid);
             return;
         }
 
@@ -574,7 +622,7 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 
         // add to list with actual frequency and set if new
         if (addDXClusterSpot (box, dial_freq*1e-3, dx_call, dx_grid, ut)) {                  // Hz to kHz
-            // Serial.printf (_FX("DXC: WSJT-X %s @ %s\n"), dx_call, dx_grid);
+            // dxcLog (_FX("WSJT-X %s @ %s\n"), dx_call, dx_grid);
             engageRow (spots[n_spots-1]);
         }
 
@@ -601,12 +649,58 @@ static void showDXClusterErr (const SBox &box, const char *msg)
         tft.print (msg);
 
         // log
-        dxcTrace (msg);
+        dxcLog (msg);
 
         // shut down connection
         closeDXCluster();
 }
 
+#if defined(_USE_SHOWDX)
+
+/* send show/dx to prefill list for a new connection.
+ * not an error if none are available.
+ * N.B. works fine but HB9CEY says show/dx does not honor filters which will annoy experts
+ */
+static void prefillDXList(const SBox &box)
+{
+        char line[150];
+
+        // ask for recent entries
+        snprintf (line, sizeof(line), _FX("show/dx %d"), LISTING_N);
+        dxcLog (line);
+        dx_client.println (line);
+        updateClocks(false);
+
+        // collect spots until find next prompt.
+        // N.B. response format differs from normal spot format and is sorted most-recent-first
+        //  14020.0  OX7AM        4-Nov-2021 1859Z  up 1                         <K2CYS>
+        typedef struct {
+            float kHz;
+            char call[20];
+            uint16_t ut;
+        } ShowSpot;
+        StackMalloc ss_mem(LISTING_N * sizeof(ShowSpot));
+        ShowSpot *ss = (ShowSpot *) ss_mem.getMem();
+        int n_ss = 0;
+        uint16_t ll;
+        while (getTCPLine (dx_client, line, sizeof(line), &ll) && !isSpiderPrompt(line, ll)) {
+            // dxcLog (line);
+            int ut;
+            if (sscanf (line, "%f %20s %*s %d", &ss[n_ss].kHz, ss[n_ss].call, &ut) == 3 && n_ss < LISTING_N) {
+                dxcLog (line);
+                ss[n_ss++].ut = ut;
+            }
+        }
+        dxcLog (_FX("found %d prior spots\n"), n_ss);
+        updateClocks(false);
+
+        // create list in reverse order
+        n_spots = 0;
+        while (--n_ss >= 0)
+            (void) addDXClusterSpot (box, ss[n_ss].kHz, ss[n_ss].call, NULL, ss[n_ss].ut);
+}
+
+#endif // _USE_SHOWDX
 
 /* try to connect to the cluster defined by getDXClusterHost():getDXClusterPort().
  * if success: dx_client or wsjtx_server is live and return true,
@@ -617,7 +711,7 @@ static bool connectDXCluster (const SBox &box)
         const char *dxhost = getDXClusterHost();
         int dxport = getDXClusterPort();
 
-        Serial.printf (_FX("DXC: Connecting to %s:%d\n"), dxhost, dxport);
+        dxcLog (_FX("Connecting to %s:%d\n"), dxhost, dxport);
         resetWatchdog();
 
         // decide type from host name
@@ -641,18 +735,18 @@ static bool connectDXCluster (const SBox &box)
                 // look alive
                 resetWatchdog();
                 updateClocks(false);
-                dxcTrace (_FX("connect ok"));
+                dxcLog (_FX("connect ok"));
 
                 // assume we have been asked for our callsign
                 dx_client.println (getCallsign());
 
-                // read until find a line ending with '>', looking for clue about type of cluster
+                // read until find next prompt, looking for clue about type of cluster
                 uint16_t bl;
                 StackMalloc buf_mem(200);
                 char *buf = buf_mem.getMem();
                 cl_type = CT_UNKNOWN;
                 while (getTCPLine (dx_client, buf, buf_mem.getSize(), &bl)) {
-                    // Serial.println (buf);
+                    // dxcLog (buf);
                     strtolower(buf);
                     if (strstr (buf, "dx") && strstr (buf, "spider"))
                         cl_type = CT_DXSPIDER;
@@ -661,7 +755,7 @@ static bool connectDXCluster (const SBox &box)
                         cl_type = CT_ARCLUSTER;
     #endif // _SUPPORT_ARCLUSTER
 
-                    if (buf[bl-1] == '>')
+                    if (isSpiderPrompt(buf,bl))
                         break;
                 }
 
@@ -674,6 +768,25 @@ static bool connectDXCluster (const SBox &box)
                     showDXClusterErr (box, _FX("Failed sending DE grid"));
                     return (false);
                 }
+
+                // prefill list with old or new, depending on _USE_SHOWDX
+
+              #if defined(_USE_SHOWDX)
+
+                // prefill list with fresh spots
+                prefillDXList (box);
+
+              #else
+
+                // restore known spots if not too old else reset list
+                if (millis() - last_action < MAX_AGE) {
+                    for (uint8_t i = 0; i < n_spots; i++)
+                        drawSpotOnList (box, i);
+                } else {
+                    n_spots = 0;
+                }
+
+              #endif // _USE_SHOWDX
 
                 // confirm still ok
                 if (!dx_client) {
@@ -734,18 +847,18 @@ bool sendDXClusterDELLGrid()
             // set grid
             snprintf (buf, sizeof(buf), _FX("set/qra %s"), maid);
             dx_client.println(buf);
-            dxcTrace (buf);
-            if (!lookForDXClusterString (buf, sizeof(buf), ">")) {
-                Serial.println (F("No > after set/qra"));
+            dxcLog (buf);
+            if (!lookForDXClusterPrompt()) {
+                dxcLog (_FX("No > after set/qra"));
                 return (false);
             }
 
             // set DE ll
             snprintf (buf, sizeof(buf), _FX("set/location %s"), llstr);
             dx_client.println(buf);
-            dxcTrace (buf);
-            if (!lookForDXClusterString (buf, sizeof(buf), ">")) {
-                Serial.println (F("No > after set/loc"));
+            dxcLog (buf);
+            if (!lookForDXClusterPrompt()) {
+                dxcLog (_FX("No > after set/loc"));
                 return (false);
             }
 
@@ -759,21 +872,21 @@ bool sendDXClusterDELLGrid()
             // friendly turn off skimmer just avoid getting swamped
             strcpy_P (buf, PSTR("set dx filter not skimmer"));
             dx_client.println(buf);
-            dxcTrace (buf);
+            dxcLog (buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "filter"))
                 return (false);
 
             // set grid
             snprintf (buf, sizeof(buf), _FX("set station grid %sjj"), maid);    // fake 6-char grid
             dx_client.println(buf);
-            dxcTrace (buf);
+            dxcLog (buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "set to"))
                 return (false);
 
             // set ll
             snprintf (buf, sizeof(buf), _FX("set station latlon %s"), llstr);
             dx_client.println(buf);
-            dxcTrace (buf);
+            dxcLog (buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "location"))
                 return (false);
 
@@ -815,14 +928,6 @@ static bool initDXCluster(const SBox &box)
             // ok: show host in green
             showHostPort (box, RA8875_GREEN);
 
-            // restore known spots if not too old else reset list
-            if (millis() - last_action < MAX_AGE) {
-                for (uint8_t i = 0; i < n_spots; i++)
-                    drawSpotOnList (box, i);
-            } else {
-                n_spots = 0;
-            }
-
             // reinit time
             last_action = millis();
 
@@ -855,7 +960,7 @@ bool updateDXCluster(const SBox &box)
 
             // roll any new spots into list
             char line[120];
-            char call[30];
+            char call[20];
             float kHz;
             while (dx_client.available() && getTCPLine (dx_client, line, sizeof(line), NULL)) {
                 // DX de KD0AA:     18100.0  JR1FYS       FT8 LOUD in FL!                2156Z EL98
@@ -864,15 +969,9 @@ bool updateDXCluster(const SBox &box)
                 updateClocks(false);
                 resetWatchdog();
 
-                // log but note some clusters embed \a bell in their reports, remove so they don't beep
-                for (char *lp = line; *lp; lp++)
-                    if (!isprint(*lp))
-                        *lp = ' ';
-                // Serial.println (line);
-
                 // crack
-                if (sscanf (line, _FX("DX de %*s %f %10s"), &kHz, call) == 2) {
-                    dxcTrace (line);
+                if (sscanf (line, _FX("DX de %*s %f %20s"), &kHz, call) == 2) {
+                    dxcLog (line);
 
                     // looks like a spot, extract time also
                     char *utp = &line[70];
@@ -893,7 +992,7 @@ bool updateDXCluster(const SBox &box)
             // send something if quiet for too long
             if (millis() - last_action > CLUSTER_TIMEOUT) {
                 last_action = millis();        // avoid banging
-                dxcTrace (_FX("feeding"));
+                dxcLog (_FX("feeding"));
                 if (!sendDXClusterDELLGrid()) {
                     showDXClusterErr (box, _FX("Lost connection"));
                     return(false);
@@ -911,7 +1010,7 @@ bool updateDXCluster(const SBox &box)
 
             int packet_size;
             while ((packet_size = wsjtx_server.parsePacket()) > 0) {
-                // Serial.printf (_FX("DXC: WSJT-X size= %d heap= %d\n"), packet_size, ESP.getFreeHeap());
+                // dxcLog (_FX("WSJT-X size= %d heap= %d\n"), packet_size, ESP.getFreeHeap());
                 any_msg = (uint8_t *) realloc (any_msg, packet_size);
                 resetWatchdog();
                 if (wsjtx_server.read (any_msg, packet_size) > 0) {
@@ -919,7 +1018,7 @@ bool updateDXCluster(const SBox &box)
                     if (wsjtxIsStatusMsg (&bp)) {
                         // save from bp to the end in prep for wsjtxParseStatusMsg()
                         int n_skip = bp - any_msg;
-                        // Serial.printf (_FX("DXC: skip= %d packet_size= %d\n"), n_skip, packet_size);
+                        // dxcLog (_FX("skip= %d packet_size= %d\n"), n_skip, packet_size);
                         sts_msg = (uint8_t *) realloc (sts_msg, packet_size - n_skip);
                         memcpy (sts_msg, any_msg + n_skip, packet_size - n_skip);
                     }
@@ -949,11 +1048,11 @@ void closeDXCluster()
         // make sure either/both connection is/are closed
         if (dx_client) {
             dx_client.stop();
-            Serial.printf (_FX("DXC: disconnect %s\n"), dx_client ? "failed" : "ok");
+            dxcLog (_FX("disconnect %s\n"), dx_client ? "failed" : "ok");
         }
         if (wsjtx_server) {
             wsjtx_server.stop();
-            Serial.printf (_FX("DXC: WSTJ-X disconnect %s\n"), wsjtx_server ?"failed":"ok");
+            dxcLog (_FX("WSTJ-X disconnect %s\n"), wsjtx_server ?"failed":"ok");
         }
 }
 

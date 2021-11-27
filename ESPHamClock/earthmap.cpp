@@ -130,16 +130,17 @@ void drawDEInfo()
 {
     // init info block
     tft.fillRect (de_info_b.x, de_info_b.y, de_info_b.w, de_info_b.h, RA8875_BLACK);
+    uint16_t vspace = de_info_b.h/DE_INFO_ROWS;
 
     // draw desired contents
-    if (de_time_fmt == DETIME_INFO) {
+    switch (de_time_fmt) {
+    case DETIME_INFO:
 
-        uint16_t vspace = de_info_b.h/DE_INFO_ROWS;
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         tft.setTextColor (DE_COLOR);
 
         // time
-        drawDETime(false);
+        drawDECalTime(false);
 
         // lat and lon
         char buf[30];
@@ -155,20 +156,28 @@ void drawDEInfo()
         // sun rise/set info
         drawDESunRiseSetInfo();
 
-    } else if (de_time_fmt == DETIME_ANALOG || de_time_fmt == DETIME_ANALOG_DTTM) {
+        break;
+
+    case DETIME_ANALOG:         // fallthru
+    case DETIME_ANALOG_DTTM:    // fallthru
+    case DETIME_DIGITAL_12:     // fallthru
+    case DETIME_DIGITAL_24:
 
         drawTZ (de_tz);
         updateClocks(true);
+        break;
 
-    } else if (de_time_fmt == DETIME_CAL) {
+    case DETIME_CAL:
 
-        drawDETime(true);
+        drawDECalTime(true);
         drawCalendar(true);
-
+        break;
     }
 }
 
-void drawDETime(bool center)
+/* draw the time in de_info_b suitable for DETIME_INFO and DETIME_CALENDAR formats
+ */
+void drawDECalTime(bool center)
 {
     drawTZ (de_tz);
 
@@ -606,7 +615,7 @@ void drawMapMenu()
 {
     enum MIName {                               // menu items -- N.B. must be in same order as mitems[]
         MI_STY_TTL, MI_STY_CTY, MI_STY_TER, MI_STY_DRA, MI_STY_PRP,
-        MI_GRD_TTL, MI_GRD_NON, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI,
+        MI_GRD_TTL, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI,
         MI_PRJ_TTL, MI_PRJ_AZM, MI_PRJ_MER,
         MI_RSS_YES,
         MI_NON_YES,
@@ -618,17 +627,16 @@ void drawMapMenu()
     #define PRI_INDENT 2
     #define SEC_INDENT 8
     MenuItem mitems[MI_N] = {
-        {MENU_TITLE, false, PRI_INDENT, "Style:"},
+        {MENU_LABEL, false, PRI_INDENT, "Style:"},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_COUNTRIES]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_TERRAIN]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_DRAP]},
             {MENU_IGNORE, false, SEC_INDENT, NULL},     // see later
-        {MENU_TITLE, false, PRI_INDENT, "Grid:"},
-            {MENU_1OFN, false, SEC_INDENT, "None"},
-            {MENU_1OFN, false, SEC_INDENT, "Tropics"},
-            {MENU_1OFN, false, SEC_INDENT, "Lat/Long"},
-            {MENU_1OFN, false, SEC_INDENT, "Maidenhead"},
-        {MENU_TITLE, false, PRI_INDENT, "Projection:"},
+        {MENU_LABEL, false, PRI_INDENT, "Grid:"},
+            {MENU_01OFN, false, SEC_INDENT, "Tropics"},
+            {MENU_01OFN, false, SEC_INDENT, "Lat/Long"},
+            {MENU_01OFN, false, SEC_INDENT, "Maidenhead"},
+        {MENU_LABEL, false, PRI_INDENT, "Projection:"},
             {MENU_1OFN, false, SEC_INDENT, "Azimuthal"},
             {MENU_1OFN, false, SEC_INDENT, "Mercator"},
         {MENU_TOGGLE, false, PRI_INDENT, "RSS"},
@@ -637,53 +645,46 @@ void drawMapMenu()
             {MENU_TOGGLE, false, PRI_INDENT, "Names"},
         #endif
     };
-    Menu menu = {
-        1,      // n_cols
-        0,      // n_rows -- see later
-        MI_N,   // n_items
-        mitems
-    };
 
     // init selections with current states
 
     // if showing a propmap list in menu as selected else core map
-    char propband[NV_MAPSTYLE_LEN];             // must be persistent for runMenu()
-    if (prop_map != PROP_MAP_OFF) {
-        menu.items[MI_STY_PRP].type = MENU_1OFN;
-        menu.items[MI_STY_PRP].set = true;
-        menu.items[MI_STY_PRP].label = getMapStyle (propband);
-        menu.n_rows = MI_N;                     // use all rows
+    char propband[NV_MAPSTYLE_LEN];             // must be persistent for life time of runMenu()
+    if (prop_map == PROP_MAP_OFF) {
+        // select current map
+        mitems[MI_STY_CTY].set = core_map == CM_COUNTRIES;
+        mitems[MI_STY_TER].set = core_map == CM_TERRAIN;
+        mitems[MI_STY_DRA].set = core_map == CM_DRAP;
     } else {
-        menu.items[MI_STY_CTY].set = core_map == CM_COUNTRIES;
-        menu.items[MI_STY_TER].set = core_map == CM_TERRAIN;
-        menu.items[MI_STY_DRA].set = core_map == CM_DRAP;
-        menu.n_rows = MI_N - 1;                 // 1 IGNORE row
+        // add propmap item and select
+        mitems[MI_STY_PRP].type = MENU_1OFN;
+        mitems[MI_STY_PRP].set = true;
+        mitems[MI_STY_PRP].label = getMapStyle (propband);
     }
 
-    menu.items[MI_GRD_NON].set = mapgrid_choice == MAPGRID_OFF;
-    menu.items[MI_GRD_TRO].set = mapgrid_choice == MAPGRID_TROPICS;
-    menu.items[MI_GRD_LLG].set = mapgrid_choice == MAPGRID_LATLNG;
-    menu.items[MI_GRD_MAI].set = mapgrid_choice == MAPGRID_MAID;
+    mitems[MI_GRD_TRO].set = mapgrid_choice == MAPGRID_TROPICS;
+    mitems[MI_GRD_LLG].set = mapgrid_choice == MAPGRID_LATLNG;
+    mitems[MI_GRD_MAI].set = mapgrid_choice == MAPGRID_MAID;
 
-    menu.items[MI_PRJ_AZM].set = azm_on;
-    menu.items[MI_PRJ_MER].set = !azm_on;
+    mitems[MI_PRJ_AZM].set = azm_on;
+    mitems[MI_PRJ_MER].set = !azm_on;
 
-    menu.items[MI_RSS_YES].set = rss_on;
-    menu.items[MI_NON_YES].set = night_on;
+    mitems[MI_RSS_YES].set = rss_on;
+    mitems[MI_NON_YES].set = night_on;
     #if defined(_IS_UNIX)
-        menu.items[MI_PLA_YES].set = names_on;
+        mitems[MI_PLA_YES].set = names_on;
     #endif
 
     // create a box for the menu
     SBox menu_b;
     menu_b.x = view_btn_b.x;                    // left edge matches view button
     menu_b.y = view_btn_b.y+view_btn_b.h;       // top just below view button
-    menu_b.w = VIEWMENU_W;                      // enough for widest string
-    menu_b.h = 0;                               // set by runMenu
+    // w/h are set dynamically by runMenu()
 
     // run menu
     SBox ok_b;
-    bool menu_ok = runMenu (menu, map_b, menu_b, ok_b);
+    Menu menu = {menu_b, ok_b, true, 1, MI_N, mitems};
+    bool menu_ok = runMenu (menu);
 
     bool full_redraw = false;
     if (menu_ok) {
@@ -695,13 +696,13 @@ void drawMapMenu()
 
         // update map if style changed; restore core_map if prop_map turned off
         CoreMaps new_cm = CM_NONE;
-        if (prop_map != PROP_MAP_OFF && !menu.items[MI_STY_PRP].set)
+        if (prop_map != PROP_MAP_OFF && !mitems[MI_STY_PRP].set)
             new_cm = core_map;
-        else if (menu.items[MI_STY_CTY].set && core_map != CM_COUNTRIES)
+        else if (mitems[MI_STY_CTY].set && core_map != CM_COUNTRIES)
             new_cm = CM_COUNTRIES;
-        else if (menu.items[MI_STY_TER].set && core_map != CM_TERRAIN)
+        else if (mitems[MI_STY_TER].set && core_map != CM_TERRAIN)
             new_cm = CM_TERRAIN;
-        else if (menu.items[MI_STY_DRA].set && core_map != CM_DRAP)
+        else if (mitems[MI_STY_DRA].set && core_map != CM_DRAP)
             new_cm = CM_DRAP;
         if (new_cm != CM_NONE) {
             if (installNewMapStyle (new_cm))
@@ -712,35 +713,36 @@ void drawMapMenu()
             }
         }
 
-        // check for new grid
-        if (menu.items[MI_GRD_NON].set && mapgrid_choice != MAPGRID_OFF) {
+        // check for different grid
+        if (!mitems[MI_GRD_TRO].set && !mitems[MI_GRD_LLG].set && !mitems[MI_GRD_MAI].set &&
+                        mapgrid_choice != MAPGRID_OFF) {
             mapgrid_choice = MAPGRID_OFF;
             NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
             full_redraw = true;
-        } else if (menu.items[MI_GRD_TRO].set && mapgrid_choice != MAPGRID_TROPICS) {
+        } else if (mitems[MI_GRD_TRO].set && mapgrid_choice != MAPGRID_TROPICS) {
             mapgrid_choice = MAPGRID_TROPICS;
             NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
             full_redraw = true;
-        } else if (menu.items[MI_GRD_LLG].set && mapgrid_choice != MAPGRID_LATLNG) {
+        } else if (mitems[MI_GRD_LLG].set && mapgrid_choice != MAPGRID_LATLNG) {
             mapgrid_choice = MAPGRID_LATLNG;
             NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
             full_redraw = true;
-        } else if (menu.items[MI_GRD_MAI].set && mapgrid_choice != MAPGRID_MAID) {
+        } else if (mitems[MI_GRD_MAI].set && mapgrid_choice != MAPGRID_MAID) {
             mapgrid_choice = MAPGRID_MAID;
             NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
             full_redraw = true;
         }
 
         // check for different azm/merc
-        if (menu.items[MI_PRJ_AZM].set != azm_on) {
-            azm_on = menu.items[MI_PRJ_AZM].set;
+        if (mitems[MI_PRJ_AZM].set != azm_on) {
+            azm_on = mitems[MI_PRJ_AZM].set;
             NVWriteUInt8 (NV_AZIMUTHAL_ON, azm_on);
             full_redraw = true;
         }
 
         // check for change night option
-        if (menu.items[MI_NON_YES].set != night_on) {
-            night_on = menu.items[MI_NON_YES].set;
+        if (mitems[MI_NON_YES].set != night_on) {
+            night_on = mitems[MI_NON_YES].set;
             NVWriteUInt8 (NV_NIGHT_ON, night_on);
             full_redraw = true;
         }
@@ -748,15 +750,15 @@ void drawMapMenu()
 
     #if defined(_IS_UNIX)
         // check for change of names option
-        if (menu.items[MI_PLA_YES].set != names_on) {
-            names_on = menu.items[MI_PLA_YES].set;
+        if (mitems[MI_PLA_YES].set != names_on) {
+            names_on = mitems[MI_PLA_YES].set;
             NVWriteUInt8 (NV_NAMES_ON, names_on);
         }
     #endif
 
         // check for changed RSS -- N.B. do this last to utilize full_redraw
-        if (menu.items[MI_RSS_YES].set != rss_on) {
-            rss_on = menu.items[MI_RSS_YES].set;
+        if (mitems[MI_RSS_YES].set != rss_on) {
+            rss_on = mitems[MI_RSS_YES].set;
             NVWriteUInt8 (NV_RSS_ON, rss_on);
 
             // do minimal restore if not restart map

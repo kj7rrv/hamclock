@@ -309,8 +309,9 @@ int main (int ac, char *av[])
         for (int i = 0; i < ac; i++)
             printf ("  argv[%d] = %s\n", i, av[i]);
 
-        // log our working dir
+        // log our working dir and euid
         printf ("working directory is %s\n", our_dir.c_str());
+        printf ("euid %d\n", geteuid());
 
 	// call Arduino setup one time
         printf ("Calling Arduino setup()\n");

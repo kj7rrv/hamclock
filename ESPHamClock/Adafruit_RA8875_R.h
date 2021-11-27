@@ -152,6 +152,15 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 	    Adafruit_RA8875::fillTriangle(x0, y0, x1, y1, x2, y2, color);
 	}
 
+        void setTextWrap (bool on)
+        {
+            #if defined (_IS_ESP8266)
+                Adafruit_RA8875::setTextWrap(on);
+            #else
+                (void) on;      // not used
+            #endif
+        }
+
         // non-standard
         bool getMouse (uint16_t *x, uint16_t *y)
         {

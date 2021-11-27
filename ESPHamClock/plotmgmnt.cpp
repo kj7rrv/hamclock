@@ -182,37 +182,32 @@ PlotChoice askPaneChoice (PlotPane pp)
     // set this temporarily to show all choices, just for testing worst-case layout
     #define ASKP_SHOWALL 0
 
-    // init menu descriptor
-    Menu menu;
-    menu.n_cols = 2;
-    menu.n_rows = 0;
-    menu.n_items = 0;
-    menu.items = NULL;
-
-    // collect all candidates suitable for this pane
+    // build items from all candidates suitable for this pane
+    MenuItem *mitems = NULL;
+    int n_mitems = 0;
     for (int i = 0; i < PLOT_CH_N; i++) {
         // use if not used elsewhere and available or already assigned to this pane
         PlotChoice ch = (PlotChoice) i;
         PlotPane pp_ch = findPaneForChoice (ch);
         if ( (pp_ch == PANE_NONE && plotChoiceIsAvailable(ch)) || pp_ch == pp || ASKP_SHOWALL) {
             // set up next menu item
-            menu.items = (MenuItem *) realloc (menu.items, (menu.n_items+1)*sizeof(MenuItem));
-            MenuItem &mi = menu.items[menu.n_items++];
+            mitems = (MenuItem *) realloc (mitems, (n_mitems+1)*sizeof(MenuItem));
+            MenuItem &mi = mitems[n_mitems++];
             mi.type = MENU_AL1OFN;
             mi.set = (plot_rotset[pp] & (1 << ch)) ? true : false;
             mi.label = plot_names[ch];
             mi.indent = 4;
         }
     }
-    menu.n_rows = menu.n_items; // no MENU_IGNORE
 
     // nice sort by label
-    qsort (menu.items, menu.n_items, sizeof(MenuItem), menuChoiceQS);
+    qsort (mitems, n_mitems, sizeof(MenuItem), menuChoiceQS);
 
     // run the menu in copy of plot box so its height is not changed
-    SBox pb = plot_b[pp];
+    SBox pb = plot_b[pp];       // copy, not reference, because runMenu will shrink wrap
     SBox ok_b;
-    bool menu_ok = runMenu (menu, plot_b[pp], pb, ok_b);
+    Menu menu = {pb, ok_b, true, 2, n_mitems, mitems};
+    bool menu_ok = runMenu (menu);
 
     // return current choice by default
     PlotChoice return_ch = plot_ch[pp];
@@ -224,11 +219,11 @@ PlotChoice askPaneChoice (PlotPane pp)
 
         // set new rotset
         plot_rotset[pp] = 0;
-        for (int i = 0; i < menu.n_items; i++) {
-            if (menu.items[i].set) {
+        for (int i = 0; i < n_mitems; i++) {
+            if (mitems[i].set) {
                 // find which choice this refers to by matching labels
                 for (int j = 0; j < PLOT_CH_N; j++) {
-                    if (strcmp (plot_names[j], menu.items[i].label) == 0) {
+                    if (strcmp (plot_names[j], mitems[i].label) == 0) {
                         plot_rotset[pp] |= (1 << j);
                         break;
                     }
@@ -249,7 +244,7 @@ PlotChoice askPaneChoice (PlotPane pp)
     }
 
     // finished with menu. labels were static.
-    free ((void*)menu.items);
+    free ((void*)mitems);
 
     // report
     logPaneRotSet(pp, return_ch);
@@ -374,6 +369,114 @@ void insureCountdownPaneSensible()
     }
 }
 
+/* check for touch in the given pane, return whether ours.
+ * N.B. accommodate a few choices that have their own touch features.
+ */
+bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
+{
+    // out fast if not ours
+    SBox &box = plot_b[pp];
+    if (!inBox (s, box))
+        return (false);
+
+    // reserve top 20% for bringing up choice menu
+    bool in_top = s.y < box.y + box.h/5;
+
+    // check a few choices that have their own active areas
+    switch (plot_ch[pp]) {
+    case PLOT_CH_DXCLUSTER:
+        if (checkDXClusterTouch (s, box))
+            return (true);
+        break;
+    case PLOT_CH_BC:
+        if (checkBCTouch (s, box))
+            return (true);
+        break;
+    case PLOT_CH_GIMBAL:
+        if (checkGimbalTouch (s, box))
+            return (true);
+        break;
+    case PLOT_CH_COUNTDOWN:
+        if (!in_top) {
+            checkStopwatchTouch(tt);
+            return (true);
+        }
+        break;
+    case PLOT_CH_MOON:
+        if (!in_top) {
+            drawMoonElPlot();
+            initEarthMap();
+            return(true);
+        }
+        break;
+
+    // tapping a BME below top rotates just among other BME and disables auto rotate.
+    // try all possibilities because they might be on other panes.
+    case PLOT_CH_TEMPERATURE:
+        if (!in_top) {
+            if (setPlotChoice (pp, PLOT_CH_PRESSURE)
+                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)
+                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)) {
+                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
+                savePlotOps();
+                return (true);
+            }
+        }
+        break;
+    case PLOT_CH_PRESSURE:
+        if (!in_top) {
+            if (setPlotChoice (pp, PLOT_CH_HUMIDITY)
+                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)
+                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)) {
+                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
+                savePlotOps();
+                return (true);
+            }
+        }
+        break;
+    case PLOT_CH_HUMIDITY:
+        if (!in_top) {
+            if (setPlotChoice (pp, PLOT_CH_DEWPOINT)
+                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)
+                            || setPlotChoice (pp, PLOT_CH_PRESSURE)) {
+                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
+                savePlotOps();
+                return (true);
+            }
+        }
+        break;
+    case PLOT_CH_DEWPOINT:
+        if (!in_top) {
+            if (setPlotChoice (pp, PLOT_CH_TEMPERATURE)
+                            || setPlotChoice (pp, PLOT_CH_PRESSURE)
+                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)) {
+                plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
+                savePlotOps();
+                return (true);
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    if (!in_top)
+        return (false);
+
+    // draw menu with choices for this pane
+    PlotChoice ch = askPaneChoice(pp);
+
+    // always engage even if same to erase menu
+    if (!setPlotChoice (pp, ch)) {
+        fatalError (_FX("Bug! checkPlotTouch bad choice %d pane %d"), (int)ch, (int)pp+1);
+        // never returns
+    }
+
+    // it was ours
+    return (true);
+}
+
 /* called once to init plot info from NV and insure legal and consistent values
  */
 void initPlotPanes()
@@ -475,7 +578,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
 
         // skip response header
         if (!httpSkipHeader (client)) {
-            plotMessage (box, color, _FX("image header short"));
+            plotMessage (box, color, _FX("Image header short"));
             goto out;
         }
 
@@ -485,7 +588,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
 
         // read first two bytes to confirm correct format
         if (!getChar(client,&c) || c != 'B' || !getChar(client,&c) || c != 'M') {
-            plotMessage (box, color, _FX("bad file"));
+            plotMessage (box, color, _FX("File not BMP"));
             goto out;
         }
         byte_os += 2;
@@ -493,13 +596,13 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         // skip down to byte 10 which is the offset to the pixels offset
         while (byte_os++ < 10) {
             if (!getChar(client,&c)) {
-                plotMessage (box, color, _FX("header offset error"));
+                plotMessage (box, color, _FX("Header offset error"));
                 goto out;
             }
         }
         for (uint8_t i = 0; i < 4; i++, byte_os++) {
             if (!getChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("pix_start error"));
+                plotMessage (box, color, _FX("Pix_start error"));
                 goto out;
             }
         }
@@ -509,7 +612,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         // next word is subheader size, must be 40 BITMAPINFOHEADER
         for (uint8_t i = 0; i < 4; i++, byte_os++) {
             if (!getChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("hdr size error"));
+                plotMessage (box, color, _FX("Hdr size error"));
                 goto out;
             }
         }
@@ -523,7 +626,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         // next word is width
         for (uint8_t i = 0; i < 4; i++, byte_os++) {
             if (!getChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("width error"));
+                plotMessage (box, color, _FX("Width error"));
                 goto out;
             }
         }
@@ -532,7 +635,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         // next word is height
         for (uint8_t i = 0; i < 4; i++, byte_os++) {
             if (!getChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("height error"));
+                plotMessage (box, color, _FX("Height error"));
                 goto out;
             }
         }
@@ -543,14 +646,14 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         // next short is n color planes
         for (uint8_t i = 0; i < 2; i++, byte_os++) {
             if (!getChar(client,&i16.c[i])) {
-                plotMessage (box, color, _FX("planes error"));
+                plotMessage (box, color, _FX("Planes error"));
                 goto out;
             }
         }
         uint16_t n_planes = i16.x;
         if (n_planes != 1) {
             Serial.printf (_FX("planes must be 1: %d\n"), n_planes);
-            plotMessage (box, color, _FX("n planes error"));
+            plotMessage (box, color, _FX("N Planes error"));
             goto out;
         }
 
@@ -564,28 +667,28 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         uint16_t n_bpp = i16.x;
         if (n_bpp != 24) {
             Serial.printf (_FX("bpp must be 24: %d\n"), n_bpp);
-            plotMessage (box, color, _FX("bpx error"));
+            plotMessage (box, color, _FX("BPP error"));
             goto out;
         }
 
         // next word is compression method
         for (uint8_t i = 0; i < 4; i++, byte_os++) {
             if (!getChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("compression error"));
+                plotMessage (box, color, _FX("Compression error"));
                 goto out;
             }
         }
         uint32_t comp = i32.x;
         if (comp != 0) {
             Serial.printf (_FX("compression must be 0: %d\n"), comp);
-            plotMessage (box, color, _FX("comp error"));
+            plotMessage (box, color, _FX("Comp error"));
             goto out;
         }
 
         // skip down to start of pixels
         while (byte_os++ <= pix_start) {
             if (!getChar(client,&c)) {
-                plotMessage (box, color, _FX("header 3 error"));
+                plotMessage (box, color, _FX("Header 3 error"));
                 goto out;
             }
         }
@@ -626,7 +729,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
                         goto out;
                     } else {
                         Serial.printf (_FX("read error after %d pixels\n"), n_draw);
-                        plotMessage (box, color, _FX("file is short"));
+                        plotMessage (box, color, _FX("File is short"));
                         goto out;
                     }
                 }
@@ -649,7 +752,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
             if (extra > 0) {
                 for (uint8_t i = 0; i < 4 - extra; i++) {
                     if (!getChar(client,&c)) {
-                        plotMessage (box, color, _FX("row padding error"));
+                        plotMessage (box, color, _FX("Row padding error"));
                         goto out;
                     }
                 }
@@ -660,7 +763,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         ok = true;
 
     } else {
-        plotMessage (box, color, _FX("connection failed"));
+        plotMessage (box, color, _FX("Connection failed"));
     }
 
 out:
@@ -669,14 +772,13 @@ out:
 }
 
 /* wait until:
- *   a tap occurs inside the given box,
- *   a tap occurs outside the given box,
- *   the given function (if not NULL) returns true or
- *   the given timeout occurs.
+ *   a tap occurs inside inbox;
+ *   (*fp)() (IFF fp != NULL) returns true; or
+ *   nothing happens for to_ms millis.
  * if tap inbox return location and true, else false for all other cases.
- * while waiting we update clocks and allow some web server commands.
+ * while waiting we optionally update clocks and allow some web server commands.
  */
-bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32_t to_ms, SCoord &tap)
+bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap)
 {
     drainTouch();
 
@@ -690,8 +792,6 @@ bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32
                 tap = s;
                 return(true);
             }
-            if (!inBox (s, outbox))
-                return (false);
             t0 = millis();
         }
 
@@ -701,7 +801,12 @@ bool waitForTap (const SBox &inbox, const SBox &outbox, bool (*fp)(void), uint32
         if (fp && (*fp)())
             return (false);
 
-        updateClocks(false);
+        if (update_clocks)
+            updateClocks(false);
+
         wdDelay (100);
+
+        // refresh protected region in case X11 window is moved
+        tft.drawPR();
     }
 }

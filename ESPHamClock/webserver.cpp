@@ -29,19 +29,42 @@ static WiFiServer *remoteServer;
 static const char garbcmd[] = "Garbled command";
 static const char notsupp[] = "Not supported";
 
-/* replace all "%20" with blank, IN PLACE
+/* convert a hex digit to its numeric value.
+ * N.B. assumes ASCII encoding.
+ * N.B. we do no range checking.
  */
-static void replaceBlankEntity (char *from)
+static int hex2Int (char x)
 {
+        if (x <= '9')
+            return (x - '0');
+        else
+            return (toupper(x) - 'A' + 10);
+}
+
+/* replace all "%XX" with hex value and + with space, IN PLACE.
+ * return whether any such changes were performed.
+ */
+static bool replaceEncoding (char *from)
+{
+    bool mod = false;
+
     char *to = from;
     while (*from) {
-        if (strncmp (from, "%20", 3) == 0) {
+        if (from[0] == '+') {
             *to++ = ' ';
+            from += 1;
+            mod = true;
+        } else if (from[0] == '%' && isxdigit(from[1]) && isxdigit(from[2])) {
+            *to++ = 16*hex2Int(from[1]) + hex2Int(from[2]);
             from += 3;
-        } else
+            mod = true;
+        } else {
             *to++ = *from++;
+        }
     }
     *to = '\0';
+
+    return (mod);
 }
 
 /* send initial response indicating body will be plain text
@@ -508,7 +531,7 @@ static bool getWiFiDXSpots (WiFiClient *clientp, char *line)
 
         // print together
         snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u %s   %6.2f %7.2f   %6.0f   %4.0f\n"),
-                MAX_SPOTCALL_LEN-1, sp->call, sp->uts, sp->grid, sp->ll.lat_d, sp->ll.lng_d, dist, bear);
+                MAX_SPOTCALL_LEN-1, sp->call, sp->utcs, sp->grid, sp->ll.lat_d, sp->ll.lng_d, dist, bear);
         clientp->print(line);
     }
 
@@ -653,6 +676,8 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
     case DETIME_ANALOG:         FWIFIPR (*clientp, F("Analog ")); break;
     case DETIME_CAL:            FWIFIPR (*clientp, F("Calendar ")); break;
     case DETIME_ANALOG_DTTM:    FWIFIPR (*clientp, F("Analog+DtTm ")); break;
+    case DETIME_DIGITAL_12:     FWIFIPR (*clientp, F("12 Hr digital ")); break;
+    case DETIME_DIGITAL_24:     FWIFIPR (*clientp, F("24 Hr digital ")); break;
     }
     snprintf (buf, sizeof(buf), _FX("TZ=UTC%+g "), de_tz.tz_secs/3600.0);
     clientp->print(buf);
@@ -681,10 +706,8 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
     }
 
     // report rss
-    if (rss_on)
-        FWIFIPRLN (*clientp, F("RSS       on"));
-    else
-        FWIFIPRLN (*clientp, F("RSS       off"));
+    snprintf (buf, sizeof(buf), _FX("RSS       %s, interval %d secs\n"), rss_on ? "On" : "Off", rss_interval);
+    clientp->print (buf);
 
     // report dxcluster state
     FWIFIPR (*clientp, F("DXCluster "));
@@ -707,7 +730,7 @@ static bool getWiFiConfig (WiFiClient *clientp, char *unused)
     #if defined(_SUPPORT_ENVSENSOR)
         size_t bl = 0;
         for (int i = 0; i < MAX_N_BME; i++) {
-            const BMEData *dp = getBMEData(i);
+            const BMEData *dp = getBMEData(i, false);
             if (dp)
                 bl += snprintf (buf+bl,sizeof(buf)-bl, _FX("dTemp@%x= %g dPres@%x= %g "),
                                         dp->i2c, getBMETempCorr(i), dp->i2c, getBMEPresCorr(i));
@@ -806,6 +829,8 @@ static bool getWiFiSatellite (WiFiClient *clientp, char *unused)
     FWIFIPR (*clientp, F("Rate  ")); clientp->print (rate); FWIFIPRLN(*clientp, F(" m/s"));
     FWIFIPR (*clientp, F("144MHzDoppler ")); clientp->print (-rate*144000/3e8); FWIFIPRLN(*clientp,F(" kHz"));
     FWIFIPR (*clientp, F("440MHzDoppler ")); clientp->print (-rate*440000/3e8); FWIFIPRLN(*clientp,F(" kHz"));
+    FWIFIPR (*clientp, F("1.3GHzDoppler ")); clientp->print (-rate*1.3e6/3e8); FWIFIPRLN(*clientp,F(" kHz"));
+    FWIFIPR (*clientp, F("10GHzDoppler  ")); clientp->print (-rate*1e7/3e8); FWIFIPRLN(*clientp,F(" kHz"));
 
     // add table of next several events, if any
     time_t *rises, *sets;
@@ -908,7 +933,7 @@ static bool getWiFiSensorData (WiFiClient *clientp, char *line)
     // send data for each connected sensor
     resetWatchdog();
     for (int i = 0; i < MAX_N_BME; i++) {
-        const BMEData *dp = getBMEData(i);
+        const BMEData *dp = getBMEData(i, true);
         if (dp) {
             // head points to oldest
             for (int j = 0; j < N_BME_READINGS; j++) {
@@ -1038,7 +1063,7 @@ static bool getWiFiSys (WiFiClient *clientp, char *unused)
     FWIFIPR (*clientp, F("MaxBlock ")); clientp->println (ESP.getMaxFreeBlockSize());
     FWIFIPR (*clientp, F("SketchSz ")); clientp->println (ESP.getSketchSize());
     FWIFIPR (*clientp, F("FreeSkSz ")); clientp->println (ESP.getFreeSketchSpace());
-    FWIFIPR (*clientp, F("FlChipSz ")); clientp->println (ESP.getFlashChipRealSize());
+    FWIFIPR (*clientp, F("FlashSiz ")); clientp->println (ESP.getFlashChipRealSize());
     FWIFIPR (*clientp, F("CPUMHz   ")); clientp->println (ESP.getCpuFreqMHz());
     FWIFIPR (*clientp, F("CoreVer  ")); clientp->println (ESP.getCoreVersion());
     // #if defined __has_include                        should work but doesn't
@@ -1681,6 +1706,142 @@ static bool setWiFiMapView (WiFiClient *clientp, char line[])
     return (true);
 }
 
+/* set a new correction for the given sensor
+ *   sensor=76|77&dTemp=X&dPres=Y" },
+ */
+static bool setWiFiSensorCorr (WiFiClient *clientp, char line[])
+{
+    if (getNBMEConnected() == 0) {
+        strcpy (line, _FX("No sensors"));
+        return (false);
+    }
+
+    // look for each keyword, if any
+    char *S = strstr (line, _FX("sensor="));
+    char *T = strstr (line, _FX("dTemp="));
+    char *P = strstr (line, _FX("dPres="));
+
+    // look for unknown keywords
+    for (char *sep = line-1, *kw = line; sep != NULL; sep = strchr (kw, '&'), kw = sep + 1) {
+        if (*kw && S != kw && T != kw && P != kw) {
+            strcpy (line, garbcmd);
+            return (false);
+        }
+    }
+
+    // sensor is required
+    if (!S) {
+        strcpy (line, "missing sensor");
+        return (false);
+    }
+    int sensor = atoi (S+7);
+    if (sensor == 76)
+        sensor = BME_76;
+    else if (sensor == 77)
+        sensor = BME_77;
+    else {
+        strcpy (line, "sensor must be 76 or 77");
+        return (false);
+    }
+
+    // at least one of T and P are required
+    if (!T && !P) {
+        strcpy (line, "missing delta");
+        return (false);
+    }
+
+    // try dPres if set
+    if (P) {
+        if (!setBMEPresCorr(sensor, atof(P+6))) {
+            strcpy (line, "bad dPres sensor");
+            return (false);
+        }
+    }
+
+    // try dTemp if set
+    if (T) {
+        if (!setBMETempCorr(sensor, atof(T+6))) {
+            strcpy (line, "bad dTemp sensor");
+            return (false);
+        }
+    }
+
+    // ack
+    if (clientp) {
+        startPlainText (*clientp);
+        clientp->print("Ok\n");
+    }
+
+    // good
+    return (true);
+}
+
+/* control RSS list:
+ *    reset      empty local list
+ *    add=X      add 1 to local list
+ *    network    resume network connection
+ *    file       list of titles follows header in POST format
+ *    interval   set refresh interval, secs, min 5
+ */
+static bool setWiFiRSS (WiFiClient *clientp, char line[])
+{
+    StackMalloc buf_mem(150);
+    char *buf = (char *) buf_mem.getMem();
+    int n_titles, n_max;
+
+    // set buf initially empty, fill with default reply if still empty after processing
+    buf[0] = '\0';
+
+    // check args -- full buf with suitable message
+    if (strcmp (line, "network") == 0) {
+        // restore normal rss network queries
+        (void) setRSSTitle (NULL, n_titles, n_max);
+        strcpy (buf, "Restored RSS network feeds\n");
+    } else if (strcmp (line, "reset") == 0) {
+        // turn off network and empty local list
+        (void) setRSSTitle ("", n_titles, n_max);
+    } else if (strncmp (line, "add=", 4) == 0) {
+        // turn off network and add title to local list if room
+        if (setRSSTitle (line+4, n_titles, n_max)) {
+        } else {
+            sprintf (line, "List is full -- max %d", n_max);
+            return (false);
+        }
+    } else if (strcmp (line, "file") == 0) {
+        // titles follow header
+        (void) setRSSTitle ("", n_titles, n_max);       // reset list
+        while (getTCPLine (*clientp, buf, buf_mem.getSize(), NULL))
+            (void) setRSSTitle (buf, n_titles, n_max);
+        buf[0] = '\0';                                  // want default reply
+    } else if (strncmp (line, "interval=", 9) == 0) {
+        int new_i = atoi(line+9);
+        if (new_i >= RSS_MIN_INT) {
+            rss_interval = new_i;
+            snprintf (buf, buf_mem.getSize(), "RSS interval now %d secs\n", rss_interval);
+            NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
+        } else {
+            sprintf (line, "Min interval %d seconds", RSS_MIN_INT);
+            return (false);
+        }
+    } else {
+        strcpy (line, garbcmd);
+        return (false);
+    }
+
+    // create default reply if buf empty
+    if (buf[0] == '\0')
+        snprintf (buf, buf_mem.getSize(), "Now %d of %d local titles\n", n_titles, n_max);
+
+    // ack
+    if (clientp) {
+        startPlainText (*clientp);
+        clientp->print (buf);
+    }
+    Serial.print (buf);
+
+    // ok
+    return (true);
+}
 
 /* set new collection of plot choices for a given pane.
  * return whether ok
@@ -1973,7 +2134,7 @@ static bool setWiFiTouch (WiFiClient *clientp, char line[])
     return (true);
 }
 
-/* set the VOACAP map to the given band and/or power
+/* set the VOACAP map to the given band and/or power and/or timeline units
  * return whether all ok.
  */
 static bool setWiFivoacap (WiFiClient *clientp, char line[])
@@ -1981,10 +2142,11 @@ static bool setWiFivoacap (WiFiClient *clientp, char line[])
     // look for each keyword, if any
     char *B = strstr (line, _FX("band="));
     char *P = strstr (line, _FX("power="));
+    char *T = strstr (line, _FX("tl="));
 
     // look for unknown keywords
     for (char *sep = line-1, *kw = line; sep != NULL; sep = strchr (kw, '&'), kw = sep + 1) {
-        if (*kw && P != kw && B != kw) {
+        if (*kw && P != kw && B != kw && T != kw) {
             strcpy (line, garbcmd);
             return (false);
         }
@@ -2028,13 +2190,30 @@ static bool setWiFivoacap (WiFiClient *clientp, char line[])
         bc_power = (uint16_t)power;
     }
 
+    // crack timeline
+    if (T) {
+        if (strncmp(T+3, _FX("UTC"), 3) == 0) {
+            bc_utc = 1;
+        } else if (strncmp(T+3, _FX("DE"), 2) == 0) {
+            bc_utc = 0;
+        } else {
+            strcpy (line, _FX("tl must be DE or UTC"));
+            return (false);
+        }
+    }
+
     // engage or revert
     PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
     if (B || P) {
+        // new band or power so refresh plot if visible (grabs bc_utc too) 0and always refresh map
         if (bc_pp != PANE_NONE)
             checkBandConditions (plot_b[bc_pp], true);
         newVOACAPMap (pms);
+    } else if (T) {
+        // only changing timeline units so just redraw
+        plotBandConditions (plot_b[bc_pp], 0, NULL, NULL);
     } else {
+        // off: turn off map and show it is now off in pane if visible
         newVOACAPMap (PROP_MAP_OFF);
         newCoreMap (core_map);
         if (bc_pp != PANE_NONE)
@@ -2045,15 +2224,12 @@ static bool setWiFivoacap (WiFiClient *clientp, char line[])
     if (clientp) {
         startPlainText (*clientp);
         char buf[50];
-        size_t l = sprintf (buf, "VOACAP");
-        if (B)
-            l += sprintf (buf+l, " band %d m", propMap2Band(pms));
-        if (P && B)
-            l += sprintf (buf+l, ",");
-        if (P)
-            l += sprintf (buf+l, " power %d W", bc_power);
-        if (!P && !B)
-            l += sprintf (buf+l, " off");
+        size_t l = snprintf (buf, sizeof(buf), _FX("VOACAP "));
+        if (pms == PROP_MAP_OFF)
+            l += snprintf (buf+l, sizeof(buf)-l, _FX("map off"));
+        else
+            l += snprintf (buf+l, sizeof(buf)-l, _FX("band %d m"), propMap2Band(pms));
+        l += snprintf (buf+l, sizeof(buf)-l, _FX(", power %d W, timeline %s"), bc_power, bc_utc?"UTC":"DE");
         clientp->println(buf);
     }
 
@@ -2171,15 +2347,17 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_newdx?",         setWiFiNewDX,          "lat=X&lng=Y" },
     { "set_newdxgrid?",     setWiFiNewDXGrid,      "AB12" },
     { "set_pane?",          setWiFiPane,           "Pane[123]=X,Y,Z... any from:" },
+    { "set_rss?",           setWiFiRSS,            "reset|add=X|file|network|interval=secs" },
     { "set_satname?",       setWiFiSatName,        "abc|none" },
     { "set_sattle?",        setWiFiSatTLE,         "name=abc&t1=line1&t2=line2" },
+    { "set_senscorr?",      setWiFiSensorCorr,     "sensor=76|77&dTemp=X&dPres=Y" },
     { "set_stopwatch?",     setWiFiStopwatch,      "reset|run|stop|lap|countdown=mins" },
     { "set_time?",          setWiFiTime,           "ISO=YYYY-MM-DDTHH:MM:SS" },
     { "set_time?",          setWiFiTime,           "Now" },
     { "set_time?",          setWiFiTime,           "unix=secs_since_1970" },
     { "set_title?",         setWiFiTitle,          "msg=hello&fg=R,G,B&bg=R,G,B|rainbow" },
     { "set_touch?",         setWiFiTouch,          "x=X&y=Y&hold=0|1" },
-    { "set_voacap?",        setWiFivoacap,         "band=80-10&power=p" },
+    { "set_voacap?",        setWiFivoacap,         "band=80-10&power=p&tl=DE/UTC" },
     { "restart ",           doWiFiReboot,          "restart HamClock" },
     { "updateVersion ",     doWiFiUpdate,          "update to latest version"},
 #if defined(_IS_UNIX)
@@ -2217,8 +2395,9 @@ static bool runWebserverCommand (WiFiClient *clientp, bool ro, char *command)
                 // found command, skip to start of args
                 char *args = command+cmd_len;
 
-                // replace any %20
-                replaceBlankEntity (args);
+                // replace any %XX encoded values
+                if (replaceEncoding (args))
+                    Serial.printf ("Decoded: %s\n", args);      // print decoded version
 
                 // chop off trailing HTTP _after_ looking for commands because get_ commands end with blank.
                 char *http = strstr (args, " HTTP");
@@ -2247,16 +2426,15 @@ static void serveRemote(WiFiClient *clientp, bool ro)
 {
     StackMalloc line_mem(TLE_LINEL*4);          // accommodate longest query, probably set_sattle with %20s
     char *line = (char *) line_mem.getMem();    // handy access to malloced buffer
-    char *skipget = line+5;                     // handy location within line[] after "GET /"
 
-    // first line must be the GET
+    // first line must be the GET except set_rss which is POST
     if (!getTCPLine (*clientp, line, line_mem.getSize(), NULL)) {
         sendHTTPError (*clientp, "empty web query");
         goto out;
     }
-    if (strncmp (line, "GET /", 5)) {
+    if (strncmp (line, "GET /", 5) && strncmp (line, "POST /set_rss?", 14)) {
         Serial.println (line);
-        sendHTTPError (*clientp, "Method Not Allowed");
+        sendHTTPError (*clientp, "Method must be GET (or POST with set_rss)");
         goto out;
     }
 
@@ -2269,7 +2447,7 @@ static void serveRemote(WiFiClient *clientp, bool ro)
         Serial.println(line);
 
     // run command
-    if (runWebserverCommand (clientp, ro, skipget))
+    if (runWebserverCommand (clientp, ro, strchr (line,'/')+1))
         goto out;
 
     // if get here, command was not found so list help

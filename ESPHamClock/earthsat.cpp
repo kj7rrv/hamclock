@@ -865,8 +865,8 @@ static bool askSat()
     StackMalloc name_mem(sizeof(SatNames));
     SatNames *sat_names = (SatNames *) name_mem.getMem();
     uint16_t prev_sel_x = 0, prev_sel_y = 0;
-    int8_t sel_idx = NO_SAT;
-    uint8_t n_sat = 0;
+    int sel_idx = NO_SAT;
+    int n_sat = 0;
 
     // open connection
     WiFiClient sat_client;
@@ -892,8 +892,8 @@ static bool askSat()
         }
 
         // find row and column, col-major order
-        uint8_t r = n_sat % N_ROWS;
-        uint8_t c = n_sat / N_ROWS;
+        int r = n_sat % N_ROWS;
+        int c = n_sat / N_ROWS;
 
         // ul corner
         uint16_t x = c*CELL_W;
@@ -933,7 +933,7 @@ static bool askSat()
                 float hrs_to_rise = (rs.rise_time - t_now)*24.0;
                 if (hrs_to_rise*60 < SOON_MINS)
                     tft.setTextColor (SOON_COLOR);
-                uint8_t mins_to_rise = (hrs_to_rise - (uint16_t)hrs_to_rise)*60;
+                int mins_to_rise = (hrs_to_rise - floor(hrs_to_rise))*60;
                 if (hrs_to_rise < 1 && mins_to_rise < 1)
                     mins_to_rise = 1;   // 00:00 looks wrong
                 if (hrs_to_rise < 10)
@@ -970,17 +970,17 @@ static bool askSat()
     if (n_sat == 0)
         goto out;
 
-    // make box for whole screen so we can use waitForTap()
+    // entire display is one big menu box
     SBox screen_b;
     screen_b.x = 0;
     screen_b.y = 0;
     screen_b.w = tft.width();
     screen_b.h = tft.height();
 
-    // follow touches to make selection, done when tap Ok
+    // follow touches to make selection, done when tap Ok or any item during drawing
     selectFontStyle (BOLD_FONT, SMALL_FONT);
     SCoord s_tap;
-    while (stop_tap || waitForTap (screen_b, screen_b, NULL, MENU_TO, s_tap)) {
+    while (stop_tap || waitForTap (screen_b, NULL, MENU_TO, false, s_tap)) {
 
         // use stop tap first time if set
         if (stop_tap) {
@@ -997,11 +997,11 @@ static bool askSat()
 
         // else toggle tapped sat, if any
         resetWatchdog();
-        uint8_t r = (s_tap.y - TBORDER)/CELL_H;
-        uint8_t c = s_tap.x/CELL_W;
+        int r = (s_tap.y - TBORDER)/CELL_H;
+        int c = s_tap.x/CELL_W;
         if (s_tap.y < TBORDER || s_tap.x - c*CELL_W > CELL_W/4)
             continue;                           // require tapping in left quarter of cell
-        uint8_t tap_idx = c*N_ROWS + r;         // column major order
+        int tap_idx = c*N_ROWS + r;             // column major order
         if (tap_idx < n_sat) {
             // toggle
             uint16_t x = c * CELL_W;
@@ -1292,14 +1292,14 @@ void drawSatPathAndFoot()
 
     resetWatchdog();
 
-    for (uint16_t i = 1; i < n_path; i++) {
+    for (int i = 1; i < n_path; i++) {
         SCoord *sp0 = &sat_path[i-1];
         SCoord *sp1 = &sat_path[i];
         if (segmentSpanOk(*sp0,*sp1))
             tft.drawLine (sp0->x, sp0->y, sp1->x, sp1->y, 2, getSatPathColor());
     }
 
-    for (uint8_t alt_i = 0; alt_i < N_FOOT; alt_i++) {
+    for (int alt_i = 0; alt_i < N_FOOT; alt_i++) {
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
             SCoord *sp0 = &sat_foot[alt_i][foot_i];
             SCoord *sp1 = &sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
@@ -1411,19 +1411,19 @@ bool checkSatNameTouch (const SCoord &s)
  */
 void displaySatInfo()
 {
-    if (!obs || !sat || !dx_info_for_sat)
+    if (!obs || !dx_info_for_sat)
         return;
+
+    // freshen elements if new or stale
+    if (!sat || nowWO() - tle_refresh > TLE_REFRESH) {
+        if (!satLookup())
+            return;
+    }
 
     // confirm epoch still valid
     if (!satEpochOk(nowWO())) {
         fatalSatError (_FX("Epoch for %s is out of date"), sat_name);
         return;
-    }
-
-    // freshen elements if stale
-    if (nowWO() - tle_refresh > TLE_REFRESH) {
-        if (!satLookup())
-            return;
     }
 
     findNextPass(sat_name, nowWO(), sat_rs);
@@ -1699,9 +1699,12 @@ void showNextSatEvents ()
     // advance to first data row
     y += CELL_H;
 
-    // get list of times
+    // get list of times (ESP takes a while so show signs of life)
+    tft.setCursor (x, y);
+    tft.print (F("Computing..."));
     time_t *rises, *sets;
     int n_times = nextSatRSEvents (&rises, &sets);
+    tft.fillRect (x, y-22, 200, 100, RA8875_BLACK);     // font y - font height
 
     // show list, if any
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -1787,7 +1790,7 @@ void showNextSatEvents ()
 
     // wait for fresh tap or timeout
     SCoord tap;
-    (void) waitForTap (resume_b, map_b, NULL, _SNS_TIMEOUT, tap);
+    (void) waitForTap (resume_b, NULL, _SNS_TIMEOUT, false, tap);
 
     // ack
     drawStringInBox (button_name, resume_b, true, RA8875_GREEN);
