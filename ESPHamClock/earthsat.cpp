@@ -27,7 +27,9 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #endif
 
 
-#define RISE_ALARM_DT   (1.0F/1440.0F)  // flash this many days before rise event
+#define ALARM_DT        (1.0F/1440.0F)  // flash this many days before an event
+#define RISING_RATE     1               // flash at this rate when sat about to rise
+#define SETTING_RATE    10              // flash at this rate when sat about to set
 #define MAX_TLE_AGE     7.0F            // max age to use a TLE, days (except moon)
 #define TLE_REFRESH     (3600*6)        // freshen TLEs this often, seconds
 #define SAT_TOUCH_R     20U             // touch radius, pixels
@@ -114,44 +116,85 @@ void strncpySubChar (char to_str[], const char from_str[], char to_char, char fr
     *to_str = '\0';
 }
 
-/* set alarm buzzer SATALARM_GPIO high if on -- RPi only
- */
-static void risetAlarm (bool on)
-{
 #if defined(_SUPPORT_GPIO) and defined(_IS_UNIX)
 
+#include <pthread.h>
+
+/* thread that repeatedly reads the value pointed to by a passed int pointer as a desired rate in Hz
+ * and controls GPIO pin SATALARM_GPIO
+ */
+static void * gpioThread (void *vp)
+{
+    // passed pointer to value containing desired Hz
+    int *rate_hz_p = (int *)vp;
+
+    // attach to GPIO, init output
+    GPIO &gpio = GPIO::getGPIO();
+    gpio.setAsOutput (SATALARM_GPIO);
+    gpio.setLo (SATALARM_GPIO);
+
+    // set our internal polling rate and init counter there of.
+    useconds_t delay_us = 100000;               // N.B. sets maximum rate that can be achieved
+    unsigned n_delay = 0;
+
+    // forever check and implement what *rate_hz_p wants
+    for(;;) {
+        usleep (delay_us);
+        int rate_hz = *rate_hz_p;
+        if (rate_hz < 0) {
+            gpio.setLo (SATALARM_GPIO);
+            n_delay = 0;
+        } else if (rate_hz == 0) {
+            gpio.setHi (SATALARM_GPIO);
+            n_delay = 0;
+        } else {
+            unsigned rate_period_us = 1000000U/rate_hz;
+            if (++n_delay*delay_us >= rate_period_us) {
+                gpio.setHiLo (SATALARM_GPIO, !gpio.readPin(SATALARM_GPIO));
+                n_delay = 0;
+            }
+        }
+    }
+}
+
+/* set alarm buzzer SATALARM_GPIO according to rate -- RPi only.
+ * rate < 0  : off
+ * rate == 0 : one
+ * rate > 0  : flash at this Hz
+ */
+static void risetAlarm (int rate)
+{
     // ignore if not supposed to use GPIO
     if (!GPIOOk())
         return;
 
-    // init if first time
-    static bool inited, last_on;
-    GPIO& gpio = GPIO::getGPIO();
-    if (!inited) {
-        gpio.setAsOutput (SATALARM_GPIO);
-        gpio.setLo (SATALARM_GPIO);
-        last_on = false;
-        inited = true;
+    // init helper thread if first time.
+    static bool gpiot_started;
+    static int my_rate;
+    if (!gpiot_started) {
+        pthread_t tid;
+        int e = pthread_create (&tid, NULL, gpioThread, &my_rate);
+        if (e != 0) {
+            Serial.printf ("GPIO thread err: %s\n", strerror(e));
+            return;
+        }
+        gpiot_started = true;
     }
 
-    // command if changed
-    if (on && !last_on) {
-        gpio.setAsOutput (SATALARM_GPIO);
-        gpio.setHi (SATALARM_GPIO);
-        last_on = true;
-    } else if (!on && last_on) {
-        gpio.setAsOutput (SATALARM_GPIO);
-        gpio.setLo (SATALARM_GPIO);
-        last_on = false;
-    }
+    // tell helper thread what we want done
+    my_rate = rate;
+}
 
 #else
 
+// dummy
+static void risetAlarm (int rate)
+{
     // not used
-    (void) on;
+    (void) rate;
+}
 
 #endif // _SUPPORT_GPIO
-}
 
 /* fill sat_foot with loci of points that see the sat at various viewing altitudes.
  * N.B. call this before updateSatPath malloc's its memory
@@ -1164,27 +1207,26 @@ void updateSatPass()
         if (t_now < sat_rs.rise_time) {
             // pass lies ahead
             drawSatTime ("Rise in ", days_to_rise);
-            // flash at 1 Hz when about to rise
-            risetAlarm(days_to_rise < RISE_ALARM_DT && !((last_run/1000) & 1));
+            risetAlarm(days_to_rise < ALARM_DT ? RISING_RATE : -1);
         } else if (t_now < sat_rs.set_time) {
             // pass in progress
             drawSatTime (" Set in ", days_to_set);
-            risetAlarm(true);
             drawSatNow();
+            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
             // just set, time to find next pass
-            risetAlarm(false);
             displaySatInfo();
+            risetAlarm(-1);
         }
     } else {
         if (t_now < sat_rs.set_time) {
             // pass in progress
             drawSatTime (" Set in ", days_to_set);
-            risetAlarm(true);
             drawSatNow();
+            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
             // just set, time to find next pass
-            risetAlarm(false);
+            risetAlarm(-1);
             displaySatInfo();
         }
     }
@@ -1431,16 +1473,19 @@ void displaySatInfo()
     drawNextPass();
 }
 
-/* retrieve list of satellites and let user select up to one, preselecting last known if any.
+/* present list of satellites and let user select up to one, preselecting last known if any.
  * save name in sat_name and NVRAM, even if empty to signify no satellite.
  * return whether a sat was chosen or not.
+ * N.B. caller must call initScreen on return regardless
  */
 bool querySatSelection()
 {
     resetWatchdog();
 
-    // stop any tracking
-    stopGimbalNow();
+    // we need the whole screen
+    closeDXCluster();       // prevent inbound msgs from clogging network
+    closeGimbal();          // avoid dangling connection
+    hideClocks();
 
     NVReadString (NV_SATNAME, sat_name);
     if (askSat()) {
@@ -1460,7 +1505,8 @@ bool querySatSelection()
     return (SAT_NAME_IS_SET());
 }
 
-/* install new satellite, if possible, or remove if "none"
+/* install new satellite, if possible, or remove if "none".
+ * N.B. calls initScreen() if changes sat
  */
 bool setSatFromName (const char *new_name)
 {
@@ -1468,7 +1514,8 @@ bool setSatFromName (const char *new_name)
     if (strcmp (new_name, "none") == 0) {
         if (SAT_NAME_IS_SET()) {
             unsetSat();
-            initScreen();
+            drawOneTimeDX();
+            initEarthMap();
         }
         return (true);
     }
@@ -1490,8 +1537,10 @@ bool setSatFromName (const char *new_name)
         // make permanent and redraw
         dx_info_for_sat = true;
         NVWriteString (NV_SATNAME, sat_name);
-        initScreen();
+        drawOneTimeDX();
+        initEarthMap();
         return (true);
+
     } else {
         // failed
         return (false);

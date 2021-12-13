@@ -457,6 +457,7 @@ bool askNewPos (const SBox &b, LatLong &op_ll, char op_grid[MAID_CHARLEN])
             if (timesUp (&t0, NP_TIMEOUT))
                 cancelled = true;
             wdDelay(100);
+            tft.drawPR();
         }
         if (cancelled)
             continue;

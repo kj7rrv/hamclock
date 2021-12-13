@@ -228,7 +228,7 @@ void doOTAupdate(const char *newver)
     tft.setCursor (0, 100);
     tft.setTextColor (RA8875_WHITE);
     tft.println (F("Beginning remote update..."));
-    tft.println (F("  Do not interrupt power or WiFi during this process."));
+    tft.println (F("  Do not interrupt power or network during this process."));
     tft.println();
 
     // save cursor as progress bar location

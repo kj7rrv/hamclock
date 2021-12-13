@@ -462,6 +462,7 @@ enum {
     MAPGRID_N
 };
 extern uint8_t mapgrid_choice;
+extern const char *grid_styles[MAPGRID_N];
 
 #define MAX_PREF_LEN     4              // maximumm prefix length
 
@@ -517,6 +518,8 @@ extern bool overMap (const SCoord &s);
 extern bool overAnySymbol (const SCoord &s);
 extern bool overRSS (const SCoord &s);
 extern bool overRSS (const SBox &b);
+extern bool checkCallsignTouchFG (SCoord &b);
+extern bool checkCallsignTouchBG (SCoord &b);
 extern void newDE (LatLong &ll, const char *grid);
 extern void newDX (LatLong &ll, const char *grid, const char *override_prefix);
 extern void drawDXPath(void);
@@ -531,6 +534,7 @@ extern void setMapTagBox (const char *tag, const SCoord &c, uint16_t r, SBox &bo
 extern void drawMapTag (const char *tag, SBox &box);
 extern void setDXPrefixOverride (char p[MAX_PREF_LEN]);
 extern bool getDXPrefix (char p[MAX_PREF_LEN+1]);
+extern void drawScreenLock(void);
 extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
 extern void drawCallsign (bool all);
@@ -650,6 +654,7 @@ enum {
     DETIME_N,
 };
 
+extern const char *detime_names[DETIME_N];
 extern uint8_t de_time_fmt;     // one of DETIME_*
 extern void initTime(void);
 extern time_t nowWO(void);
@@ -799,6 +804,7 @@ extern bool checkPathDirTouch (const SCoord &s);
 extern void propDEDXPath (bool long_path, LatLong &ll, float *distp, float *bearp);
 extern bool waiting4DXPath(void);
 extern void eraseSCircle (const SCircle &c);
+extern void drawRSSBox (void);
 extern void eraseRSSBox (void);
 extern void drawMapMenu(void);
 extern bool segmentSpanOk (SCoord &s0, SCoord &s1);
@@ -862,6 +868,7 @@ extern void displaySatInfo(void);
 extern void setSatObserver (float lat, float lng);
 extern void drawSatPointsOnRow (uint16_t r);
 extern void drawSatNameOnRow(uint16_t y);
+extern void drawOneTimeDX(void);
 extern bool dx_info_for_sat;
 extern bool setSatFromName (const char *new_name);
 extern bool setSatFromTLE (const char *name, const char *t1, const char *t2);
@@ -994,14 +1001,16 @@ typedef enum {
     PROP_MAP_N
 } PropMapSetting;
 #define PROP_MAP_OFF    PROP_MAP_N      // handy alias meaning none active
+
 extern PropMapSetting prop_map;
 
 
-// N.B. must be in same order as map_files[]
+// N.B. must be in same order as map_styles[]
 typedef enum {
     CM_COUNTRIES,
     CM_TERRAIN,
     CM_DRAP,
+    CM_MUF,
     CM_N
 } CoreMaps;
 #define CM_NONE CM_N                    // handy alias meaning none active
@@ -1009,11 +1018,10 @@ typedef enum {
 extern CoreMaps core_map;               // current map, if any
 extern const char *map_styles[CM_N];    // core map style names
 
+extern void initCoreMaps(void);
+extern bool installFreshMaps(void);
 extern float propMap2MHz (PropMapSetting pms);
 extern int propMap2Band (PropMapSetting pms);
-extern bool installPropMaps (float MHz);
-extern bool installBackgroundMaps (bool verbose, CoreMaps cm, bool *downloaded);
-extern bool installNewMapStyle (CoreMaps cm);
 extern bool getMapDayPixel (uint16_t row, uint16_t col, uint16_t *dayp);
 extern bool getMapNightPixel (uint16_t row, uint16_t col, uint16_t *nightp);
 extern const char *getMapStyle (char s[]);
@@ -1536,9 +1544,9 @@ typedef struct {
 
 extern void initSys (void);
 extern void initWiFiRetry(void);
-extern void newBC(void);
-extern void newVOACAPMap(PropMapSetting pm);
-extern void newCoreMap(CoreMaps cm);
+extern void scheduleNewBC(void);
+extern void scheduleNewVOACAPMap(PropMapSetting pm);
+extern void scheduleNewCoreMap(CoreMaps cm);
 extern void updateWiFi(void);
 extern bool checkBCTouch (const SCoord &s, const SBox &b);
 extern bool setPlotChoice (PlotPane new_pp, PlotChoice new_ch);
@@ -1557,7 +1565,7 @@ extern void FWIFIPRLN (WiFiClient &client, const __FlashStringHelper *str);
 extern int getNTPServers (const NTPServer **listp);
 extern bool setRSSTitle (const char *title, int &n_titles, int &max_titles);
 extern uint16_t bc_power;
-extern uint8_t bc_utc;
+extern uint8_t bc_utc_tl;
 extern uint8_t rss_interval;
 
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, 

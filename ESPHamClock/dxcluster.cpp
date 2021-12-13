@@ -377,15 +377,22 @@ static void setDXClusterSpotMapPosition (DXClusterSpot &s)
         setMapTagBox (tag, center, 0, s.map_b);
 }
 
-static void drawSpotOnMap (DXClusterSpot &s)
+static void drawSpotOnMap (DXClusterSpot &cs)
 {
         if (mapDXClusterSpots()) {
-            if (plotSpotCallsigns()) {
-                drawMapTag (s.call, s.map_b);
-            } else {
-                char prefix[MAX_PREF_LEN];
-                call2Prefix (s.call, prefix);
-                drawMapTag (prefix, s.map_b);
+            // first decide whether spot is even over the map
+            SCoord s;
+            s.x = cs.map_b.x + cs.map_b.w/2;
+            s.y = cs.map_b.y + cs.map_b.h/2;
+            if (overMap(s)) {
+                // proceed
+                if (plotSpotCallsigns()) {
+                    drawMapTag (cs.call, cs.map_b);
+                } else {
+                    char prefix[MAX_PREF_LEN];
+                    call2Prefix (cs.call, prefix);
+                    drawMapTag (prefix, cs.map_b);
+                }
             }
         }
 }

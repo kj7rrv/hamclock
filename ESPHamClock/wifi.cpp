@@ -54,18 +54,19 @@ static const char stereo_a_img_page[] =
         "/ham/HamClock/STEREO/STEREO-A-195-160.bmp";
     #endif
 
-// band conditions and map, models change each hour
+// band conditions and voacap map, models change each hour
 #define BC_INTERVAL     2400                    // polling interval, secs
 #define VOACAP_INTERVAL 2500                    // polling interval, secs
 static const char bc_page[] = "/ham/HamClock/fetchBandConditions.pl";
 static bool bc_reverting;                       // set while waiting for BC after WX
-static int bc_hour, map_hour;                   // hour when valid
+static time_t bc_time;                          // effective time when BC was loaded
 uint16_t bc_power;                              // VOACAP power setting
-uint8_t bc_utc;                                 // label band conditions timeline in utc else DE local
-PropMapSetting prop_map = PROP_MAP_OFF;         // whether/how showing background prop map
+uint8_t bc_utc_tl;                              // label band conditions timeline in utc else DE local
+static time_t map_time;                         // effective time when map was loaded
 
-// background map update intervals
+// core map update intervals
 #define DRAPMAP_INTERVAL     (5*60)             // polling interval, secs
+#define MUFMAP_INTERVAL      (60*60)            // polling interval, secs
 #define OTHER_MAPS_INTERVAL  (60*60)            // polling interval, secs
 
 // DRAP info, new data posted every few minutes
@@ -182,6 +183,18 @@ static bool updateSolarWind(const SBox &box);
 static bool updateDRAPPlot(const SBox &box);
 static bool updateRSS (void);
 static uint32_t crackBE32 (uint8_t bp[]);
+
+
+/* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
+ */
+static time_t tdiff (const time_t t1, const time_t t2)
+{
+    if (t1 > t2)
+        return (t1 - t2);
+    if (t2 > t1)
+        return (t2 - t1);
+    return (0);
+}
 
 /* return the next retry time_t.
  * retries are spaced out every WIFI_RETRY to avoid swamping the server
@@ -522,9 +535,18 @@ void initSys()
     LittleFS.begin();
     LittleFS.setTimeCallback(now);
 
-    // insure initial default map files are installed and ready to go
-    if (!installBackgroundMaps (true, CM_NONE, NULL))
-        tftMsg (true, 0, _FX("No map"));
+    // init bc_power and bc_utc_tl
+    if (!NVReadUInt16 (NV_BCPOWER, &bc_power)) {
+        bc_power = 100;
+        NVWriteUInt16 (NV_BCPOWER, bc_power);
+    }
+    if (!NVReadUInt8 (NV_BC_UTCTIMELINE, &bc_utc_tl)) {
+        bc_utc_tl = 0;  // default to local time line
+        NVWriteUInt8 (NV_BC_UTCTIMELINE, bc_utc_tl);
+    }
+
+    // insure core_map is defined
+    initCoreMaps();
 
     // offer time to peruse unless alreay opted to skip
     if (!skipped_here) {
@@ -548,38 +570,35 @@ void initSys()
             wdDelay(100);
         }
     }
-
-
-    // handy place to init bc_power and bc_utc
-    if (bc_power == 0 && !NVReadUInt16 (NV_BCPOWER, &bc_power))
-        bc_power = 100;
-    if (!NVReadUInt8 (NV_BC_UTCTIMELINE, &bc_utc))
-        bc_utc = 0;
 }
 
 /* update BandConditions pane in box b if needed or requested.
  */
 void checkBandConditions (const SBox &b, bool force)
 {
-    // update if asked to or out of sync with map or time to refresh
-    bool update_bc = force || (prop_map != PROP_MAP_OFF && bc_hour != map_hour) || (now() > next_bc);
+    // update if asked to or out of sync with prop map or it's time to refresh or it's off over an hour
+    bool update_bc = force || (prop_map != PROP_MAP_OFF && tdiff(bc_time,map_time)>=3600)
+                           || (now()>next_bc) || tdiff(nowWO(),bc_time)>=3600;
     if (!update_bc)
         return;
 
     if (updateBandConditions(b)) {
         // worked ok so reschedule later
         next_bc = now() + BC_INTERVAL;
-        bc_hour = hour(nowWO());
+        bc_time = nowWO();
     } else {
-        // retry
+        // retry soon
         next_bc = nextWiFiRetry();
     }
 }
 
-/* check if time to update VOACAP or core map.
+/* check if time to update background map
  */
 static void checkMap(void)
 {
+    // local effective time
+    int now_time = nowWO();
+
     // note whether BC is up
     PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
     bool bc_up = bc_pp != PANE_NONE;
@@ -587,62 +606,78 @@ static void checkMap(void)
     // check VOACAP first
     if (prop_map != PROP_MAP_OFF) {
 
-        // update if time or to stay in sync with BC if on
-        if (now() > next_map || (bc_up && map_hour != bc_hour)) {
+        // update if time or to stay in sync with BC if on it's off over an hour
+        if (now() > next_map || (bc_up && tdiff(map_time,bc_time)>=3600) || tdiff(now_time,map_time)>=3600) {
 
-            // show pending if BC up
+            // show busy if BC up
             if (bc_up)
                 plotBandConditions (plot_b[bc_pp], 1, NULL, NULL);
 
-            // update prop map
-            bool ok = installPropMaps (propMap2MHz (prop_map));
+            // update prop map, schedule next
+            bool ok = installFreshMaps();
             if (ok) {
                 next_map = now() + VOACAP_INTERVAL;             // schedule normal refresh
-                map_hour = hour(nowWO());                       // map is now current
-                initEarthMap();
+                map_time = now_time;                            // map is now current
+                initEarthMap();                                 // restart fresh
 
-                // sync DRAP plot update if in use
+                // sync DRAP plot too if in use
                 if (findPaneChoiceNow(PLOT_CH_DRAP) != PANE_NONE)
                     next_drap = now();
             } else {
                 next_map = nextWiFiRetry();                     // schedule retry
-                map_hour = bc_hour;                             // match bc to avoid immediate retry
+                map_time = bc_time;                             // match bc to avoid immediate retry
             }
 
-            // show result of effort unless no BC box
+            // show result of effort if BC up
             if (bc_up)
                 plotBandConditions (plot_b[bc_pp], ok ? 0 : -1, NULL, NULL);
 
             Serial.printf (_FX("Next VOACAP map check in %ld s at %ld\n"), next_map - now(), next_map);
-
         }
 
     } else if (core_map != CM_NONE) {
 
-        if (now() > next_map) {
+        if (now() > next_map || tdiff(now_time,map_time)>=3600) {
 
-            bool downloaded;
-            if (installBackgroundMaps (false, core_map, &downloaded)) {
+            // update map, schedule next
+            bool ok = installFreshMaps();
+            if (ok) {
                 // schedule next refresh
-                if (core_map == CM_DRAP) {
+                if (core_map == CM_DRAP)
                     next_map = now() + DRAPMAP_INTERVAL;
-                } else {
+                else if (core_map == CM_MUF)
+                    next_map = now() + MUFMAP_INTERVAL;
+                else
                     next_map = now() + OTHER_MAPS_INTERVAL;
-                }
-                if (downloaded)
-                    initEarthMap();                             // avoid redraw if no change
+
+                // note time of map
+                map_time = now_time;                            // map is now current
+
+                // start
+                initEarthMap();
+
             } else
                 next_map = nextWiFiRetry();                     // schedule retry
+
+            // insure BC band is off
+            if (bc_up)
+                plotBandConditions (plot_b[bc_pp], 0, NULL, NULL);
 
             Serial.printf (_FX("Next %s map check in %ld s at %ld\n"), map_styles[core_map],
                                         next_map - now(), next_map);
         }
+
+    } else {
+
+        // eh??
+        fatalError (_FX("Bug! no map"));
+
     }
 }
 
 
 /* check for tap at s known to be within BandConditions box b.
- * tapping a band loads prop map; tapping timeline toggle bc_utc; tapping power cycles bc_power 1-1000 W.
+ * tapping a band loads prop map; tapping timeline toggle bc_utc_tl; tapping power cycles bc_power 1-1000 W.
  * return whether tap was useful for us.
  * N.B. coordinate tap positions with plotBandConditions()
  */
@@ -703,20 +738,20 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         NVWriteUInt16 (NV_BCPOWER, bc_power);
         checkBandConditions (b, true);
         if (power_changed)
-            newVOACAPMap(prop_map);
+            scheduleNewVOACAPMap(prop_map);
     
     } else if (inBox (s, tl_b)) {
 
-        // toggle bc_utc and redraw
-        bc_utc = !bc_utc;
-        NVWriteUInt8 (NV_BC_UTCTIMELINE, bc_utc);
+        // toggle bc_utc_tl and redraw
+        bc_utc_tl = !bc_utc_tl;
+        NVWriteUInt8 (NV_BC_UTCTIMELINE, bc_utc_tl);
         plotBandConditions (b, 0, NULL, NULL);
 
     } else {
 
         // toggle band depending on position, if any.
         PropMapSetting new_prop_map = prop_map;
-        if (s.x < b.x + b.w/4) {
+        if (s.x < b.x + b.w) {
             int i = (b.y + b.h - 20 - s.y) / ((b.h - 47)/PROP_MAP_N);
             if (i == prop_map) {
                 // tapped current VOACAP selection: toggle current setting
@@ -731,10 +766,10 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         if (new_prop_map != prop_map) {
             if (new_prop_map == PROP_MAP_OFF) {
                 prop_map = PROP_MAP_OFF;
-                newCoreMap (core_map);
+                scheduleNewCoreMap (core_map);
                 plotBandConditions (b, 0, NULL, NULL);
             } else
-                newVOACAPMap(new_prop_map);
+                scheduleNewVOACAPMap(new_prop_map);
         }
 
     }
@@ -1485,11 +1520,14 @@ void sendUserAgent (WiFiClient &client)
             map_style[0] = 'N';
         }
 
+        // combine rss_on and rss_local
+        int rss_code = rss_on + 2*rss_local;
+
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
-            de_time_fmt, brb_mode, dx_info_for_sat, rss_on, useMetricUnits(),
+            de_time_fmt, brb_mode, dx_info_for_sat, rss_code, useMetricUnits(),
             getNBMEConnected(), getKX3Baud(), found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, use_fb0,
             // new for LV5:
@@ -1982,17 +2020,25 @@ out:
  */
 static bool updateDRAPPlot(const SBox &box)
 {
-    // collect 24 hours of stats no closer than 5 minutes apart
-    #define     DRAPDT          (10*60)                 // interval, seconds
-    #define     NPLOTDRAP       (86400/DRAPDT)          // max number of values
-    #define     MAXDRAPAGE      3600                    // must have data this new, secs
-    StackMalloc x_mem(NPLOTDRAP*sizeof(float));         // hours ago 
-    StackMalloc y_mem(NPLOTDRAP*sizeof(float));         // drap MHz
-    float *x = (float *) x_mem.getMem();
-    float *y = (float *) y_mem.getMem();
+    // collect 24 hours of max value found in each 10 minute interval
+    #define     DRAP_INTERVAL   (10*60)                         // interval, seconds
+    #define     DRAP_PERIOD     (24*3600)                       // total period, seconds
+    #define     DRAP_NPLOT      (DRAP_PERIOD/DRAP_INTERVAL)     // number of points to plot
+    #define     DRAP_MAXMISSI   (DRAP_NPLOT/10)                 // max allowed missing intervals
+    #define     DRAP_MINGOODI   (DRAP_NPLOT-3600/DRAP_INTERVAL) // min index with good data
+    StackMalloc x_mem(DRAP_NPLOT*sizeof(float));                // x array
+    StackMalloc y_mem(DRAP_NPLOT*sizeof(float));                // y array
+    float *x = (float *) x_mem.getMem();                        // hours ago, [0] oldest
+    float *y = (float *) y_mem.getMem();                        // max MHz in interval
     WiFiClient drap_client;
     char line[80];
     bool ok = false;
+
+    // want to find any holes in data so init x values to all 0
+    memset (x, 0, x_mem.getSize());
+
+    // want max in each interval so init y values to all 0
+    memset (y, 0, y_mem.getSize());
 
     Serial.println (drap_page);
     resetWatchdog();
@@ -2009,76 +2055,84 @@ static bool updateDRAPPlot(const SBox &box)
             goto out;
         }
 
-        // read lines and build corresponding x/y values
-        time_t t0 = now();
-        time_t oldest_drap = t0 - NPLOTDRAP*DRAPDT;
-        time_t prev_unix = 0;
-        float max_drapdt = 0;
-        long unixs;
-        float x_val = 0, min, max, mean;
-        int ndrap = 0;
+        // init state
+        time_t t_now = now();
+
+        // read lines, oldest first
+        int n_lines = 0;
         while (getTCPLine (drap_client, line, sizeof(line), NULL)) {
-            if (sscanf (line, "%ld : %f %f %f", &unixs, &min, &max, &mean) != 4) {
-                plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP data garbled"));
+            n_lines++;
+
+            // crack
+            long utime;
+            float min, max, mean;
+            if (sscanf (line, "%ld : %f %f %f", &utime, &min, &max, &mean) != 4) {
+                plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data garbled"));
                 goto out;
             }
 
-            // hours ago
-            x_val = (unixs - t0)/3600.0F;;
+            // skip if crazy new or too old
+            int age = t_now - utime;
+            if (utime > t_now || age > DRAP_PERIOD)
+                continue;
 
-            // accept only if within current period and not same interval
-            if (ndrap < NPLOTDRAP && unixs >= oldest_drap) {
-                // capture max value in this interval
-                if (max > max_drapdt)
-                    max_drapdt = max;
-                if (unixs - prev_unix >= DRAPDT) {
-                    prev_unix = unixs;
-                    x[ndrap] = x_val;
-                    y[ndrap] = max_drapdt;
-                    ndrap++;
-                    max_drapdt = 0;
-                    // Serial.printf (_FX("DRAP %3d: %g\n"), ndrap, max_drapdt);
-                }
-            }
+            // find which array index this is and hours ago for x coord
+            int xi = DRAP_NPLOT*(DRAP_PERIOD - age)/DRAP_PERIOD;
+            x[xi] = age/(-3600.0F);                             // hours ago
+
+            // set in array if larger
+            if (max > y[xi])
+                y[xi] = max;
+
+            // Serial.printf ("DRAP %3d: %f %f\n", xi, x[xi], y[xi]);
         }
+        Serial.printf (_FX("DRAP: read %d lines\n"), n_lines);
 
-        // always capture latest as last entry
-        if (ndrap == NPLOTDRAP)
-            ndrap -= 1;
-        x[ndrap] = x_val;
-        y[ndrap] = max;
-        ndrap++;
-
-        // plot if found some recent
+        // look alive
         updateClocks(false);
         resetWatchdog();
-        if (ndrap > 10 && t0 - unixs < MAXDRAPAGE) {
 
-            // always include the latest raw value even if must overwrite existing entry
-            if (ndrap < NPLOTDRAP) {
-                x[ndrap] = x_val;
-                y[ndrap] = max;
-                ndrap++;
+        // check for missing data
+        int n_missing = 0;
+        int maxi_good = 0;
+        for (int i = 0; i < DRAP_NPLOT; i++) {
+            if (x[i] == 0) {
+                x[i] = (DRAP_PERIOD - i*DRAP_PERIOD/DRAP_NPLOT)/-3600.0F;
+                if (i > 0)
+                    y[i] = y[i-1];                      // fill with previous
+                Serial.printf (_FX("DRAP: filling missing interval %d at age %g days to %g\n"), i, x[i], y[i]);
+                n_missing++;
             } else {
-                x[NPLOTDRAP-1] = x_val;
-                y[NPLOTDRAP-1] = max;
+                maxi_good = i;
             }
-            Serial.printf (_FX("DRAP found %d of %d, newest %g is %u s old\n"),
-                        ndrap, NPLOTDRAP, max, t0 - unixs);
-
-            if (plotXY (box,x,y,ndrap,_FX("Hours"),_FX("DRAP, max MHz"),DRAPPLOT_COLOR,0,0,y[ndrap-1])) {
-                drap_spw = y[ndrap-1];
-                drap_update = t0;
-                ok = true;
-            }
-        } else {
-            plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP data missing"));
-            Serial.printf (_FX("DRAP missing: found %d / %d, dt %ld / %d s\n"),
-                        ndrap, NPLOTDRAP, t0 - unixs, MAXDRAPAGE);
         }
 
+        // check for too much missing or newest too old
+        if (n_missing > DRAP_MAXMISSI) {
+            plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data too sparse"));
+            goto out;
+        }
+        if (maxi_good < DRAP_MINGOODI) {
+            plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data too old"));
+            goto out;
+        }
+
+        // ok, plot it
+        if (plotXY (box, x, y, DRAP_NPLOT, _FX("Hours"), _FX("DRAP,  max MHz"), DRAPPLOT_COLOR,
+                                                            0, 0, y[DRAP_NPLOT-1])) {
+            // capture for getSpaceWeather()
+            drap_spw = y[DRAP_NPLOT-1];
+            drap_update = t_now;
+        } else {
+            plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: no data"));
+            goto out;
+        }
+
+        // ok!
+        ok = true;
+
     } else {
-        plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP connection failed"));
+        plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: connection failed"));
     }
 
     // clean up
@@ -2644,7 +2698,7 @@ void initWiFiRetry()
 /* called to schedule an update to the band conditions pane if up.
  * if BC is on PANE_1 wait for a revert in progress otherwie update immediately.
  */
-void newBC()
+void scheduleNewBC()
 {
     PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
     if (bc_pp != PANE_NONE && (bc_pp != PANE_1 || !bc_reverting))
@@ -2652,8 +2706,9 @@ void newBC()
 }
 
 /* called to schedule an immediate update of the given VOACAP map, unless being turned off.
+ * leave core_map as default to use later if VOACAP turned off.
  */
-void newVOACAPMap(PropMapSetting pm)
+void scheduleNewVOACAPMap(PropMapSetting pm)
 {
     prop_map = pm;
     if (pm != PROP_MAP_OFF)
@@ -2661,9 +2716,11 @@ void newVOACAPMap(PropMapSetting pm)
 }
 
 /* called to schedule an immediate update of the give core map, unless being turned off
+ * turns off any VOACAP map.
  */
-void newCoreMap(CoreMaps cm)
+void scheduleNewCoreMap(CoreMaps cm)
 {
+    prop_map = PROP_MAP_OFF;
     core_map = cm;
     if (cm != CM_NONE)
         next_map = 0;

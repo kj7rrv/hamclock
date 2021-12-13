@@ -593,6 +593,10 @@ void eraseRSSBox ()
 {
     resetWatchdog();
 
+    // drap scale will move if up so erase where it is
+    if (DRAPScaleIsUp())
+        eraseDRAPScale();
+
     // erase entire banner if azm mode because redrawing the map will miss the corners
     if (azm_on)
         tft.fillRect (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.w, rss_bnr_b.h, RA8875_BLACK);
@@ -605,8 +609,24 @@ void eraseRSSBox ()
         drawSatPointsOnRow (y);
     }
 
+    // draw drap in new location
+    if (DRAPScaleIsUp())
+        drawDRAPScale();
+
     // restore maid key
     drawMaidGridKey();
+}
+
+/* arrange to draw the RSS box after it has been off a while, including DRAP and Maid key if necessary
+ */
+void drawRSSBox()
+{
+    scheduleRSSNow();
+    if (DRAPScaleIsUp()) {
+        eraseDRAPScale();       // erase where it is now
+        drawDRAPScale();        // draw in new location
+        drawMaidGridKey();      // tidy up
+    }
 }
 
 /* draw, perform and engage results of the map View menu
@@ -614,7 +634,7 @@ void eraseRSSBox ()
 void drawMapMenu()
 {
     enum MIName {                               // menu items -- N.B. must be in same order as mitems[]
-        MI_STY_TTL, MI_STY_CTY, MI_STY_TER, MI_STY_DRA, MI_STY_PRP,
+        MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_PRP,
         MI_GRD_TTL, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI,
         MI_PRJ_TTL, MI_PRJ_AZM, MI_PRJ_MER,
         MI_RSS_YES,
@@ -631,11 +651,12 @@ void drawMapMenu()
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_COUNTRIES]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_TERRAIN]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_DRAP]},
-            {MENU_IGNORE, false, SEC_INDENT, NULL},     // see later
+            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_MUF]},
+            {MENU_IGNORE, false, SEC_INDENT, NULL},     // MI_STY_PRP: see below
         {MENU_LABEL, false, PRI_INDENT, "Grid:"},
-            {MENU_01OFN, false, SEC_INDENT, "Tropics"},
-            {MENU_01OFN, false, SEC_INDENT, "Lat/Long"},
-            {MENU_01OFN, false, SEC_INDENT, "Maidenhead"},
+            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_TROPICS]},
+            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_LATLNG]},
+            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_MAID]},
         {MENU_LABEL, false, PRI_INDENT, "Projection:"},
             {MENU_1OFN, false, SEC_INDENT, "Azimuthal"},
             {MENU_1OFN, false, SEC_INDENT, "Mercator"},
@@ -651,10 +672,11 @@ void drawMapMenu()
     // if showing a propmap list in menu as selected else core map
     char propband[NV_MAPSTYLE_LEN];             // must be persistent for life time of runMenu()
     if (prop_map == PROP_MAP_OFF) {
-        // select current map
-        mitems[MI_STY_CTY].set = core_map == CM_COUNTRIES;
+        // select current map, leave MI_STY_PRP as ignored
+        mitems[MI_STR_CRY].set = core_map == CM_COUNTRIES;
         mitems[MI_STY_TER].set = core_map == CM_TERRAIN;
         mitems[MI_STY_DRA].set = core_map == CM_DRAP;
+        mitems[MI_STY_MUF].set = core_map == CM_MUF;
     } else {
         // add propmap item and select
         mitems[MI_STY_PRP].type = MENU_1OFN;
@@ -694,24 +716,16 @@ void drawMapMenu()
         // set Ok yellow while processing
         menuRedrawOk (ok_b, MENU_OK_BUSY);
 
-        // update map if style changed; restore core_map if prop_map turned off
-        CoreMaps new_cm = CM_NONE;
-        if (prop_map != PROP_MAP_OFF && !mitems[MI_STY_PRP].set)
-            new_cm = core_map;
-        else if (mitems[MI_STY_CTY].set && core_map != CM_COUNTRIES)
-            new_cm = CM_COUNTRIES;
-        else if (mitems[MI_STY_TER].set && core_map != CM_TERRAIN)
-            new_cm = CM_TERRAIN;
-        else if (mitems[MI_STY_DRA].set && core_map != CM_DRAP)
-            new_cm = CM_DRAP;
-        if (new_cm != CM_NONE) {
-            if (installNewMapStyle (new_cm))
-                full_redraw = true;
-            else {
-                menuRedrawOk (ok_b, MENU_OK_ERR);
-                wdDelay(1000);
-            }
-        }
+        // schedule a new map if style changed
+        bool prop_turned_off = prop_map != PROP_MAP_OFF && !mitems[MI_STY_PRP].set;
+        if (mitems[MI_STR_CRY].set && (prop_turned_off || core_map != CM_COUNTRIES))
+            scheduleNewCoreMap (CM_COUNTRIES);
+        else if (mitems[MI_STY_TER].set && (prop_turned_off || core_map != CM_TERRAIN))
+            scheduleNewCoreMap (CM_TERRAIN);
+        else if (mitems[MI_STY_DRA].set && (prop_turned_off || core_map != CM_DRAP))
+            scheduleNewCoreMap (CM_DRAP);
+        else if (mitems[MI_STY_MUF].set && (prop_turned_off || core_map != CM_MUF))
+            scheduleNewCoreMap (CM_MUF);
 
         // check for different grid
         if (!mitems[MI_GRD_TRO].set && !mitems[MI_GRD_LLG].set && !mitems[MI_GRD_MAI].set &&
@@ -764,24 +778,14 @@ void drawMapMenu()
             // do minimal restore if not restart map
             if (!full_redraw) {
                 if (rss_on) {
-                    scheduleRSSNow();
-                    if (DRAPScaleIsUp()) {
-                        eraseDRAPScale();       // erase where it is now
-                        drawDRAPScale();        // draw in new location
-                        drawMaidGridKey();      // tidy up
-                    }
+                    drawRSSBox();
                 } else {
-                    if (DRAPScaleIsUp())
-                        eraseDRAPScale();
                     eraseRSSBox();
-                    if (DRAPScaleIsUp())
-                        drawDRAPScale();
-                    drawMaidGridKey();
                 }
             }
         }
 
-        // restart map if it has changed
+        // restart map if enough has changed
         if (full_redraw)
             initEarthMap();
 

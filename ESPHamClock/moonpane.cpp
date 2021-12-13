@@ -156,7 +156,7 @@ void updateMoonPane (bool force)
 #define MP_DUR          (2*24*3600)                             // plot duration, seconds
 #define MP_DT           (MP_DUR/100)                            // plot step size, seconds
 #define MP_US           60                                      // micro step refined time, seconds
-#define MP_TO           (60*1000)                               // time out, millis
+#define MP_TO           (30*1000)                               // time out, millis
 #define MP_FC           RGB565(65,200,65)                       // fill color 
 #define MP_TT           7                                       // timeline marker thickness
 #define MP_E2Y(E)       ((uint16_t)(map_b.y+MP_TB + MP_PH*(M_PI_2F-(E))/M_PIF + 0.5F)) // elev to y coord

@@ -209,7 +209,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
                 tft.fillRect (px, py, w, h, co);
         } else {
             // other plots are connect-the-dots
-            uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-2)*(x[i]-minx)/dx);   // stay inside border
+            uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-3)*(x[i]-minx)/dx);   // stay inside border
             uint16_t py = (uint16_t)(box.y + TGAP + (box.h-BGAP-TGAP)*(1 - (y[i]-miny)/dy));
             if (i > 0 && (last_px != px || last_py != py))
                 tft.drawLine (last_px, last_py, px, py, color);            // avoid bug with 0-length lines
@@ -335,7 +335,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
  *      for each band and a summary line to be drawn across the bottom.
  *   2. we can also be called just to update annotation as indicated by bmp or cfg_str being NULL. In this
  *      case we only draw the band indicators showing prop_map according to busy with the others normal
- *      and we redraw the time line according to bc_utc.
+ *      and we redraw the time line according to bc_utc_tl.
  * bmp is a matrix of 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
  * we draw the matrix rotated so rows go up from 80 and cols start on the left at the current DE hour.
  * busy means <0 err, 0 idle, >0 active.
@@ -352,11 +352,12 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     #define TOP_B 27                                    // top border -- match VOACAP
     #define PGAP 5                                      // gap between title and plot
     #define PBOT_B 20                                   // plot bottom border -- room for config and time
-    #define PLEFT_B 18                                  // left border -- room for band
+    #define PLEFT_B 16                                  // left border -- room for band
+    #define PRIGHT_B 16                                 // right border -- room for freq
     #define PTOP_Y (box.y + TOP_B + PGAP)               // plot top y
     #define PBOT_Y (box.y+box.h-PBOT_B)                 // plot bottom y
     #define PLEFT_X (box.x + PLEFT_B)                   // plot left x
-    #define PRIGHT_X (box.x+box.w-2)                    // plot right x
+    #define PRIGHT_X (box.x+box.w-PRIGHT_B)             // plot right x
     #define PLOT_W (PRIGHT_X - PLEFT_X)                 // plot width
     #define PLOT_H (PBOT_Y - PTOP_Y)                    // plot height
     #define PCOL_W (PLOT_W/PLOT_COLS-1)                 // plot column width
@@ -371,25 +372,31 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     if (draw_all)
         prepPlotBox (box);
 
-    // label band names -- indicate current voacap map, if any
+    // label band names and freqs -- indicate current voacap map, if any
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(GRAY);
     for (int p_row = 0; p_row < PLOT_ROWS; p_row++) {
+
+        // find row and desired bg color
         uint16_t y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
-        if (p_row == prop_map) {
-            uint16_t rect_col = busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE);
-            tft.fillRect (box.x+1, y+1, PLEFT_B-4, PFONT_H+4, rect_col);
-        } else if (!draw_all) {
-            tft.fillRect (box.x+1, y+1, PLEFT_B-4, PFONT_H+4, RA8875_BLACK);
-        }
+        uint16_t rect_col = p_row == prop_map ? (busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE))
+                                              : RA8875_BLACK;
+
+        // background
+        tft.fillRect (box.x+1, y+1, PLEFT_B-2, PFONT_H+4, rect_col);
+        tft.fillRect (box.x+box.w-PRIGHT_B, y+1, PRIGHT_B-2, PFONT_H+4, rect_col);
+
+        // text
         tft.setCursor (box.x+2, y + 2);
         tft.print (propMap2Band((PropMapSetting)p_row));
+        tft.setCursor (box.x+box.w-PRIGHT_B+1, y + 2);
+        tft.printf ("%2.0f", propMap2MHz((PropMapSetting)p_row));
     }
 
     // find utc and DE hour now. these will be the matrix row in plot column 0.
     int utc_hour_now = hour (nowWO());
     int de_hour_now = hour (nowWO() + de_tz.tz_secs);
-    int hr_now = bc_utc ? utc_hour_now : de_hour_now;
+    int hr_now = bc_utc_tl ? utc_hour_now : de_hour_now;
 
     // erase timeline if not drawing all (because prepPlotBox() already erased everything if draw_all)
     uint16_t timeline_y = PBOT_Y+1;
@@ -399,7 +406,7 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     // label timeline local or utc wth local DE now always on left end
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setCursor (box.x+2, timeline_y);
-    if (bc_utc) {
+    if (bc_utc_tl) {
         // squeeze UTC label
         tft.setTextColor(GRAY);
         tft.print ((char)'U');

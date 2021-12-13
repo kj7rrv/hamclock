@@ -75,8 +75,14 @@ uint8_t night_on, names_on;
 // Azimuthal-Mercator flag
 uint8_t azm_on;
 
-// grid style
+// grid styles
 uint8_t mapgrid_choice;
+const char *grid_styles[MAPGRID_N] = {
+    "None",
+    "Tropics",
+    "Lat/Long",
+    "Maidenhead"
+};
 
 // info to display in the call sign GUI location -- the real call sign is always getCallsign()
 CallsignInfo cs_info;
@@ -87,7 +93,7 @@ static SBox version_b;                          // show or check version, just b
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
 SBox desrss_b, dxsrss_b;
 
-// screen lock or demo mode control -- size mush match HC_RUNMAN_W/H base size
+// screen lock or demo mode control -- size must match HC_RUNMAN_W/H base size
 SBox lkscrn_b = {216, 117, 13, 20};
 
 // WiFi touch control
@@ -117,6 +123,17 @@ uint32_t max_wd_dt;
 // whether flash crc is ok
 uint8_t flash_crc_ok;
 
+// name of each DETIME setting, for menu and set_defmt
+// N.B. must be in same order as DETIME_* 
+const char *detime_names[DETIME_N] = {
+    "All info",
+    "Simple analog",
+    "Calendar",
+    "Annotated analog",
+    "Digital 12 hour",
+    "Digital 24 hour",
+};
+
 /* free gpath.
  */
 void setDXPathInvalid()
@@ -133,14 +150,10 @@ static void drawVersion(bool force);
 static void checkTouch(void);
 static void drawUptime(bool force);
 static void drawWiFiInfo(void);
-static void drawScreenLock(void);
 static void toggleLockScreen(void);
 static void drawDEFormatMenu(void);
-static bool checkCallsignTouchFG (SCoord &b);
-static bool checkCallsignTouchBG (SCoord &b);
 static void eraseDXPath(void);
 static void eraseDXMarker(void);
-static uint16_t getNextColor(uint16_t current);
 static void drawRainbow (SBox &box);
 static void drawDXCursorPrefix (void);
 static void setDXPrefixOverride (const char *ovprefix);
@@ -499,8 +512,8 @@ void setup()
     rss_bnr_b.w = map_b.w;
     rss_bnr_b.h = 2*GB_H;
     NVReadUInt8 (NV_RSS_ON, &rss_on);
-    if (!NVReadUInt8 (NV_RSS_INTERVAL, &rss_interval)) {
-        rss_interval = RSS_MIN_INT;
+    if (!NVReadUInt8 (NV_RSS_INTERVAL, &rss_interval) || rss_interval < RSS_MIN_INT) {
+        rss_interval = RSS_DEF_INT;
         NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
     }
 
@@ -598,7 +611,7 @@ static void drawOneTimeDE()
 /* draw the one-time portion of dx_info either because we just booted or because
  * we are transitioning back from being in sat mode
  */
-static void drawOneTimeDX()
+void drawOneTimeDX()
 {
     if (dx_info_for_sat) {
         // sat
@@ -672,6 +685,10 @@ void initScreen()
     drawUptime(true);
     drawScreenLock();
 
+    // always close these so they will restart if open in any pane
+    closeDXCluster();
+    closeGimbal();
+
     // flush any stale touchs
     drainTouch();
 }
@@ -713,23 +730,29 @@ static void checkTouch()
         }
     }
 
+    // if get here TT is either TAP or HOLD
 
-    // check for lock screen first
+    // check lock first
     if (inBox (s, lkscrn_b)) {
-        if (getDemoMode()) {
-            // turn off, draw padlock
-            setDemoMode (false);
-            drawScreenLock();
-        } else {
-            // check for shutdown or toggle lock
-            if (tt == TT_HOLD) {
-                if (!screenIsLocked())
-                    shutdown();
-            } else {
+        if (screenIsLocked()) {
+            // if locked all you can do is unlock with a tap
+            if (tt == TT_TAP)
                 toggleLockScreen();
-                drawScreenLock();
+        } else {
+            // if unlocked HOLD always means shutdown else toggle
+            if (tt == TT_HOLD) {
+                shutdown();
+            } else {
+                if (getDemoMode())
+                    setDemoMode (false);
+                else
+                    toggleLockScreen();
             }
         }
+
+        // nothing else
+        drawScreenLock();
+        drainTouch();
         return;
     }
     if (screenIsLocked())
@@ -775,7 +798,7 @@ static void checkTouch()
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
             updateMoonPane(true);
-            newBC();
+            scheduleNewBC();
         }
         drawDEInfo();   // erase regardless
     } else if (!dx_info_for_sat && inBox (s, dx_tz.box)) {
@@ -799,8 +822,8 @@ static void checkTouch()
         show_lp = !show_lp;
         NVWriteUInt8 (NV_LP, show_lp);
         drawDXInfo ();
-        newBC();
-        newVOACAPMap(prop_map);
+        scheduleNewBC();
+        scheduleNewVOACAPMap(prop_map);
     } else if (inBox (s, desrss_b)) {
         // N.B. this must come before askde_b because it overlaps
         if (de_time_fmt == DETIME_INFO) {
@@ -841,9 +864,6 @@ static void checkTouch()
         drawBeaconBox();
         updateBeacons(true, true, true);
     } else if (checkSatNameTouch(s)) {
-        closeDXCluster();       // prevent inbound msgs from clogging network
-        closeGimbal();          // avoid dangling connection
-        hideClocks();
         dx_info_for_sat = querySatSelection();
         initScreen();
     } else if (dx_info_for_sat && inCircle (s, satpass_c)) {
@@ -928,7 +948,7 @@ void newDX (LatLong &ll, const char *grid, const char *ovprefix)
 
     // show DX weather and update band conditions if showing
     showDXWX();
-    newBC();
+    scheduleNewBC();
 
     // persist
     NVWriteFloat (NV_DX_LAT, dx_ll.lat_d);
@@ -998,26 +1018,87 @@ void newDE (LatLong &ll, const char *grid)
     showDEWX();                         // schedules moon update after linger if assigned to plot1
     if (findPaneChoiceNow(PLOT_CH_MOON) != PANE_NONE)
         updateMoonPane(true);           // only if not scheduled by showDEWX
-    newBC();
-    newVOACAPMap(prop_map);
+    scheduleNewBC();
+    scheduleNewVOACAPMap(prop_map);
     sendDXClusterDELLGrid();
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
+}
+
+/* return next color in basic series of primary colors with decent contrast.
+ */
+static uint16_t getNextColor (uint16_t current, uint16_t contrast)
+{
+    static uint16_t colors[] = {
+        RA8875_RED, RA8875_GREEN, RA8875_BLUE, RA8875_CYAN,
+        RA8875_MAGENTA, RA8875_YELLOW, RA8875_WHITE, RA8875_BLACK
+    };
+    #define NCOLORS NARRAY(colors)
+    
+    // find index of current color, ok if not found
+    unsigned current_i;
+    for (current_i = 0; current_i < NCOLORS; current_i++)
+        if (colors[current_i] == current)
+            break;
+
+    // scan forward from current skipping ones with poor contrast
+    uint16_t new_color;
+    for (unsigned cdiff_i = 1; cdiff_i < NCOLORS; cdiff_i++) {
+        new_color = colors[(current_i + cdiff_i) % NCOLORS];
+        if (new_color == contrast)
+            continue;
+        switch (contrast) {
+        case RA8875_RED:
+            if (new_color != RA8875_MAGENTA)
+                return (new_color);
+            break;
+        case RA8875_GREEN:
+            if (new_color != RA8875_CYAN)
+                return (new_color);
+            break;
+        case RA8875_BLUE:
+            if (new_color != RA8875_BLACK)
+                return (new_color);
+            break;
+        case RA8875_CYAN:
+            if (new_color != RA8875_GREEN)
+                return (new_color);
+            break;
+        case RA8875_MAGENTA:
+            if (new_color != RA8875_RED)
+                return (new_color);
+            break;
+        case RA8875_YELLOW:
+            if (new_color != RA8875_WHITE)
+                return (new_color);
+            break;
+        case RA8875_WHITE:
+            if (new_color != RA8875_YELLOW)
+                return (new_color);
+            break;
+        case RA8875_BLACK:
+            if (new_color != RA8875_BLUE)
+                return (new_color);
+            break;
+        }
+    }
+
+    // default 
+    return (colors[0]);
 }
  
 /* given a touch location check if Op wants to change callsign fg.
  * if so then update cs_info and return true else false.
  */
-static bool checkCallsignTouchFG (SCoord &b)
+bool checkCallsignTouchFG (SCoord &b)
 {
     SBox left_half = cs_info.box;
     left_half.w /=2;
 
     if (inBox (b, left_half)) {
         // change fg
-        do {
-            cs_info.fg_color = getNextColor (cs_info.fg_color);
-        } while (!cs_info.bg_rainbow && cs_info.fg_color == cs_info.bg_color);
+        uint16_t contrast = cs_info.bg_rainbow ? RA8875_BLACK : cs_info.bg_color;
+        cs_info.fg_color = getNextColor (cs_info.fg_color, contrast);
         return (true);
     }
     return (false);
@@ -1027,48 +1108,26 @@ static bool checkCallsignTouchFG (SCoord &b)
 /* given a touch location check if Op wants to change callsign bg.
  * if so then update cs_info and return true else false.
  */
-static bool checkCallsignTouchBG (SCoord &b)
+bool checkCallsignTouchBG (SCoord &b)
 {
     SBox right_half = cs_info.box;
     right_half.w /=2;
     right_half.x += right_half.w;
 
     if (inBox (b, right_half)) {
-        // change bg cycling through rainbow when current color is white
+        // change bg, cycling through rainbow when current color is white
         if (cs_info.bg_rainbow) {
             cs_info.bg_rainbow = false;
-            do {
-                cs_info.bg_color = getNextColor (cs_info.bg_color);
-            } while (cs_info.bg_color == cs_info.fg_color);
+            cs_info.bg_color = getNextColor (cs_info.bg_color, cs_info.fg_color);
+        } else if (cs_info.bg_color == RA8875_WHITE) {
+            cs_info.bg_rainbow = true;
+            // leave cs_info.bg_color to resume color scan when rainbow turned off
         } else {
-            // TODO: can never turn on Rainbow if FG is white because BG will never be set to white
-            if (cs_info.bg_color == RA8875_WHITE) {
-                cs_info.bg_rainbow = true;
-            } else {
-                do {
-                    cs_info.bg_color = getNextColor (cs_info.bg_color);
-                } while (cs_info.bg_color == cs_info.fg_color);
-            }
+            cs_info.bg_color = getNextColor (cs_info.bg_color, cs_info.fg_color);
         }
         return (true);
     }
     return (false);
-}
-
-/* return next color in basic set of primary colors.
- */
-static uint16_t getNextColor(uint16_t current)
-{
-    static uint16_t colors[] = {
-        RA8875_RED, RA8875_GREEN, RA8875_BLUE, RA8875_CYAN,
-        RA8875_MAGENTA, RA8875_YELLOW, RA8875_WHITE, RA8875_BLACK
-    };
-    #define NCOLORS NARRAY(colors)
-
-    for (uint8_t i = 0; i < NCOLORS; i++)
-        if (colors[i] == current)
-            return (colors[(i+1)%NCOLORS]);
-    return (colors[0]);         // default if current is unknown
 }
 
 /* erase the DX marker by restoring map
@@ -1547,7 +1606,7 @@ bool overAnySymbol (const SCoord &s)
  */
 bool DRAPScaleIsUp(void)
 {
-    return (core_map == CM_DRAP && prop_map == PROP_MAP_OFF);
+    return (prop_map == PROP_MAP_OFF && (core_map == CM_DRAP || core_map == CM_MUF));
 }
 
 
@@ -1688,7 +1747,7 @@ static void toggleLockScreen()
 
 /* draw the lock screen symbol according to demo and/or NV_LKSCRN_ON.
  */
-static void drawScreenLock()
+void drawScreenLock()
 {
     tft.fillRect (lkscrn_b.x, lkscrn_b.y, lkscrn_b.w, lkscrn_b.h, RA8875_BLACK);
 
@@ -1722,12 +1781,12 @@ static void drawDEFormatMenu()
     // menu of each DETIME_*
     #define _MI_INDENT  5
     MenuItem mitems[DETIME_N] = {
-        {MENU_1OFN, de_time_fmt == DETIME_INFO,        _MI_INDENT, "All info"},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      _MI_INDENT, "Simple analog"},
-        {MENU_1OFN, de_time_fmt == DETIME_CAL,         _MI_INDENT, "Calendar"},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, _MI_INDENT, "Annotated analog"},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  _MI_INDENT, "Digital 12 hour"},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  _MI_INDENT, "Digital 24 hour"},
+        {MENU_1OFN, de_time_fmt == DETIME_INFO,        _MI_INDENT, detime_names[DETIME_INFO]},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      _MI_INDENT, detime_names[DETIME_ANALOG]},
+        {MENU_1OFN, de_time_fmt == DETIME_CAL,         _MI_INDENT, detime_names[DETIME_CAL]},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, _MI_INDENT, detime_names[DETIME_ANALOG_DTTM]},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  _MI_INDENT, detime_names[DETIME_DIGITAL_12]},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  _MI_INDENT, detime_names[DETIME_DIGITAL_24]},
     };
 
     // create a box for the menu

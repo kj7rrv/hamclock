@@ -260,8 +260,6 @@ static void drawDigitalClock (time_t delocal_t)
 
     // prep
     tft.fillRect (de_info_b.x, de_info_b.y, de_info_b.w, de_info_b.h-1, RA8875_BLACK);
-    selectFontStyle (BOLD_FONT, LARGE_FONT);
-    tft.setTextColor (DE_COLOR);
 
     // format time
     char buf[50];
@@ -275,8 +273,10 @@ static void drawDigitalClock (time_t delocal_t)
     }
 
     // print time
+    selectFontStyle (BOLD_FONT, LARGE_FONT);
     uint16_t bw = getTextWidth(buf);
     tft.setCursor (de_info_b.x+(de_info_b.w-bw)/2-4, de_info_b.y + de_info_b.h/2);
+    tft.setTextColor (DE_COLOR);
     tft.print (buf);
 
     // other info
@@ -287,6 +287,8 @@ static void drawDigitalClock (time_t delocal_t)
     bl += snprintf (buf+bl, sizeof(buf)-bl, "%d, %d", dy, yr);
     if (de_time_fmt == DETIME_DIGITAL_12)
         bl += snprintf (buf+bl, sizeof(buf)-bl, " %s", hr < 12 ? "AM" : "PM");
+    else
+        bl += snprintf (buf+bl, sizeof(buf)-bl, " 24h");
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     bw = getTextWidth(buf);
     tft.setCursor (de_info_b.x + (de_info_b.w-bw)/2, de_info_b.y + 4*de_info_b.h/5);
@@ -824,10 +826,9 @@ bool checkClockTouch (SCoord &s, TouchType tt)
     drawUTCButton();
 
     // restart systems if likely effected by time change
-    int32_t dt = abs (utc_offset - off0);
+    int dt = abs (utc_offset - off0);
     if (dt > 5*60) {
         initWiFiRetry();        // this will also update moon
-        initEarthMap();
     } else {
         updateMoonPane (false);
     }
