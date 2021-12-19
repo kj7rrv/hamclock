@@ -19,6 +19,8 @@
 #define BHDRSZ (COREHDRSZ+HDRVER)                       // total header size
 #define BPERBMPPIX 2                                    // bytes per BMP pixel
 
+// box in which to draw map scales
+SBox mapscale_b;
 
 // current CoreMap designation even if not currently being shown, if any
 CoreMaps core_map = CM_NONE;                            // current core map, if any
@@ -34,6 +36,7 @@ const char *map_styles[CM_N] = {
     "Terrain",
     "DRAP",
     "MUF",
+    "Aurora",
 };
 
 // prop and muf style names
@@ -763,7 +766,7 @@ static bool installFileMaps()
         resetWatchdog();
 
         // confirm core_map is one of the file styles
-        if (core_map != CM_COUNTRIES && core_map != CM_TERRAIN && core_map != CM_DRAP)
+        if (core_map != CM_COUNTRIES && core_map != CM_TERRAIN && core_map != CM_DRAP && core_map !=CM_AURORA)
             fatalError (_FX("Bug! style not a file map %d"), core_map);        // does not return
 
         // create names and titles
@@ -864,6 +867,15 @@ void initCoreMaps()
             core_map = CM_TERRAIN;
         }
 }
+
+
+/* return whether the map scale is (or should be) visible now
+ */
+bool mapScaleIsUp(void)
+{
+    return (prop_map == PROP_MAP_OFF && (core_map == CM_DRAP || core_map == CM_MUF || core_map == CM_AURORA));
+}
+
 
 /* produce a listing of the map storage directory.
  * N.B. return malloced array and malloced name -- caller must free()
@@ -968,17 +980,19 @@ int propMap2Band (PropMapSetting pms)
         }
 }
 
-/* draw the DRAP frequency scale at drap_b.
- * N.B. we move drap_b depending on rss_on
+
+/* draw the appropriate scale at mapscale_b depending on core_map.
+ * N.B. we move mapscale_b depending on rss_on
  */
-void drawDRAPScale()
+void drawMapScale()
 {
-    // color scale to match NOAA palette
     typedef struct {
-        uint8_t mhz;
+        int value;
         uint32_t color;
-    } DRAPScale;
-    static DRAPScale scale[] = {
+    } MapScalePoint;
+
+    // CM_DRAP and CM_MUF
+    static const MapScalePoint d_scale[] = {  // see fetchDRAP.pl and fetchVOACAP-MUF.pl
         {0,  0x000000},
         {4,  0x4E138A},
         {9,  0x001EF5},
@@ -989,69 +1003,102 @@ void drawDRAPScale()
         {35, 0xE93323},
     };
 
+    // CM_AURORA
+    static const MapScalePoint a_scale[] = {  // see fetchAurora.pl
+        {0,   0x282828},
+        {25,  0x00FF00},
+        {50,  0xFFFF00},
+        {75,  0xEA6D2D},
+        {100, 0xFF0000},
+    };
+
+    const MapScalePoint *msp;
+    unsigned n_scale;
+    unsigned n_labels;
+    const char *title;
+
+    switch (core_map) {
+    case CM_MUF:        // fallthru
+    case CM_DRAP:
+        msp = d_scale;
+        n_scale = NARRAY(d_scale);
+        n_labels = 8;
+        title = "MHz";
+        break;
+    case CM_AURORA:
+        msp = a_scale;
+        n_scale = NARRAY(a_scale);
+        n_labels = 5;
+        title = "% Chance";
+        break;
+    default:
+        fatalError ("Bug! drawMapScale core_map %d", (int)core_map);
+        return;         // lint
+    }
+
     resetWatchdog();
 
     // geometry setup
-    #define _DRS_N_SCALE NARRAY(scale)                                  // n scale entries
-    #define _DRS_X0     drap_b.x                                        // left x
-    #define _DRS_X1     (drap_b.x + drap_b.w)                           // right x
-    #define _DRS_DX     (_DRS_X1-_DRS_X0)                               // width
-    #define _DRS_MIN    scale[0].mhz                                    // min freq
-    #define _DRS_MAX    scale[_DRS_N_SCALE-1].mhz                       // max freq
-    #define _DRS_DM     (_DRS_MAX-_DRS_MIN)                             // freq span
-    #define _DRS_M2X(m) (_DRS_X0 + _DRS_DX*((m)-_DRS_MIN)/_DRS_DM)      // convert MHz to x
-    #define _DRS_NL     (_DRS_DM/5U)                                    // n labels
-    #define _DRS_PRY    (drap_b.y+5U)                                   // label y
+    #define _MS_X0     mapscale_b.x                             // left x
+    #define _MS_X1     (mapscale_b.x + mapscale_b.w)            // right x
+    #define _MS_DX     (_MS_X1-_MS_X0)                          // width
+    #define _MS_MINV   msp[0].value                             // min value
+    #define _MS_MAXV   msp[n_scale-1].value                     // max value
+    #define _MS_DV     (_MS_MAXV-_MS_MINV)                      // value span
+    #define _MS_V2X(v) (_MS_X0 + _MS_DX*((v)-_MS_MINV)/_MS_DV)  // convert value to x
+    #define _MS_PRY    (mapscale_b.y+5U)                        // text y
 
-    // set drap_b.y above RSS if on else at the bottom
-    drap_b.y = rss_on ? rss_bnr_b.y - drap_b.h: map_b.y + map_b.h - drap_b.h;
+    // set mapscale_b.y above RSS if on else at the bottom
+    mapscale_b.y = rss_on ? rss_bnr_b.y - mapscale_b.h: map_b.y + map_b.h - mapscale_b.h;
 
     // draw smoothly-interpolated color scale
-    for (unsigned i = 1; i < _DRS_N_SCALE; i++) {
-        uint8_t dm = scale[i].mhz - scale[i-1].mhz;
-        uint8_t r0 = scale[i-1].color >> 16;
-        uint8_t g0 = (scale[i-1].color >> 8) & 0xFF;
-        uint8_t b0 = scale[i-1].color & 0xFF;
-        uint8_t r1 = scale[i].color >> 16;
-        uint8_t g1 = (scale[i].color >> 8) & 0xFF;
-        uint8_t b1 = scale[i].color & 0xFF;
-        for (uint16_t x = _DRS_M2X(scale[i-1].mhz); x <= _DRS_M2X(scale[i].mhz); x++) {
-            if (x < drap_b.x + drap_b.w) {
+    for (unsigned i = 1; i < n_scale; i++) {
+        uint8_t dm = msp[i].value - msp[i-1].value;
+        uint8_t r0 = msp[i-1].color >> 16;
+        uint8_t g0 = (msp[i-1].color >> 8) & 0xFF;
+        uint8_t b0 = msp[i-1].color & 0xFF;
+        uint8_t r1 = msp[i].color >> 16;
+        uint8_t g1 = (msp[i].color >> 8) & 0xFF;
+        uint8_t b1 = msp[i].color & 0xFF;
+        for (uint16_t x = _MS_V2X(msp[i-1].value); x <= _MS_V2X(msp[i].value); x++) {
+            if (x < mapscale_b.x + mapscale_b.w) {
                 // macros can overflow slightlty
-                float mhz = (float)_DRS_DM*(x - _DRS_X0)/_DRS_DX;
-                float frac = fminf(fmaxf((mhz - scale[i-1].mhz)/dm,0),1);
+                float value = (float)_MS_DV*(x - _MS_X0)/_MS_DX;
+                float frac = fminf(fmaxf((value - msp[i-1].value)/dm,0),1);
                 uint16_t new_c = RGB565(r0+frac*(r1-r0), g0+frac*(g1-g0), b0+frac*(b1-b0));
-                tft.drawLine (x, drap_b.y, x, drap_b.y+drap_b.h-1, 1, new_c);
+                tft.drawLine (x, mapscale_b.y, x, mapscale_b.y+mapscale_b.h-1, 1, new_c);
             }
         }
     }
 
-    // draw labels inside drap_b
+    // draw labels inside mapscale_b
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    for (unsigned i = 0; i <= _DRS_NL; i++) {
-        // evenly spaced but keep ends just inside drap_b
-        uint16_t x = i == 0 ? _DRS_X0+2 : (i == _DRS_NL ? _DRS_X1-12 : _DRS_X0 + _DRS_DX*i/_DRS_NL - 7);
-        tft.setCursor (x, _DRS_PRY);
-        tft.setTextColor (i < _DRS_NL/2 ? RA8875_WHITE : RA8875_BLACK);
-        int mhz_print = _DRS_MIN + _DRS_DM*i/_DRS_NL;
-        tft.print (mhz_print);
+    for (unsigned i = 0; i <= n_labels; i++) {
+        // evenly spaced but keep ends just inside mapscale_b
+        uint16_t x = i == 0 ? _MS_X0+2 : (i == n_labels ? _MS_X1-18 : _MS_X0 + _MS_DX*i/n_labels - 7);
+        tft.setCursor (x, _MS_PRY);
+        tft.setTextColor (i < n_labels/2 ? RA8875_WHITE : RA8875_BLACK);
+        int value = _MS_MINV + _MS_DV*i/n_labels;
+        tft.print (value);
     }
+
+    // draw title
     tft.setTextColor (RA8875_WHITE);
-    tft.setCursor (_DRS_X0 + _DRS_DX/(2*_DRS_NL)-10, _DRS_PRY);
-    tft.print ("MHz");
+    tft.setCursor (_MS_X0 + _MS_DX/(2*n_labels)-10, _MS_PRY);
+    tft.print (title);
 }
 
 
-/* erase the DRAP scale in drap_b.
+/* erase mapscale_b by redrawing map within
  * N.B. beware globals being temporarily changed -- see comments
  */
-void eraseDRAPScale ()
+void eraseMapScale ()
 {
     resetWatchdog();
 
-    // save then move drap_b off the map so drawMapCoord doesn't skip it
-    SBox db = drap_b;
-    drap_b.y = 0;
+    // save then move mapscale_b off the map so drawMapCoord doesn't skip it
+    SBox db = mapscale_b;
+    mapscale_b.y = 0;
 
     // save whether rss is on too because it is skipped also
     uint8_t rs = rss_on;
@@ -1069,6 +1116,6 @@ void eraseDRAPScale ()
     }
 
     // restore
-    drap_b = db;
+    mapscale_b = db;
     rss_on = rs;
 }

@@ -240,14 +240,14 @@ static BoolPrompt bool_pr[N_BPR] = {
     // page 1 -- index 0
 
     {0, {10,  R2Y(1), 140, PR_H}, {160, R2Y(1), 40,  PR_H}, false, "IP Geolocate?", "No", "Yes"},
-    {0, {260, R2Y(1),  60, PR_H}, {330, R2Y(1), 40,  PR_H}, false, "gpsd?", "No", NULL},
-    {0, {10,  R2Y(2),  70, PR_H}, {110, R2Y(2), 50,  PR_H}, false, "WiFi?", "No", NULL},
+    {0, {260, R2Y(1),  60, PR_H}, {330, R2Y(1), 30,  PR_H}, false, "gpsd?", "No", NULL},
+    {0, {10,  R2Y(2),  70, PR_H}, {110, R2Y(2), 30,  PR_H}, false, "WiFi?", "No", NULL},
     {0, {10,  R2Y(4), 120, PR_H}, {140, R2Y(4), 90,  PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
     {0, {260, R2Y(4), 150, PR_H}, {410, R2Y(4), 40,  PR_H}, false, "Demo mode?", "No", "Yes"},
 
     // page 2 -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {110, R2Y(0), 110, PR_H}, false, "Cluster?", "No", NULL},
+    {1, {10,  R2Y(0),  90, PR_H},  {110, R2Y(0), 30, PR_H}, false, "Cluster?", "No", NULL},
     {1, {665, R2Y(0),  70, PR_H},  {735, R2Y(0), 60,  PR_H}, false, "Map?", "No", NULL},         // map on/off
     {1, {735, R2Y(0),   0, PR_H},  {735, R2Y(0), 60,  PR_H}, false, NULL, "Prefix", "Call"},     // how
                                                                 // prefix must be the false state
@@ -922,7 +922,9 @@ static bool tappedStringPrompt (SCoord &s, StringPrompt **spp)
 {
     for (uint8_t i = 0; i < N_SPR; i++) {
         StringPrompt *sp = &string_pr[i];
-        if (stringIsRelevant(sp) && inBox (s, sp->v_box)) {
+        if (!stringIsRelevant(sp))
+            continue;
+        if ((sp->p_str && inBox (s, sp->p_box)) || (sp->v_str && inBox (s, sp->v_box))) {
             *spp = sp;
             return (true);
         }
@@ -931,7 +933,7 @@ static bool tappedStringPrompt (SCoord &s, StringPrompt **spp)
 }
 
 /* find whether s is in any relevant bool object.
- * require s within prompt else within state if none.
+ * require s within prompt or state box.
  * if so return true and set *bpp, else return false.
  */
 static bool tappedBool (SCoord &s, BoolPrompt **bpp)
@@ -940,7 +942,8 @@ static bool tappedBool (SCoord &s, BoolPrompt **bpp)
         BoolPrompt *bp = &bool_pr[i];
         if (!boolIsRelevant(bp))
             continue;
-        if ((bp->p_str && inBox (s, bp->p_box)) || (!bp->p_str && inBox (s, bp->s_box))) {
+        if ((bp->p_str && inBox (s, bp->p_box))
+               || (((bp->state && bp->t_str) || (!bp->state && bp->f_str)) && inBox (s, bp->s_box))) {
             *bpp = bp;
             return (true);
         }

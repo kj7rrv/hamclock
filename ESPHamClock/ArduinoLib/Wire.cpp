@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 
 #include "Arduino.h"
 #include "Wire.h"
@@ -72,13 +73,18 @@ TwoWire::~TwoWire()
  */
 bool TwoWire::openConnection()
 {
-	const char filename[] = "/dev/i2c-1";
+	static const char filename[] = "/dev/i2c-1";
         if (i2c_fd < 0) {
             i2c_fd = ::open(filename, O_RDWR);
-            if (i2c_fd < 0)
+            if (i2c_fd < 0) {
                 printf ("I2C: %s: %s\n", filename, strerror(errno));
-            else if (verbose)
+            } else if (::flock (i2c_fd, LOCK_EX|LOCK_NB) < 0) {
+                printf ("I2C: %s: in use by another process\n", filename);
+                close (i2c_fd);
+                i2c_fd = -1;
+            } else if (verbose) {
                 printf ("I2C: %s open ok\n", filename);
+            }
         } else if (verbose)
             printf ("I2C: %s already open\n", filename);
 
@@ -413,13 +419,18 @@ TwoWire::~TwoWire()
  */
 bool TwoWire::openConnection()
 {
-	const char filename[] = "/dev/iic0";
+	static const char filename[] = "/dev/iic0";
         if (i2c_fd < 0) {
             i2c_fd = ::open(filename, O_RDWR);
-            if (i2c_fd < 0)
+            if (i2c_fd < 0) {
                 printf ("I2C: %s: %s\n", filename, strerror(errno));
-            else if (verbose)
+            } else if (::flock (i2c_fd, LOCK_EX|LOCK_NB) < 0) {
+                printf ("I2C: %s: in use by another process\n", filename);
+                close (i2c_fd);
+                i2c_fd = -1;
+            } else if (verbose) {
                 printf ("I2C: %s open ok\n", filename);
+            }
         } else if (verbose)
             printf ("I2C: %s already open\n", filename);
 

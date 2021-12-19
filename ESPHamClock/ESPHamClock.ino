@@ -66,9 +66,6 @@ SCircle satpass_c;
 SBox rss_bnr_b;
 uint8_t rss_on;
 
-// DRAP scale
-SBox drap_b;
-
 // whether to shade night or show place names
 uint8_t night_on, names_on;
 
@@ -533,12 +530,12 @@ void setup()
     maidlblright_b.w = MH_RC_W;
     maidlblright_b.h = map_b.h;
 
-    // position the DRAP scale
-    // N.B. drap_b.y is set dynamically in drawDRAPScale() depending on rss_on
-    drap_b.x = map_b.x;
-    drap_b.w = map_b.w;
-    drap_b.h = map_b.h/20;
-    drap_b.y = rss_on ? rss_bnr_b.y - drap_b.h: map_b.y + map_b.h - drap_b.h;
+    // position the map scale
+    // N.B. mapscale_b.y is set dynamically in drawMapScale() depending on rss_on
+    mapscale_b.x = map_b.x;
+    mapscale_b.w = map_b.w;
+    mapscale_b.h = map_b.h/20;
+    mapscale_b.y = rss_on ? rss_bnr_b.y - mapscale_b.h: map_b.y + map_b.h - mapscale_b.h;
 
     // check for saved satellite
     dx_info_for_sat = initSatSelection();
@@ -1578,18 +1575,18 @@ static bool overMaidKey (const SCoord &s)
                         && (inBox(s,maidlbltop_b) || inBox(s,maidlblright_b)) );
 }
 
-/* return whether coordinate s is over an active DRAP scale
+/* return whether coordinate s is over an active map scale
  */
-static bool overDRAPScale (const SCoord &s)
+static bool overMapScale (const SCoord &s)
 {
-    return (DRAPScaleIsUp() && inBox(s,drap_b));
+    return (mapScaleIsUp() && inBox(s,mapscale_b));
 }
 
 /* return whether coordinate s is over a usable map location
  */
 bool overMap (const SCoord &s)
 {
-    return (inBox(s, map_b) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overDRAPScale(s));
+    return (inBox(s, map_b) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overMapScale(s));
 }
 
 /* return whether coordinate s is over any symbol
@@ -1599,14 +1596,7 @@ bool overAnySymbol (const SCoord &s)
     return (inCircle(s, de_c) || inCircle(s, dx_c) || inCircle(s, deap_c)
                 || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
-                || overDRAPScale(s));
-}
-
-/* return whether the DRAP scale is (or should be) visible now
- */
-bool DRAPScaleIsUp(void)
-{
-    return (prop_map == PROP_MAP_OFF && (core_map == CM_DRAP || core_map == CM_MUF));
+                || overMapScale(s));
 }
 
 
@@ -1618,8 +1608,8 @@ void drawAllSymbols(bool erase_too)
     updateClocks(false);
     resetWatchdog();
 
-    if (DRAPScaleIsUp())
-        drawDRAPScale();
+    if (mapScaleIsUp())
+        drawMapScale();
     if (!overRSS(sun_c.s))
         drawSun();
     if (!overRSS(moon_c.s))

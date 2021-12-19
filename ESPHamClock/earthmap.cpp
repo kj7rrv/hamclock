@@ -209,26 +209,6 @@ void drawDECalTime(bool center)
     tft.print(buf);
 }
 
-/* draw some fake stars for the azimuthal projection
- */
-void drawAzmStars()
-{
-    #define N_AZMSTARS 200
-    uint8_t n_stars = 0;
-    while (n_stars < N_AZMSTARS) {
-        int32_t x = random (map_b.w);
-        int32_t y = random (map_b.h);
-        int32_t dx = (x > map_b.w/2) ? (x - 3*map_b.w/4) : (x - map_b.w/4);
-        int32_t dy = y - map_b.h/2;
-        if (dx*dx + dy*dy > map_b.w*map_b.w/16) {
-            uint16_t c = random(256);
-            c = RGB565(c,c,c);
-            tft.drawPixel (map_b.x+x, map_b.y+y, c);
-            n_stars++;
-        }
-    }
-}
-
 /* draw the Maidenhead grid key around the map if appropriate.
  */
 static void drawMaidGridKey()
@@ -239,12 +219,12 @@ static void drawMaidGridKey()
 
     resetWatchdog();
 
-    // keep right stripe above RSS and DRAP scale, if on
+    // keep right stripe above RSS and map scale, if on
     uint16_t right_h = map_b.h;
     if (rss_on)
         right_h = rss_bnr_b.y - map_b.y;
-    if (DRAPScaleIsUp())
-        right_h = drap_b.y - map_b.y;           // drap_b.y already above rss if on
+    if (mapScaleIsUp())
+        right_h = mapscale_b.y - map_b.y;           // drap_b.y already above rss if on
 
     // prep background stripes
     tft.fillRect (map_b.x, map_b.y, map_b.w, MH_TR_H, RA8875_BLACK);                            // top
@@ -359,15 +339,15 @@ static void drawLLGrid (int lat_step, int lng_step)
             uint16_t bot_y = map_b.y+map_b.h-1;
             if (rss_on)
                 bot_y = rss_bnr_b.y - 1;
-            if (DRAPScaleIsUp())
-                bot_y = drap_b.y - 1;                   // drap_b.y already above rss if on
+            if (mapScaleIsUp())
+                bot_y = mapscale_b.y - 1;                   // drap_b.y already above rss if on
             tft.drawLine (s.x, top_y, s.x, bot_y, i == n_lngstep/2 ? GRIDC00 : GRIDC);
         }
 
         // horizontal
         for (int i = 1; i < n_latstep; i++) {
             uint16_t y = map_b.y + i*map_b.h/n_latstep;
-            if ((!rss_on || y < rss_bnr_b.y) && (!DRAPScaleIsUp() || y < drap_b.y)) {
+            if ((!rss_on || y < rss_bnr_b.y) && (!mapScaleIsUp() || y < mapscale_b.y)) {
                 uint16_t left_x = y < view_btn_b.y + view_btn_b.h ? view_btn_b.x + view_btn_b.w : map_b.x;
                 tft.drawLine (left_x, y, map_b.x+map_b.w-1, y, i == n_latstep/2 ? GRIDC00 : GRIDC);
             }
@@ -541,6 +521,26 @@ static void drawMouseLoc()
 
 #endif // _IS_UNIX
 
+/* draw some fake stars for the azimuthal projection
+ */
+static void drawAzmStars()
+{
+    #define N_AZMSTARS 100
+    uint8_t n_stars = 0;
+    while (n_stars < N_AZMSTARS) {
+        int32_t x = random (map_b.w);
+        int32_t y = random (map_b.h);
+        int32_t dx = (x > map_b.w/2) ? (x - 3*map_b.w/4) : (x - map_b.w/4);
+        int32_t dy = y - map_b.h/2;
+        if (dx*dx + dy*dy > map_b.w*map_b.w/16) {
+            uint16_t c = random(256);
+            c = RGB565(c,c,c);
+            tft.drawPixel (map_b.x+x, map_b.y+y, c);
+            n_stars++;
+        }
+    }
+}
+
 static void updateCircumstances()
 {
     time_t utc = nowWO();
@@ -563,8 +563,8 @@ static void updateCircumstances()
 }
 
 /* draw the map view menu button.
- * adjust position depending on whether we are drawing the maidenhead labels.
- * adjust view_pick_b to match.
+ * N.B. adjust position depending on whether we are drawing the maidenhead labels and
+ *    adjust view_pick_b to match.
  */
 static void drawMapMenuButton()
 {
@@ -575,11 +575,12 @@ static void drawMapMenuButton()
     else
         view_pick_b.y = view_btn_b.y = map_b.y;
 
-    // 1 pixel inside so onMap() gives 2-pixel thick sat footprints some room
+    // 1 pixel inside so overMap() gives 2-pixel thick sat footprints some room
     tft.fillRect (view_btn_b.x, view_btn_b.y, view_btn_b.w-1, view_btn_b.h-1, RA8875_BLACK);
     tft.drawRect (view_btn_b.x, view_btn_b.y, view_btn_b.w-1, view_btn_b.h-1, RA8875_WHITE);
 
-    const char *str = "View";
+    char style_mem[NV_MAPSTYLE_LEN];
+    const char *str = getMapStyle (style_mem);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     uint16_t str_w = getTextWidth(str);
     tft.setCursor (view_btn_b.x+(view_btn_b.w-str_w)/2, view_btn_b.y+2);
@@ -594,8 +595,8 @@ void eraseRSSBox ()
     resetWatchdog();
 
     // drap scale will move if up so erase where it is
-    if (DRAPScaleIsUp())
-        eraseDRAPScale();
+    if (mapScaleIsUp())
+        eraseMapScale();
 
     // erase entire banner if azm mode because redrawing the map will miss the corners
     if (azm_on)
@@ -610,21 +611,21 @@ void eraseRSSBox ()
     }
 
     // draw drap in new location
-    if (DRAPScaleIsUp())
-        drawDRAPScale();
+    if (mapScaleIsUp())
+        drawMapScale();
 
     // restore maid key
     drawMaidGridKey();
 }
 
-/* arrange to draw the RSS box after it has been off a while, including DRAP and Maid key if necessary
+/* arrange to draw the RSS box after it has been off a while, including mapscale and Maid key if necessary
  */
 void drawRSSBox()
 {
     scheduleRSSNow();
-    if (DRAPScaleIsUp()) {
-        eraseDRAPScale();       // erase where it is now
-        drawDRAPScale();        // draw in new location
+    if (mapScaleIsUp()) {
+        eraseMapScale();       // erase where it is now
+        drawMapScale();        // draw in new location
         drawMaidGridKey();      // tidy up
     }
 }
@@ -634,7 +635,7 @@ void drawRSSBox()
 void drawMapMenu()
 {
     enum MIName {                               // menu items -- N.B. must be in same order as mitems[]
-        MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_PRP,
+        MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_AUR, MI_STY_PRP,
         MI_GRD_TTL, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI,
         MI_PRJ_TTL, MI_PRJ_AZM, MI_PRJ_MER,
         MI_RSS_YES,
@@ -652,6 +653,7 @@ void drawMapMenu()
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_TERRAIN]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_DRAP]},
             {MENU_1OFN, false, SEC_INDENT, map_styles[CM_MUF]},
+            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_AURORA]},
             {MENU_IGNORE, false, SEC_INDENT, NULL},     // MI_STY_PRP: see below
         {MENU_LABEL, false, PRI_INDENT, "Grid:"},
             {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_TROPICS]},
@@ -677,6 +679,7 @@ void drawMapMenu()
         mitems[MI_STY_TER].set = core_map == CM_TERRAIN;
         mitems[MI_STY_DRA].set = core_map == CM_DRAP;
         mitems[MI_STY_MUF].set = core_map == CM_MUF;
+        mitems[MI_STY_AUR].set = core_map == CM_AURORA;
     } else {
         // add propmap item and select
         mitems[MI_STY_PRP].type = MENU_1OFN;
@@ -726,6 +729,8 @@ void drawMapMenu()
             scheduleNewCoreMap (CM_DRAP);
         else if (mitems[MI_STY_MUF].set && (prop_turned_off || core_map != CM_MUF))
             scheduleNewCoreMap (CM_MUF);
+        else if (mitems[MI_STY_AUR].set && (prop_turned_off || core_map != CM_AURORA))
+            scheduleNewCoreMap (CM_AURORA);
 
         // check for different grid
         if (!mitems[MI_GRD_TRO].set && !mitems[MI_GRD_LLG].set && !mitems[MI_GRD_MAI].set &&
@@ -832,7 +837,7 @@ void initEarthMap()
     scheduleRSSNow();
     updateClocks(true);
 
-    // draw map view button over map
+    // draw map view button
     drawMapMenuButton();
 
     // reset any pending great circle path
@@ -911,9 +916,9 @@ void drawMoreEarth()
         drew_symbols = true;
     }
 
-    // overlay any sat lines on this row except drap scale
-    // N.B. can't use !inBox(moremap_s, drap_b) because .x is off the map now
-    if (!DRAPScaleIsUp() || moremap_s.y < drap_b.y || moremap_s.y > drap_b.y + drap_b.h) {
+    // overlay any sat lines on this row except map scale
+    // N.B. can't use !inBox(moremap_s, mapscale_b) because .x is off the map now
+    if (!mapScaleIsUp() || moremap_s.y < mapscale_b.y || moremap_s.y > mapscale_b.y + mapscale_b.h) {
         drawSatPointsOnRow (moremap_s.y);
         drawSatNameOnRow (moremap_s.y);
     }

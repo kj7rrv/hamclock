@@ -8,7 +8,7 @@ class WiFiServer {
     public:
 
 	WiFiServer(int newport);
-	void begin();
+	bool begin(char ynot[]);
 	WiFiClient available();
         void stop();
 

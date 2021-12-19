@@ -52,7 +52,7 @@ typedef enum {
     DEMO_N,
 
 } DemoChoice;
-static bool runDemoChoice (DemoChoice choice, bool &slow);
+static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[]);
 
 // persistent server for listening for remote connections
 static WiFiServer *remoteServer;
@@ -1273,27 +1273,51 @@ static bool setWiFiTitle (WiFiClient client, char line[])
  */
 static bool setWiFiDemo (WiFiClient client, char line[])
 {
-    int choice = atoi(line);
-
     char buf[100];
-    if (choice < 0) {
-        setDemoMode(false);
-        drawScreenLock();
-        sprintf (buf, "Demo mode off\n");
-    } else if (choice < DEMO_N) {
-        bool slow;
-        bool ok = runDemoChoice ((DemoChoice)choice, slow);
-        sprintf (buf, "Demo %d %s %s\n", choice, ok ? "Ok" : "No", slow ? "slow" : "");
+    int choice;
+
+    // crack
+    if (strcmp (line, "on") == 0) {
         setDemoMode(true);
         drawScreenLock();
+        strcpy (buf, "Demo mode on\n");
+        Serial.print (buf);
+    } else if (strcmp (line, "off") == 0) {
+        setDemoMode(false);
+        drawScreenLock();
+        strcpy (buf, "Demo mode off\n");
+        Serial.print (buf);
+    } else if (sscanf (line, "n=%d", &choice) == 1) {
+        if (choice >= 0 && choice < DEMO_N) {
+            // turn on if not already
+            if (!getDemoMode()) {
+                setDemoMode(true);
+                drawScreenLock();
+            }
+
+            // run it
+            bool slow;
+            if (runDemoChoice ((DemoChoice)choice, slow, buf)) {
+                strcat (buf, "\n");
+                Serial.print (buf);
+            } else {
+                strcpy (line, buf);
+                return (false);
+            }
+        } else {
+            sprintf (line, _FX("Demo are 0 .. %d"), DEMO_N-1);
+            return (false);
+        }
     } else {
-        sprintf (line, "Demo choices are 0 .. %d", DEMO_N-1);
+        strcpy (line, garbcmd);
         return (false);
     }
 
+    // ack
     startPlainText (client);
     client.print (buf);
 
+    // good
     return (true);
 }
 
@@ -2000,16 +2024,18 @@ static bool setWiFiPane (WiFiClient client, char line[])
         return (false);
     }
 
-    // build new rotset
-    plot_rotset[pp] = 0;
-    for (int i = 0; i < n_pc; i++)
-        plot_rotset[pp] |= (1 << pc[i]);
-
-    // show first and persist
+    // show first in list
     if (!setPlotChoice (pp, pc[0])) {
         sprintf (line, _FX("%s failed for pane %d"), plot_names[pc[0]], pane_1);
         return (false);
     }
+
+    // worked so build new rotset
+    plot_rotset[pp] = 0;
+    for (int i = 0; i < n_pc; i++)
+        plot_rotset[pp] |= (1 << pc[i]);
+
+    // persist
     logPaneRotSet(pp, pc[0]);
     savePlotOps();
 
@@ -2432,7 +2458,7 @@ static const CmdTble command_table[] PROGMEM = {
 #endif // defined(_IS_UNIX)
 
     // the following entries are not shown with help -- update N_UNDOCCMD if change
-    { "set_demo?",          setWiFiDemo,           "-1 off else force choice number" },
+    { "set_demo?",          setWiFiDemo,           "on|off|n=N" },
 };
 
 #define N_CMDTABLE      NARRAY(command_table)           // n entries in command table
@@ -2477,8 +2503,11 @@ static bool runWebserverCommand (WiFiClient client, bool ro, char *command)
 
                 // run handler, passing string starting right after the command, reply with error if trouble.
                 PCTF funp = CT_FUNP(ctp);
-                if (!(*funp)(client, args))
-                    sendHTTPError (client, args);
+                if (!(*funp)(client, args)) {
+                    StackMalloc errmsg(strlen(args)+20);
+                    snprintf (errmsg.getMem(), errmsg.getSize(), "Error: %s", args);
+                    sendHTTPError (client, errmsg.getMem());
+                }
 
                 // command found, even if it reported an error
                 return (true);
@@ -2576,7 +2605,7 @@ void checkWebServer()
     }
 }
 
-void initWebServer()
+bool initWebServer(char ynot[])
 {
     resetWatchdog();
 
@@ -2586,7 +2615,16 @@ void initWebServer()
     }
 
     remoteServer = new WiFiServer(svr_port);
-    remoteServer->begin();
+
+    #if defined(_IS_ESP8266)
+        // Arduino version returns void
+        (void) ynot;
+        remoteServer->begin();
+        return (true);
+    #else
+        return (remoteServer->begin(ynot));
+    #endif
+
 }
 
 /* like readCalTouch() but also checks for remote web server touch.
@@ -2624,19 +2662,19 @@ void runNextDemoCommand()
     if (!getDemoMode())
         return;
 
-    // otherwise only occasionally
+    // wait for :15 or :45 unless previous was slow on ESP, and beware checking again during same second
+    static bool prev_slow;
+    static time_t prev_t0;
+    time_t t0 = nowWO();
+    int t060 = t0 % 60;
     #if defined(_IS_ESP8266)
-        #define DEMO_DT  35000                // demo update interval, ms, long enuf for new Merc map draw
-        #define ESPX_DT  60000                // allow extra time for ESP Azm map or prop/muf map, ms
+        if ( t0 == prev_t0 || ! (t060 == 15 || (t060 == 45 && !prev_slow)) )
+            return;
     #else
-        #define DEMO_DT  30000                // demo update interval, ms
-        #define ESPX_DT  0
+        if ( t0 == prev_t0 || ! (t060 == 15 || t060 == 45) )
+            return;
     #endif
-
-    // wait for a few minutes after start or every DEMO_DT
-    static uint32_t demo_t;
-    if (millis() < 120000 || !timesUp (&demo_t, DEMO_DT))
-        return;
+    prev_t0 = t0;
 
     // list of probabilities for each DemoChoice, must sum to 100
     static const uint8_t item_probs[DEMO_N] = {
@@ -2698,31 +2736,32 @@ void runNextDemoCommand()
         prev_choice = choice;
 
         // run choice
-        bool slow;
-        ok = runDemoChoice (choice, slow);
-        if (slow)
-            demo_t += ESPX_DT;
+        char msg[100];
+        ok = runDemoChoice (choice, prev_slow, msg);
+        Serial.println (msg);
 
     } while (!ok);
 }
 
-/* handy helper to consistently log a demo command
+/* handy helper to consistently format a demo command response into buf[]
  */
-static void logDemo (bool ok, int n, const char *fmt, ...)
+static void demoMsg (bool ok, int n, char buf[], const char *fmt, ...)
 {
-    char msg[128];
+    // format the message
+    char msg[100];
     va_list ap;
     va_start (ap, fmt);
     vsnprintf (msg, sizeof(msg), fmt, ap);
     va_end (ap);
 
-    Serial.printf ("Demo %d @ %ld %s: %s\n", n, getUptime(NULL,NULL,NULL,NULL), ok ? "Ok" : "No", msg);
+    // save with boilerplate to buf
+    sprintf (buf, _FX("Demo %d @ %ld %s: %s"), n, getUptime(NULL,NULL,NULL,NULL), ok ? "Ok" : "No", msg);
 }
 
 /* run the given DemoChoice. 
  * return whether appropriate and successful and, if so, whether it is likely to be slower than usual.
  */
-static bool runDemoChoice (DemoChoice choice, bool &slow)
+static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
 {
     // assume not
     slow = false;
@@ -2735,7 +2774,11 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         {
             PlotChoice pc = getAnyAvailableChoice();
             ok = setPlotChoice (PANE_1, pc);
-            logDemo (ok, choice, "Pane 1 %s", plot_names[pc]);
+            if (ok) {
+                plot_rotset[PANE_1] = (1 << pc);   // no auto rotation
+                savePlotOps();
+            }
+            demoMsg (ok, choice, msg, _FX("Pane 1 %s"), plot_names[pc]);
         }
         break;
 
@@ -2743,7 +2786,11 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         {
             PlotChoice pc = getAnyAvailableChoice();
             ok = setPlotChoice (PANE_2, pc);
-            logDemo (ok, choice, "Pane 2 %s", plot_names[pc]);
+            if (ok) {
+                plot_rotset[PANE_2] = (1 << pc);   // no auto rotation
+                savePlotOps();
+            }
+            demoMsg (ok, choice, msg, _FX("Pane 2 %s"), plot_names[pc]);
         }
         break;
 
@@ -2751,7 +2798,11 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         {
             PlotChoice pc = getAnyAvailableChoice();
             ok = setPlotChoice (PANE_3, pc);
-            logDemo (ok, choice, "Pane 3 %s", plot_names[pc]);
+            if (ok) {
+                plot_rotset[PANE_3] = (1 << pc);   // no auto rotation
+                savePlotOps();
+            }
+            demoMsg (ok, choice, msg, _FX("Pane 3 %s"), plot_names[pc]);
         }
         break;
 
@@ -2763,7 +2814,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         else
             eraseRSSBox();
         ok = true;
-        logDemo (ok, choice, "RSS %s", rss_on ? "On" : "Off");
+        demoMsg (ok, choice, msg, "RSS %s", rss_on ? "On" : "Off");
         break;
 
     case DEMO_NEWDX:
@@ -2774,7 +2825,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             ll.lng_d = random(359)-180;
             newDX (ll, NULL, NULL);
             ok = true;
-            logDemo (ok, choice, "NewDX %g %g", ll.lat_d, ll.lng_d);
+            demoMsg (ok, choice, msg, _FX("NewDX %g %g"), ll.lat_d, ll.lng_d);
         }
         break;
 
@@ -2785,7 +2836,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         if (azm_on)
             slow = true;
         ok = true;
-        logDemo (ok, choice, "Proj %s", azm_on ? "Azm" : "Mer");
+        demoMsg (ok, choice, msg, "Proj %s", azm_on ? "Azm" : "Mer");
         break;
 
     case DEMO_MAPNIGHT:
@@ -2795,7 +2846,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         if (azm_on)
             slow = true;
         ok = true;
-        logDemo (ok, choice, "Night %s", night_on ? "On" : "Off");
+        demoMsg (ok, choice, msg, "Night %s", night_on ? "On" : "Off");
         break;
 
     case DEMO_MAPGRID:
@@ -2805,7 +2856,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         if (azm_on)
             slow = true;
         ok = true;
-        logDemo (ok, choice, "Grid %s", grid_styles[mapgrid_choice]);
+        demoMsg (ok, choice, msg, "Grid %s", grid_styles[mapgrid_choice]);
         break;
 
     case DEMO_MAPSTYLE:
@@ -2813,7 +2864,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         scheduleNewCoreMap (core_map);
         slow = true;
         ok = true;
-        logDemo (ok, choice, "Map %s", map_styles[core_map]);
+        demoMsg (ok, choice, msg, "Map %s", map_styles[core_map]);
         break;
 
     case DEMO_NCDXF:
@@ -2822,7 +2873,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         drawBeaconBox();
         updateBeacons(true, true, true);
         ok = true;
-        logDemo (ok, choice, "NCDXF %s", brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
+        demoMsg (ok, choice, msg, "NCDXF %s", brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
         break;
 
     case DEMO_VOACAP:
@@ -2835,6 +2886,8 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             time_t noaaspw_age, xray_age, path_age;
             getSpaceWeather (ssn,flux,kp,swind,drap,noaaspw,noaaspw_age,xray,xray_age,path,path_age);
             if (path_age < 2*3600) {
+
+                // pick band with best propagation
                 float best_rel = 0;
                 int best_band = 0;
                 for (int i = 0; i < PROP_MAP_N; i++) {
@@ -2843,17 +2896,18 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
                         best_band = i;
                     }
                 }
+
                 // engage
                 scheduleNewVOACAPMap ((PropMapSetting)best_band);
                 slow = true;
                 ok = true;
 
                 char ps[NV_MAPSTYLE_LEN];
-                logDemo (ok, choice, "VOACAP %s", getMapStyle(ps));
+                demoMsg (ok, choice, msg, "VOACAP %s", getMapStyle(ps));
             } else {
                 // too old to use
                 ok = false;
-                logDemo (ok, choice, "VOACAP too old");
+                demoMsg (ok, choice, msg, _FX("VOACAP too old"));
             }
         }
         break;
@@ -2867,7 +2921,8 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
             drawCallsign (false);   // just foreground
             ok = true;
-            logDemo (ok, choice, "call FG 0x%04X", cs_info.fg_color);
+            demoMsg (ok, choice, msg, _FX("call FG 0x%02X %02X %02X"), RGB565_R(cs_info.fg_color),
+                                    RGB565_G(cs_info.fg_color), RGB565_B(cs_info.fg_color));
         }
         break;
 
@@ -2882,9 +2937,10 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             drawCallsign (true);    // fg and bg
             ok = true;
             if (cs_info.bg_rainbow)
-                logDemo (ok, choice, "call BG Rainbow");
+                demoMsg (ok, choice, msg, _FX("call BG Rainbow"));
             else
-                logDemo (ok, choice, "call BG 0x%04X", cs_info.bg_color);
+                demoMsg (ok, choice, msg, _FX("call BG 0x%02X %02X %02X"), RGB565_R(cs_info.bg_color),
+                                    RGB565_G(cs_info.bg_color), RGB565_B(cs_info.bg_color));
         }
         break;
 
@@ -2893,7 +2949,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
         drawDEInfo();
         ok = true;
-        logDemo (ok, choice, "DE fmt %s", detime_names[de_time_fmt]);
+        demoMsg (ok, choice, msg, "DE fmt %s", detime_names[de_time_fmt]);
         break;
 
     case DEMO_ONAIR:
@@ -2901,7 +2957,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             static bool toggle;
             setOnAir (toggle = !toggle);
             ok = true;
-            logDemo (ok, choice, "ONAIR %s", toggle ? "On" : "Off");
+            demoMsg (ok, choice, msg, "ONAIR %s", toggle ? "On" : "Off");
         }
         break;
 
@@ -2912,7 +2968,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
             if (getSatAzElNow (name, &az, &el, &range, &rate, &raz, &saz, &rhrs, &shrs)) {
                 // sat assigned, turn off
                 ok = setSatFromName("none");
-                logDemo (ok, choice, "Sat none");
+                demoMsg (ok, choice, msg, "Sat none");
             } else {
                 // assign new sat
                 static const char *sats[] = {
@@ -2921,7 +2977,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
                 static int next_sat;
                 next_sat = (next_sat + 1) % NARRAY(sats);
                 ok = setSatFromName(sats[next_sat]);
-                logDemo (ok, choice, "Sat %s", sats[next_sat]);
+                demoMsg (ok, choice, msg, "Sat %s", sats[next_sat]);
             }
             slow = true;
         }
@@ -2932,8 +2988,9 @@ static bool runDemoChoice (DemoChoice choice, bool &slow)
         if (ok) {
             drawMoonElPlot();
             initEarthMap();
+            slow = true;                // allow for time spent in drawMoonElPlot
         }
-        logDemo (ok, choice, "EME");
+        demoMsg (ok, choice, msg, "EME");
         break;
 
     case DEMO_N:

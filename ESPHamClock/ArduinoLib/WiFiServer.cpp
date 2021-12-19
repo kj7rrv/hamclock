@@ -36,7 +36,9 @@ WiFiServer::WiFiServer(int newport)
         if (_trace_server) printf ("WiFiSvr: new instance on port %d\n", port);
 }
 
-void WiFiServer::begin()
+/* N.B. Arduino version returns void and no ynot
+ */
+bool WiFiServer::begin(char ynot[])
 {
         struct sockaddr_in serv_socket;
         int sfd;
@@ -47,7 +49,7 @@ void WiFiServer::begin()
         /* make socket endpoint */
         if ((sfd = ::socket (AF_INET, SOCK_STREAM, 0)) < 0) {
             printf ("socket: %s\n", strerror(errno));
-	    return;
+	    return (false);
 	}
 
         /* bind to given port for any IP address */
@@ -56,35 +58,35 @@ void WiFiServer::begin()
         serv_socket.sin_addr.s_addr = htonl (INADDR_ANY);
         serv_socket.sin_port = htons ((unsigned short)port);
         if (::setsockopt(sfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) < 0) {
-            printf ("setsockopt: %s\n", strerror(errno));
+            sprintf (ynot, "setsockopt: %s", strerror(errno));
 	    close (sfd);
-	    return;
+	    return (false);
 	}
         if (::bind(sfd,(struct sockaddr*)&serv_socket,sizeof(serv_socket)) < 0) {
-            printf ("bind: %s\n", strerror(errno));
+            sprintf (ynot, "bind: %s", strerror(errno));
 	    close (sfd);
-	    return;
+	    return (false);
 	}
 
 	/* set non-blocking */
         int flags = ::fcntl(sfd, F_GETFL, 0);
         if (flags < 0) {
-	    printf ("fcntl(GETL): %s\n", strerror(errno));
+	    sprintf (ynot, "fcntl(GETL): %s", strerror(errno));
 	    close (sfd);
-	    return;
+	    return (false);
 	}
         flags |= O_NONBLOCK;
         if (::fcntl(sfd, F_SETFL, flags) < 0) {
-	    printf ("fcntl(SETL): %s\n", strerror(errno));
+	    sprintf (ynot, "fcntl(SETL): %s", strerror(errno));
 	    close (sfd);
-	    return;
+	    return (false);
 	}
 
         /* willing to accept connections with a backlog of 5 pending */
         if (::listen (sfd, 50) < 0) {
-            printf ("listen: %s\n", strerror(errno));
+            sprintf (ynot, "listen: %s", strerror(errno));
 	    close (sfd);
-	    return;
+	    return (false);
 	}
 
         /* handle write errors inline */
@@ -93,6 +95,7 @@ void WiFiServer::begin()
         /* ok */
         if (_trace_server) printf ("WiFiSvr: new server socket %d\n", sfd);
         socket = sfd;
+        return (true);
 }
 
 WiFiClient WiFiServer::available()

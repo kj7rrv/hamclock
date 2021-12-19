@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 
 #include <bcm_host.h>
 
@@ -158,12 +159,17 @@ bool GPIO::readPin (uint8_t p)
  */
 bool GPIO::mapGPIOAddress(char ynot[])
 {
-        // access kernel physical address
-        const char gpiofilefile[] = "/dev/gpiomem";
-        int fd = open (gpiofilefile, O_RDWR|O_SYNC);
+        // acquire exclusive access to kernel physical address
+        static const char gpiofilefile[] = "/dev/gpiomem";
+        int fd = ::open (gpiofilefile, O_RDWR|O_SYNC);
         if (fd < 0) {
             sprintf (ynot, "%s: %s", gpiofilefile, strerror(errno));
             return (false);
+        }
+        if (::flock (fd, LOCK_EX|LOCK_NB) < 0) {
+            sprintf (ynot, "%s: file in use", gpiofilefile);
+            close (fd);
+            return(false);
         }
 
         /* mmap access */

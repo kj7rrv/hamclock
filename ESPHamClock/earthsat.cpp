@@ -120,13 +120,14 @@ void strncpySubChar (char to_str[], const char from_str[], char to_char, char fr
 
 #include <pthread.h>
 
-/* thread that repeatedly reads the value pointed to by a passed int pointer as a desired rate in Hz
+static volatile int gpio_rate_hz;              // set my main thread, read by gpioThread
+
+/* thread that repeatedly reads gpio_rate as a desired rate in Hz
  * and controls GPIO pin SATALARM_GPIO
  */
 static void * gpioThread (void *vp)
 {
-    // passed pointer to value containing desired Hz
-    int *rate_hz_p = (int *)vp;
+    (void) vp;
 
     // attach to GPIO, init output
     GPIO &gpio = GPIO::getGPIO();
@@ -137,18 +138,17 @@ static void * gpioThread (void *vp)
     useconds_t delay_us = 100000;               // N.B. sets maximum rate that can be achieved
     unsigned n_delay = 0;
 
-    // forever check and implement what *rate_hz_p wants
+    // forever check and implement what gpio_rate_hz wants
     for(;;) {
         usleep (delay_us);
-        int rate_hz = *rate_hz_p;
-        if (rate_hz < 0) {
+        if (gpio_rate_hz < 0) {
             gpio.setLo (SATALARM_GPIO);
             n_delay = 0;
-        } else if (rate_hz == 0) {
+        } else if (gpio_rate_hz == 0) {
             gpio.setHi (SATALARM_GPIO);
             n_delay = 0;
         } else {
-            unsigned rate_period_us = 1000000U/rate_hz;
+            unsigned rate_period_us = 1000000U/gpio_rate_hz;
             if (++n_delay*delay_us >= rate_period_us) {
                 gpio.setHiLo (SATALARM_GPIO, !gpio.readPin(SATALARM_GPIO));
                 n_delay = 0;
@@ -170,19 +170,16 @@ static void risetAlarm (int rate)
 
     // init helper thread if first time.
     static bool gpiot_started;
-    static int my_rate;
     if (!gpiot_started) {
+        gpiot_started = true;   // dont repeat even if thread err
         pthread_t tid;
-        int e = pthread_create (&tid, NULL, gpioThread, &my_rate);
-        if (e != 0) {
+        int e = pthread_create (&tid, NULL, gpioThread, NULL);
+        if (e != 0)
             Serial.printf ("GPIO thread err: %s\n", strerror(e));
-            return;
-        }
-        gpiot_started = true;
     }
 
     // tell helper thread what we want done
-    my_rate = rate;
+    gpio_rate_hz = rate;
 }
 
 #else
@@ -593,7 +590,7 @@ static void setSatMapNameLoc()
 
         // start in south pacific
         #define _SP_LNG (-160)          // South Pacific longitude
-        #define _SP_LAT (-30)           // " latitude above RSS and DRAP
+        #define _SP_LAT (-30)           // " latitude above RSS and map scales
         SCoord name_l_s, name_r_s;      // left and right box candidate location
         ll2s (deg2rad(_SP_LAT), deg2rad(_SP_LNG), name_l_s, 0);
         name_r_s.x = name_l_s.x + map_name_b.w;
@@ -1573,12 +1570,15 @@ bool setSatFromTLE (const char *name, const char *t1, const char *t2)
     return (true);
 }
 
-/* return whether there is a valid sat in NV
+/* called once to return whether there is a valid sat in NV.
+ * also a good time to insure alarm pin is off.
  */
 bool initSatSelection()
 {
     NVReadString (NV_SATNAME, sat_name);
     return (SAT_NAME_IS_SET());
+
+    risetAlarm(-1);
 }
 
 /* return whether new_pass has been set since last call, and always reset.

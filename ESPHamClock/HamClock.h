@@ -418,9 +418,8 @@ extern SBox view_pick_b;                // map view pick box
 extern SBox dx_maid_b;                  // dx maidenhead pick
 extern SBox de_maid_b;                  // de maidenhead pick
 extern SBox lkscrn_b;                   // screen lock icon button
-extern SBox drap_b;                     // DRAP scale
 
-#define VIEWBTN_W       40              // map View button width
+#define VIEWBTN_W       60              // map View button width
 #define VIEWBTN_H       13              // map View button height
 #define MOUSELOC_H      62              // height of mouse loc box
 
@@ -539,7 +538,6 @@ extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
 extern void drawCallsign (bool all);
 extern void logState (void);
-extern bool DRAPScaleIsUp(void);
 extern const char *hc_version;
 
 
@@ -1011,12 +1009,15 @@ typedef enum {
     CM_TERRAIN,
     CM_DRAP,
     CM_MUF,
+    CM_AURORA,
     CM_N
 } CoreMaps;
 #define CM_NONE CM_N                    // handy alias meaning none active
 
 extern CoreMaps core_map;               // current map, if any
 extern const char *map_styles[CM_N];    // core map style names
+
+extern SBox mapscale_b;                 // map scale box
 
 extern void initCoreMaps(void);
 extern bool installFreshMaps(void);
@@ -1025,8 +1026,9 @@ extern int propMap2Band (PropMapSetting pms);
 extern bool getMapDayPixel (uint16_t row, uint16_t col, uint16_t *dayp);
 extern bool getMapNightPixel (uint16_t row, uint16_t col, uint16_t *nightp);
 extern const char *getMapStyle (char s[]);
-extern void drawDRAPScale(void);
-extern void eraseDRAPScale(void);
+extern void drawMapScale(void);
+extern void eraseMapScale(void);
+extern bool mapScaleIsUp(void);
 
 
 typedef struct {
@@ -1520,7 +1522,7 @@ extern int32_t getTZ (const LatLong &ll);
  *
  */
 
-extern void initWebServer(void);
+extern bool initWebServer(char ynot[]);
 extern void checkWebServer(void);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];

@@ -66,10 +66,9 @@ static time_t map_time;                         // effective time when map was l
 
 // core map update intervals
 #define DRAPMAP_INTERVAL     (5*60)             // polling interval, secs
-#define MUFMAP_INTERVAL      (60*60)            // polling interval, secs
 #define OTHER_MAPS_INTERVAL  (60*60)            // polling interval, secs
 
-// DRAP info, new data posted every few minutes
+// DRAP plot info, new data posted every few minutes
 #define DRAPPLOT_INTERVAL    (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
 #define DRAPPLOT_COLOR  RA8875_RED              // loading message text color
 static const char drap_page[] = "/ham/HamClock/drap/stats.txt";
@@ -414,10 +413,16 @@ static void initWiFi (bool verbose)
 
     // start web server for remote commands
     if (WiFi.status() == WL_CONNECTED || !strcmp (mac, mac_lh)) {
-        tftMsg (verbose, 0, _FX("Start web server"));
-        initWebServer();
+        char buf[200];
+        if (!initWebServer(buf)) {
+            Serial.printf ("Web server on port %d failed: %s\n", svr_port, buf);
+            strcpy (buf, _FX("Web server failed"));
+        } else {
+            snprintf (buf, sizeof(buf), _FX("Start web server on port %d"), svr_port);
+        }
+        tftMsg (verbose, 0, buf);
     } else {
-        tftMsg (verbose, 0, _FX("No web server"));
+        tftMsg (verbose, 0, _FX("No network for server"));
     }
 
     // retrieve cities
@@ -645,8 +650,6 @@ static void checkMap(void)
                 // schedule next refresh
                 if (core_map == CM_DRAP)
                     next_map = now() + DRAPMAP_INTERVAL;
-                else if (core_map == CM_MUF)
-                    next_map = now() + MUFMAP_INTERVAL;
                 else
                     next_map = now() + OTHER_MAPS_INTERVAL;
 
@@ -2021,15 +2024,15 @@ out:
 static bool updateDRAPPlot(const SBox &box)
 {
     // collect 24 hours of max value found in each 10 minute interval
-    #define     DRAP_INTERVAL   (10*60)                         // interval, seconds
-    #define     DRAP_PERIOD     (24*3600)                       // total period, seconds
-    #define     DRAP_NPLOT      (DRAP_PERIOD/DRAP_INTERVAL)     // number of points to plot
-    #define     DRAP_MAXMISSI   (DRAP_NPLOT/10)                 // max allowed missing intervals
-    #define     DRAP_MINGOODI   (DRAP_NPLOT-3600/DRAP_INTERVAL) // min index with good data
-    StackMalloc x_mem(DRAP_NPLOT*sizeof(float));                // x array
-    StackMalloc y_mem(DRAP_NPLOT*sizeof(float));                // y array
-    float *x = (float *) x_mem.getMem();                        // hours ago, [0] oldest
-    float *y = (float *) y_mem.getMem();                        // max MHz in interval
+    #define     _DRAP_INTERVAL   (10*60)                                // interval, seconds
+    #define     _DRAP_PERIOD     (24*3600)                              // total period, seconds
+    #define     _DRAP_NPLOT      (_DRAP_PERIOD/_DRAP_INTERVAL)          // number of points to plot
+    #define     _DRAP_MAXMISSI   (_DRAP_NPLOT/10)                       // max allowed missing intervals
+    #define     _DRAP_MINGOODI   (_DRAP_NPLOT-3600/_DRAP_INTERVAL)      // min index with good data
+    StackMalloc x_mem(_DRAP_NPLOT*sizeof(float));                       // x array
+    StackMalloc y_mem(_DRAP_NPLOT*sizeof(float));                       // y array
+    float *x = (float *) x_mem.getMem();                                // hours ago, [0] oldest
+    float *y = (float *) y_mem.getMem();                                // max MHz in interval
     WiFiClient drap_client;
     char line[80];
     bool ok = false;
@@ -2073,11 +2076,11 @@ static bool updateDRAPPlot(const SBox &box)
 
             // skip if crazy new or too old
             int age = t_now - utime;
-            if (utime > t_now || age > DRAP_PERIOD)
+            if (utime > t_now || age > _DRAP_PERIOD)
                 continue;
 
             // find which array index this is and hours ago for x coord
-            int xi = DRAP_NPLOT*(DRAP_PERIOD - age)/DRAP_PERIOD;
+            int xi = _DRAP_NPLOT*(_DRAP_PERIOD - age)/_DRAP_PERIOD;
             x[xi] = age/(-3600.0F);                             // hours ago
 
             // set in array if larger
@@ -2095,9 +2098,9 @@ static bool updateDRAPPlot(const SBox &box)
         // check for missing data
         int n_missing = 0;
         int maxi_good = 0;
-        for (int i = 0; i < DRAP_NPLOT; i++) {
+        for (int i = 0; i < _DRAP_NPLOT; i++) {
             if (x[i] == 0) {
-                x[i] = (DRAP_PERIOD - i*DRAP_PERIOD/DRAP_NPLOT)/-3600.0F;
+                x[i] = (_DRAP_PERIOD - i*_DRAP_PERIOD/_DRAP_NPLOT)/-3600.0F;
                 if (i > 0)
                     y[i] = y[i-1];                      // fill with previous
                 Serial.printf (_FX("DRAP: filling missing interval %d at age %g days to %g\n"), i, x[i], y[i]);
@@ -2108,20 +2111,20 @@ static bool updateDRAPPlot(const SBox &box)
         }
 
         // check for too much missing or newest too old
-        if (n_missing > DRAP_MAXMISSI) {
+        if (n_missing > _DRAP_MAXMISSI) {
             plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data too sparse"));
             goto out;
         }
-        if (maxi_good < DRAP_MINGOODI) {
+        if (maxi_good < _DRAP_MINGOODI) {
             plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data too old"));
             goto out;
         }
 
         // ok, plot it
-        if (plotXY (box, x, y, DRAP_NPLOT, _FX("Hours"), _FX("DRAP,  max MHz"), DRAPPLOT_COLOR,
-                                                            0, 0, y[DRAP_NPLOT-1])) {
+        if (plotXY (box, x, y, _DRAP_NPLOT, _FX("Hours"), _FX("DRAP,  max MHz"), DRAPPLOT_COLOR,
+                                                            0, 0, y[_DRAP_NPLOT-1])) {
             // capture for getSpaceWeather()
-            drap_spw = y[DRAP_NPLOT-1];
+            drap_spw = y[_DRAP_NPLOT-1];
             drap_update = t_now;
         } else {
             plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: no data"));
