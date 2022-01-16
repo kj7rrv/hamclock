@@ -65,7 +65,11 @@ uint8_t bc_utc_tl;                              // label band conditions timelin
 static time_t map_time;                         // effective time when map was loaded
 
 // core map update intervals
+#if defined(_IS_ESP8266)
+#define DRAPMAP_INTERVAL     (15*60)            // polling interval, secs -- save FLASH writes
+#else
 #define DRAPMAP_INTERVAL     (5*60)             // polling interval, secs
+#endif // _IS_ESP8266
 #define OTHER_MAPS_INTERVAL  (60*60)            // polling interval, secs
 
 // DRAP plot info, new data posted every few minutes
@@ -711,10 +715,10 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         // show menu of available power choices
         #define N_POW 4
         MenuItem mitems[N_POW] = {
-            {MENU_1OFN, bc_power == 1, 5, "1 watt"},
-            {MENU_1OFN, bc_power == 10, 5, "10 watts"},
-            {MENU_1OFN, bc_power == 100, 5, "100 watts"},
-            {MENU_1OFN, bc_power == 1000, 5, "1000 watts"},
+            {MENU_1OFN, bc_power == 1,    1, 5, "1 watt"},
+            {MENU_1OFN, bc_power == 10,   1, 5, "10 watts"},
+            {MENU_1OFN, bc_power == 100,  1, 5, "100 watts"},
+            {MENU_1OFN, bc_power == 1000, 1, 5, "1000 watts"},
         };
 
         SBox menu_b;
@@ -1523,6 +1527,11 @@ void sendUserAgent (WiFiClient &client)
             map_style[0] = 'N';
         }
 
+        // kx3 baud else gpio on/off
+        int gpio = getKX3Baud();
+        if (gpio == 0)
+            gpio = GPIOOk();
+
         // combine rss_on and rss_local
         int rss_code = rss_on + 2*rss_local;
 
@@ -1531,11 +1540,11 @@ void sendUserAgent (WiFiClient &client)
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb_mode, dx_info_for_sat, rss_code, useMetricUnits(),
-            getNBMEConnected(), getKX3Baud(), found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
+            getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, use_fb0,
             // new for LV5:
             (int)as, getCenterLng(), doy, names_on, getDemoMode(), (int)getSWEngineState(cd_timer), 
-            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, 0, 0);
+            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, (int)getDateFormat(), 0);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
@@ -2331,7 +2340,7 @@ static bool updateSTEREO_A (const SBox &box)
     // overlay rotation terminator
     if (file_ok) {
         #define SASEP_NSEGS 30          // number of line segments
-        #define SASEP_COLOR RA8875_BLACK
+        #define SASEP_COLOR RA8875_RED
         const float csep = cosf (deg2rad(sep));                 // cos angle past limb
         const uint16_t img_w = box.w - 10;                      // apparent image width
         const uint16_t img_r2 = img_w*img_w/4;                  // " sqr radius

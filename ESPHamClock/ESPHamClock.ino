@@ -28,7 +28,6 @@ static SBox askde_b;                    // de lat/lng dialog
 SBox de_title_b;                        // de title location
 SBox map_b;                             // entire map, pixels only, not border
 SBox view_btn_b;                        // map View button
-SBox view_pick_b;                       // map View pick box
 SBox dx_maid_b;                         // dx maindenhead 
 SBox de_maid_b;                         // de maindenhead 
 
@@ -85,6 +84,8 @@ const char *grid_styles[MAPGRID_N] = {
 CallsignInfo cs_info;
 static const char on_air_msg[] = "ON THE AIR";  // used by setOnAir()
 static SBox version_b;                          // show or check version, just below call
+static SBox wifi_b;                             // wifi info
+static bool rssi_ignore;                        // allow op to ignore low wifi power
 #define CSINFO_DROP     3                       // gap below cs_info
 
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
@@ -362,17 +363,17 @@ void setup()
     view_btn_b.w = VIEWBTN_W;
     view_btn_b.h = VIEWBTN_H;
 
-    // pick box is wider and taller to avoid accidentally setting a close DX
-    view_pick_b.x = view_btn_b.x;
-    view_pick_b.y = view_btn_b.y;               // gets adjusted if showing grid label
-    view_pick_b.w = 2*view_btn_b.w;
-    view_pick_b.h = 3*view_btn_b.h;
-
     // redefine callsign for main screen
     cs_info.box.x = 0;
     cs_info.box.y = 0;
     cs_info.box.w = 230;
     cs_info.box.h = 52;
+
+    // wifi box
+    wifi_b.x = cs_info.box.x + 68;              // a little past Uptime
+    wifi_b.y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
+    wifi_b.w = 114;
+    wifi_b.h = 8;
 
     // version box
     version_b.w = 46;
@@ -534,7 +535,7 @@ void setup()
     // N.B. mapscale_b.y is set dynamically in drawMapScale() depending on rss_on
     mapscale_b.x = map_b.x;
     mapscale_b.w = map_b.w;
-    mapscale_b.h = map_b.h/20;
+    mapscale_b.h = 10;
     mapscale_b.y = rss_on ? rss_bnr_b.y - mapscale_b.h: map_b.y + map_b.h - mapscale_b.h;
 
     // check for saved satellite
@@ -620,7 +621,7 @@ void drawOneTimeDX()
         // title
         selectFontStyle (BOLD_FONT, SMALL_FONT);
         tft.setTextColor(DX_COLOR);
-        tft.setCursor(dx_info_b.x, dx_tz.box.y+18);
+        tft.setCursor(dx_info_b.x, dx_info_b.y + 30);
         tft.print(F("DX:"));
 
         // save/restore dx_c so it can be used for marker in box
@@ -759,7 +760,7 @@ static void checkTouch()
 
     // check all touch locations, ones that can be over map checked first
     LatLong ll;
-    if (inBox (s, view_pick_b)) {
+    if (inBox (s, view_btn_b)) {
         // set flag to draw map menu at next opportunity
         mapmenu_pending = true;
     } else if (checkSatMapTouch (s)) {
@@ -767,8 +768,8 @@ static void checkTouch()
         displaySatInfo();
         eraseDXPath();                  // declutter to emphasize sat track
         drawAllSymbols(false);
-    } else if (s2ll (s, ll)) {
-        // subpixel values are meaningless
+    } else if (!overViewBtn(s, DX_R) && s2ll (s, ll)) {
+        // new DE or DX.
         roundLL (ll);
         if (tt == TT_HOLD) {
             // map hold: update DE
@@ -863,8 +864,8 @@ static void checkTouch()
     } else if (checkSatNameTouch(s)) {
         dx_info_for_sat = querySatSelection();
         initScreen();
-    } else if (dx_info_for_sat && inCircle (s, satpass_c)) {
-        showNextSatEvents ();
+    } else if (dx_info_for_sat && inBox (s, dx_info_b)) {
+        drawDXSatMenu(s);
     } else if (inBox (s, version_b)) {
         char nv[50];
         if (newVersionIsAvailable(nv, sizeof(nv))) {
@@ -879,6 +880,10 @@ static void checkTouch()
             wdDelay(3000);
         }
         initScreen();
+    } else if (inBox (s, wifi_b)) {
+        int rssi;
+        if (readWiFiRSSI(rssi))
+            runWiFiMeter(false, rssi_ignore);
     }
 }
 
@@ -1417,9 +1422,6 @@ static void drawWiFiInfo()
 {
     resetWatchdog();
 
-    // show in red if wifi signal strength less than this -- not a hard cutoff but -70 is definitely dead.
-    #define MIN_WIFI_RSSI (-60)
-
     // just once every few seconds, wary about overhead calling RSSI()
     static uint32_t prev_ms;
     if (!timesUp(&prev_ms, 5000))
@@ -1427,24 +1429,40 @@ static void drawWiFiInfo()
 
     // toggle rssi and ip, or just ip if no wifi
     static bool rssi_ip_toggle;
-    char str[30];
+    char str[40];
     if (rssi_ip_toggle) {
-        // show RSSI, if working
-        static int16_t prev_rssi;
-        int16_t rssi = WiFi.RSSI();
-        if (rssi < 10) {
-            sprintf (str, _FX("  WiFi %4d dBm"), rssi);
+
+        // show RSSI, if working, and show meter if too low and not ignored
+
+        static int prev_rssi;           // for computing change
+
+        // read now
+        int rssi;
+        bool ok = readWiFiRSSI(rssi);
+
+        // show meter at least once if too low
+        if (ok && !rssi_ignore && rssi < MIN_WIFI_RSSI) {
+            runWiFiMeter(true, rssi_ignore);
+            ok = readWiFiRSSI(rssi);
+        }
+
+        // display value
+        if (ok) {
+            snprintf (str, sizeof(str), _FX("  WiFi %4d dBm"), rssi);
             tft.setTextColor (rssi < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
         } else {
             // no wifi, just leave IP showing
             str[0] = '\0';
         }
-        if (abs(rssi-prev_rssi) > 3) {
-            // log if changed more than 3 db
+
+        // log if changed more than a few db
+        if (ok && abs(rssi-prev_rssi) > 3) {
             Serial.printf (_FX("Up %lu s: RSSI %d\n"), millis()/1000U, rssi);
             prev_rssi = rssi;
         }
+
     } else {
+
         // show IP
         IPAddress ip = WiFi.localIP();
         bool net_ok = ip[0] != '\0';
@@ -1459,11 +1477,8 @@ static void drawWiFiInfo()
 
     if (str[0]) {
         selectFontStyle (LIGHT_FONT, FAST_FONT);
-        int16_t x = cs_info.box.x + 68;         // a little past Uptime
-        int16_t y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
-        uint16_t w = cs_info.box.w - version_b.w - 68 - 2;
-        tft.fillRect (x, y-1, w, 11, RA8875_BLACK);
-        tft.setCursor (x, y);
+        tft.fillRect (wifi_b.x, wifi_b.y-1, wifi_b.w, wifi_b.h, RA8875_BLACK);
+        tft.setCursor (wifi_b.x, wifi_b.y);
         tft.print(str);
     }
 
@@ -1771,12 +1786,12 @@ static void drawDEFormatMenu()
     // menu of each DETIME_*
     #define _MI_INDENT  5
     MenuItem mitems[DETIME_N] = {
-        {MENU_1OFN, de_time_fmt == DETIME_INFO,        _MI_INDENT, detime_names[DETIME_INFO]},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      _MI_INDENT, detime_names[DETIME_ANALOG]},
-        {MENU_1OFN, de_time_fmt == DETIME_CAL,         _MI_INDENT, detime_names[DETIME_CAL]},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, _MI_INDENT, detime_names[DETIME_ANALOG_DTTM]},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  _MI_INDENT, detime_names[DETIME_DIGITAL_12]},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  _MI_INDENT, detime_names[DETIME_DIGITAL_24]},
+        {MENU_1OFN, de_time_fmt == DETIME_INFO,        1, _MI_INDENT, detime_names[DETIME_INFO]},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      1, _MI_INDENT, detime_names[DETIME_ANALOG]},
+        {MENU_1OFN, de_time_fmt == DETIME_CAL,         1, _MI_INDENT, detime_names[DETIME_CAL]},
+        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, 1, _MI_INDENT, detime_names[DETIME_ANALOG_DTTM]},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  1, _MI_INDENT, detime_names[DETIME_DIGITAL_12]},
+        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  1, _MI_INDENT, detime_names[DETIME_DIGITAL_24]},
     };
 
     // create a box for the menu

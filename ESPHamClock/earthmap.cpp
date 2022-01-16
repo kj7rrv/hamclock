@@ -191,7 +191,10 @@ void drawDECalTime(bool center)
 
     // generate text
     char buf[32];
-    sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+    if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
+        sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+    else
+        sprintf (buf, "%02d:%02d %d %s", hr, mn, dy, monthShortStr(mo));
 
     // set position
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -386,10 +389,10 @@ static void drawMapGrid()
             for (float lng = -180; lng <= 180; lng += 1) {
                 ll2s (deg2rad(-23.5), deg2rad(lng), s01, 0);
                 ll2s (deg2rad(23.5), deg2rad(lng), s11, 0);
-                if (segmentSpanOk(s00,s01))
+                if (segmentSpanOk(s00,s01,0))
                     tft.drawLine (s00.x, s00.y, s01.x, s01.y, GRIDC);
                 s00 = s01;
-                if (segmentSpanOk(s10,s11))
+                if (segmentSpanOk(s10,s11,0))
                     tft.drawLine (s10.x, s10.y, s11.x, s11.y, GRIDC);
                 s10 = s11;
             }
@@ -563,17 +566,16 @@ static void updateCircumstances()
 }
 
 /* draw the map view menu button.
- * N.B. adjust position depending on whether we are drawing the maidenhead labels and
- *    adjust view_pick_b to match.
+ * N.B. adjust y position depending on whether we are drawing the maidenhead labels
  */
 static void drawMapMenuButton()
 {
     resetWatchdog();
 
     if (mapgrid_choice == MAPGRID_MAID && !azm_on)
-        view_pick_b.y = view_btn_b.y = map_b.y + MH_TR_H;
+        view_btn_b.y = map_b.y + MH_TR_H;
     else
-        view_pick_b.y = view_btn_b.y = map_b.y;
+        view_btn_b.y = map_b.y;
 
     // 1 pixel inside so overMap() gives 2-pixel thick sat footprints some room
     tft.fillRect (view_btn_b.x, view_btn_b.y, view_btn_b.w-1, view_btn_b.h-1, RA8875_BLACK);
@@ -634,7 +636,7 @@ void drawRSSBox()
  */
 void drawMapMenu()
 {
-    enum MIName {                               // menu items -- N.B. must be in same order as mitems[]
+    enum MIName {     // menu items -- N.B. must be in same order as mitems[]
         MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_AUR, MI_STY_PRP,
         MI_GRD_TTL, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI,
         MI_PRJ_TTL, MI_PRJ_AZM, MI_PRJ_MER,
@@ -648,24 +650,24 @@ void drawMapMenu()
     #define PRI_INDENT 2
     #define SEC_INDENT 8
     MenuItem mitems[MI_N] = {
-        {MENU_LABEL, false, PRI_INDENT, "Style:"},
-            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_COUNTRIES]},
-            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_TERRAIN]},
-            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_DRAP]},
-            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_MUF]},
-            {MENU_1OFN, false, SEC_INDENT, map_styles[CM_AURORA]},
-            {MENU_IGNORE, false, SEC_INDENT, NULL},     // MI_STY_PRP: see below
-        {MENU_LABEL, false, PRI_INDENT, "Grid:"},
-            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_TROPICS]},
-            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_LATLNG]},
-            {MENU_01OFN, false, SEC_INDENT, grid_styles[MAPGRID_MAID]},
-        {MENU_LABEL, false, PRI_INDENT, "Projection:"},
-            {MENU_1OFN, false, SEC_INDENT, "Azimuthal"},
-            {MENU_1OFN, false, SEC_INDENT, "Mercator"},
-        {MENU_TOGGLE, false, PRI_INDENT, "RSS"},
-        {MENU_TOGGLE, false, PRI_INDENT, "Night"},
+        {MENU_LABEL, false, 0, PRI_INDENT, "Style:"},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_COUNTRIES]},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_TERRAIN]},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_DRAP]},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_MUF]},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_AURORA]},
+            {MENU_IGNORE, false, 1, SEC_INDENT, NULL},     // MI_STY_PRP: see below
+        {MENU_LABEL, false, 0, PRI_INDENT, "Grid:"},
+            {MENU_01OFN, false, 2, SEC_INDENT, grid_styles[MAPGRID_TROPICS]},
+            {MENU_01OFN, false, 2, SEC_INDENT, grid_styles[MAPGRID_LATLNG]},
+            {MENU_01OFN, false, 2, SEC_INDENT, grid_styles[MAPGRID_MAID]},
+        {MENU_LABEL, false, 0, PRI_INDENT, "Projection:"},
+            {MENU_1OFN, false, 3, SEC_INDENT, "Azimuthal"},
+            {MENU_1OFN, false, 3, SEC_INDENT, "Mercator"},
+        {MENU_TOGGLE, false, 4, PRI_INDENT, "RSS"},
+        {MENU_TOGGLE, false, 5, PRI_INDENT, "Night"},
         #if defined(_IS_UNIX)
-            {MENU_TOGGLE, false, PRI_INDENT, "Names"},
+            {MENU_TOGGLE, false, 6, PRI_INDENT, "Names"},
         #endif
     };
 
@@ -1046,6 +1048,7 @@ bool s2ll (uint16_t x, uint16_t y, LatLong &ll)
 }
 bool s2ll (const SCoord &s, LatLong &ll)
 {
+    // avoid map
     if (!overMap(s))
         return (false);
 
@@ -1517,7 +1520,10 @@ void drawDXTime()
     tft.setCursor (dx_info_b.x, dx_info_b.y+2*vspace-8);
 
     char buf[32];
-    sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+    if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
+        sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+    else
+        sprintf (buf, "%02d:%02d %d %s", hr, mn, dy, monthShortStr(mo));
     tft.print(buf);
 }
 
@@ -1530,12 +1536,20 @@ void antipode (LatLong &to, const LatLong &from)
     normalizeLL(to);
 }
 
-/* return whether the given line segment spans a reasonable portion of the map.
- * beware map edge, wrap and crossing center of azm map
+/* return whether s is over the view_btn_b, including an extra border for fat lines or DX etc
  */
-bool segmentSpanOk (SCoord &s0, SCoord &s1)
+bool overViewBtn (const SCoord &s, uint16_t border)
+{
+    border += 1;
+    return (s.x < view_btn_b.x + view_btn_b.w + border && s.y < view_btn_b.y + view_btn_b.h + border);
+}
+
+/* return whether the given line segment spans a reasonable portion of the map.
+ * beware map edge, view button, wrap-around and crossing center of azm map
+ */
+bool segmentSpanOk (SCoord &s0, SCoord &s1, uint16_t border)
 {
     return (s0.x - s1.x < tft.width()/2 && s1.x - s0.x < tft.width()/2
                 && (!azm_on || ((s0.x < map_b.x+map_b.w/2) == (s1.x < map_b.x+map_b.w/2)))
-                && overMap(s0) && overMap(s1));
+                && overMap(s0) && overMap(s1) && !overViewBtn(s0,border) && !overViewBtn(s1,border));
 }

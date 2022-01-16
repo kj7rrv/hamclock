@@ -14,9 +14,6 @@ uint8_t desrss, dxsrss;                         // show actual de/dx sun rise/se
 // handy way for webserver to get last time source
 const char *gpsd_server, *ntp_server;           // at most one set to static storage of server name
 
-// touch regions
-static uint16_t mo_x, dy_x, yr_x;               // x coords of month, day year for touch regions
-
 // run flag and progression
 static bool hide_clocks;                        // run but don't display
 static int prev_yr, prev_mo, prev_dy, prev_hr, prev_mn, prev_sc, prev_wd;
@@ -282,9 +279,18 @@ static void drawDigitalClock (time_t delocal_t)
     // other info
     // N.B. dayShortStr and monthShort return same static pointer
     size_t bl = 0;
-    bl += snprintf (buf+bl, sizeof(buf)-bl, "%s ", dayShortStr(wd));
-    bl += snprintf (buf+bl, sizeof(buf)-bl, "%s ", monthShortStr(mo));
-    bl += snprintf (buf+bl, sizeof(buf)-bl, "%d, %d", dy, yr);
+    if (getDateFormat() == DF_DMY) {
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%s, ", dayShortStr(wd));
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%d %s %d", dy, monthShortStr(mo), yr);
+    } else if (getDateFormat() == DF_MDY) {
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%s ", dayShortStr(wd));
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%s %d, %d", monthShortStr(mo), dy, yr);
+    } else if (getDateFormat() == DF_YMD) {
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%s, ", dayShortStr(wd));
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "%d %s %d", yr, monthShortStr(mo), dy);
+    } else {
+        fatalError (_FX("Bug! bad date fmt: %d"), (int)getDateFormat());
+    }
     if (de_time_fmt == DETIME_DIGITAL_12)
         bl += snprintf (buf+bl, sizeof(buf)-bl, " %s", hr < 12 ? "AM" : "PM");
     else
@@ -580,10 +586,10 @@ void updateClocks(bool all)
         uint16_t y = clock_b.y + clock_b.h - 8; // descent
         tft.setTextColor(MDY_C);
 
-        // sprintf whole string once to center, then again to get start of each portion
+        // print in desired format
         if (doy_on) {
 
-            // Weekday DOY <doy>, year
+            // Weekday DOY <doy> year
 
             // find day of year
             tmElements_t tm;
@@ -593,33 +599,62 @@ void updateClocks(bool all)
             time_t year0 = makeTime (tm);
             int doy = (t - year0) / (24*3600) + 1;
 
-            int l = sprintf (buf, "%s ", dayShortStr(wd));
-            sprintf (buf+l, "DOY %d,  %d", doy, yr);
+            sprintf (buf, "%s DOY %d  %d", dayShortStr(wd), doy, yr);
             uint16_t bw = getTextWidth (buf);
             int16_t x = clock_b.x + (clock_b.w-UTC_W-bw)/2;
             if (x < 0)
                 x = 0;
             tft.setCursor(x, y);
-            sprintf (buf, "%s ", dayShortStr(wd));    tft.print(buf); mo_x = tft.getCursorX();
-            sprintf (buf, "DOY ");                    tft.print(buf); dy_x = tft.getCursorX();
-            sprintf (buf, "%d,  ", doy);              tft.print(buf); yr_x = tft.getCursorX();
-            tft.print(yr);
+            tft.print(buf);
 
         } else {
 
-            // Weekday Mon date, year
+            // N.B. dayShortStr() and monthShortStr() share the same static pointer
 
-            int l = sprintf (buf, "%s  ", dayShortStr(wd));
-            sprintf (buf+l, "%s  %d,  %d", monthShortStr(mo), dy, yr);      // returns same ptr??
-            uint16_t bw = getTextWidth (buf);
-            int16_t x = clock_b.x + (clock_b.w-UTC_W-bw)/2;
-            if (x < 0)
-                x = 0;
-            tft.setCursor(x, y);
-            sprintf (buf, "%s  ", dayShortStr(wd));   tft.print(buf); mo_x = tft.getCursorX();
-            sprintf (buf, "%s  ", monthShortStr(mo)); tft.print(buf); dy_x = tft.getCursorX();
-            sprintf (buf, "%d,  ", dy); tft.print(buf);               yr_x = tft.getCursorX();
-            tft.print(yr);
+            if (getDateFormat() == DF_DMY) {
+
+                // Weekday, date month year
+
+                int l = sprintf (buf, "%s, ", dayShortStr(wd));
+                sprintf (buf+l, "%2d %s %d", dy, monthShortStr(mo), yr);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else if (getDateFormat() == DF_MDY) {
+
+                // Weekday month date, year
+
+                int l = sprintf (buf, "%s  ", dayShortStr(wd));
+                sprintf (buf+l, "%s %2d, %d", monthShortStr(mo), dy, yr);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else if (getDateFormat() == DF_YMD) {
+
+                // Weekday, year month date
+
+                int l = sprintf (buf, "%s,  ", dayShortStr(wd));
+                sprintf (buf+l, "%d %s %2d", yr, monthShortStr(mo), dy);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else {
+
+                fatalError (_FX("Bug! bad format: %d"), (int)getDateFormat());
+
+            }
         }
 
         // update other info
@@ -764,13 +799,15 @@ bool checkClockTouch (SCoord &s, TouchType tt)
     } else {
         // DMY
         uint16_t mid_h = hms_h + (clock_b.h-hms_h)/2;
-        if (dx < mo_x-clock_b.x) {
-            // touched day of week
+        uint16_t s_n = dx/(clock_b.w/6);              // 0 1 .. 4 5 section
+        DateFormat df = getDateFormat();        
+        if (s_n <= 1) {
+            // touched day of week in any format
             if (dy < mid_h)
                 utc_offset += SECSPERDAY;
             else
                 utc_offset -= SECSPERDAY;
-        } else if (dx < dy_x-clock_b.x) {
+        } else if ((s_n == 2 && df == DF_MDY) || (s_n == 3 && (df == DF_DMY || df == DF_YMD))) {
             // touched month
             if (tt == TT_HOLD) {
                 // just toggle DOY, no change in time
@@ -793,7 +830,7 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                 }
                 utc_offset = makeTime(tm) - real_utc;
             }
-        } else if (dx < yr_x-clock_b.x) {
+        } else if ((s_n == 2 && df == DF_DMY) || (s_n == 3 && df == DF_MDY) || (s_n == 4 && df == DF_YMD)) {
             // touched date of month
             if (tt == TT_HOLD) {
                 // just toggle DOY, no change in time
@@ -806,7 +843,7 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                 else
                     utc_offset -= SECSPERDAY;
             }
-        } else if (dx < lkscrn_b.x-clock_b.x-10) {
+        } else if ((s_n == 2 && df == DF_YMD) || (s_n == 4 && (df == DF_DMY || df == DF_MDY))) {
             // touched year
             tmElements_t tm;
             breakTime (user_utc, tm);
@@ -887,6 +924,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
         snprintf (tz_label[i], MAX_NEW_TZ, "UTC%+g", tz/3600.0F);
         MenuItem &mi = mitems[i];
         mi.type = MENU_1OFN;
+        mi.group = 1;
         mi.set = tz == tzi.tz_secs;
         mi.indent = TZ_MENU_INDENT;
         mi.label = tz_label[i];

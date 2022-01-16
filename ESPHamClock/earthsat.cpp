@@ -1094,11 +1094,65 @@ static bool satEpochOk(time_t t)
         return (false);
 
     DateTime t_now = userDateTime(t);
-    DateTime t_epo = sat->epoch();
+    DateTime t_sat = sat->epoch();
+
+    bool ok;
     if (isSatMoon())
-        return (t_epo + 1.5F > t_now && t_now + 1.5F > t_epo);
+        ok = t_sat + 1.5F > t_now && t_now + 1.5F > t_sat;
     else
-        return (t_epo + MAX_TLE_AGE > t_now && t_now + MAX_TLE_AGE > t_epo);
+        ok = t_sat + MAX_TLE_AGE > t_now && t_now + MAX_TLE_AGE > t_sat;
+
+    if (!ok) {
+        int year;
+        uint8_t mon, day, h, m, s;
+        t_now.gettime (year, mon, day, h, m, s);
+        Serial.printf (_FX("Ep: now = %d-%02d-%02d  %02d:%02d:%02d\n"), year, mon, day, h, m, s);
+        t_sat.gettime (year, mon, day, h, m, s);
+        Serial.printf (_FX("    sat = %d-%02d-%02d  %02d:%02d:%02d\n"), year, mon, day, h, m, s);
+    }
+
+    return (ok);
+
+}
+
+/* show pass time and process key rise/set events
+ */
+static void drawSatRSEvents()
+{
+    if (!sat)
+        return;
+
+    DateTime t_now = userDateTime(nowWO());
+    float days_to_rise = sat_rs.rise_time - t_now;
+    float days_to_set = sat_rs.set_time - t_now;
+
+    if (sat_rs.rise_time < sat_rs.set_time) {
+        if (t_now < sat_rs.rise_time) {
+            // pass lies ahead
+            drawSatTime ("Rise in ", days_to_rise);
+            risetAlarm(days_to_rise < ALARM_DT ? RISING_RATE : -1);
+        } else if (t_now < sat_rs.set_time) {
+            // pass in progress
+            drawSatTime (" Set in ", days_to_set);
+            drawSatNow();
+            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
+        } else {
+            // just set, time to find next pass
+            displaySatInfo();
+            risetAlarm(-1);
+        }
+    } else {
+        if (t_now < sat_rs.set_time) {
+            // pass in progress
+            drawSatTime (" Set in ", days_to_set);
+            drawSatNow();
+            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
+        } else {
+            // just set, time to find next pass
+            risetAlarm(-1);
+            displaySatInfo();
+        }
+    }
 }
 
 /* set the satellite observing location
@@ -1194,40 +1248,8 @@ void updateSatPass()
         return;
     }
 
-    // update pass and process key events
-
-    DateTime t_now = userDateTime(nowWO());
-    float days_to_rise = sat_rs.rise_time - t_now;
-    float days_to_set = sat_rs.set_time - t_now;
-
-    if (sat_rs.rise_time < sat_rs.set_time) {
-        if (t_now < sat_rs.rise_time) {
-            // pass lies ahead
-            drawSatTime ("Rise in ", days_to_rise);
-            risetAlarm(days_to_rise < ALARM_DT ? RISING_RATE : -1);
-        } else if (t_now < sat_rs.set_time) {
-            // pass in progress
-            drawSatTime (" Set in ", days_to_set);
-            drawSatNow();
-            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
-        } else {
-            // just set, time to find next pass
-            displaySatInfo();
-            risetAlarm(-1);
-        }
-    } else {
-        if (t_now < sat_rs.set_time) {
-            // pass in progress
-            drawSatTime (" Set in ", days_to_set);
-            drawSatNow();
-            risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
-        } else {
-            // just set, time to find next pass
-            risetAlarm(-1);
-            displaySatInfo();
-        }
-    }
-
+    // show rise/set
+    drawSatRSEvents();
 }
 
 /* compute satellite geocentric path into sat_path[] and footprint into sat_foot[].
@@ -1332,18 +1354,18 @@ void drawSatPathAndFoot()
     resetWatchdog();
 
     for (int i = 1; i < n_path; i++) {
-        SCoord *sp0 = &sat_path[i-1];
-        SCoord *sp1 = &sat_path[i];
-        if (segmentSpanOk(*sp0,*sp1))
-            tft.drawLine (sp0->x, sp0->y, sp1->x, sp1->y, 2, getSatPathColor());
+        SCoord &sp0 = sat_path[i-1];
+        SCoord &sp1 = sat_path[i];
+        if (segmentSpanOk(sp0,sp1,1))
+            tft.drawLine (sp0.x, sp0.y, sp1.x, sp1.y, 2, getSatPathColor());
     }
 
     for (int alt_i = 0; alt_i < N_FOOT; alt_i++) {
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
-            SCoord *sp0 = &sat_foot[alt_i][foot_i];
-            SCoord *sp1 = &sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
-            if (segmentSpanOk(*sp0,*sp1))
-                tft.drawLine (sp0->x, sp0->y, sp1->x, sp1->y, 2, getSatFootColor());
+            SCoord &sf0 = sat_foot[alt_i][foot_i];
+            SCoord &sf1 = sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
+            if (segmentSpanOk(sf0,sf1,1))
+                tft.drawLine (sf0.x, sf0.y, sf1.x, sf1.y, 2, getSatFootColor());
         }
     }
 }
@@ -1430,18 +1452,17 @@ bool checkSatMapTouch (const SCoord &s)
     return (inBox (s, sat_b) || (!dx_info_for_sat && inBox (s, map_name_b)));
 }
 
-/* return whether user has tapped the satellite name box in the DX pane, this means the "DX" label
- * too if sat info not currently being displayed.
+/* return whether user has tapped the "DX" label while showing DX info which means op wants
+ * to set a new satellite
  */
 bool checkSatNameTouch (const SCoord &s)
 {
-    if (dx_info_for_sat) {
-        // check entire box
-        return (inBox (s, satname_b));
-    } else {
-        // check just the left third so DX symbol and TZ button are not included
-        SBox lt_b = {satname_b.x, satname_b.y, (uint16_t)(satname_b.w/3), satname_b.h};
+    if (!dx_info_for_sat) {
+        // check just the left third so symbol (*) and TZ button are not included
+        SBox lt_b = {dx_info_b.x, dx_info_b.y, (uint16_t)(dx_info_b.w/3), 30};
         return (inBox (s, lt_b));
+    } else {
+        return (false);
     }
 }
 
@@ -1847,4 +1868,67 @@ void showNextSatEvents ()
 
     // restore map
     initEarthMap();
+}
+
+/* called when tap within dx_info_b while showing a sat to show menu of choices.
+ * s is known to be withing dx_info_b.
+ */
+void drawDXSatMenu (const SCoord &s)
+{
+    // list menu items. N.B. enum and mitems[] must be in same order
+    enum {
+        _DXS_CHGSAT, _DXS_SATRST, _DXS_SATOFF, _DXS_SHOWDX, _DXS_N
+    };
+    #define _DXS_INDENT 5
+    MenuItem mitems[_DXS_N] = {
+        {MENU_1OFN, true,  1, _DXS_INDENT, "Change sat"},
+        {MENU_1OFN, false, 1, _DXS_INDENT, "Rise/set table"},
+        {MENU_1OFN, false, 1, _DXS_INDENT, "Turn off sat"},
+        {MENU_1OFN, false, 1, _DXS_INDENT, "Show DX Info"},
+    };
+
+    // box for menu
+    SBox menu_b;
+    menu_b.x = fminf (s.x, dx_info_b.x + dx_info_b.w - 100);
+    menu_b.y = fminf (s.y, dx_info_b.y + dx_info_b.h - (_DXS_N+1)*14);
+    // w/h are set dynamically by runMenu()
+
+    // run menu
+    SBox ok_b;
+    Menu menu = {menu_b, ok_b, false, 1, _DXS_N, mitems};
+    if (runMenu (menu)) {
+        if (mitems[_DXS_SHOWDX].set) {
+            // return to normal DX info but leave sat functional
+            dx_info_for_sat = false;
+            drawOneTimeDX();
+            drawDXInfo();
+
+        } else if (mitems[_DXS_CHGSAT].set) {
+            // show selection of sats, op may choose one or none
+            dx_info_for_sat = querySatSelection();
+            initScreen();
+
+        } else if (mitems[_DXS_SATOFF].set) {
+            // turn off sat and return to normal DX info
+            unsetSat();
+            dx_info_for_sat = false;
+            drawOneTimeDX();
+            initEarthMap();
+
+        } else if (mitems[_DXS_SATRST].set) {
+            // erase menu then show table of rise/set
+            displaySatInfo();
+            drawSatRSEvents();
+            showNextSatEvents();
+
+        } else {
+            fatalError (_FX("Bug! no dx sat menu"));
+        }
+
+    } else {
+        // cancelled, just restore sat info
+        displaySatInfo();
+        drawSatRSEvents();
+    }
+
 }

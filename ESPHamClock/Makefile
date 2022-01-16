@@ -76,6 +76,7 @@ OBJS = \
 	tz.o \
         webserver.o \
 	wifi.o \
+        wifimeter.o \
 	wx.o
 
 help:

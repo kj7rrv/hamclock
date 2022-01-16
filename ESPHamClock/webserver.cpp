@@ -73,7 +73,7 @@ static int hex2Int (char x)
             return (toupper(x) - 'A' + 10);
 }
 
-/* replace all "%XX" with hex value and + with space, IN PLACE.
+/* replace all "%XX" or "\xXX" with hex value and + with space, IN PLACE.
  * return whether any such changes were performed.
  */
 static bool replaceEncoding (char *from)
@@ -89,6 +89,10 @@ static bool replaceEncoding (char *from)
         } else if (from[0] == '%' && isxdigit(from[1]) && isxdigit(from[2])) {
             *to++ = 16*hex2Int(from[1]) + hex2Int(from[2]);
             from += 3;
+            mod = true;
+        } else if (from[0] == '\\' && from[1] == 'x' && isxdigit(from[2]) && isxdigit(from[3])) {
+            *to++ = 16*hex2Int(from[2]) + hex2Int(from[3]);
+            from += 4;
             mod = true;
         } else {
             *to++ = *from++;
@@ -837,15 +841,17 @@ static bool getWiFiSatellite (WiFiClient client, char *unused)
         return (true);
     }
 
-    FWIFIPR (client, F("Name  ")); client.println (name);
-    FWIFIPR (client, F("Alt   ")); client.print (el); FWIFIPRLN(client, F(" deg"));
-    FWIFIPR (client, F("Az    ")); client.print (az); FWIFIPRLN(client, F(" deg"));
-    FWIFIPR (client, F("Range ")); client.print (range); FWIFIPRLN(client, F(" km"));
-    FWIFIPR (client, F("Rate  ")); client.print (rate); FWIFIPRLN(client, F(" m/s"));
-    FWIFIPR (client, F("144MHzDoppler ")); client.print (-rate*144000/3e8); FWIFIPRLN(client,F(" kHz"));
-    FWIFIPR (client, F("440MHzDoppler ")); client.print (-rate*440000/3e8); FWIFIPRLN(client,F(" kHz"));
-    FWIFIPR (client, F("1.3GHzDoppler ")); client.print (-rate*1.3e6/3e8); FWIFIPRLN(client,F(" kHz"));
-    FWIFIPR (client, F("10GHzDoppler  ")); client.print (-rate*1e7/3e8); FWIFIPRLN(client,F(" kHz"));
+    // table of info
+    char line[60];
+    snprintf (line, sizeof(line), _FX("Name          %s\n"), name); client.print(line);
+    snprintf (line, sizeof(line), _FX("Alt           %.2f deg\n"), el); client.print(line);
+    snprintf (line, sizeof(line), _FX("Az            %.2f deg\n"), az); client.print(line);
+    snprintf (line, sizeof(line), _FX("Range         %.2f km\n"), range); client.print(line);
+    snprintf (line, sizeof(line), _FX("Rate          %.2f m/s\n"), rate); client.print(line);
+    snprintf (line, sizeof(line), _FX("144MHzDoppler %.6f kHz\n"), -rate*144000/3e8); client.print(line);
+    snprintf (line, sizeof(line), _FX("440MHzDoppler %.6f kHz\n"), -rate*440000/3e8); client.print(line);
+    snprintf (line, sizeof(line), _FX("1.3GHzDoppler %.6f kHz\n"), -rate*1.3e6/3e8); client.print(line);
+    snprintf (line, sizeof(line), _FX("10GHzDoppler  %.6f kHz\n"), -rate*1e7/3e8); client.print(line);
 
     // add table of next several events, if any
     time_t *rises, *sets;
@@ -853,6 +859,12 @@ static bool getWiFiSatellite (WiFiClient client, char *unused)
     if (raz == SAT_NOAZ || saz == SAT_NOAZ || (n_times = nextSatRSEvents (&rises, &sets)) == 0) {
         FWIFIPR (client, F("No rise or set\n"));
     } else {
+        // next events
+        snprintf (line, sizeof(line), _FX("NextRiseIn    %02dh%02d\n"), (int)rhrs,
+                (int)(60*(rhrs-(int)rhrs)+0.5F)); client.print(line);
+        snprintf (line, sizeof(line), _FX("NextSetIn     %02dh%02d\n"),(int)shrs,
+                (int)(60*(shrs-(int)shrs)+0.5F)); client.print(line);
+
         // print heading
         FWIFIPR (client, F("  Upcoming DE Passes\n"));
         FWIFIPR (client, F("Day  Rise    Set    Up\n"));
@@ -860,7 +872,6 @@ static bool getWiFiSatellite (WiFiClient client, char *unused)
 
         // print table
         for (int i = 0; i < n_times; i++) {
-            char line[60];
 
             // DE timezone
             time_t rt = rises[i] + de_tz.tz_secs;

@@ -197,6 +197,7 @@ PlotChoice askPaneChoice (PlotPane pp)
             mi.set = (plot_rotset[pp] & (1 << ch)) ? true : false;
             mi.label = plot_names[ch];
             mi.indent = 4;
+            mi.group = 1;
         }
     }
 

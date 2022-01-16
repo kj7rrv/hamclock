@@ -109,6 +109,8 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_ALARMCLOCK
     1,                          // NV_BC_UTCTIMELINE
     1,                          // NV_RSS_INTERVAL
+    1,                          // NV_DATEMDY
+    1,                          // NV_DATEDMYYMD
 };
 
 

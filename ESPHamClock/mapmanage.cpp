@@ -1046,7 +1046,7 @@ void drawMapScale()
     #define _MS_MAXV   msp[n_scale-1].value                     // max value
     #define _MS_DV     (_MS_MAXV-_MS_MINV)                      // value span
     #define _MS_V2X(v) (_MS_X0 + _MS_DX*((v)-_MS_MINV)/_MS_DV)  // convert value to x
-    #define _MS_PRY    (mapscale_b.y+5U)                        // text y
+    #define _MS_PRY    (mapscale_b.y+1U)                        // text y
 
     // set mapscale_b.y above RSS if on else at the bottom
     mapscale_b.y = rss_on ? rss_bnr_b.y - mapscale_b.h: map_b.y + map_b.h - mapscale_b.h;

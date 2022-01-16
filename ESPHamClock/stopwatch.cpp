@@ -790,10 +790,10 @@ static void drawBCDate (int hr, int dy, int wd, int mo)
     // month
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setCursor (bcdate_b.x, bcdate_b.y + 90);
-    if (useMetricUnits())
-        tft.printf (_FX("%d %s"), dy, monthStr(mo));
-    else
+    if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
         tft.printf (_FX("%s %d"), monthStr(mo), dy);
+    else
+        tft.printf (_FX("%d %s"), dy, monthStr(mo));
 
     // AM/PM/UTC
     tft.setCursor (bcdate_b.x, bcdate_b.y + 125);
@@ -1333,37 +1333,46 @@ static void showAlarmRinging()
  */
 static void runBCMenu (const SCoord &s)
 {
-    // handy enumeration of fields
+    // handy enumeration of fields -- N.B. must align with mitems[]
     enum MIName {
-        MI_FMT_TTL, MI_FMT_ANA, MI_FMT_DIG,
-        MI_ANA_TTL, MI_ANA_SHD,
-        MI_DIG_TTL, MI_DIG_UTC, MI_DIG_12H, MI_DIG_24H,
-        MI_ALL_TTL, MI_ALL_SDT, MI_ALL_SWX, MI_ALL_CDW, MI_ALL_ALM,
+        MI_FMT_TTL,
+            MI_FMT_ANA,
+                MI_ANA_SHD,
+            MI_FMT_DIG,
+                MI_DIG_UTC,
+                MI_DIG_12H,
+                MI_DIG_24H,
+        MI_ALL_TTL,
+            MI_ALL_SDT,
+            MI_ALL_SWX,
+            MI_ALL_CDW,
+            MI_ALL_ALM,
+        MI_BLK1,
         MI_EXT,
-        MI_BLK,
+        MI_BLK2,
         MI_N,
     };
 
-    // items
+    // items -- N.B. must align with MIName
     #define PRI_INDENT 4
     #define SEC_INDENT 10
+    #define TER_INDENT 16
     MenuItem mitems[MI_N] = {
-        {MENU_LABEL, false, PRI_INDENT, "Format:"},
-            {MENU_1OFN, !(bc_bits & SW_BCDIGBIT), SEC_INDENT, "Analog"},
-            {MENU_1OFN, !!(bc_bits & SW_BCDIGBIT), SEC_INDENT, "Digital"},
-        {MENU_LABEL, false, PRI_INDENT, "Analog options:"},
-            {MENU_TOGGLE, !(bc_bits & SW_ANOSHBIT), SEC_INDENT, "Show second hand"},
-        {MENU_LABEL, false, PRI_INDENT, "Digital options:"},
-            {MENU_1OFN, !!(bc_bits & SW_UTCBIT), SEC_INDENT, "UTC"},
-            {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT, SEC_INDENT, "DE 12 hour"},
-            {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == 0, SEC_INDENT, "DE 24 hour"},
-        {MENU_LABEL, false, PRI_INDENT, "Shared options:"},
-            {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), SEC_INDENT, "Show date info"},
-            {MENU_TOGGLE, !!(bc_bits & SW_BCWXBIT), SEC_INDENT, "Show DE weather"},
-            {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, SEC_INDENT, "Count down"},
-            {MENU_TOGGLE, alarm_state != ALMS_OFF, SEC_INDENT, "Alarm armed"},
-        {MENU_TOGGLE, false, PRI_INDENT, "Exit Big Clock"},
-        {MENU_BLANK, false, PRI_INDENT, NULL},
+        {MENU_LABEL, false, 0, PRI_INDENT, "Format:"},
+            {MENU_1OFN, !(bc_bits & SW_BCDIGBIT), 1, SEC_INDENT, "Analog"},
+                {MENU_TOGGLE, !(bc_bits & SW_ANOSHBIT), 2, TER_INDENT, "Show second hand"},
+            {MENU_1OFN, !!(bc_bits & SW_BCDIGBIT), 1, SEC_INDENT, "Digital"},
+                {MENU_1OFN, !!(bc_bits & SW_UTCBIT), 3, TER_INDENT, "UTC"},
+                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT, 3, TER_INDENT, "DE 12 hour"},
+                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == 0, 3, TER_INDENT, "DE 24 hour"},
+        {MENU_LABEL, false, 0, PRI_INDENT, "Shared options:"},
+            {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 4, SEC_INDENT, "Show date info"},
+            {MENU_TOGGLE, !!(bc_bits & SW_BCWXBIT), 5, SEC_INDENT, "Show DE weather"},
+            {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Show count down"},
+            {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Show alarm time"},
+        {MENU_BLANK, false, 8, PRI_INDENT, NULL},
+        {MENU_TOGGLE, false, 9, PRI_INDENT, "Exit Big Clock"},
+        {MENU_BLANK, false, 10, PRI_INDENT, NULL},
     };
 
     // box for menu anchored at s

@@ -88,63 +88,40 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
         tft.drawPR();
 }
 
-/* starting with item ii, count how many either side are of the same type and set, including self.
+/* count how many items in the same group and type as ii are set
  */
 static int menuCountItemsSet (Menu &menu, int ii)
 {
     MenuItem &menu_ii = menu.items[ii];
-    int n_set = menu_ii.type != MENU_IGNORE && menu_ii.set ? 1 : 0;
+    int n_set = 0;
 
-    for (int i = ii-1; i >= 0; --i) {
+    for (int i = 0; i < menu.n_items; i++) {
         if (menu.items[i].type == MENU_IGNORE)
             continue;
         if (menu.items[i].type != menu_ii.type)
-            break;
-        if (menu.items[i].set)
-            n_set++;
-    }
-
-    for (int i = ii+1; i < menu.n_items; i++) {
-        if (menu.items[i].type == MENU_IGNORE)
             continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+        if (menu.items[i].group != menu_ii.group)
+            continue;
         if (menu.items[i].set)
             n_set++;
     }
-
-    printf ("nset %d\n", n_set);
 
     return (n_set);
 }
 
-/* starting with item ii, turn off all items either side of the same type, including self.
+/* turn off all items in same group and type as item ii.
  */
 static void menuItemsAllOff (Menu &menu, SBox *boxes, int ii)
 {
     MenuItem &menu_ii = menu.items[ii];
 
-    if (menu_ii.type != MENU_IGNORE && menu_ii.set) {
-        menu_ii.set = false;
-        menuDrawItem (menu_ii, boxes[ii], false);
-    }
-
-    for (int i = ii-1; i >= 0; --i) {
+    for (int i = 0; i < menu.n_items; i++) {
         if (menu.items[i].type == MENU_IGNORE)
             continue;
         if (menu.items[i].type != menu_ii.type)
-            break;
-        if (menu.items[i].set) {
-            menu.items[i].set = false;
-            menuDrawItem (menu.items[i], boxes[i], false);
-        }
-    }
-
-    for (int i = ii+1; i < menu.n_items; i++) {
-        if (menu.items[i].type == MENU_IGNORE)
             continue;
-        if (menu.items[i].type != menu_ii.type)
-            break;
+        if (menu.items[i].group != menu_ii.group)
+            continue;
         if (menu.items[i].set) {
             menu.items[i].set = false;
             menuDrawItem (menu.items[i], boxes[i], false);

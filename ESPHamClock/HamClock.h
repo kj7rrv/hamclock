@@ -414,7 +414,6 @@ extern SBox satname_b;                  // satellite name pick
 extern SBox de_info_b;                  // de info pane
 extern SBox map_b;                      // main map 
 extern SBox view_btn_b;                 // map view menu button
-extern SBox view_pick_b;                // map view pick box
 extern SBox dx_maid_b;                  // dx maidenhead pick
 extern SBox de_maid_b;                  // de maidenhead pick
 extern SBox lkscrn_b;                   // screen lock icon button
@@ -805,11 +804,13 @@ extern void eraseSCircle (const SCircle &c);
 extern void drawRSSBox (void);
 extern void eraseRSSBox (void);
 extern void drawMapMenu(void);
-extern bool segmentSpanOk (SCoord &s0, SCoord &s1);
+extern bool segmentSpanOk (SCoord &s0, SCoord &s1, uint16_t border);
 extern void roundLatLong (LatLong &ll);
 extern void initScreen(void);
 extern bool checkOnAir(void);
 extern float lngDiff (float dlng);
+extern bool overViewBtn (const SCoord &s, uint16_t border);
+
 
 
 
@@ -878,6 +879,7 @@ extern bool isSatMoon(void);
 extern const char **getAllSatNames(void);
 extern int nextSatRSEvents (time_t **rises, time_t **sets);
 extern void showNextSatEvents (void);
+extern void drawDXSatMenu(const SCoord &s);
 
 #define SAT_NOAZ        (-999)  // error flag
 #define SAT_MIN_EL      0.0F    // rise elevation
@@ -924,6 +926,12 @@ extern time_t getGPSDUTC(const char **server);
  */
 
 
+typedef enum {
+    DF_MDY,
+    DF_DMY,
+    DF_YMD
+} DateFormat;
+
 extern void clockSetup(void);
 extern const char *getWiFiSSID(void);
 extern const char *getWiFiPW(void);
@@ -962,6 +970,7 @@ extern void setDemoMode(bool on);
 extern uint16_t getGridColor(void);
 extern int16_t getCenterLng(void);
 extern void setCenterLng(int16_t);
+extern DateFormat getDateFormat(void);
 
 
 
@@ -1068,6 +1077,7 @@ typedef enum {
 typedef struct {
     MenuFieldType type;         // appearance and behavior
     bool set;                   // whether selected
+    uint8_t group;              // association
     uint8_t indent;             // pixels to indent
     const char *label;          // string -- user must manage memory
 } MenuItem;
@@ -1239,6 +1249,8 @@ typedef enum {
     NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if off
     NV_BC_UTCTIMELINE,          // band conditions timeline labeled in UTC else DE
     NV_RSS_INTERVAL,            // RSS update interval, seconds
+    NV_DATEMDY,                 // 0 = MDY 1 = see NV_DATEDMYYMD
+    NV_DATEDMYYMD,              // 0 = DMY 1 = YMD
 
     NV_N
 } NV_Name;
@@ -1573,6 +1585,22 @@ extern uint8_t rss_interval;
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, 
     SPWxValue &drap, NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,
     float pathrel[PROP_MAP_N], time_t &pathrel_age);
+
+
+
+
+/*********************************************************************************************
+ *
+ * wifimeter.cpp
+ *
+ */
+
+
+#define MIN_WIFI_RSSI (-60)                     // minimum acceptable signal strength, dBm
+extern void runWiFiMeter (bool warn, bool &ignore_on);
+extern bool readWiFiRSSI(int &rssi);
+
+
 
 
 /*********************************************************************************************

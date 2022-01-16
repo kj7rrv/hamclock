@@ -291,14 +291,16 @@ int WiFi::RSSI(void)
 
 #ifdef __APPLE__
 
-        const char cmd[] =
-            "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I | "
-            "grep CtlRSSI";
-        char ret[256];
-        int apple_rssi;
+        static const char cmd[] =
+            "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I";
+        char ret[2048];
 
-        if (getCommand (cmd, ret, sizeof(ret)) && sscanf (ret, " agrCtlRSSI: %d", &apple_rssi) == 1)
-            rssi = apple_rssi;
+        if (getCommand (cmd, ret, sizeof(ret))) {
+            int apple_rssi;
+            char *rssi_kw = strstr (ret, "agrCtlRSSI: ");
+            if (rssi_kw && sscanf (rssi_kw+11, "%d", &apple_rssi) == 1 && apple_rssi != 0)
+                rssi = apple_rssi;
+        }
 
 #endif // __APPLE__
 

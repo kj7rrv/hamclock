@@ -221,6 +221,8 @@ typedef enum {
     CLMAP_BPR,
     CLLABEL_BPR,
     NTPSET_BPR,
+    DATEFMT_MDY_BPR,
+    DATEFMT_DMYYMD_BPR,
     UNITS_BPR,
     X11_FULLSCRN_BPR,
     GPIOOK_BPR,
@@ -231,9 +233,7 @@ typedef enum {
 } BPIds;
 
 /* bool prompts. N.B. must match BPIds order
- * N.B. cluster map and kx3 use two "entangled" bools to create 3 states which means
- *      one bool turns a feature on and off, the second holds possible values
- *      when on, eg CLMAP_BPR+CLLABEL_BPR, KX3ON_BPR+KX3BAUD_BPR
+ * N.B. date format, cluster map and kx3 use two "entangled" bools to create 3 states
  */
 static BoolPrompt bool_pr[N_BPR] = {
 
@@ -247,12 +247,15 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // page 2 -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {110, R2Y(0), 30, PR_H}, false, "Cluster?", "No", NULL},
+    {1, {10,  R2Y(0),  90, PR_H},  {110, R2Y(0), 30,  PR_H}, false, "Cluster?", "No", NULL},
     {1, {665, R2Y(0),  70, PR_H},  {735, R2Y(0), 60,  PR_H}, false, "Map?", "No", NULL},         // map on/off
     {1, {735, R2Y(0),   0, PR_H},  {735, R2Y(0), 60,  PR_H}, false, NULL, "Prefix", "Call"},     // how
                                                                 // prefix must be the false state
 
     {1, {10,  R2Y(1),  90, PR_H},  {110, R2Y(1), 110, PR_H}, false, "NTP?", "Default set", NULL},
+    {1, {510, R2Y(1), 130, PR_H},  {640, R2Y(1), 150, PR_H}, false, "Date format?", "Mon Day Year", NULL},
+    {1, {510, R2Y(1), 130, PR_H},  {640, R2Y(1), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
+            // MDY: F X   DMY: T F  YMD:  T T
 
     {1, {10,  R2Y(2),  90, PR_H},  {110, R2Y(2), 110, PR_H}, false, "Units?", "Imperial", "Metric"},
 
@@ -538,6 +541,8 @@ static void nextTabFocus()
         { NULL, &bool_pr[CLMAP_BPR] },
         { NULL, &bool_pr[CLLABEL_BPR] },
         { NULL, &bool_pr[NTPSET_BPR] },
+        { NULL, &bool_pr[DATEFMT_MDY_BPR] },
+        { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
         {       &string_pr[NTPHOST_SPR], NULL},
         { NULL, &bool_pr[UNITS_BPR] },
         {       &string_pr[TEMPCORR_SPR], NULL},
@@ -1549,12 +1554,6 @@ static void initSetup()
         NVWriteString(NV_WIFI_PASSWD, wifipw);
     }
 
-#if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
-    // don't show my creds when testing
-    strcpy (wifissid, "mywifissid");
-    strcpy (wifipw, "mywifipassword");
-#endif
-
 
 
     // init call sign
@@ -1736,6 +1735,16 @@ static void initSetup()
 
     // init several more misc
 
+    uint8_t df_mdy, df_dmyymd;
+    if (!NVReadUInt8 (NV_DATEMDY, &df_mdy) || !NVReadUInt8 (NV_DATEDMYYMD, &df_dmyymd)) {
+        df_mdy = 0;
+        df_dmyymd = 0;
+        NVWriteUInt8 (NV_DATEMDY, df_mdy);
+        NVWriteUInt8 (NV_DATEDMYYMD, df_dmyymd);
+    }
+    bool_pr[DATEFMT_MDY_BPR].state = (df_mdy != 0);
+    bool_pr[DATEFMT_DMYYMD_BPR].state = (df_dmyymd != 0);
+
     uint8_t logok;
     if (!NVReadUInt8 (NV_LOGUSAGE, &logok)) {
         logok = 0;
@@ -1889,19 +1898,24 @@ static void initDisplay()
                                         "%.0f%c", fabsf((float)center_lng), center_lng < 0 ? 'W' : 'E');
                                         // conversion to float just to avoid g++ snprintf size warning
 
+#if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
+    // don't show my creds when testing
+    strcpy_P (wifissid, PSTR("mywifissid"));
+    strcpy_P (wifipw, PSTR("mywifipassword"));
+#endif
+
     // draw first page
     drawNextPage();
 }
 
-/* display an entangled pair of bools, first one is on/off, second is one of two states if first is on
+/* display an entangled pair of bools: show A state if off else B state
  */
-static void drawBoolPair (BPIds on_off, BPIds a_or_b)
+static void drawBoolPair (BPIds A, BPIds B)
 {
-    if (bool_pr[on_off].state) {
-        drawBPPrompt (&bool_pr[on_off]);
-        drawBPState (&bool_pr[a_or_b]);
+    if (bool_pr[A].state) {
+        drawBPState (&bool_pr[B]);
     } else {
-        drawBPPromptState (&bool_pr[on_off]);
+        drawBPState (&bool_pr[A]);
     }
 }
 
@@ -2026,7 +2040,51 @@ static void runSetup()
 
             // check for possible secondary implications
 
-            if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
+            if (bp == &bool_pr[DATEFMT_MDY_BPR]) {
+
+                // cycle to the next of three possibilities
+                // MDY: F X   DMY: T F  YMD:  T T
+
+                if (bool_pr[DATEFMT_MDY_BPR].state) {
+                    // DATEFMT_MDY_BPR just toggled so state was F X = MDY, want DMY next
+                    bool_pr[DATEFMT_MDY_BPR].state = true;
+                    bool_pr[DATEFMT_DMYYMD_BPR].state = false;
+                } else {
+                    if (bool_pr[DATEFMT_DMYYMD_BPR].state) {
+                        // DATEFMT_MDY_BPR just toggled so state was T T = YMD, want MDY next
+                        bool_pr[DATEFMT_MDY_BPR].state = false;
+                        bool_pr[DATEFMT_DMYYMD_BPR].state = false;
+                    } else {
+                        // DATEFMT_MDY_BPR just toggled so state was T F = DMY, want YMD next
+                        bool_pr[DATEFMT_MDY_BPR].state = true;
+                        bool_pr[DATEFMT_DMYYMD_BPR].state = true;
+                    }
+                }
+                drawBoolPair(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
+
+            } else if (bp == &bool_pr[DATEFMT_DMYYMD_BPR]) {
+
+                // cycle to the next of three possibilities
+                // MDY: F X   DMY: T F  YMD:  T T
+
+                if (bool_pr[DATEFMT_MDY_BPR].state) {
+                    if (bool_pr[DATEFMT_DMYYMD_BPR].state) {
+                        // DATEFMT_DMYYMD_BPR just toggled so state was T F = DMY, want YMD next
+                        bool_pr[DATEFMT_MDY_BPR].state = true;
+                        bool_pr[DATEFMT_DMYYMD_BPR].state = true;
+                    } else {
+                        // DATEFMT_DMYYMD_BPR just toggled so state was T T = YMD, want MDY next
+                        bool_pr[DATEFMT_MDY_BPR].state = false;
+                        bool_pr[DATEFMT_DMYYMD_BPR].state = false;
+                    }
+                } else {
+                    // DATEFMT_DMYYMD_BPR just toggled so state was F X = MDY, want DMY next
+                    bool_pr[DATEFMT_MDY_BPR].state = true;
+                    bool_pr[DATEFMT_DMYYMD_BPR].state = false;
+                }
+                drawBoolPair(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
+
+            } else if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
 
                 // check for full screen that won't fit
                 if (bp->state) {
@@ -2077,7 +2135,7 @@ static void runSetup()
             else if (bp == &bool_pr[CLUSTER_BPR]) {
                 // show/hide dx cluster prompts
                 if (bp->state) {
-                    // query for host, port and map
+                    // show query for host, port and map
                     eraseBPState (&bool_pr[CLUSTER_BPR]);
                     drawSPPromptValue (&string_pr[DXHOST_SPR]);
                     drawSPPromptValue (&string_pr[DXPORT_SPR]);
@@ -2126,13 +2184,15 @@ static void runSetup()
             else if (bp == &bool_pr[GPIOOK_BPR]) {
                 // toggle KX3 and env sensors
                 if (bp->state) {
+                    // retain kx3 state but draw prompt
+                    drawBPPrompt (&bool_pr[KX3ON_BPR]);
                     drawBoolPair(KX3ON_BPR, KX3BAUD_BPR);
                     drawSPPromptValue (&string_pr[TEMPCORR_SPR]);
                     drawSPPromptValue (&string_pr[PRESCORR_SPR]);
                     drawSPPromptValue (&string_pr[TEMPCORR2_SPR]);
                     drawSPPromptValue (&string_pr[PRESCORR2_SPR]);
                 } else {
-                    // turn off kx3 and erase
+                    // turn off kx3 and erase it and temps
                     bool_pr[KX3ON_BPR].state = false;
                     eraseBPPromptState (&bool_pr[KX3ON_BPR]);
                     eraseBPPromptState (&bool_pr[KX3BAUD_BPR]);
@@ -2193,8 +2253,11 @@ static void runSetup()
 static void finishSettingUp()
 {
     // persist results 
+#if !defined(_SHOW_ALL) && !defined(_MARK_BOUNDS)
+    // only persist creds when not testing
     NVWriteString(NV_WIFI_SSID, wifissid);
     NVWriteString(NV_WIFI_PASSWD, wifipw);
+#endif
     NVWriteString(NV_CALLSIGN, call);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
@@ -2215,6 +2278,8 @@ static void finishSettingUp()
             bool_pr[CLMAP_BPR].state ? (bool_pr[CLLABEL_BPR].state ? NVMS_CALL : NVMS_PREFIX) : NVMS_NONE);
     NVWriteUInt8 (NV_NTPSET, bool_pr[NTPSET_BPR].state);
     NVWriteString(NV_NTPHOST, ntphost);
+    NVWriteUInt8 (NV_DATEMDY, bool_pr[DATEFMT_MDY_BPR].state);
+    NVWriteUInt8 (NV_DATEDMYYMD, bool_pr[DATEFMT_DMYYMD_BPR].state);
     NVWriteUInt8 (NV_GPIOOK, bool_pr[GPIOOK_BPR].state);
     NVWriteInt16 (NV_CENTERLNG, center_lng);
 
@@ -2487,6 +2552,16 @@ bool useGPSD()
 bool useLocalNTPHost()
 {
     return (bool_pr[NTPSET_BPR].state);
+}
+
+/* return desired date format
+ */
+DateFormat getDateFormat()
+{
+    if (bool_pr[DATEFMT_MDY_BPR].state)
+        return (bool_pr[DATEFMT_DMYYMD_BPR].state ? DF_YMD : DF_DMY);
+    else
+        return (DF_MDY);
 }
 
 /* return whether user is ok with logging usage
