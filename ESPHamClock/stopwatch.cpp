@@ -147,7 +147,7 @@ static void setAlarmPin (bool set) { (void) set; }
 #define SW_DW           45                      // digit width
 #define SW_DH           100                     // digit heigth
 #define SW_X0           ((800-SW_ND*SW_DW-(SW_ND-1)*SW_DGAP)/2)   // x coord of left-most digit to center
-#define SW_FLT          45                      // line thickness as fraction of SW_DW
+#define SW_LT           1                       // line thickness
 #define SW_PUNCR        3                       // punctuation radius
 #define SW_BAX          240                     // control button A x
 #define SW_BBX          440                     // control button B x
@@ -193,6 +193,17 @@ static void setAlarmPin (bool set) { (void) set; }
 #define BAC_BEZR        238                     // bezel radius
 #define BAC_HTR         12                      // hour tick radius
 #define BAC_MTR         5                       // minute tick radius
+#define BACD_Y0         180                     // when add digital y center
+#define BACD_MNR        158                     // when add digital minute hand radius
+#define BACD_SCR        135                     // when add digital second hand radius
+#define BACD_HRR        97                      // when add digital hour hand radius
+#define BACD_FR         174                     // when add digital face radius
+#define BACD_BEZR       178                     // when add digital bezel radius
+#define BACD_HTR        10                      // when add digital hour tick radius
+#define BACD_MTR        4                       // when add digital minute tick radius
+#define BACD_DY         430                     // when add digital y coord of digits
+#define BACD_HMX0       336                     // when add digital H:M starting x
+#define BACD_HMSX0      305                     // when add digital H:M:S starting x
 #define BAC_DOTR        2                       // center dot radius
 #define BAC_HRTH        deg2rad(15.0F)          // hour hand thickness half-angle, rads
 #define BAC_MNTH        (BAC_HRTH*BAC_HRR/BAC_MNR) // minute hand thickness half-angle, rads
@@ -214,35 +225,28 @@ static void setAlarmPin (bool set) { (void) set; }
 #define BAC_WXGDT       (30L*60*1000)           // weather update period when good, millis
 #define BAC_WXFDT       (6*1000)                // weather update period when fail, millis
 
-// big digital clock params
-#define BDC_W           100                     // digit width
-#define BDC_H           (2*BDC_W)               // digit height
-#define BDC_X0          (400-3*BDC_W)           // left x
-#define BDC_Y0          (BAC_WXY+BAC_WXH+20)    // top y
-#define BDC_FLT         5                       // segment thickness as fraction of BDC_W
-#define BDC_GAP         (BDC_W/2)               // gap between adjacent digits
-#define BDC_CR          (BDC_W/BDC_FLT/2)       // colon radius
+// big digital clock
+#define BDC_HMW         110                     // digit width
+#define BDC_HMCW        (2*BDC_HMW/3)           // colon spacing
+#define BDC_HMH         (2*BDC_HMW)             // digit height
+#define BDC_HMY0        (BAC_WXY+BAC_WXH+20)    // top y
+#define BDC_HMLT        (BDC_HMW/5)             // line thickness
+#define BDC_HMGAP       (BDC_HMW/3)             // gap between adjacent digits
+#define BDC_HMX0        (400-(4*BDC_HMW+2*BDC_HMGAP+BDC_HMCW)/2)     // left x for hh:mm
+#define BDC_HMCR        (BDC_HMLT/2)            // colon radius
 
 // contols common to both big clock styles
-#define BC_ALM_X        2                       // x coord of alarm time box
-#define BC_ALM_Y        380                     // y coord of alarm time box
 #define BC_CDP_X        2                       // countdown period x
-#define BC_CDP_Y        (BC_ALM_Y+SW_BH)        // countdown period y 
+#define BC_CDP_Y        420                     // countdown period y 
+#define BC_CDP_W        100                     // countdown period with 
+#define BC_ALM_X        (BC_CDP_X+BC_CDP_W)     // x coord of alarm time box
+#define BC_ALM_Y        BC_CDP_Y                // y coord of alarm time box
 #define BC_BAD_W        200                     // bad time message width
 #define BC_BAD_H        SW_BH                   // bad time message height
 #define BC_BAD_X        (800-BC_BAD_W-2)        // x coord of bad time message
 #define BC_BAD_Y        BC_CDP_Y                // y coord of bad time message
-#define BC_EXIT_X       500                     // exit area x coord
-#define BC_EXIT_Y       300                     // exit area y coord
 
 
-// sanity checks
-#if BDC_X0+BDC_W+BDC_GAP+BDC_W+2*BDC_GAP+BDC_W+BDC_GAP+BDC_W+BDC_GAP > 800
-#error Big Digital Clock digits too wide
-#endif
-#if BDC_Y0+BDC_H > 480
-#error Big Digital Clock digits too tall
-#endif
 
 // current state
 static SWEngineState sws_engine;                // what is _running_
@@ -277,10 +281,10 @@ static SBox color_b = {SW_CX, SW_CY, SW_CW, SW_CH};
 static uint8_t sw_hue;                          // hue 0..255
 static uint16_t sw_col;                         // color pixel
 
-// big clock controls
+// big clock info
 static SBox bcdate_b = {BAC_DATEX, BAC_DATEY, BAC_DATEW, BAC_DATEH};
 static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};      // weather
-static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, SW_BW, SW_BH};        // countdown remaining and control
+static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, SW_BH};     // countdown remaining and control
 static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, SW_BW, SW_BH};     // alarm time and control
 static uint16_t bc_bits;                        // see SWBCBits
 static uint32_t bc_prev_wx;                     // time of prev drawn wx, millis
@@ -364,78 +368,83 @@ static void drawColorScale()
     tft.drawLine (hue_x, color_b.y+3*color_b.h/8, hue_x, color_b.y+5*color_b.h/8, RA8875_WHITE);
 }
 
-/* draw the given digit in the given bounding box with lines the given fractional thickness of box width.
+/* draw the given digit in the given bounding box with the given line thickness.
  */
-static void drawDigit (const SBox &b, int digit, int frac_thick)
+static void drawDigit (const SBox &b, int digit, uint16_t lt)
 {
-    uint16_t lt = b.w/frac_thick;
-    uint16_t l2 = b.w/(2*frac_thick);
+    // insure all dimensions are even so two halves make a whole
+    uint16_t t = (lt+1) & ~1U;
+    uint16_t w = (b.w+1) & ~1U;
+    uint16_t h = (b.h+1) & ~1U;
+    uint16_t to2 = t/2;
+    uint16_t wo2 = w/2;
+    uint16_t ho2 = h/2;
 
     // erase 
-    tft.fillRect (b.x, b.y, b.w, b.h, SW_BG);
+    tft.fillRect (b.x, b.y, w, h, SW_BG);
 
     // draw digit -- replace with drawRect to check boundaries
     switch (digit) {
     case 0:
-        tft.fillRect (b.x, b.y, b.w, lt, sw_col);
-        tft.fillRect (b.x, b.y+lt, lt, b.h-2*lt, sw_col);
-        tft.fillRect (b.x, b.y+b.h-lt, b.w, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+lt, lt, b.h-2*lt, sw_col);
+        tft.fillRect (b.x, b.y, w, t, sw_col);
+        tft.fillRect (b.x, b.y+t, t, h-2*t, sw_col);
+        tft.fillRect (b.x, b.y+h-t, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+t, t, h-2*t, sw_col);
         break;
     case 1:
-        tft.fillRect (b.x+b.w/2-l2, b.y, lt, b.h, sw_col);      // center column
+        tft.fillRect (b.x+wo2-to2, b.y, t, h, sw_col);      // center column? a little right?
         break;
     case 2:
-        tft.fillRect (b.x, b.y, b.w, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+lt, lt, b.h/2-lt-l2, sw_col);
-        tft.fillRect (b.x, b.y+b.h/2-l2, b.w, lt, sw_col);
-        tft.fillRect (b.x, b.y+b.h/2+l2, lt, b.h/2-lt-l2, sw_col);
-        tft.fillRect (b.x, b.y+b.h-lt, b.w, lt, sw_col);
+        tft.fillRect (b.x, b.y, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+t, t, ho2-t-to2, sw_col);
+        tft.fillRect (b.x, b.y+ho2-to2, w, t, sw_col);
+        tft.fillRect (b.x, b.y+ho2+to2, t, ho2-t-to2, sw_col);
+        tft.fillRect (b.x, b.y+h-t, w, t, sw_col);
         break;
     case 3:
-        tft.fillRect (b.x, b.y, b.w, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+lt, lt, b.h-2*lt, sw_col);
-        tft.fillRect (b.x, b.y+b.h/2-l2, b.w-lt, lt, sw_col);
-        tft.fillRect (b.x, b.y+b.h-lt, b.w, lt, sw_col);
+        tft.fillRect (b.x, b.y, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+t, t, h-2*t, sw_col);
+        tft.fillRect (b.x, b.y+ho2-to2, w-t, t, sw_col);
+        tft.fillRect (b.x, b.y+h-t, w, t, sw_col);
         break;
     case 4:
-        tft.fillRect (b.x, b.y, lt, b.h/2+l2, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h/2-l2, b.w-2*lt, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y, lt, b.h, sw_col);
+        tft.fillRect (b.x, b.y, t, ho2+to2, sw_col);
+        tft.fillRect (b.x+t, b.y+ho2-to2, w-2*t, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y, t, h, sw_col);
         break;
     case 5:
-        tft.fillRect (b.x, b.y, b.w, lt, sw_col);
-        tft.fillRect (b.x, b.y+lt, lt, b.h/2-lt-l2, sw_col);
-        tft.fillRect (b.x, b.y+b.h/2-l2, b.w, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+b.h/2+l2, lt, b.h/2-lt-l2, sw_col);
-        tft.fillRect (b.x, b.y+b.h-lt, b.w, lt, sw_col);
+        tft.fillRect (b.x, b.y, w, t, sw_col);
+        tft.fillRect (b.x, b.y+t, t, ho2-t-to2, sw_col);
+        tft.fillRect (b.x, b.y+ho2-to2, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+ho2+to2, t, ho2-t-to2, sw_col);
+        tft.fillRect (b.x, b.y+h-t, w, t, sw_col);
         break;
     case 6:
-        tft.fillRect (b.x, b.y, lt, b.h, sw_col);
-        tft.fillRect (b.x+lt, b.y, b.w-lt, lt, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h/2-l2, b.w-lt, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+b.h/2+l2, lt, b.h/2-l2-lt, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h-lt, b.w-lt, lt, sw_col);
+        tft.fillRect (b.x, b.y, t, h, sw_col);
+        tft.fillRect (b.x+t, b.y, w-t, t, sw_col);
+        tft.fillRect (b.x+t, b.y+ho2-to2, w-t, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+ho2+to2, t, ho2-to2-t, sw_col);
+        tft.fillRect (b.x+t, b.y+h-t, w-t, t, sw_col);
         break;
     case 7:
-        tft.fillRect (b.x, b.y, b.w, lt, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y+lt, lt, b.h-lt, sw_col);
+        tft.fillRect (b.x, b.y, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+t, t, h-t, sw_col);
         break;
     case 8:
-        tft.fillRect (b.x, b.y, lt, b.h, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y, lt, b.h, sw_col);
-        tft.fillRect (b.x+lt, b.y, b.w-2*lt, lt, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h/2-l2, b.w-2*lt, lt, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h-lt, b.w-2*lt, lt, sw_col);
+        tft.fillRect (b.x, b.y, t, h, sw_col);
+        tft.fillRect (b.x+w-t, b.y, t, h, sw_col);
+        tft.fillRect (b.x+t, b.y, w-2*t, t, sw_col);
+        tft.fillRect (b.x+t, b.y+ho2-to2, w-2*t, t, sw_col);
+        tft.fillRect (b.x+t, b.y+h-t, w-2*t, t, sw_col);
         break;
     case 9:
-        tft.fillRect (b.x, b.y, lt, b.h/2+l2, sw_col);
-        tft.fillRect (b.x+b.w-lt, b.y, lt, b.h, sw_col);
-        tft.fillRect (b.x+lt, b.y, b.w-2*lt, lt, sw_col);
-        tft.fillRect (b.x+lt, b.y+b.h/2-l2, b.w-2*lt, lt, sw_col);
+        tft.fillRect (b.x, b.y, t, ho2+to2, sw_col);
+        tft.fillRect (b.x+w-t, b.y, t, h, sw_col);
+        tft.fillRect (b.x+t, b.y, w-2*t, t, sw_col);
+        tft.fillRect (b.x+t, b.y+ho2-to2, w-2*t, t, sw_col);
         break;
     default:
-        Serial.printf (_FX("Bug! drawDigit %d\n"), digit);
+        fatalError(_FX("Bug! drawDigit %d"), digit);
         break;
     }
 }
@@ -459,7 +468,7 @@ static void drawSWDigit (uint8_t position, uint8_t digit)
     b.h = SW_DH;
 
     // draw
-    drawDigit (b, digit, SW_FLT);
+    drawDigit (b, digit, SW_LT);
 }
 
 /* display the given time value in millis()
@@ -831,19 +840,95 @@ static bool drawBCWx(void)
     return (ok);
 }
 
-/* draw the given big digital clock digit in the given position 0 .. 3
+/* draw space weather in upper right.
+ * just numbers, plus prompts if all
  */
-static void drawBDCDigit (uint8_t position, uint8_t digit)
+static void drawBCSpaceWx(bool all)
 {
-    // bounding box
-    SBox b;
-    b.x = BDC_X0 + (BDC_W+BDC_GAP)*position + (position >= 2)*BDC_GAP;
-    b.y = BDC_Y0;
-    b.w = BDC_W;
-    b.h = BDC_H;
+    // freshen, draw if new or all
+    if (!checkSpaceStats(now()) && !all)
+        return;
 
-    // draw
-    drawDigit (b, digit, BDC_FLT);
+    // collect info
+    SPWxValue ssn, flux, kp, swind, drap;
+    NOAASpaceWx noaaspw;
+    float path[PROP_MAP_N];
+    char xray[10];
+    time_t noaaspw_age, xray_age, path_age;
+    getSpaceWeather (ssn, flux, kp, swind, drap, noaaspw, noaaspw_age, xray, xray_age, path, path_age);
+
+    // prep
+    tft.setTextColor (sw_col);
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    const char *err = "Err";
+    char buf[20];
+
+    // justification columns and row size
+    #define _SX_LEFT_X   660
+    #define _SX_RIGHT_X  796
+    #define _SX_CENTER_X ((_SX_LEFT_X+_SX_RIGHT_X)/2)
+    #define _SX_VALUE_W  (_SX_RIGHT_X-_SX_CENTER_X+2)
+    uint16_t y = 0;
+    uint16_t dy = 32;
+
+    y += dy;
+    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    if (ssn.value == SPW_ERR) {
+        strcpy (buf, err);
+    } else {
+        snprintf (buf, sizeof(buf), "%.1f", ssn.value);
+    }
+    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
+    tft.print (buf);
+
+
+    y += dy;
+    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    if (flux.value == SPW_ERR) {
+        strcpy (buf, err);
+    } else {
+        snprintf (buf, sizeof(buf), "%.1f", flux.value);
+    }
+    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
+    tft.print (buf);
+
+
+    y += dy;
+    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    strcpy (buf, xray);
+    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
+    tft.print (buf);
+
+
+    y += dy;
+    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
+    if (kp.value == SPW_ERR) {
+        strcpy (buf, err);
+    } else {
+        snprintf (buf, sizeof(buf), "%.0f", kp.value);
+    }
+    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
+    tft.print (buf);
+
+
+    // labels if needed
+    if (all) {
+        y = 0;
+        tft.setCursor (_SX_LEFT_X, y += dy);
+        tft.print ("SSN");
+        tft.setCursor (_SX_LEFT_X, y += dy);
+        tft.print ("SFI");
+        tft.setCursor (_SX_LEFT_X, y += dy);
+        tft.print ("X-Ray");
+        tft.setCursor (_SX_LEFT_X, y += dy);
+        tft.print ("Kp");
+    }
+
+    printFreeHeap (F("drawBCSpaceWx"));
 }
 
 /* draw the digital Big Clock 
@@ -852,78 +937,146 @@ static void drawDigitalBigClock (bool all)
 {
     // persist to avoid drawing the same digits again
     static time_t prev_t0;                              // previous report time
-    static uint8_t prev_mnten, prev_mnmn;               // previous mins tens and unit
+    static uint8_t prev_mnten, prev_mnunit;             // previous mins tens and unit
+    static uint8_t prev_scten;                          // previous seconds tens and unit
     static uint8_t prev_hr, prev_mo, prev_dy;           // previous drawn date info
+    static bool prev_leadhr;                            // previous whether leading hours tens digit
 
     // get time now, including any user offset
     time_t t0 = nowWO();
 
-    // local unless utc digital
+    // local unless utc
     if (!(bc_bits & SW_UTCBIT))
         t0 += de_tz.tz_secs;
 
     // done if same second unless all
     if (!all && t0 == prev_t0)
         return;
+    prev_t0 = t0;
 
     // crack open
-    uint8_t hr = hour(t0);
-    uint8_t mn = minute(t0);
+    int hr = hour(t0);
+    int mn = minute(t0);
+    int sc = second(t0);
     int dy = day(t0);
     int mo = month(t0);
-    uint8_t mnmn = mn%10;
+    int hrten = hr/10;
+    int hrunit = hr%10;
+    int mnunit = mn%10;
+
+    // handy
+    bool want_secs = !(bc_bits & SW_NOSECBIT);
+    #define SECS_REDUCE        3               // reduce digits by this factor for seconds
+
+    // initial box for drawDigit, walk right for each position
+    SBox b;
+    b.x = BDC_HMX0;
+    b.y = BDC_HMY0;
+    b.w = BDC_HMW;
+    b.h = BDC_HMH;
+
+    // adjust x to center if no leading hour digit in 12 hour mode
+    bool leadhr = true;
+    if ((bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
+        // 12 hours don't show leading 0
+        int hr12 = hr%12;
+        if (hr12 == 0)
+            hr12 = 12;
+        hrunit = hr12%10;
+        leadhr = hr12 >= 10;
+        if (leadhr) {
+            hrten = hr12/10;
+        } else {
+            hrten = -1;                         // flag to not show
+            b.x += BDC_HMW/2;                   // center with 1 fewer digits
+        }
+    }
+
+    // also adjust x if showing seconds
+    if (want_secs)
+        b.x -= (BDC_HMGAP + (2*BDC_HMW + BDC_HMGAP)/SECS_REDUCE)/2;     // see below
+
+    // restart if changing whether we have a leading hour digit
+    if (leadhr != prev_leadhr)
+        all = true;
+    prev_leadhr = leadhr;
 
     // initial erase or showing date and it's a new day
     if (all || ((bc_bits & SW_BCDATEBIT) && (dy != prev_dy || mo != prev_mo))) {
         eraseScreen();
         all = true;     // insure everything gets redrawn
-        // date
-        if (bc_bits & SW_BCDATEBIT) {
+        if (bc_bits & SW_BCDATEBIT)
             drawBCDate (hr, dy, weekday(t0), mo);
-            prev_dy = dy;
-            prev_mo = mo;
-        }
-    }
-
-    // toggle punctuation every second
-    if (all || t0 != prev_t0) {
-        uint16_t x = BDC_X0 + BDC_W + BDC_GAP + BDC_W + BDC_GAP;
-        uint16_t color = all || (t0&1) ? sw_col : SW_BG;
-        tft.fillCircle (x, BDC_Y0 + BDC_H/3,   BDC_CR, color);
-        tft.fillCircle (x, BDC_Y0 + 2*BDC_H/3, BDC_CR, color);
-        prev_t0 = t0;
-    }
-
-    // update minutes every minute
-    if (all || mnmn != prev_mnmn) {
-
-        // minute for sure
-        drawBDCDigit (3, mnmn);
-        prev_mnmn = mnmn;
-
-        // and tens of minutes too if changed
-        uint8_t mnten = mn/10;
-        if (all || mnten != prev_mnten) {
-            drawBDCDigit (2, mnten);
-            prev_mnten = mnten;
-        }
+        prev_dy = dy;
+        prev_mo = mo;
     }
 
     // update hour every hour
     if (all || hr != prev_hr) {
-        prev_hr = hr;
-        if ((bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
-            // 12 hours don't show leading 0
-            uint8_t hr12 = hr%12;
-            if (hr12 == 0)
-                hr12 = 12;
-            if (hr12 >= 10)
-                drawBDCDigit (0, hr12/10);
-            drawBDCDigit (1, hr12%10);
-        } else {
-            drawBDCDigit (0, hr/10);
-            drawBDCDigit (1, hr%10);
+        if (hrten >= 0) {
+            drawDigit (b, hrten, BDC_HMLT);
+            b.x += BDC_HMW + BDC_HMGAP;
         }
+        drawDigit (b, hrunit, BDC_HMLT);
+        b.x += BDC_HMW;
+        prev_hr = hr;
+    } else {
+        if (hrten >= 0)
+            b.x += BDC_HMW + BDC_HMGAP;
+        b.x += BDC_HMW;
+    }
+
+
+    // blink unless showing seconds
+    if (want_secs) {
+        if (all) {
+            tft.fillCircle (b.x+BDC_HMCW/2, b.y + BDC_HMH/3,   BDC_HMCR, sw_col);
+            tft.fillCircle (b.x+BDC_HMCW/2, b.y + 2*BDC_HMH/3, BDC_HMCR, sw_col);
+        }
+    } else {
+        uint16_t colon_color = all || (t0&1) ? sw_col : SW_BG;
+        tft.fillCircle (b.x+BDC_HMCW/2, b.y + BDC_HMH/3,   BDC_HMCR, colon_color);
+        tft.fillCircle (b.x+BDC_HMCW/2, b.y + 2*BDC_HMH/3, BDC_HMCR, colon_color);
+    }
+    b.x += BDC_HMCW;
+
+
+    // update minutes every minute
+    if (all || mnunit != prev_mnunit) {
+
+        // draw tens of minutes if changed
+        uint8_t mnten = mn/10;
+        if (all || mnten != prev_mnten) {
+            drawDigit (b, mnten, BDC_HMLT);
+            prev_mnten = mnten;
+        }
+        b.x += BDC_HMW + BDC_HMGAP;
+
+        // unit minute for sure
+        drawDigit (b, mnunit, BDC_HMLT);
+        b.x += BDC_HMW;
+        prev_mnunit = mnunit;
+    } else 
+        b.x += BDC_HMW + BDC_HMGAP + BDC_HMW;
+        
+    // add seconds as superscript if wanted
+    if (want_secs) {
+
+        // seconds are shown reduced size
+        b.x += BDC_HMGAP;
+        b.w /= SECS_REDUCE;
+        b.h /= SECS_REDUCE;
+
+        // draw tens of seconds if changed
+        uint8_t scten = sc/10;
+        if (all || scten != prev_scten) {
+            drawDigit (b, scten, BDC_HMLT/SECS_REDUCE);
+            prev_scten = scten;
+        }
+        b.x += b.w + BDC_HMGAP/SECS_REDUCE;
+
+        // unit seconds for sure
+        drawDigit (b, sc%10, BDC_HMLT/SECS_REDUCE);
     }
 
     // update awareness
@@ -935,16 +1088,78 @@ static void drawDigitalBigClock (bool all)
         drawAlarmIndicator(false);
     }
 
-    // update weather if desired and all or new
+    // update DE weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
         bc_wxdt = drawBCWx() ? BAC_WXGDT : BAC_WXFDT;
+
+    // update space weather if desired
+    if (bc_bits & SW_BCSPWXBIT)
+        drawBCSpaceWx(all);
 
     #if defined(_SHOW_ALL)
         tft.drawRect (bccd_b.x, bccd_b.y, bccd_b.w, bccd_b.h, RA8875_WHITE);
     #endif
+}
 
-    // immediate
-    tft.drawPR();
+/* draw the digital time portion of the analog clock.
+ * hr is local 24 hour.
+ */
+static void drawAnalogDigital (bool all, int hr, int mn, int sc)
+{
+    // persist state
+    static uint8_t prev_hr, prev_mn, prev_sc;           // previous time
+    static uint16_t prev_stx, prev_sux;                 // previous seconds tens and unit x
+
+    // options
+    bool want_seconds = !(bc_bits & SW_NOSECBIT);
+    uint16_t x0 = want_seconds ? BACD_HMSX0 : BACD_HMX0;
+
+    // prep
+    selectFontStyle (LIGHT_FONT, LARGE_FONT);
+    tft.setTextColor (sw_col);
+
+    // draw hr and mn
+    if (all || hr != prev_hr || mn != prev_mn) {
+
+        tft.fillRect (x0, BACD_DY-45, 140, 50, RA8875_BLACK);
+        // tft.drawRect (x0, BACD_DY-45, 140, 50, RA8875_RED);
+
+        // convert to 12 hours, don't print leading zero
+        int hr12 = hr%12;
+        if (hr12 == 0)
+            hr12 = 12;
+        if (hr12 >= 10)
+            tft.setCursor (x0, BACD_DY);
+        else
+            tft.setCursor (x0+15, BACD_DY);
+        tft.printf ("%d:%02d", hr12, mn);
+
+        if (want_seconds)
+            tft.print (':');
+        prev_stx = tft.getCursorX();
+        prev_hr = hr;
+        prev_mn = mn;
+    }
+
+    // sc if enabled
+    if (want_seconds && (all || sc != prev_sc)) {
+        bool new_tens = (sc/10) != (prev_sc/10);
+        if (all || new_tens) {
+            tft.fillRect (prev_stx, BACD_DY-45, 60, 50, RA8875_BLACK);
+            // tft.drawRect (prev_stx, BACD_DY-45, 60, 50, RA8875_RED);
+            tft.setCursor (prev_stx, BACD_DY);
+            tft.print (sc/10);
+            prev_sux = tft.getCursorX();
+        } else {
+            tft.fillRect (prev_sux, BACD_DY-45, 30, 50, RA8875_BLACK);
+            // tft.drawRect (prev_sux, BACD_DY-45, 30, 50, RA8875_RED);
+        }
+
+        // always draw unit digit
+        tft.setCursor (prev_sux, BACD_DY);
+        tft.print (sc%10);
+        prev_sc = sc;
+    }
 }
 
 
@@ -971,6 +1186,11 @@ static void drawAnalogBigClock (bool all)
         return;
     prev_t0 = t0;
 
+    // handy
+    bool want_numbers = (bc_bits & SW_ANNUMBIT) != 0;
+    bool want_seconds = !(bc_bits & SW_NOSECBIT);
+    bool color_hands = (bc_bits & SW_ANCOLHBIT) != 0;
+
     // crack open
     int hr = hour(t0);
     int mn = minute(t0);
@@ -978,32 +1198,44 @@ static void drawAnalogBigClock (bool all)
     int dy = day(t0);
     int mo = month(t0);
 
+    // face geometry, scale down if showing digital too
+    bool add_digital = (bc_bits & SW_ANWDBIT) != 0;
+    int bac_y0    = add_digital ? BACD_Y0   : BAC_Y0;
+    int bac_mnr   = add_digital ? BACD_MNR  : BAC_MNR;
+    int bac_scr   = add_digital ? BACD_SCR  : BAC_SCR;
+    int bac_hrr   = add_digital ? BACD_HRR  : BAC_HRR;
+    int bac_fr    = add_digital ? BACD_FR   : BAC_FR;
+    int bac_bezr  = add_digital ? BACD_BEZR : BAC_BEZR;
+    int bac_htr   = add_digital ? BACD_HTR  : BAC_HTR;
+    int bac_mtr   = add_digital ? BACD_MTR  : BAC_MTR;
+
     // refresh if desired or new date (since we never erase the date)
     if (all || ((bc_bits & SW_BCDATEBIT) && (dy != prev_dy || mo != prev_mo))) {
 
         // fresh face
         eraseScreen();
+        all = true;     // insure everything gets redrawn
 
         // face perimeter
       #if defined (_IS_ESP8266)
         // avoids bright flash of circle filling but doesn't fill at higher display sizes
-        for (uint16_t r = BAC_FR+1; r <= BAC_BEZR; r++)
-            tft.drawCircle (BAC_X0, BAC_Y0, r, BAC_BEZCOL);
+        for (uint16_t r = bac_fr+1; r <= bac_bezr; r++)
+            tft.drawCircle (BAC_X0, bac_y0, r, BAC_BEZCOL);
       #else
-        tft.fillCircle (BAC_X0, BAC_Y0, BAC_BEZR, BAC_BEZCOL);
-        tft.fillCircle (BAC_X0, BAC_Y0, BAC_FR, RA8875_BLACK);
+        tft.fillCircle (BAC_X0, bac_y0, bac_bezr, BAC_BEZCOL);
+        tft.fillCircle (BAC_X0, bac_y0, bac_fr, RA8875_BLACK);
       #endif
-        tft.drawCircle (BAC_X0, BAC_Y0, BAC_FR, BAC_FCOL);
+        tft.drawCircle (BAC_X0, bac_y0, bac_fr, BAC_FCOL);
 
         // hour points
         for (int i = 0; i < 12; i++) {
             float a = deg2rad(360.0F*i/12.0F);
-            uint16_t x0 = roundf(BAC_X0 + (BAC_FR-BAC_HTR) * cosf(a));
-            uint16_t y0 = roundf(BAC_Y0 + (BAC_FR-BAC_HTR) * sinf(a));
-            uint16_t x1 = roundf(BAC_X0 + BAC_FR * cosf(a-BAC_HTTH));
-            uint16_t y1 = roundf(BAC_Y0 + BAC_FR * sinf(a-BAC_HTTH));
-            uint16_t x2 = roundf(BAC_X0 + BAC_FR * cosf(a+BAC_HTTH));
-            uint16_t y2 = roundf(BAC_Y0 + BAC_FR * sinf(a+BAC_HTTH));
+            uint16_t x0 = roundf(BAC_X0 + (bac_fr-bac_htr) * cosf(a));
+            uint16_t y0 = roundf(bac_y0 + (bac_fr-bac_htr) * sinf(a));
+            uint16_t x1 = roundf(BAC_X0 + bac_fr * cosf(a-BAC_HTTH));
+            uint16_t y1 = roundf(bac_y0 + bac_fr * sinf(a-BAC_HTTH));
+            uint16_t x2 = roundf(BAC_X0 + bac_fr * cosf(a+BAC_HTTH));
+            uint16_t y2 = roundf(bac_y0 + bac_fr * sinf(a+BAC_HTTH));
             tft.drawLine (x0, y0, x1, y1, 1, BAC_FCOL);
             tft.drawLine (x0, y0, x2, y2, 1, BAC_FCOL);
         }
@@ -1013,20 +1245,20 @@ static void drawAnalogBigClock (bool all)
             if ((i % 5) == 0)
                 continue;                               // don't overdraw hour marks
             float a = deg2rad(360.0F*i/60.0F);
-            uint16_t x0 = roundf(BAC_X0 + BAC_FR * cosf(a));
-            uint16_t y0 = roundf(BAC_Y0 + BAC_FR * sinf(a));
-            uint16_t x1 = roundf(BAC_X0 + (BAC_FR-BAC_MTR) * cosf(a));
-            uint16_t y1 = roundf(BAC_Y0 + (BAC_FR-BAC_MTR) * sinf(a));
+            uint16_t x0 = roundf(BAC_X0 + bac_fr * cosf(a));
+            uint16_t y0 = roundf(bac_y0 + bac_fr * sinf(a));
+            uint16_t x1 = roundf(BAC_X0 + (bac_fr-bac_mtr) * cosf(a));
+            uint16_t y1 = roundf(bac_y0 + (bac_fr-bac_mtr) * sinf(a));
             tft.drawLine (x0, y0, x1, y1, 1, BAC_FCOL);
         }
 
-        // init all locations bogus but inside face and not 0
-        prev_hrdx1 = prev_hrdy1 = 10;
-        prev_mndx1 = prev_mndy1 = 10;
-        prev_hrdx2 = prev_hrdy2 = 20;
-        prev_mndx2 = prev_mndy2 = 20;
-        prev_hrdx3 = prev_hrdy3 = 30;
-        prev_mndx3 = prev_mndy3 = 30;
+        // init all locations to any bogus shape inside face for the initial erase
+        prev_hrdx1 = 20;  prev_hrdy1 = 20;
+        prev_hrdx2 = 0;   prev_hrdy2 = 40;
+        prev_hrdx3 = -20; prev_hrdy3 = 20;
+        prev_mndx1 = 20;  prev_mndy1 = 20;
+        prev_mndx2 = 0;   prev_mndy2 = 40;
+        prev_mndx3 = -20; prev_mndy3 = 20;
         prev_scdx3 = prev_scdy3 = 30;
 
         // date
@@ -1041,73 +1273,122 @@ static void drawAnalogBigClock (bool all)
     float hr_angle = deg2rad(30*(3-(((hr+24)%12) + mn/60.0F)));
     float mn_angle = deg2rad(6*(15-(mn+sc/60.0F)));
     float sc_angle = deg2rad(6*(15-sc));
-    int16_t hrdx3 = roundf(BAC_HRR * cosf(hr_angle));
-    int16_t hrdy3 = roundf(BAC_HRR * sinf(hr_angle));
-    int16_t mndx3 = roundf(BAC_MNR * cosf(mn_angle));
-    int16_t mndy3 = roundf(BAC_MNR * sinf(mn_angle));
-    int16_t scdx3 = roundf(BAC_SCR * cosf(sc_angle));
-    int16_t scdy3 = roundf(BAC_SCR * sinf(sc_angle));
+    int16_t hrdx3 = roundf(bac_hrr * cosf(hr_angle));
+    int16_t hrdy3 = roundf(bac_hrr * sinf(hr_angle));
+    int16_t mndx3 = roundf(bac_mnr * cosf(mn_angle));
+    int16_t mndy3 = roundf(bac_mnr * sinf(mn_angle));
+    int16_t scdx3 = roundf(bac_scr * cosf(sc_angle));
+    int16_t scdy3 = roundf(bac_scr * sinf(sc_angle));
 
     // erase and update hand position if far tip moved
     bool hr_moved = hrdx3 != prev_hrdx3 || hrdy3 != prev_hrdy3;
     bool mn_moved = mndx3 != prev_mndx3 || mndy3 != prev_mndy3;
     bool sc_moved = scdx3 != prev_scdx3 || scdy3 != prev_scdy3;
     if (hr_moved) {
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_hrdx1, BAC_Y0-prev_hrdy1, 1, RA8875_BLACK);
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_hrdx2, BAC_Y0-prev_hrdy2, 1, RA8875_BLACK);
-        tft.drawLine (BAC_X0+prev_hrdx1,BAC_Y0-prev_hrdy1,BAC_X0+prev_hrdx3,BAC_Y0-prev_hrdy3,1,RA8875_BLACK);
-        tft.drawLine (BAC_X0+prev_hrdx2,BAC_Y0-prev_hrdy2,BAC_X0+prev_hrdx3,BAC_Y0-prev_hrdy3,1,RA8875_BLACK);
-        prev_hrdx1 = roundf(BAC_HRR/3.0F * cosf(hr_angle-BAC_HRTH));
-        prev_hrdy1 = roundf(BAC_HRR/3.0F * sinf(hr_angle-BAC_HRTH));
-        prev_hrdx2 = roundf(BAC_HRR/3.0F * cosf(hr_angle+BAC_HRTH));
-        prev_hrdy2 = roundf(BAC_HRR/3.0F * sinf(hr_angle+BAC_HRTH));
+        SCoord hand[4];         // order avoids bug in ESP
+        hand[0].x = BAC_X0+prev_hrdx1; hand[0].y = bac_y0-prev_hrdy1;
+        hand[1].x = BAC_X0;            hand[1].y = bac_y0;
+        hand[2].x = BAC_X0+prev_hrdx2; hand[2].y = bac_y0-prev_hrdy2;
+        hand[3].x = BAC_X0+prev_hrdx3; hand[3].y = bac_y0-prev_hrdy3;
+        if (color_hands)
+            tft.fillPolygon (hand, NARRAY(hand), RA8875_BLACK);
+        else
+            tft.drawPolygon (hand, NARRAY(hand), RA8875_BLACK);
+
+        prev_hrdx1 = roundf(bac_hrr/3.0F * cosf(hr_angle-BAC_HRTH));
+        prev_hrdy1 = roundf(bac_hrr/3.0F * sinf(hr_angle-BAC_HRTH));
+        prev_hrdx2 = roundf(bac_hrr/3.0F * cosf(hr_angle+BAC_HRTH));
+        prev_hrdy2 = roundf(bac_hrr/3.0F * sinf(hr_angle+BAC_HRTH));
         prev_hrdx3 = hrdx3;
         prev_hrdy3 = hrdy3;
     }
     if (mn_moved) {
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_mndx1, BAC_Y0-prev_mndy1, 1, RA8875_BLACK);
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_mndx2, BAC_Y0-prev_mndy2, 1, RA8875_BLACK);
-        tft.drawLine (BAC_X0+prev_mndx1,BAC_Y0-prev_mndy1,BAC_X0+prev_mndx3,BAC_Y0-prev_mndy3,1,RA8875_BLACK);
-        tft.drawLine (BAC_X0+prev_mndx2,BAC_Y0-prev_mndy2,BAC_X0+prev_mndx3,BAC_Y0-prev_mndy3,1,RA8875_BLACK);
-        prev_mndx1 = roundf(BAC_MNR/3.0F * cosf(mn_angle-BAC_MNTH));
-        prev_mndy1 = roundf(BAC_MNR/3.0F * sinf(mn_angle-BAC_MNTH));
-        prev_mndx2 = roundf(BAC_MNR/3.0F * cosf(mn_angle+BAC_MNTH));
-        prev_mndy2 = roundf(BAC_MNR/3.0F * sinf(mn_angle+BAC_MNTH));
+        SCoord hand[4];         // order avoids bug in ESP
+        hand[0].x = BAC_X0+prev_mndx1; hand[0].y = bac_y0-prev_mndy1;
+        hand[1].x = BAC_X0;            hand[1].y = bac_y0;
+        hand[2].x = BAC_X0+prev_mndx2; hand[2].y = bac_y0-prev_mndy2;
+        hand[3].x = BAC_X0+prev_mndx3; hand[3].y = bac_y0-prev_mndy3;
+        if (color_hands)
+            tft.fillPolygon (hand, NARRAY(hand), RA8875_BLACK);
+        else
+            tft.drawPolygon (hand, NARRAY(hand), RA8875_BLACK);
+
+        prev_mndx1 = roundf(bac_mnr/3.0F * cosf(mn_angle-BAC_MNTH));
+        prev_mndy1 = roundf(bac_mnr/3.0F * sinf(mn_angle-BAC_MNTH));
+        prev_mndx2 = roundf(bac_mnr/3.0F * cosf(mn_angle+BAC_MNTH));
+        prev_mndy2 = roundf(bac_mnr/3.0F * sinf(mn_angle+BAC_MNTH));
         prev_mndx3 = mndx3;
         prev_mndy3 = mndy3;
     }
-    if (sc_moved) {
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_scdx3, BAC_Y0-prev_scdy3, 1, RA8875_BLACK);
+    if (want_seconds && sc_moved) {
+        tft.drawLine (BAC_X0, bac_y0, BAC_X0+prev_scdx3, bac_y0-prev_scdy3, 1, RA8875_BLACK);
         prev_scdx3 = scdx3;
         prev_scdy3 = scdy3;
+    }
+
+    // draw numbers if desired and all or if likely partially erased by min or sec hand
+    if (want_numbers) {
+        int16_t mntipx = BAC_X0+prev_mndx3;
+        int16_t mntipy = bac_y0-prev_mndy3;
+        int16_t sctipx = BAC_X0+prev_scdx3;
+        int16_t sctipy = bac_y0-prev_scdy3;
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        tft.setTextColor (sw_col);
+        #define TIP_R 50                                                // redraw if this close to tip
+        for (int i = 1; i <= 12; i++) {
+            float theta = deg2rad(i*360/12);                            // CW from up
+            int16_t x = BAC_X0 + bac_scr*sinf(theta) - (i<10?5:12);;    // wrt center of number
+            int16_t y = bac_y0 - bac_scr*cosf(theta) + 9;
+            if (all || (mn_moved && abs(x-mntipx)<TIP_R && abs(y-mntipy)<TIP_R)
+                        || (want_seconds && sc_moved && abs(x-sctipx)<TIP_R && abs(y-sctipy)<TIP_R)) {
+                tft.setCursor (x, y);
+                tft.print(i);
+            }
+        }
     }
 
     // draw hand if moved or likely clobbered by another hand erasure
     float hr_sc_angle = fabsf(hr_angle - sc_angle);
     float hr_mn_angle = fabsf(hr_angle - mn_angle);
     float mn_sc_angle = fabsf(mn_angle - sc_angle);
-    bool hrsc_hit = hr_sc_angle < 2*BAC_HRTH || hr_sc_angle > 2*M_PIF - 2*BAC_HRTH;    // fudge fat bottom
+    bool hrsc_hit = hr_sc_angle < 2*BAC_HRTH || hr_sc_angle > 2*M_PIF - 2*BAC_HRTH;
     bool hrmn_hit = hr_mn_angle < 2*BAC_HRTH || hr_mn_angle > 2*M_PIF - 2*BAC_HRTH;
     bool mnsc_hit = mn_sc_angle < 2*BAC_MNTH || mn_sc_angle > 2*M_PIF - 2*BAC_MNTH;
-    if (hr_moved || hrsc_hit || hrmn_hit) {
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_hrdx1, BAC_Y0-prev_hrdy1, 1, BAC_HRCOL);
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_hrdx2, BAC_Y0-prev_hrdy2, 1, BAC_HRCOL);
-        tft.drawLine (BAC_X0+prev_hrdx1,BAC_Y0-prev_hrdy1,BAC_X0+prev_hrdx3,BAC_Y0-prev_hrdy3,1,BAC_HRCOL);
-        tft.drawLine (BAC_X0+prev_hrdx2,BAC_Y0-prev_hrdy2,BAC_X0+prev_hrdx3,BAC_Y0-prev_hrdy3,1,BAC_HRCOL);
+    if (want_numbers || hr_moved || hrsc_hit || hrmn_hit) {
+        SCoord hand[4];         // order avoids bug in ESP
+        hand[0].x = BAC_X0+prev_hrdx1; hand[0].y = bac_y0-prev_hrdy1;
+        hand[1].x = BAC_X0;            hand[1].y = bac_y0;
+        hand[2].x = BAC_X0+prev_hrdx2; hand[2].y = bac_y0-prev_hrdy2;
+        hand[3].x = BAC_X0+prev_hrdx3; hand[3].y = bac_y0-prev_hrdy3;
+        if (color_hands)
+            tft.fillPolygon (hand, NARRAY(hand), BAC_HRCOL);
+        else {
+            tft.fillPolygon (hand, NARRAY(hand), RA8875_BLACK);
+            tft.drawPolygon (hand, NARRAY(hand), BAC_HRCOL);
+        }
     }
-    if (mn_moved || hrmn_hit || mnsc_hit) {
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_mndx1, BAC_Y0-prev_mndy1, 1, BAC_MNCOL);
-        tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_mndx2, BAC_Y0-prev_mndy2, 1, BAC_MNCOL);
-        tft.drawLine (BAC_X0+prev_mndx1,BAC_Y0-prev_mndy1,BAC_X0+prev_mndx3,BAC_Y0-prev_mndy3,1,BAC_MNCOL);
-        tft.drawLine (BAC_X0+prev_mndx2,BAC_Y0-prev_mndy2,BAC_X0+prev_mndx3,BAC_Y0-prev_mndy3,1,BAC_MNCOL);
-    }
-    if (sc_moved || hrsc_hit || mnsc_hit) {
-        if ((bc_bits & SW_ANOSHBIT) == 0)
-            tft.drawLine (BAC_X0, BAC_Y0, BAC_X0+prev_scdx3, BAC_Y0-prev_scdy3, 1, BAC_SCCOL);
+    if (want_numbers || mn_moved || hrmn_hit || mnsc_hit) {
+        SCoord hand[4];         // order avoids bug in ESP
+        hand[0].x = BAC_X0+prev_mndx1; hand[0].y = bac_y0-prev_mndy1;
+        hand[1].x = BAC_X0;            hand[1].y = bac_y0;
+        hand[2].x = BAC_X0+prev_mndx2; hand[2].y = bac_y0-prev_mndy2;
+        hand[3].x = BAC_X0+prev_mndx3; hand[3].y = bac_y0-prev_mndy3;
+        if (color_hands) {
+            tft.fillPolygon (hand, NARRAY(hand), BAC_MNCOL);
+            if (hrmn_hit)
+                tft.drawPolygon (hand, NARRAY(hand), RA8875_BLACK);        // mn hand border if near hr hand
+        } else {
+            tft.fillPolygon (hand, NARRAY(hand), RA8875_BLACK);
+            tft.drawPolygon (hand, NARRAY(hand), BAC_HRCOL);
+        }
     }
 
+    // draw second hand after numbers so it overlays
+    if (want_seconds && (sc_moved || hrsc_hit || mnsc_hit))
+        tft.drawLine (BAC_X0, bac_y0, BAC_X0+prev_scdx3, bac_y0-prev_scdy3, 1, BAC_SCCOL);
+
     // center dot
-    tft.fillCircle (BAC_X0, BAC_Y0, BAC_DOTR, BAC_BEZCOL);
+    tft.fillCircle (BAC_X0, bac_y0, BAC_DOTR, BAC_BEZCOL);
 
     // update awareness
     drawBCAwareness (all);
@@ -1118,17 +1399,22 @@ static void drawAnalogBigClock (bool all)
         drawAlarmIndicator(false);
     }
 
+    // numeric time too if desired
+    if (add_digital)
+        drawAnalogDigital (all, hr, mn, sc);
+
+
     #if defined(_SHOW_ALL)
         tft.drawRect (bccd_b.x, bccd_b.y, bccd_b.w, bccd_b.h, RA8875_WHITE);
     #endif
 
-    // immediate
-    tft.drawPR();
-
-    // update weather if desired and all or new
+    // update DE or space weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
         bc_wxdt = drawBCWx() ? BAC_WXGDT : BAC_WXFDT;
 
+    // update space weather if desired
+    if (bc_bits & SW_BCSPWXBIT)
+        drawBCSpaceWx(all);
 }
 
 /* update stopwatch in any possible display state
@@ -1337,16 +1623,20 @@ static void runBCMenu (const SCoord &s)
     enum MIName {
         MI_FMT_TTL,
             MI_FMT_ANA,
-                MI_ANA_SHD,
+                MI_ANA_DIG,
+                MI_ANA_NUM,
+                MI_ANA_FIL,
             MI_FMT_DIG,
                 MI_DIG_UTC,
                 MI_DIG_12H,
                 MI_DIG_24H,
         MI_ALL_TTL,
+            MI_ALL_SEC,
             MI_ALL_SDT,
-            MI_ALL_SWX,
             MI_ALL_CDW,
             MI_ALL_ALM,
+            MI_ALL_SWX,
+            MI_ALL_SPW,
         MI_BLK1,
         MI_EXT,
         MI_BLK2,
@@ -1360,19 +1650,23 @@ static void runBCMenu (const SCoord &s)
     MenuItem mitems[MI_N] = {
         {MENU_LABEL, false, 0, PRI_INDENT, "Format:"},
             {MENU_1OFN, !(bc_bits & SW_BCDIGBIT), 1, SEC_INDENT, "Analog"},
-                {MENU_TOGGLE, !(bc_bits & SW_ANOSHBIT), 2, TER_INDENT, "Show second hand"},
+                {MENU_TOGGLE, !!(bc_bits & SW_ANWDBIT), 2, TER_INDENT, "+ Digital"},
+                {MENU_TOGGLE, !!(bc_bits & SW_ANNUMBIT), 2, TER_INDENT, "Numbers"},
+                {MENU_TOGGLE, !!(bc_bits & SW_ANCOLHBIT), 2, TER_INDENT, "Color hands"},
             {MENU_1OFN, !!(bc_bits & SW_BCDIGBIT), 1, SEC_INDENT, "Digital"},
                 {MENU_1OFN, !!(bc_bits & SW_UTCBIT), 3, TER_INDENT, "UTC"},
                 {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT, 3, TER_INDENT, "DE 12 hour"},
                 {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == 0, 3, TER_INDENT, "DE 24 hour"},
-        {MENU_LABEL, false, 0, PRI_INDENT, "Shared options:"},
-            {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 4, SEC_INDENT, "Show date info"},
-            {MENU_TOGGLE, !!(bc_bits & SW_BCWXBIT), 5, SEC_INDENT, "Show DE weather"},
-            {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Show count down"},
-            {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Show alarm time"},
-        {MENU_BLANK, false, 8, PRI_INDENT, NULL},
-        {MENU_TOGGLE, false, 9, PRI_INDENT, "Exit Big Clock"},
-        {MENU_BLANK, false, 10, PRI_INDENT, NULL},
+        {MENU_LABEL, false, 0, PRI_INDENT, "Also show:"},
+            {MENU_TOGGLE, !(bc_bits & SW_NOSECBIT), 4, SEC_INDENT, "Seconds"},
+            {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 5, SEC_INDENT, "Date info"},
+            {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Count down"},
+            {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Alarm"},
+            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 8, SEC_INDENT, "DE WX"},
+            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 8, SEC_INDENT, "Space WX"},
+        {MENU_BLANK, false, 9, PRI_INDENT, NULL},
+        {MENU_TOGGLE, false, 10, PRI_INDENT, "Exit Big Clock"},
+        {MENU_BLANK, false, 11, PRI_INDENT, NULL},
     };
 
     // box for menu anchored at s
@@ -1383,7 +1677,7 @@ static void runBCMenu (const SCoord &s)
 
     // run, do nothing more if cancelled
     SBox ok_b;
-    Menu menu = {menu_b, ok_b, false, 1, MI_N, mitems};
+    MenuInfo menu = {menu_b, ok_b, false, false, 1, MI_N, mitems};
     if (!runMenu (menu))
         return;
 
@@ -1401,10 +1695,15 @@ static void runBCMenu (const SCoord &s)
     if (menu.items[MI_EXT].set)
         sws_display = SWD_MAIN;
 
-    if (menu.items[MI_ANA_SHD].set)
-        bc_bits &= ~SW_ANOSHBIT;
+    if (menu.items[MI_ANA_DIG].set)
+        bc_bits |= SW_ANWDBIT;
     else
-        bc_bits |= SW_ANOSHBIT;
+        bc_bits &= ~SW_ANWDBIT;
+
+    if (menu.items[MI_ANA_NUM].set)
+        bc_bits |= SW_ANNUMBIT;
+    else
+        bc_bits &= ~SW_ANNUMBIT;
 
     if (menu.items[MI_DIG_UTC].set)
         bc_bits |= SW_UTCBIT;
@@ -1415,6 +1714,11 @@ static void runBCMenu (const SCoord &s)
         bc_bits |= SW_DB12HBIT;
     else
         bc_bits &= ~SW_DB12HBIT;
+
+    if (menu.items[MI_ALL_SEC].set)             // N.B. inverted from what you might expect
+        bc_bits &= ~SW_NOSECBIT;
+    else
+        bc_bits |= SW_NOSECBIT;
 
     if (menu.items[MI_ALL_SDT].set)
         bc_bits |= SW_BCDATEBIT;
@@ -1437,6 +1741,19 @@ static void runBCMenu (const SCoord &s)
         bc_bits |= SW_BCWXBIT;
     else
         bc_bits &= ~SW_BCWXBIT;
+
+    if (menu.items[MI_ALL_SPW].set)
+        bc_bits |= SW_BCSPWXBIT;
+    else
+        bc_bits &= ~SW_BCSPWXBIT;
+
+    if (menu.items[MI_ANA_FIL].set)
+        bc_bits |= SW_ANCOLHBIT;
+    else
+        bc_bits &= ~SW_ANCOLHBIT;
+
+    // save new settings
+    saveSWNV();
 
 }
 
@@ -1782,6 +2099,8 @@ void checkStopwatchTouch(TouchType tt)
  */
 bool runStopwatch()
 {
+    resetWatchdog();
+
     // always honor countdown switch regardless of display state
     if (countdownPinIsTrue())
         setSWEngineState (SWE_COUNTDOWN, countdown_period);
@@ -1843,6 +2162,10 @@ bool runStopwatch()
         // update countdown if running
         if (sws_engine == SWE_COUNTDOWN)
             drawCDTimeRemaining(false);
+
+        // update other systems
+        followBrightness();
+        readBME280();
 
         // stopwatch is up
         return (true);

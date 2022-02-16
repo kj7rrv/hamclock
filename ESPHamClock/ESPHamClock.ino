@@ -35,15 +35,11 @@ SBox de_maid_b;                         // de maindenhead
 TZInfo de_tz = {{85, 158, 50, 17}, DE_COLOR, 0};
 TZInfo dx_tz = {{85, 307, 50, 17}, DX_COLOR, 0};
 
-// NCDFX box
-SBox NCDXF_b = {745, 0, 54, 147};
+// NCDFX box, also used for brightness, on/off controls and space wx stats
+SBox NCDXF_b = {745, 0, 55, PLOTBOX_H};
 
-// brightness control and mode control
-SBox brightness_b = {745, 30, 54, 147-30};      // lower portion of NCDXF_b
-uint8_t brb_mode;                       // one of BRB_MODE
-
-// common "skip" button
-const SBox skip_b    = {730,10,55,35};
+// common "skip" button in several places
+SBox skip_b    = {730,10,55,35};
 bool skip_skip;
 
 // special options to force initing DE using our IP or given IP
@@ -86,6 +82,8 @@ static const char on_air_msg[] = "ON THE AIR";  // used by setOnAir()
 static SBox version_b;                          // show or check version, just below call
 static SBox wifi_b;                             // wifi info
 static bool rssi_ignore;                        // allow op to ignore low wifi power
+static int rssi_avg;                            // running rssi mean
+#define RSSI_ALPHA 0.5F                         // rssi blending coefficient
 #define CSINFO_DROP     3                       // gap below cs_info
 
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
@@ -172,8 +170,8 @@ static void onSig (int signo)
     sigstr[0] = (signo/10)+'0';
     sigstr[1] = (signo%10)+'0';
     sigstr[2] = '\n';
-    write (1, msg, sizeof(msg)-1);
-    write (1, sigstr, 3);
+    (void) !write (1, msg, sizeof(msg)-1);
+    (void) !write (1, sigstr, 3);
 
     // try to insure screen is back on -- har!
     setFullBrightness();
@@ -360,8 +358,8 @@ void setup()
     // position View button in upper left
     view_btn_b.x = map_b.x;
     view_btn_b.y = map_b.y;                     // gets adjusted if showing grid label
-    view_btn_b.w = VIEWBTN_W;
-    view_btn_b.h = VIEWBTN_H;
+    view_btn_b.w = 60;
+    view_btn_b.h = 14;
 
     // redefine callsign for main screen
     cs_info.box.x = 0;
@@ -552,12 +550,8 @@ void setup()
 void loop()
 {
     // update stopwatch exclusively, if active
-    if (runStopwatch()) {
-        // these can run even while stopwatch is up
-        followBrightness();
-        readBME280();
+    if (runStopwatch())
         return;
-    }
 
     // check on wifi and plots
     updateWiFi();
@@ -856,11 +850,8 @@ static void checkTouch()
         updateWiFi();
     } else if (checkPlotTouch(s, PANE_3, tt)) {
         updateWiFi();
-    } else if (inBox (s, brightness_b)) {
-        changeBrightness(s);
-    } else if (checkBeaconTouch(s)) {
-        drawBeaconBox();
-        updateBeacons(true, true, true);
+    } else if (inBox (s, NCDXF_b)) {
+        doNCDXFTouch(s);
     } else if (checkSatNameTouch(s)) {
         dx_info_for_sat = querySatSelection();
         initScreen();
@@ -883,7 +874,7 @@ static void checkTouch()
     } else if (inBox (s, wifi_b)) {
         int rssi;
         if (readWiFiRSSI(rssi))
-            runWiFiMeter(false, rssi_ignore);
+            rssi_avg = runWiFiMeter (false, rssi_ignore);     // full effect of last reading
     }
 }
 
@@ -1027,7 +1018,7 @@ void newDE (LatLong &ll, const char *grid)
     displaySatInfo();
 }
 
-/* return next color in basic series of primary colors with decent contrast.
+/* return next color after current in basic series of primary colors that is nicely different from contrast.
  */
 static uint16_t getNextColor (uint16_t current, uint16_t contrast)
 {
@@ -1043,46 +1034,48 @@ static uint16_t getNextColor (uint16_t current, uint16_t contrast)
         if (colors[current_i] == current)
             break;
 
-    // scan forward from current skipping ones with poor contrast
-    uint16_t new_color;
+    // scan forward from current until find one nicely different from contrast
     for (unsigned cdiff_i = 1; cdiff_i < NCOLORS; cdiff_i++) {
-        new_color = colors[(current_i + cdiff_i) % NCOLORS];
-        if (new_color == contrast)
+        uint16_t next_color = colors[(current_i + cdiff_i) % NCOLORS];
+
+        // certainly doesn't work if same as contrast
+        if (next_color == contrast)
             continue;
-        switch (contrast) {
+
+        // continue scanning if bad combination
+        switch (next_color) {
         case RA8875_RED:
-            if (new_color != RA8875_MAGENTA)
-                return (new_color);
+            if (contrast == RA8875_MAGENTA)
+                continue;
             break;
-        case RA8875_GREEN:
-            if (new_color != RA8875_CYAN)
-                return (new_color);
-            break;
+        case RA8875_GREEN:      // fallthru
         case RA8875_BLUE:
-            if (new_color != RA8875_BLACK)
-                return (new_color);
+            if (contrast == RA8875_CYAN)
+                continue;
             break;
         case RA8875_CYAN:
-            if (new_color != RA8875_GREEN)
-                return (new_color);
+            if (contrast == RA8875_GREEN || contrast == RA8875_BLUE)
+                continue;
             break;
         case RA8875_MAGENTA:
-            if (new_color != RA8875_RED)
-                return (new_color);
+            if (contrast == RA8875_RED)
+                continue;
             break;
         case RA8875_YELLOW:
-            if (new_color != RA8875_WHITE)
-                return (new_color);
+            if (contrast == RA8875_WHITE)
+                continue;
             break;
         case RA8875_WHITE:
-            if (new_color != RA8875_YELLOW)
-                return (new_color);
+            if (contrast == RA8875_YELLOW)
+                continue;
             break;
         case RA8875_BLACK:
-            if (new_color != RA8875_BLUE)
-                return (new_color);
+            // black goes with anything
             break;
         }
+
+        // no complaints
+        return (next_color);
     }
 
     // default 
@@ -1099,8 +1092,8 @@ bool checkCallsignTouchFG (SCoord &b)
 
     if (inBox (b, left_half)) {
         // change fg
-        uint16_t contrast = cs_info.bg_rainbow ? RA8875_BLACK : cs_info.bg_color;
-        cs_info.fg_color = getNextColor (cs_info.fg_color, contrast);
+        uint16_t bg = cs_info.bg_rainbow ? RA8875_BLACK : cs_info.bg_color;
+        cs_info.fg_color = getNextColor (cs_info.fg_color, bg);
         return (true);
     }
     return (false);
@@ -1356,19 +1349,29 @@ void drawCallsign (bool all)
     selectFontStyle (BOLD_FONT, LARGE_FONT);
     getTextBounds (call, &cw, &ch);
 
+    bool fast_font = false;
     if (cw >= cs_info.box.w) {
         selectFontStyle (BOLD_FONT, SMALL_FONT);
         getTextBounds (call, &cw, &ch);
         if (cw >= cs_info.box.w) {
             selectFontStyle (LIGHT_FONT, SMALL_FONT);
             getTextBounds (call, &cw, &ch);
+            if (cw >= cs_info.box.w) {
+                selectFontStyle (LIGHT_FONT, FAST_FONT);
+                getTextBounds (call, &cw, &ch);
+                fast_font = true;
+            }
         }
     }
 
-    tft.setTextColor (cs_info.fg_color);
+    // one last clip to be sure then draw
+    cw = maxStringW (call, cs_info.box.w);
     int cx = cs_info.box.x + (cs_info.box.w-cw)/2;
     int cy = cs_info.box.y + ch + (cs_info.box.h-ch)/2 - 3;
+    if (fast_font)
+        cy -= ch;               // FAST_FONT y is on top, other are on the bottom
     tft.setCursor (cx, cy);
+    tft.setTextColor (cs_info.fg_color);
     tft.print(call);
 }
 
@@ -1427,38 +1430,40 @@ static void drawWiFiInfo()
     if (!timesUp(&prev_ms, 5000))
         return;
 
+    // message, if [0] != 0
+    char str[40];
+    str[0] = '\0';
+
     // toggle rssi and ip, or just ip if no wifi
     static bool rssi_ip_toggle;
-    char str[40];
-    if (rssi_ip_toggle) {
+    if (rssi_ip_toggle && millis() > 30000) {   // ignore first 30 seconds, reports of flakeness
 
         // show RSSI, if working, and show meter if too low and not ignored
 
-        static int prev_rssi;           // for computing change
+        static int prev_logv;           // for only logging large changes
 
-        // read now
+        // read
         int rssi;
-        bool ok = readWiFiRSSI(rssi);
+        if (readWiFiRSSI(rssi)) {
 
-        // show meter at least once if too low
-        if (ok && !rssi_ignore && rssi < MIN_WIFI_RSSI) {
-            runWiFiMeter(true, rssi_ignore);
-            ok = readWiFiRSSI(rssi);
-        }
+            // Serial.printf ("**************************** %d\n", rssi);
 
-        // display value
-        if (ok) {
-            snprintf (str, sizeof(str), _FX("  WiFi %4d dBm"), rssi);
-            tft.setTextColor (rssi < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
-        } else {
-            // no wifi, just leave IP showing
-            str[0] = '\0';
-        }
+            // blend, or use as-is if first time
+            rssi_avg = prev_logv == 0 ? rssi : roundf(rssi*RSSI_ALPHA + rssi_avg*(1-RSSI_ALPHA));
 
-        // log if changed more than a few db
-        if (ok && abs(rssi-prev_rssi) > 3) {
-            Serial.printf (_FX("Up %lu s: RSSI %d\n"), millis()/1000U, rssi);
-            prev_rssi = rssi;
+            // show meter if too low unless ignored
+            if (!rssi_ignore && rssi_avg < MIN_WIFI_RSSI)
+                rssi_avg = runWiFiMeter (true, rssi_ignore);     // full effect of last reading
+
+            // display value
+            snprintf (str, sizeof(str), _FX("  WiFi %4d dBm"), rssi_avg);
+            tft.setTextColor (rssi_avg < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
+
+            // log if changed more than a few db
+            if (abs(rssi_avg-prev_logv) > 3) {
+                Serial.printf (_FX("Up %lu s: RSSI %d\n"), millis()/1000U, rssi_avg);
+                prev_logv = rssi_avg;
+            }
         }
 
     } else {
@@ -1625,9 +1630,9 @@ void drawAllSymbols(bool erase_too)
 
     if (mapScaleIsUp())
         drawMapScale();
-    if (!overRSS(sun_c.s))
+    if (overMap(sun_c.s))
         drawSun();
-    if (!overRSS(moon_c.s))
+    if (overMap(moon_c.s))
         drawMoon();
     updateBeacons(erase_too, true, false);
     drawDEMarker(false);
@@ -1802,7 +1807,7 @@ static void drawDEFormatMenu()
 
     // run menu
     SBox ok_b;
-    Menu menu = {menu_b, ok_b, false, 1, NARRAY(mitems), mitems};
+    MenuInfo menu = {menu_b, ok_b, false, false, 1, NARRAY(mitems), mitems};
     if (runMenu (menu)) {
         // capture and save new value
         for (int i = 0; i < DETIME_N; i++) {
@@ -2204,13 +2209,13 @@ static void shutdown(void)
         drawStringInBox ("Rebooting...", sdc[3].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Rebooting\n"));
-        system ("sudo reboot");
+        (void) !system ("sudo reboot");
         for(;;);
     case _SDC_SHUTDOWN:
         drawStringInBox ("Shutting down...", sdc[4].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Shutting down\n"));
-        system ("sudo halt");
+        (void) !system ("sudo halt");
         for(;;);
  #endif // _IS_UNIX
     default:

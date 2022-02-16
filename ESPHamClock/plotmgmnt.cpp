@@ -207,7 +207,7 @@ PlotChoice askPaneChoice (PlotPane pp)
     // run the menu in copy of plot box so its height is not changed
     SBox pb = plot_b[pp];       // copy, not reference, because runMenu will shrink wrap
     SBox ok_b;
-    Menu menu = {pb, ok_b, true, 2, n_mitems, mitems};
+    MenuInfo menu = {pb, ok_b, true, false, 2, n_mitems, mitems};
     bool menu_ok = runMenu (menu);
 
     // return current choice by default

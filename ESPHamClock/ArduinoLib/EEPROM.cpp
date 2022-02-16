@@ -63,7 +63,7 @@ void EEPROM::begin (int s)
                 // never returns
             }
         }
-        fchown (fileno(fp), getuid(), getgid());
+        (void) !fchown (fileno(fp), getuid(), getgid());
 
         // check lock
         if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0)

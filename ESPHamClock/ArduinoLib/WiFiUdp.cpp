@@ -37,6 +37,8 @@ bool WiFiUDP::begin(int port)
 	    return (false);
 	}
 
+        printf ("new UDP socket %d\n", sockfd);
+
 	return (true);
 }
 
@@ -77,6 +79,8 @@ bool WiFiUDP::beginMulticast (IPAddress ifIP, IPAddress mcIP, int port)
 	    printf ("IP_ADD_MEMBERSHIP: %s\n", strerror(errno));
 	    return (false);
         }
+
+        printf ("new multicast socket %d\n", sockfd);
 
         // ok
         return (true);
@@ -177,6 +181,7 @@ void WiFiUDP::stop()
 {
 	if (sockfd >= 0) {
 	    ::close (sockfd);
+            printf ("closing socket %d\n", sockfd);
 	    sockfd = -1;
 	}
 }

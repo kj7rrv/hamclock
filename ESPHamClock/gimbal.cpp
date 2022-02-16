@@ -16,6 +16,8 @@
 
 #include "HamClock.h"
 
+// uncomment to enable gimbal facility
+// #define _ENABLE_GIMBAL
 
 // uncomment the #define to get additional performance information
 // #define WANT__TRACE_IO
@@ -136,25 +138,26 @@ static bool ARCIsConnected()
 void closeGimbal()
 {
     if (ARCIsConnected()) {
-        Serial.printf (_FX("ARC: %lu disconnecting\n"), now());
+        Serial.printf (_FX("ARC: %lu disconnected\n"), now());
         arc_client.stop();
     }
 }
 
-/* return whether arc_client is successfully connected to ARC.
- * if not, listen at most ntry times for its multicast then try to connect.
- * print any err info in box.
- * return success immediately if already connected.
+/* try to connect arc_client to ARC if not already, trying ntry many times.
+ * print any error in the given plot box.
+ * return whether successful.
  */
-static bool connectARCOk(const SBox &box, uint8_t ntry)
+static bool connectARC (const SBox &box, uint8_t ntry)
 {
     // success if already connected
     if (ARCIsConnected())
         return (true);
 
     // pointless going further if no wifi
-    if (!wifiOk())
+    if (!wifiOk()) {
+        plotMessage (box, RA8875_RED, _FX("No network"));
         return (false);
+    }
 
     _TRACE_IO (("ARC: %lu starting connection attempt\n", now()));
 
@@ -168,16 +171,17 @@ static bool connectARCOk(const SBox &box, uint8_t ntry)
     char *buf = buf_mem.getMem();
 
     // check several times for ARC multicast, connect if found
-    uint8_t t;
+    int t;
     for (t = 0; t < ntry; t++) {
 
+        _TRACE_IO (("ARC: %lu try %d checking for mc packet\n", now(), t));
+
         // insure we can listen for multicast, else give up
-        if (!arc_mc && !arc_mc.beginMulticast(WiFi.localIP(),IPAddress(MC_IPA,MC_IPB,MC_IPC,MC_IPD),MC_PORT)){
-            Serial.println (F("ARC: multicast listen fail"));
+        if (!arc_mc && !arc_mc.beginMulticast (WiFi.localIP(),
+                                            IPAddress(MC_IPA,MC_IPB,MC_IPC,MC_IPD), MC_PORT)) {
+            plotMessage (box, RA8875_RED, _FX("Multicast fail"));
             return (false);
         }
-
-        _TRACE_IO (("ARC: %lu try %d checking for mc packet\n", now(), t));
 
         if (arc_mc.parsePacket()) {
 
@@ -212,7 +216,6 @@ static bool connectARCOk(const SBox &box, uint8_t ntry)
                     continue;
                 }
                 if (strncmp (buf, "OK ", 3)) {
-                    Serial.printf (_FX("ARC: %s\n"), buf);
                     plotMessage (box, RA8875_RED, buf);
                     wdDelay(MSG_DWELL);
                     closeGimbal();
@@ -225,7 +228,6 @@ static bool connectARCOk(const SBox &box, uint8_t ntry)
                     continue;
                 }
                 if (strncmp (buf, "OK ", 3)) {
-                    Serial.printf (_FX("ARC: %s\n"), buf);
                     plotMessage (box, RA8875_RED, buf);
                     wdDelay(MSG_DWELL);
                     closeGimbal();
@@ -267,11 +269,11 @@ static bool connectARCOk(const SBox &box, uint8_t ntry)
         wdDelay (MC_TRY_PERIOD);
     }
 
-    // fail or not ready
+    // failed if get here
     if (t < ntry)
-        Serial.println (F("ARC: server not ready"));
+        plotMessage (box, RA8875_RED, _FX("ARC Server not ready"));
     else
-        Serial.println (F("ARC: no server found"));
+        plotMessage (box, RA8875_RED, _FX("No ARC server found"));
     arc_mc.stop();
     return (false);
 }
@@ -284,52 +286,51 @@ static bool connectARCOk(const SBox &box, uint8_t ntry)
  */
 static bool doARCMessage (const SBox &box, char *resp, int maxresp_l, const char *msgfmt, ...)
 {
-        // require connection
-        if (!ARCIsConnected())
-            return (false);
+    // require connection
+    if (!ARCIsConnected())
+        return (false);
 
-        // build message
-        char msg[128];
-        va_list ap;
-        va_start (ap, msgfmt);
-        vsnprintf (msg, sizeof(msg), msgfmt, ap);
-        va_end (ap);
+    // build message
+    char msg[128];
+    va_list ap;
+    va_start (ap, msgfmt);
+    vsnprintf (msg, sizeof(msg), msgfmt, ap);
+    va_end (ap);
 
-        // send with a few retrys
-        for (uint8_t t = 1; t <= MAX_SNDRETRY; t++) {
+    // send with a few retrys
+    for (uint8_t t = 1; t <= MAX_SNDRETRY; t++) {
 
-            // send message
-            _TRACE_IO (("ARC: %lu TX %d: %s\n", now(), t, msg));
-            arc_client.println(msg);
+        // send message
+        _TRACE_IO (("ARC: %lu TX %d: %s\n", now(), t, msg));
+        arc_client.println(msg);
 
-            // get response
-            if (getTCPLine (arc_client, resp, maxresp_l, NULL)) {
-                _TRACE_IO (("ARC: %lu RX %d: %s\n", now(), t, resp));
-                return (true);
-            }
-
-            // failed, try sending again then expect two responses
-            Serial.printf (_FX("ARC: %lu TXB %d: %s\n"), now(), t, msg);
-            arc_client.println(msg);
-
-            if (getTCPLine (arc_client, resp, maxresp_l, NULL)
-                        && getTCPLine (arc_client, resp, maxresp_l, NULL)) {
-                Serial.printf (_FX("ARC: %lu RXB %d: %s\n"), now(), t, resp);
-                return (true);
-            }
-
-            // still fails, try closing and reconnect
-            Serial.printf (_FX("ARC: %lu try %d reconnecting\n"), now(), t);
-            closeGimbal();
-            if (!connectARCOk(box, MAX_MC_TRY))
-                break;                          // give up
+        // get response
+        if (getTCPLine (arc_client, resp, maxresp_l, NULL)) {
+            _TRACE_IO (("ARC: %lu RX %d: %s\n", now(), t, resp));
+            return (true);
         }
 
-        // retry efforts failed
-        Serial.printf (_FX("ARC: no response to %s\n"), msg);
-        plotMessage (box, RA8875_RED, _FX("Connection lost"));
+        // failed, try sending again then expect two responses
+        Serial.printf (_FX("ARC: %lu TXB %d: %s\n"), now(), t, msg);
+        arc_client.println(msg);
+
+        if (getTCPLine (arc_client, resp, maxresp_l, NULL)
+                    && getTCPLine (arc_client, resp, maxresp_l, NULL)) {
+            Serial.printf (_FX("ARC: %lu RXB %d: %s\n"), now(), t, resp);
+            return (true);
+        }
+
+        // still fails, try closing and reconnect
+        Serial.printf (_FX("ARC: %lu try %d reconnecting\n"), now(), t);
         closeGimbal();
-        return (false);
+        if (!connectARC(box, MAX_MC_TRY))
+            break;                          // give up
+    }
+
+    // retry efforts failed
+    plotMessage (box, RA8875_RED, _FX("Connection lost"));
+    closeGimbal();
+    return (false);
 }
 
 /* send the given get command that returns a floating value and return value.
@@ -340,22 +341,21 @@ static bool doARCMessage (const SBox &box, char *resp, int maxresp_l, const char
  */
 static bool getARCFloat (const SBox &box, const char *msg, float *valp)
 {
-        // send and collect response
-        StackMalloc resp_mem(150);
-        char *resp = resp_mem.getMem();
-        if (!doARCMessage (box, resp, resp_mem.getSize(), "%s", msg))
-            return (false);                     // reason already logged
+    // send and collect response
+    StackMalloc resp_mem(150);
+    char *resp = resp_mem.getMem();
+    if (!doARCMessage (box, resp, resp_mem.getSize(), "%s", msg))
+        return (false);                     // reason already logged
 
-        // check response OK and echo
-        if (sscanf (resp, _FX("OK %*s %f"), valp) != 1 || strncmp (&resp[3], &msg[4], strlen(&msg[4]))) {
-            Serial.printf (_FX("ARC: %s\n"), resp);
-            plotMessage (box, RA8875_RED, resp);
-            closeGimbal();
-            return (false);
-        }
+    // check response OK and echo
+    if (sscanf (resp, _FX("OK %*s %f"), valp) != 1 || strncmp (&resp[3], &msg[4], strlen(&msg[4]))) {
+        plotMessage (box, RA8875_RED, resp);
+        closeGimbal();
+        return (false);
+    }
 
-        // looks good
-        return (true);
+    // looks good
+    return (true);
 }
 
 /* send the given command that sets a floating value and return whether it was acked ok.
@@ -365,22 +365,21 @@ static bool getARCFloat (const SBox &box, const char *msg, float *valp)
  */
 static bool setARCFloat (const SBox &box, const char *msg, float val)
 {
-        // send and collect response
-        StackMalloc resp_mem(150);
-        char *resp = resp_mem.getMem();
-        if (!doARCMessage (box, resp, resp_mem.getSize(), "%s %g", msg, val))
-            return (false);                     // reason already logged
+    // send and collect response
+    StackMalloc resp_mem(150);
+    char *resp = resp_mem.getMem();
+    if (!doARCMessage (box, resp, resp_mem.getSize(), "%s %g", msg, val))
+        return (false);                     // reason already logged
 
-        // check response OK and echo
-        if (strncmp (resp, "OK ", 3) || strncmp (&resp[3], msg, strlen(msg))) {
-            Serial.printf (_FX("ARC: %s\n"), resp);
-            plotMessage (box, RA8875_RED, resp);
-            closeGimbal();
-            return (false);
-        }
+    // check response OK and echo
+    if (strncmp (resp, "OK ", 3) || strncmp (&resp[3], msg, strlen(msg))) {
+        plotMessage (box, RA8875_RED, resp);
+        closeGimbal();
+        return (false);
+    }
 
-        // ok
-        return (true);
+    // ok
+    return (true);
 }
 
 /* get az position and related info.
@@ -424,7 +423,6 @@ static bool getAz(const SBox &box)
 
         } else {
 
-            Serial.printf (_FX("ARC: %s\n"), resp);
             plotMessage (box, RA8875_RED, resp);
             closeGimbal();
             return (false);
@@ -809,9 +807,9 @@ static void unStopGimbal(const SBox &box)
     }
 }
 
-/* init the gimbal GUI: erase and draw fixed content
+/* init the gimbal GUI and state info
  */
-void initGimbalGUI(const SBox &box)
+static void initGimbalGUI(const SBox &box)
 {
     // erase all then draw border
     prepPlotBox(box);
@@ -944,22 +942,15 @@ void stopGimbalNow()
     user_stop = true;
 }
 
-/* return whether we have something to run
+/* return whether we are built to handle a rotator; not whether one is actually connected now.
  */
 bool haveGimbal()
 {
-    // TODO
-    return (false);
-
-#if _TODO
-    // if not connected and we can't connect, then for sure we don't have a gimbal
-    if (!ARCIsConnected() && !connectARCOk(box, MIN_MC_TRY))
-        return (false);
-
-    // ok, we can go
+#if defined(_ENABLE_GIMBAL)
     return (true);
-#endif 
-
+#else
+    return (false);
+#endif
 }
 
 /* provide the current wrap az value, if applicable
@@ -974,25 +965,22 @@ bool getGimbalWrapAz (float *azp)
 }
 
 /* called often to update gimbal (or rotator).
- * details depend on hardware available, if any.
  */
-void updateGimbal ()
+void updateGimbal (const SBox &box)
 {
-    // get out fast if not connected
-    if (!ARCIsConnected())
-        return;
-
     // not crazy often
     static uint32_t prev_ms;
     if (!timesUp(&prev_ms, UPDATE_MS))
         return;
 
-    PlotPane gpp = findPaneChoiceNow (PLOT_CH_GIMBAL);
-    if (gpp == PANE_NONE)
-        return;
-    SBox &box = plot_b[gpp];
+    // init GUI if just opened
+    if (!ARCIsConnected()) {
+        if (!connectARC (box, MAX_MC_TRY))
+            return;             // already informed op
+        initGimbalGUI(box);
+    }
 
-    // set now once (can't do it in connectARCOk() because that can get called before now() is ready)
+    // set now once (can't do it in connectARC() because that can get called before now() is ready)
     if (send_now) {
         char resp[150];
         (void) doARCMessage (box, resp, sizeof(resp), _FX("set now %g %g %g"),
@@ -1101,7 +1089,7 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
 
     // if click while no connection, try hard to restablish, if still can't then move on
     if (!ARCIsConnected()) {
-        if (connectARCOk(box, MAX_MC_TRY)) {
+        if (connectARC(box, MAX_MC_TRY)) {
             initGimbalGUI(box);
             return (true);
         } else

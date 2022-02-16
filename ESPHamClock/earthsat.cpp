@@ -1170,6 +1170,7 @@ void setSatObserver (float lat, float lng)
  *    and hours until next rise and set. name and time pointers may be NULL if not interested.
  * even if return true, rise and set az may be SAT_NOAZ, for example geostationary, in which case *rdtp
  *    and *sdtp are not set even if not NULL.
+ * N.B. if sat is currently up, rdt might be negative to indicate time to preceding rise.
  */
 bool getSatAzElNow (char *name, float *azp, float *elp, float *rangep, float *ratep,
 float *razp, float *sazp, float *rdtp, float *sdtp)
@@ -1751,7 +1752,7 @@ void showNextSatEvents ()
     // draw header prompt
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setCursor (x, y);
-    tft.setTextColor (RA8875_GREEN);
+    tft.setTextColor (DE_COLOR);
     tft.print (F("Day     Rise     Set       Up"));
 
     // draw resume button box
@@ -1895,7 +1896,7 @@ void drawDXSatMenu (const SCoord &s)
 
     // run menu
     SBox ok_b;
-    Menu menu = {menu_b, ok_b, false, 1, _DXS_N, mitems};
+    MenuInfo menu = {menu_b, ok_b, false, false, 1, _DXS_N, mitems};
     if (runMenu (menu)) {
         if (mitems[_DXS_SHOWDX].set) {
             // return to normal DX info but leave sat functional

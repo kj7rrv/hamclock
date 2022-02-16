@@ -116,7 +116,7 @@ void WiFi::begin (char *ssid, char *pw)
 
 	// restart, but don't wait here
         printf ("restarting wlan0\n");
-        system ("wpa_cli -i wlan0 reconfigure");
+        (void) !system ("wpa_cli -i wlan0 reconfigure");
 
 #endif // _IS_LINUX
 }
@@ -278,8 +278,9 @@ int WiFi::RSSI(void)
         if (fp) {
             char buf[200];
             while (fgets (buf, sizeof(buf), fp)) {
+                int status;
                 float rssif;
-                if (sscanf (buf, " wlan0: %*f %*f %f %*f", &rssif) == 1) {
+                if (sscanf (buf, " %*[^:]: %d %*f %f %*f", &status, &rssif) == 2 && status == 0) {
                     rssi = rssif;
                     break;
                 }

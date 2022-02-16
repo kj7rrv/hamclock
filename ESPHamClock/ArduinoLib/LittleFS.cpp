@@ -190,7 +190,7 @@ File LittleFS::open (const char *fname, const char *how)
             if (_trace_littlefs)
                 printf ("fopen(%s, %s): ok\n", path, how);
             if (strchr (how, 'w'))
-                fchown (fileno(f.fp), getuid(), getgid());
+                (void) !fchown (fileno(f.fp), getuid(), getgid());
         } else {
             f.errstr = strerror(errno);
             printf ("fopen(%s, %s): %s\n", path, how, f.errstr.c_str());

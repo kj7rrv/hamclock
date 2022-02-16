@@ -80,7 +80,7 @@ static void setBeaconStates ()
     int sc = second(t);
     uint16_t s_10 = (60*mn + sc)/10;
 
-    for (BeaconID id = 0; id < NBEACONS; id++)
+    for (int id = 0; id < NBEACONS; id++)
         blist[id].c = BCOL_S;
 
     blist[(s_10-0+NBEACONS)%NBEACONS].c = BCOL_14;
@@ -236,81 +236,72 @@ void drawBeaconBox()
 {
     static const char label[] = "NCDXF";
 
+    // erase 
+    tft.fillRect (NCDXF_b.x, NCDXF_b.y, NCDXF_b.w, NCDXF_b.h, RA8875_BLACK);
+
     // tiny font
     selectFontStyle (BOLD_FONT, FAST_FONT);
 
     if (brb_mode == BRB_SHOW_BEACONS) {
 
-        // draw button on
-        tft.fillRect (NCDXF_b.x+6, NCDXF_b.y+8, NCDXF_b.w-12, 16, RA8875_WHITE);
-        tft.setCursor (NCDXF_b.x+14, NCDXF_b.y+12);
-        tft.setTextColor (RA8875_BLACK);
+        // draw label
+        tft.setCursor (NCDXF_b.x+13, NCDXF_b.y+2);
+        tft.setTextColor (RA8875_WHITE);
         tft.print (label);
-
-        // erase below button
-        tft.fillRect (NCDXF_b.x, NCDXF_b.y+30, NCDXF_b.w, NCDXF_b.h-30, RA8875_BLACK);
 
         // draw key
         SCoord s;
-        s.x = NCDXF_b.x + BEACONR-1;
-        s.y = NCDXF_b.y + 45;
-        uint8_t dy = (NCDXF_b.h-40)/(BCOL_N-1);         // silent color not drawn
+        s.x = NCDXF_b.x + BEACONR+1;
+        s.y = NCDXF_b.y + 16 + BEACONR;
+        uint8_t dy = (NCDXF_b.h-16)/(BCOL_N-1);         // silent color not drawn
         uint16_t c;
         
         c = BCOL_14;
         drawBeaconSymbol (s, c);
         tft.setTextColor (c);
         tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("14.100"));
+        tft.print (F("14.10"));
 
         s.y += dy;
         c = BCOL_18;
         drawBeaconSymbol (s, c);
         tft.setTextColor (c);
         tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("18.110"));
+        tft.print (F("18.11"));
 
         s.y += dy;
         c = BCOL_21;
         drawBeaconSymbol (s, c);
         tft.setTextColor (c);
         tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("21.150"));
+        tft.print (F("21.15"));
 
         s.y += dy;
         c = BCOL_24;
         drawBeaconSymbol (s, c);
         tft.setTextColor (c);
         tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("24.930"));
+        tft.print (F("24.93"));
 
         s.y += dy;
         c = BCOL_28;
         drawBeaconSymbol (s, c);
         tft.setTextColor (c);
         tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("28.200"));
+        tft.print (F("28.20"));
+
+    } else if (brb_mode == BRB_SHOW_SWSTATS) {
+
+        drawSpaceStats();
 
     } else {
-
-        // draw button state off
-        tft.fillRect (NCDXF_b.x+6, NCDXF_b.y+8, NCDXF_b.w-12, 16, RA8875_BLACK);
-        tft.drawRect (NCDXF_b.x+6, NCDXF_b.y+8, NCDXF_b.w-12, 16, RA8875_WHITE);
-        tft.setCursor (NCDXF_b.x+13, NCDXF_b.y+12);
-        tft.setTextColor (RA8875_WHITE);
-        tft.print(label);
-
-        // erase below button
-        tft.fillRect (NCDXF_b.x, NCDXF_b.y+30, NCDXF_b.w, NCDXF_b.h-30, RA8875_BLACK);
 
         // display brightness state
         drawBrightness();
     }
 
-    // border
-    tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w, NCDXF_b.y, BORDER_COL);
-    tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x, NCDXF_b.y+NCDXF_b.h, BORDER_COL);
-    tft.drawLine (NCDXF_b.x+NCDXF_b.w, NCDXF_b.y,
-                  NCDXF_b.x+NCDXF_b.w, NCDXF_b.y+NCDXF_b.h, BORDER_COL);
-
+    // border -- avoid base line
+    tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, GRAY);
+    tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x, NCDXF_b.y+NCDXF_b.h-1, GRAY);
+    tft.drawLine (NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y+NCDXF_b.h-1, GRAY);
 }

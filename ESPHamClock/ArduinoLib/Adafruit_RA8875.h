@@ -330,6 +330,12 @@ class Adafruit_RA8875 {
         uint16_t (*DEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];
         uint16_t (*NEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];
 
+        // swap two pairs of x and y
+        void swap2 (int16_t &x0, int16_t &y0, int16_t &x1, int16_t &y1) {
+            int16_t tx = x0; x0 = x1; x1 = tx;
+            int16_t ty = y0; y0 = y1; y1 = ty;
+        }
+
 };
 
 #endif // _Adafruit_RA8875_H

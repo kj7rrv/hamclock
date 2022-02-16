@@ -972,19 +972,33 @@ void Adafruit_RA8875::fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y
 	x2 *= SCALESZ;
 	y2 *= SCALESZ;
 
-	// THIS ONLY WORKS FOR EQUALATORAL POINTED UP WITH x0/y0 top, x1/y1 left x2/y2 right.
-	// google for raster triangle, eg
-	//     http://www.gabrielgambetta.com/computer-graphics-from-scratch/filled-triangles.html
-	// TODO
-	int dy = y1 - y0;
-	int dx = x2 - x0;
+        // sort in increasing y
+        if (y0 > y2)
+           swap2 (x0, y0, x2, y2);
+        if (y0 > y1)
+           swap2 (x0, y0, x1, y1);
+        if (y1 > y2)
+           swap2 (x1, y1, x2, y2);
+
 	pthread_mutex_lock (&fb_lock);
-	    for (int y = y0; y <= y1; y++) {
-		int xleft = x0 - dx*(y-y0)/dy;
-		int xrite = x0 + dx*(y-y0)/dy;
-		plotLine (xleft, y, xrite, y, fbpix);
-	    }
-	    fb_dirty = true;
+
+            // fill top subtri -- beware flat
+            if (y1 != y0 && y2 != y0) {
+                for (int16_t y = y0; y < y1; y++) {
+                    int16_t xa = x0 + (y-y0)*(x1-x0)/(y1-y0);
+                    int16_t xb = x0 + (y-y0)*(x2-x0)/(y2-y0);
+                    plotLine (xa, y, xb, y, fbpix);
+                }
+            }
+            // fill bottom subtri -- beware flat
+            if (y2 != y1 && y2 != y0) {
+                for (int16_t y = y1; y <= y2; y++) {
+                    int16_t xa = x1 + (y-y1)*(x2-x1)/(y2-y1);
+                    int16_t xb = x0 + (y-y0)*(x2-x0)/(y2-y0);
+                    plotLine (xa, y, xb, y, fbpix);
+                }
+            }
+
 	pthread_mutex_unlock (&fb_lock);
 }
 

@@ -10,7 +10,9 @@
 
 #include "HamClock.h"
 
-#define GPSD_PORT       2947                            // tcp port
+
+#define GPSD_PORT       2947                // tcp port
+#define GPSD_TO         5000                // timeout, msec
 
 
 
@@ -135,15 +137,19 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
 
             // initial progress
             connect_ok = true;
+            uint32_t t0 = millis();
 
             // enable reporting
             gpsd_client.print (F("?WATCH={\"enable\":true,\"json\":true};?POLL;\n"));
 
-            // read lines, give to lookf, done when it's happy or no more
-            const size_t MAXGLL = 2000;                    // max line length
+            // read lines, give to lookf, done when it's happy or no more or time out
+            #define MAXGLL 2000                 // max line length
             StackMalloc line_mem(MAXGLL);
             char *line = (char *) line_mem.getMem();
-            for (size_t ll = 0; ll < MAXGLL && !look_ok && getChar (gpsd_client, &line[ll]); /* none */ ) {
+            for (size_t ll = 0;
+                        !timesUp(&t0,GPSD_TO) && ll < MAXGLL && !look_ok && getChar(gpsd_client,&line[ll]);
+                        /* none */ ) {
+
                 if (line[ll] == '\n') {
                     line[ll] = '\0';
                     got_something = true;

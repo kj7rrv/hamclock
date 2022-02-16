@@ -6,9 +6,9 @@
 
 
 // RSS info
-#define NRSS            15                      // max number RSS entries to cache
+#define RSS_MAXN        15                      // max number RSS entries to cache
 static const char rss_page[] = "/ham/HamClock/RSS/web15rss.pl";
-static char *rss_titles[NRSS];                  // malloced titles
+static char *rss_titles[RSS_MAXN];                  // malloced titles
 static uint8_t n_rss_titles, rss_title_i;       // n titles and rolling index
 static bool rss_local;                          // if set: don't poll server, assume local titles
 uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
@@ -17,31 +17,38 @@ uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
 #define KP_INTERVAL     3500                    // polling period, secs
 #define KP_COLOR        RA8875_YELLOW           // loading message text color
 static const char kp_page[] = "/ham/HamClock/geomag/kindex.txt";
+#define KP_VPD           8                      // number of values per day
+#define KP_NHD           7                      // N historical days
+#define KP_NPD           2                      // N predicted days
+#define KP_NV            ((KP_NHD+KP_NPD)*KP_VPD) // N total Kp values
 
 // xray info, new data posted every 10 minutes
-#define XRAY_INTERVAL   600                     // polling interval, secs
+#define XRAY_INTERVAL   610                     // polling interval, secs
 #define XRAY_LCOLOR     RGB565(255,50,50)       // long wavelength plot color, reddish
 #define XRAY_SCOLOR     RGB565(50,50,255)       // short wavelength plot color, blueish
 static const char xray_page[] = "/ham/HamClock/xray/xray.txt";
+#define XRAY_NV         150                     // n lines to collect = 25 hours @ 10 mins per line
 
 // sunspot info, new data posted daily
 #define SSPOT_INTERVAL  3400                    // polling interval, secs
 #define SSPOT_COLOR     RA8875_CYAN             // loading message text color
-static const char sspot_page[] = "/ham/HamClock/ssn/ssn-31.txt";
+static const char ssn_page[] = "/ham/HamClock/ssn/ssn-31.txt";
+#define SSPOT_NV        31                      // n ssn to plot, 1 per day back 30 days, including 0
 
 // solar flux info, new data posted three times a day
-#define FLUX_INTERVAL   3300                    // polling interval, secs
-#define FLUX_COLOR      RA8875_GREEN            // loading message text color
+#define SFLUX_INTERVAL  3300                    // polling interval, secs
+#define SFLUX_COLOR     RA8875_GREEN            // loading message text color
 static const char sf_page[] = "/ham/HamClock/solar-flux/solarflux-99.txt";
+#define SFLUX_NV        99                      // n solar flux values, three per day for 33 days
 
-// solar wind info, new data posted every few minutes
-#define SWIND_INTERVAL  600                     // polling interval, secs
+// solar wind info, new data posted every five minutes
+#define SWIND_INTERVAL  340                     // polling interval, secs
 #define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
 static const char swind_page[] = "/ham/HamClock/solar-wind/swind-24hr.txt";
 
 // STEREO A image and info, new data posted every few hours
-#define STEREO_A_INTERVAL  3800                    // polling interval, secs
-#define STEREO_A_COLOR     RA8875_BLUE             // loading message text color
+#define STEREO_A_INTERVAL  3800                 // polling interval, secs
+#define STEREO_A_COLOR     RA8875_BLUE          // loading message text color
 static const char stereo_a_sep_page[] = "/ham/HamClock/STEREO/sepangle.txt";
 static const char stereo_a_img_page[] = 
     #if defined(_CLOCK_1600x960) 
@@ -134,14 +141,14 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 
 
 // web site retry interval, secs
-#define WIFI_RETRY      15
+#define WIFI_RETRY      5
 
 // pane auto rotation period in seconds -- most are the same but wx is longer
 #define ROTATION_INTERVAL       30
 #define ROTATION_WX_INTERVAL    60
 
 // time of next attempts -- 0 will refresh immediately -- reset in initWiFiRetry()
-static time_t next_flux;
+static time_t next_sflux;
 static time_t next_ssn;
 static time_t next_xray;
 static time_t next_kp;
@@ -166,10 +173,10 @@ static time_t next_swind;
 static time_t next_drap;
 static time_t next_stereo_a;
 
-// persisent space weather data and refresh time for use by getSpaceWeather()
-static time_t ssn_update, xray_update, flux_update, kp_update, noaa_update, swind_update;
+// persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
+static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update;
 static time_t drap_update, path_update;
-static float ssn_spw, xray_spw, flux_spw, kp_spw, swind_spw, drap_spw;
+static float ssn_spw = SPW_ERR, xray_spw, sflux_spw = SPW_ERR, kp_spw = SPW_ERR, swind_spw, drap_spw;
 static float path_spw[PROP_MAP_N]; 
 static NOAASpaceWx noaa_spw;
 
@@ -407,11 +414,13 @@ static void initWiFi (bool verbose)
         tftMsg (verbose, 0, _FX("GW: %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
         ip = WiFi.dnsIP();
         tftMsg (verbose, 0, _FX("DNS: %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
-        tftMsg (verbose, 0, _FX("Hostname: %s"), WiFi.hostname().c_str());
-        if (WiFi.RSSI() < 10) {
-            tftMsg (verbose, 0, _FX("Signal strength: %d dBm"), WiFi.RSSI());
+
+        int rssi;
+        if (readWiFiRSSI(rssi)) {
+            tftMsg (verbose, 0, _FX("Signal strength: %d dBm"), rssi);
             tftMsg (verbose, 0, _FX("Channel: %d"), WiFi.channel());
         }
+
         tftMsg (verbose, 0, _FX("S/N: %u"), ESP.getChipId());
     }
 
@@ -682,6 +691,398 @@ static void checkMap(void)
     }
 }
 
+/* given a GOES XRAY Flux value, return its event level designation in buf.
+ */
+static char *xrayLevel (float xray, char *buf)
+{
+    if (xray == SPW_ERR)
+        strcpy (buf, "Err");
+    else if (xray < 1e-8)
+        strcpy (buf, _FX("A0.0"));
+    else {
+        static const char levels[] = "ABCMX";
+        int power = floorf(log10f(xray));
+        if (power > -4)
+            power = -4;
+        float mantissa = xray*powf(10.0F,-power);
+        char alevel = levels[8+power];
+        sprintf (buf, _FX("%c%.1f"), alevel, mantissa);
+    }
+    return (buf);
+}
+
+
+
+/* retrieve latest sun spot indices and time scale in days from now.
+ * return whether all ok
+ */
+static bool retrieveSunSpots (float x[SSPOT_NV], float ssn[SSPOT_NV])
+{
+    char line[100];
+    WiFiClient ss_client;
+    bool ok = false;
+
+    // mark value as bad until proven otherwise
+    ssn_spw = SPW_ERR;
+
+    Serial.println(ssn_page);
+    resetWatchdog();
+    if (wifiOk() && ss_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+
+        // query web page
+        httpGET (ss_client, svr_host, ssn_page);
+
+        // skip response header
+        if (!httpSkipHeader (ss_client)) {
+            Serial.print (F("SSN header fail\n"));
+            goto out;
+        }
+
+        // read lines into ssn array and build corresponding time value
+        int8_t ssn_i;
+        for (ssn_i = 0; ssn_i < SSPOT_NV && getTCPLine (ss_client, line, sizeof(line), NULL); ssn_i++) {
+            // Serial.print(ssn_i); Serial.print("\t"); Serial.println(line);
+            ssn[ssn_i] = atof(line+11);
+            x[ssn_i] = 1-SSPOT_NV + ssn_i;
+        }
+
+        updateClocks(false);
+        resetWatchdog();
+
+        // ok if all received
+        if (ssn_i == SSPOT_NV) {
+
+            ok = true;
+
+            // capture latest for getSpaceWeather() and drawSpaceStats()
+            ssn_spw = ssn[SSPOT_NV-1];
+            ssn_update = now();
+
+        } else {
+
+            Serial.printf (_FX("SSN: data short %d / %d\n"), ssn_i, SSPOT_NV);
+        }
+    }
+
+    // clean up
+out:
+    ss_client.stop();
+    resetWatchdog();
+    printFreeHeap (F("retrieveSunSpots"));
+    return (ok);
+}
+
+/* update ssn_spw if not recently done so my pane.
+ * return whether a new value is ready.
+ */
+static bool checkSSN (time_t t)
+{
+    if (t < next_ssn)
+        return (false);
+
+    StackMalloc x_ssn((SSPOT_NV)*sizeof(float));
+    StackMalloc x_x((SSPOT_NV)*sizeof(float));
+    float *ssn = (float*)x_ssn.getMem();
+    float *x = (float*)x_x.getMem();
+
+    bool ok = retrieveSunSpots (x, ssn);
+    if (ok) {
+
+        // schedule next
+        next_ssn = now() + SSPOT_INTERVAL;
+
+    } else {
+        // schedule retry
+        next_ssn = nextWiFiRetry();
+    }
+
+    // true, albeit may be SPW_ERR
+    return (true);
+}
+
+
+/* retrieve latest and predicted solar flux indices, return whether all ok.
+ */
+static bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
+{
+    StackMalloc line_mem(120);
+    char *line = line_mem.getMem();
+    WiFiClient sf_client;
+    bool ok = false;
+
+    // mark value as bad until proven otherwise
+    sflux_spw = SPW_ERR;
+
+    Serial.println (sf_page);
+    resetWatchdog();
+    if (wifiOk() && sf_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+        resetWatchdog();
+
+        // query web page
+        httpGET (sf_client, svr_host, sf_page);
+
+        // skip response header
+        if (!httpSkipHeader (sf_client)) {
+            Serial.print (F("SFlux header fail\n"));
+            goto out;
+        }
+
+        // read lines into flux array and build corresponding time value
+        int8_t sflux_i;
+        for (sflux_i = 0; sflux_i < SFLUX_NV && getTCPLine(sf_client, line, line_mem.getSize(), NULL);
+                                                                        sflux_i++) {
+            // Serial.print(sflux_i); Serial.print("\t"); Serial.println(line);
+            sflux[sflux_i] = atof(line);
+            x[sflux_i] = (sflux_i - (SFLUX_NV-9-1))/3.0F;   // 3x(30 days history + 3 days predictions)
+        }
+
+        // ok if found all
+        updateClocks(false);
+        resetWatchdog();
+        if (sflux_i == SFLUX_NV) {
+
+            // capture current value for getSpaceWeather() and drawSpaceStats()
+            sflux_spw = sflux[SFLUX_NV-10];         // current value, not predictions
+            sflux_update = now();
+            ok = true;
+
+        } else {
+
+            Serial.printf (_FX("SFlux data short: %d / %d\n"), sflux_i, SFLUX_NV);
+        }
+    }
+
+    // clean up
+out:
+    sf_client.stop();
+    resetWatchdog();
+    printFreeHeap (F("retrieveSolarFlux"));
+    return (ok);
+}
+
+/* update sflux_spw if not recently done so my pane.
+ * return whether a new value is ready.
+ */
+static bool checkSolarFlux (time_t t)
+{
+    if (t < next_sflux)
+        return (false);
+
+    StackMalloc x_mem(SFLUX_NV*sizeof(float));
+    StackMalloc sflux_mem(SFLUX_NV*sizeof(float));
+    float *x = (float *) x_mem.getMem();
+    float *sflux = (float *) sflux_mem.getMem();
+
+    bool ok = retrievSolarFlux (x, sflux);
+    if (ok) {
+
+        // schedule next
+        next_sflux = now() + SFLUX_INTERVAL;
+
+    } else {
+        // schedule retry
+        next_sflux = nextWiFiRetry();
+    }
+
+    // true, albeit may be SPW_ERR
+    return (true);
+}
+
+/* retrieve latest and predicted kp indices, return whether all ok
+ */
+static bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
+{
+    uint8_t kp_i = 0;                                   // next kp index to use
+    char line[100];                                     // text line
+    WiFiClient kp_client;                               // wifi client connection
+    bool ok = false;                                    // set iff all ok
+
+    // mark value as bad until proven otherwise
+    kp_spw = SPW_ERR;
+
+    Serial.println(kp_page);
+    resetWatchdog();
+    if (wifiOk() && kp_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+        resetWatchdog();
+
+        // query web page
+        httpGET (kp_client, svr_host, kp_page);
+
+        // skip response header
+        if (!httpSkipHeader (kp_client)) {
+            Serial.print (F("Kp header short"));
+            goto out;
+        }
+
+        // read lines into kp array and build x
+        const int now_i = KP_NHD*KP_VPD-1;              // last historic is now
+        for (kp_i = 0; kp_i < KP_NV && getTCPLine (kp_client, line, sizeof(line), NULL); kp_i++) {
+            kp[kp_i] = atof(line);
+            kpx[kp_i] = (kp_i-now_i)/(float)KP_VPD;
+            // Serial.printf ("%2d%c: kp[%5.3f] = %g from \"%s\"\n", kp_i, kp_i == now_i ? '*' : ' ', kpx[kp_i], kp[kp_i], line);
+        }
+
+        // ok if all
+        if (kp_i == KP_NV) {
+
+            // save current (not last!) value for getSpaceWeather()
+            kp_spw = kp[now_i];
+            kp_update = now();
+
+            ok = true;
+
+        } else {
+
+            Serial.printf (_FX("Kp data short: %d of %d\n"), kp_i, KP_NV);
+        }
+    }
+
+    // clean up
+out:
+    kp_client.stop();
+    resetWatchdog();
+    printFreeHeap (F("retrieveKp"));
+    return (ok);
+}
+
+/* update kp_spw if not recently done so my pane.
+ * return whether a new value is ready.
+ */
+static bool checkKp (time_t t)
+{
+    if (t < next_kp)
+        return (false);
+
+    StackMalloc kpx_mem(KP_NV*sizeof(float));
+    StackMalloc kp_mem(KP_NV*sizeof(float));
+    float *kpx = (float*)kpx_mem.getMem();              // days ago
+    float *kp = (float*)kp_mem.getMem();                // kp collection
+
+    bool ok = retrieveKp (kpx, kp);
+    if (ok) {
+
+        // schedule next
+        next_kp = now() + KP_INTERVAL;
+
+    } else {
+        // schedule retry
+        next_kp = nextWiFiRetry();
+    }
+
+    // true, albeit may be SPW_ERR
+    return (true);
+}
+
+/* retrieve latest xray indices, return whether all ok
+ */
+static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XRAY_NV])
+{
+    uint8_t xray_i;                                     // next index to use
+    WiFiClient xray_client;
+    char line[100];
+    uint16_t ll;
+    bool ok = false;
+
+    // mark value as bad until proven otherwise
+    xray_spw = SPW_ERR;
+
+    Serial.println(xray_page);
+    resetWatchdog();
+    if (wifiOk() && xray_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+
+        // query web page
+        httpGET (xray_client, svr_host, xray_page);
+
+        // soak up remaining header
+        if (!httpSkipHeader (xray_client)) {
+            Serial.print (F("XRay header short"));
+            goto out;
+        }
+
+        // collect content lines and extract both wavelength intensities
+        xray_i = 0;
+        float raw_lxray = 0;
+        while (xray_i < XRAY_NV && getTCPLine (xray_client, line, sizeof(line), &ll)) {
+            // Serial.println(line);
+            if (line[0] == '2' && ll >= 56) {
+
+                // short
+                float s = atof(line+35);
+                if (s <= 0)                             // missing values are set to -1.00e+05, also guard 0
+                    s = 1e-9;
+                sxray[xray_i] = log10f(s);
+
+                // long
+                float l = atof(line+47);
+                if (l <= 0)                             // missing values are set to -1.00e+05, also guard 0
+                    l = 1e-9;
+                lxray[xray_i] = log10f(l);
+                raw_lxray = l;                          // last one will be current
+
+                // time in hours back from 0
+                x[xray_i] = (xray_i-XRAY_NV)/6.0;       // 6 entries per hour
+
+                // good
+                xray_i++;
+            }
+        }
+
+        // proceed iff we found all
+        if (xray_i == XRAY_NV) {
+
+            // capture for getSpaceWeather() and drawSpaceStats()
+            xray_spw = raw_lxray;
+            xray_update = now();
+
+            ok = true;
+
+        } else {
+
+            Serial.printf (_FX("XRay data short %d of %d\n"), xray_i, XRAY_NV);
+        }
+    }
+
+out:
+
+    xray_client.stop();
+    resetWatchdog();
+    printFreeHeap (F("retrieveXRay"));
+    return (ok);
+}
+
+/* update xray_spw if not recently done so my pane.
+ * return whether a new value is ready.
+ */
+static bool checkXRay (time_t t)
+{
+    if (t < next_xray)
+        return (false);
+
+    StackMalloc lxray_mem(XRAY_NV*sizeof(float));
+    StackMalloc sxray_mem(XRAY_NV*sizeof(float));
+    StackMalloc x_mem(XRAY_NV*sizeof(float));
+    float *lxray = (float *) lxray_mem.getMem();        // long wavelength values
+    float *sxray = (float *) sxray_mem.getMem();        // short wavelength values
+    float *x = (float *) x_mem.getMem();                // x coords of plot
+
+    bool ok = retrieveXRay (lxray, sxray, x);
+    if (ok) {
+
+        // schedule next
+        next_xray = now() + XRAY_INTERVAL;
+
+    } else {
+        // schedule retry
+        next_xray = nextWiFiRetry();
+    }
+
+    // true, albeit may be SPW_ERR
+    return (true);
+}
 
 /* check for tap at s known to be within BandConditions box b.
  * tapping a band loads prop map; tapping timeline toggle bc_utc_tl; tapping power cycles bc_power 1-1000 W.
@@ -728,7 +1129,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 
         // run menu, find selection
         SBox ok_b;
-        Menu menu = {menu_b, ok_b, true, 1, N_POW, mitems};
+        MenuInfo menu = {menu_b, ok_b, true, false, 1, N_POW, mitems};
         uint16_t new_power = bc_power;
         if (runMenu (menu)) {
             for (int i = 0; i < N_POW; i++) {
@@ -809,7 +1210,7 @@ static void revertPlot1 (uint32_t dt)
         next_xray = revert_t;
         break;
     case PLOT_CH_FLUX:
-        next_flux = revert_t;
+        next_sflux = revert_t;
         break;
     case PLOT_CH_KP:
         next_kp = revert_t;
@@ -826,10 +1227,11 @@ static void revertPlot1 (uint32_t dt)
         moon_reverting = true;
         break;
     case PLOT_CH_DXCLUSTER:
-        closeDXCluster();         // reopen after revert
+        closeDXCluster();       // reopen after revert
         next_dxcluster = revert_t;
         break;
     case PLOT_CH_GIMBAL:
+        closeGimbal();          // reopen after revert
         next_gimbal = revert_t;
         break;
     case PLOT_CH_SDO_1:
@@ -918,7 +1320,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
 
     case PLOT_CH_FLUX:
         plot_ch[pp] = PLOT_CH_FLUX;
-        next_flux = 0;
+        next_sflux = 0;
         break;
 
     case PLOT_CH_KP:
@@ -947,13 +1349,10 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         break;
 
     case PLOT_CH_GIMBAL:
-        // insure enabled and init if not already on this pane
         if (!haveGimbal())
             return (false);
-        if (plot_ch[pp] != PLOT_CH_GIMBAL) {
-            plot_ch[pp] = PLOT_CH_GIMBAL;
-            initGimbalGUI(box);
-        }
+        plot_ch[pp] = PLOT_CH_GIMBAL;
+        next_gimbal = 0;
         break;
 
     case PLOT_CH_TEMPERATURE:
@@ -1113,11 +1512,11 @@ void updateWiFi(void)
             break;
 
         case PLOT_CH_FLUX:
-            if (t0 >= next_flux) {
+            if (t0 >= next_sflux) {
                 if (updateSolarFlux(box))
-                    next_flux = now() + FLUX_INTERVAL;
+                    next_sflux = now() + SFLUX_INTERVAL;
                 else
-                    next_flux = nextWiFiRetry();
+                    next_sflux = nextWiFiRetry();
             }
             break;
 
@@ -1166,10 +1565,9 @@ void updateWiFi(void)
             break;
 
         case PLOT_CH_GIMBAL:
-            // update always unless standing by for revert
-            if (next_gimbal == 0 || t0 >= next_gimbal) {
-                updateGimbal();
-                next_gimbal = 0;
+            if (t0 >= next_gimbal) {
+                updateGimbal(box);
+                next_gimbal = 0;                // constant poll
             }
             break;
 
@@ -1285,6 +1683,10 @@ void updateWiFi(void)
 
     // check if time to update map
     checkMap();
+
+    // freshen space stats if not updated already by pane and draw if any are new
+    if (checkSpaceStats(t0))
+        drawSpaceStats();
 
     // freshen RSS
     if (t0 >= next_rss) {
@@ -1635,238 +2037,89 @@ bool httpSkipHeader (WiFiClient &client)
 static bool updateKp(SBox &box)
 {
     // data are provided every 3 hours == 8/day. collect 7 days of history + 2 days of predictions
-    #define     NKPPD           8                       // number of values per day
-    #define     NHKPD           7                       // N historical days
-    #define     NPKPD           2                       // N predicted days
-    #define     NKP             ((NHKPD+NPKPD)*NKPPD)   // N total Kp values
-    StackMalloc kp_mem(NKP*sizeof(float));
+    StackMalloc kpx_mem(KP_NV*sizeof(float));
+    StackMalloc kp_mem(KP_NV*sizeof(float));
+    float *kpx = (float*)kpx_mem.getMem();              // days ago
     float *kp = (float*)kp_mem.getMem();                // kp collection
-    uint8_t kp_i = 0;                                   // next kp index to use
-    char line[100];                                     // text line
     WiFiClient kp_client;                               // wifi client connection
-    bool ok = false;                                    // set iff all ok
 
-
-    Serial.println(kp_page);
-    resetWatchdog();
-    if (wifiOk() && kp_client.connect(svr_host, HTTPPORT)) {
+    bool ok = retrieveKp (kpx, kp);
+    if (ok) {
         updateClocks(false);
         resetWatchdog();
 
-        // query web page
-        httpGET (kp_client, svr_host, kp_page);
+        // Kp value should be shown as int
+        char value_str[10];
+        snprintf (value_str, sizeof(value_str), "%d", (int)kp_spw);
+        plotXYstr (box, kpx, kp, KP_NV, _FX("Days"), _FX("Planetary Kp"), KP_COLOR, 0, 9, value_str);
 
-        // skip response header
-        if (!httpSkipHeader (kp_client)) {
-            plotMessage (box, KP_COLOR, _FX("Kp header short"));
-            goto out;
-        }
-
-        // read lines into kp array and build x
-        StackMalloc kpx_mem(NKP*sizeof(float));
-        float *kpx = (float *) kpx_mem.getMem();
-        const int now_i = NHKPD*NKPPD-1;                        // last historic is now
-        for (kp_i = 0; kp_i < NKP && getTCPLine (kp_client, line, sizeof(line), NULL); kp_i++) {
-            kp[kp_i] = atof(line);
-            kpx[kp_i] = (kp_i-now_i)/(float)NKPPD;
-            // Serial.printf ("%2d%c: kp[%5.3f] = %g from \"%s\"\n", kp_i, kp_i == now_i ? '*' : ' ', kpx[kp_i], kp[kp_i], line);
-        }
-
-        // plot if all
-        if (kp_i == NKP) {
-
-            // save current (not last!) value for getSpaceWeather()
-            kp_spw = kp[now_i];
-            kp_update = now();
-
-            // Kp value should be shown as int
-            char value_str[10];
-            snprintf (value_str, sizeof(value_str), "%d", (int)kp_spw);
-            plotXYstr (box, kpx, kp, NKP, _FX("Days"), _FX("Planetary Kp"), KP_COLOR, 0, 9, value_str);
-
-            ok = true;
-
-        } else {
-            Serial.printf (_FX("Kp read only %d of %d\n"), kp_i, NKP);
-            plotMessage (box, KP_COLOR, _FX("Kp data short"));
-        }
-
+        // show
+        drawSpaceStats();
     } else {
         plotMessage (box, KP_COLOR, _FX("Kp connection failed"));
     }
 
-    // clean up
-out:
-    kp_client.stop();
+    // done
     resetWatchdog();
-    printFreeHeap (F("updateKp"));
     return (ok);
 }
 
-/* given a GOES XRAY Flux value, return its event level designation in buf.
+/* retrieve and plot latest xray indices, return whether all ok
  */
-static char *xrayLevel (float xray, char *buf)
-{
-    if (xray < 1e-8)
-        strcpy (buf, _FX("A0.0"));
-    else {
-        static const char levels[] = "ABCMX";
-        int power = floorf(log10f(xray));
-        if (power > -4)
-            power = -4;
-        float mantissa = xray*powf(10.0F,-power);
-        char alevel = levels[8+power];
-        sprintf (buf, _FX("%c%.1f"), alevel, mantissa);
-    }
-    return (buf);
-}
-
-// retrieve and plot latest xray indices, return whether all ok
 static bool updateXRay(const SBox &box)
 {
-    #define NXRAY 150                                   // n lines to collect = 25 hours @ 10 mins per line
-    StackMalloc lxray_mem(NXRAY*sizeof(float));
-    StackMalloc sxray_mem(NXRAY*sizeof(float));
-    StackMalloc x_mem(NXRAY*sizeof(float));
+    StackMalloc lxray_mem(XRAY_NV*sizeof(float));
+    StackMalloc sxray_mem(XRAY_NV*sizeof(float));
+    StackMalloc x_mem(XRAY_NV*sizeof(float));
     float *lxray = (float *) lxray_mem.getMem();        // long wavelength values
     float *sxray = (float *) sxray_mem.getMem();        // short wavelength values
     float *x = (float *) x_mem.getMem();                // x coords of plot
-    uint8_t xray_i;                                     // next index to use
-    WiFiClient xray_client;
-    char line[100];
-    uint16_t ll;
-    bool ok = false;
-
 
     Serial.println(xray_page);
-    resetWatchdog();
-    if (wifiOk() && xray_client.connect(svr_host, HTTPPORT)) {
-        updateClocks(false);
+    bool ok = retrieveXRay (lxray, sxray, x);
+    if (ok) {
 
-        // query web page
-        httpGET (xray_client, svr_host, xray_page);
-
-        // soak up remaining header
-        if (!httpSkipHeader (xray_client)) {
-            plotMessage (box, XRAY_LCOLOR, _FX("XRay header short"));
-            goto out;
-        }
-
-        // collect content lines and extract both wavelength intensities
-        xray_i = 0;
-        float current_xray = 1;
-        while (xray_i < NXRAY && getTCPLine (xray_client, line, sizeof(line), &ll)) {
-            // Serial.println(line);
-            if (line[0] == '2' && ll >= 56) {
-                float s = atof(line+35);
-                if (s <= 0)                     // missing values are set to -1.00e+05, also guard 0
-                    s = 1e-9;
-                sxray[xray_i] = log10f(s);
-                float l = atof(line+47);
-                if (l <= 0)                     // missing values are set to -1.00e+05, also guard 0
-                    l = 1e-9;
-                lxray[xray_i] = log10f(l);
-                // Serial.print(l); Serial.print('\t'); Serial.println (s);
-                // capture newest for display
-                if (++xray_i == NXRAY)
-                    current_xray = l;
-            }
-        }
-
-        // proceed iff we found all
-        if (xray_i == NXRAY) {
-            resetWatchdog();
-
-            // create x in hours back from 0
-            for (int16_t i = 0; i < NXRAY; i++)
-                x[i] = (i-NXRAY)/6.0;           // 6 entries per hour
-
-            // overlay short over long
-            ok = plotXYstr (box, x, lxray, NXRAY, _FX("Hours"), _FX("GOES 16 X-Ray"), XRAY_LCOLOR,
-                                -9, -2, xrayLevel(current_xray, line))
-                 && plotXY (box, x, sxray, NXRAY, NULL, NULL, XRAY_SCOLOR, -9, -2, 0.0);
-
-            if (ok) {
-                // capture
-                xray_spw = current_xray;
-                xray_update = now();
-            }
-
-        } else {
-            Serial.printf (_FX("XRay only read %d of %d\n"), xray_i, NXRAY);
-            plotMessage (box, XRAY_LCOLOR, _FX("XRay data short"));
-        }
+        // overlay short over long
+        char level_str[10];
+        plotXYstr (box, x, lxray, XRAY_NV, _FX("Hours"), _FX("GOES 16 X-Ray"), XRAY_LCOLOR,
+                                -9, -2, xrayLevel(xray_spw, level_str))
+                 && plotXY (box, x, sxray, XRAY_NV, NULL, NULL, XRAY_SCOLOR, -9, -2, 0.0);
+        // display
+        drawSpaceStats();
     } else {
         plotMessage (box, XRAY_LCOLOR, _FX("X-Ray connection failed"));
     }
 
-out:
-
-    xray_client.stop();
+    // done
     resetWatchdog();
-    printFreeHeap (F("updateXRay"));
     return (ok);
 }
 
-
-// retrieve and plot latest sun spot indices, return whether all ok
+/* retrieve and plot fresh sun spot indices
+ */
 static bool updateSunSpots (const SBox &box)
 {
-    #define NSUNSPOT 31                         // go back 30 days, including 0
-    StackMalloc x_sspot((NSUNSPOT)*sizeof(float));
-    StackMalloc x_x((NSUNSPOT)*sizeof(float));
-    StackMalloc x_line(100);
-    float *sspot = (float*)x_sspot.getMem();
+    StackMalloc x_ssn((SSPOT_NV)*sizeof(float));
+    StackMalloc x_x((SSPOT_NV)*sizeof(float));
+    float *ssn = (float*)x_ssn.getMem();
     float *x = (float*)x_x.getMem();
-    char *line = x_line.getMem();
-    WiFiClient ss_client;
-    bool ok = false;
 
-
-    Serial.println(sspot_page);
+    // get and plot if ok, else show err message
     resetWatchdog();
-    if (wifiOk() && ss_client.connect(svr_host, HTTPPORT)) {
-        updateClocks(false);
-
-        // query web page
-        httpGET (ss_client, svr_host, sspot_page);
-
-        // skip response header
-        if (!httpSkipHeader (ss_client)) {
-            plotMessage (box, SSPOT_COLOR, _FX("Sunspot header short"));
-            goto out;
-        }
-
-        // read lines into sspot array and build corresponding time value
-        int8_t ssn_i;
-        for (ssn_i = 0; ssn_i < NSUNSPOT && getTCPLine (ss_client, line, x_line.getSize(), NULL); ssn_i++) {
-            // Serial.print(ssn_i); Serial.print("\t"); Serial.println(line);
-            sspot[ssn_i] = atof(line+11);
-            x[ssn_i] = 1-NSUNSPOT + ssn_i;
-        }
-
-        // plot if found all, display current value
-        updateClocks(false);
-        resetWatchdog();
-        if (ssn_i == NSUNSPOT) {
-            ok = plotXY (box, x, sspot, NSUNSPOT, _FX("Days"), _FX("Sunspot Number"),
-                                        SSPOT_COLOR, 0, -1, sspot[NSUNSPOT-1]);
-            if (ok) {
-                // capture
-                ssn_spw = sspot[NSUNSPOT-1];
-                ssn_update = now();
-            }
-        }
+    bool ok = retrieveSunSpots (x, ssn);
+    if (ok) {
+        // plot
+        plotXY (box, x, ssn, SSPOT_NV, _FX("Days"), _FX("Sunspot Number"),
+                                        SSPOT_COLOR, 0, -1, ssn[SSPOT_NV-1]);
+        // display
+        drawSpaceStats();
 
     } else {
         plotMessage (box, SSPOT_COLOR, _FX("SSN connection failed"));
     }
 
-    // clean up
-out:
-    ss_client.stop();
+    // done
     resetWatchdog();
-    printFreeHeap (F("updateSunspots"));
     return (ok);
 }
 
@@ -1874,63 +2127,27 @@ out:
  */
 static bool updateSolarFlux(const SBox &box)
 {
-    // collect lines, three per day for 33 days
-    #define     NSFLUX          99
-    StackMalloc x_mem(NSFLUX*sizeof(float));
-    StackMalloc flux_mem(NSFLUX*sizeof(float));
-    StackMalloc line_mem(120);
+    StackMalloc x_mem(SFLUX_NV*sizeof(float));
+    StackMalloc sflux_mem(SFLUX_NV*sizeof(float));
     float *x = (float *) x_mem.getMem();
-    float *flux = (float *) flux_mem.getMem();
-    char *line = line_mem.getMem();
-    WiFiClient sf_client;
-    bool ok = false;
+    float *sflux = (float *) sflux_mem.getMem();
 
-
-    Serial.println (sf_page);
-    resetWatchdog();
-    if (wifiOk() && sf_client.connect(svr_host, HTTPPORT)) {
+    // get flux and plot if ok
+    bool ok = retrievSolarFlux(x, sflux);
+    if (ok) {
         updateClocks(false);
         resetWatchdog();
+        plotXY (box, x, sflux, SFLUX_NV, _FX("Days"), _FX("10.7 cm Solar flux"),
+                                                SFLUX_COLOR, 0, 0, sflux[SFLUX_NV-10]);
 
-        // query web page
-        httpGET (sf_client, svr_host, sf_page);
-
-        // skip response header
-        if (!httpSkipHeader (sf_client)) {
-            plotMessage (box, FLUX_COLOR, _FX("Flux header short"));
-            goto out;
-        }
-
-        // read lines into flux array and build corresponding time value
-        int8_t flux_i;
-        for (flux_i = 0; flux_i < NSFLUX && getTCPLine (sf_client, line, line_mem.getSize(), NULL);flux_i++) {
-            // Serial.print(flux_i); Serial.print("\t"); Serial.println(line);
-            flux[flux_i] = atof(line);
-            x[flux_i] = (flux_i - (NSFLUX-9-1))/3.0F;   // 3x(30 days history + 3 days predictions)
-        }
-
-        // plot if found all, display and capture current value
-        updateClocks(false);
-        resetWatchdog();
-        if (flux_i == NSFLUX) {
-            if (plotXY (box, x, flux, NSFLUX, _FX("Days"), _FX("10.7 cm Solar flux"),
-                                                FLUX_COLOR, 0, 0, flux[NSFLUX-10])) {
-                flux_spw = flux[NSFLUX-10];
-                flux_update = now();
-                ok = true;
-            }
-        } else
-            plotMessage (box, FLUX_COLOR, _FX("Flux data missing"));
-
+        // display
+        drawSpaceStats();
     } else {
-        plotMessage (box, FLUX_COLOR, _FX("Flux connection failed"));
+        plotMessage (box, SFLUX_COLOR, _FX("Flux connection failed"));
     }
 
-    // clean up
-out:
-    sf_client.stop();
+    // done
     resetWatchdog();
-    printFreeHeap (F("updateSolarFlux"));
     return (ok);
 }
 
@@ -1950,6 +2167,8 @@ static bool updateSolarWind(const SBox &box)
     char line[80];
     bool ok = false;
 
+    // mark value as bad until proven otherwise
+    swind_spw = SPW_ERR;
 
     Serial.println (swind_page);
     resetWatchdog();
@@ -1985,7 +2204,7 @@ static bool updateSolarWind(const SBox &box)
             // want y axis to be 10^12 /s /m^2
             float this_y = density * speed * 1e-3;
 
-            // capture largest value in this period
+            // capture largest value in this period for getSpaceWeather()
             if (this_y > max_y)
                 max_y = this_y;
 
@@ -2007,14 +2226,17 @@ static bool updateSolarWind(const SBox &box)
         // plot if found at least a few
         updateClocks(false);
         resetWatchdog();
-        if (nsw >= 10) {
-            if (plotXY (box, x, y, nsw, _FX("Hours"), _FX("Solar wind"), SWIND_COLOR, 0, 0, y[nsw-1])) {
-                swind_spw = y[nsw-1];
-                swind_update = t0;
-                ok = true;
-            }
-        } else
-            plotMessage (box, SWIND_COLOR, _FX("Wind data missing"));
+        if (nsw >= 10
+                && plotXY (box, x, y, nsw, _FX("Hours"), _FX("Solar wind"), SWIND_COLOR, 0, 0, y[nsw-1])) {
+
+            // capture for getSpaceWeather()
+            swind_spw = y[nsw-1];
+            swind_update = t0;
+            ok = true;
+
+        } else {
+            plotMessage (box, SWIND_COLOR, _FX("Wind data error"));
+        }
 
     } else {
         plotMessage (box, SWIND_COLOR, _FX("Wind connection failed"));
@@ -2051,6 +2273,9 @@ static bool updateDRAPPlot(const SBox &box)
 
     // want max in each interval so init y values to all 0
     memset (y, 0, y_mem.getSize());
+
+    // mark data as bad until proven otherwise
+    drap_spw = SPW_ERR;
 
     Serial.println (drap_page);
     resetWatchdog();
@@ -2135,6 +2360,7 @@ static bool updateDRAPPlot(const SBox &box)
             // capture for getSpaceWeather()
             drap_spw = y[_DRAP_NPLOT-1];
             drap_update = t_now;
+
         } else {
             plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: no data"));
             goto out;
@@ -2249,7 +2475,7 @@ static bool updateBandConditions(const SBox &box)
             for (int j = 0; j < BMTRX_COLS; j++)
                 bm[utc_hr][j] = 100*rel[j];
 
-            // copy to path_spw if correct time
+            // copy to path_spw for getSpaceWeather() if correct time
             if (utc_hr == t_hr) {
                 memcpy (path_spw, rel, PROP_MAP_N*sizeof(float));
                 path_update = now();
@@ -2377,56 +2603,73 @@ static bool updateSTEREO_A (const SBox &box)
     return (sep_ok && file_ok);
 }
 
-/* get next line from client in line[] then return true, else nothing and return false.
- * line[] will have \r and \n removed and end with \0, optional line length in *ll will not include \0.
- * if line is longer than line_len it will be silently truncated.
+/* display the RSG NOAA solar environment scale values.
  */
-bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll)
+static bool updateNOAASWx(const SBox &box)
 {
-    // decrement available length so there's always room to add '\0'
-    line_len -= 1;
+    // expecting 3 reply lines of the form, anything else is an error message
+    //  R  0 0 0 0
+    //  S  0 0 0 0
+    //  G  0 0 0 0
+    char line[100];
+    bool ok = false;
 
-    // read until find \n or time out.
-    uint16_t i = 0;
-    while (true) {
-        char c;
-        if (!getChar (client, &c))
-            return (false);
-        if (c == '\r')
-            continue;
-        if (c == '\n') {
-            line[i] = '\0';
-            if (ll)
-                *ll = i;
-            // Serial.println(line);
-            return (true);
-        } else if (i < line_len)
-            line[i++] = c;
-    }
-}
+    // TCP client
+    WiFiClient noaaswx_client;
 
-/* convert an array of 4 big-endian network-order bytes into a uint32_t
- */
-static uint32_t crackBE32 (uint8_t bp[])
-{
-    union {
-        uint32_t be;
-        uint8_t ba[4];
-    } be4;
+    // starting msg
+        
+    // read scales
+    Serial.println(noaaswx_page);
+    resetWatchdog();
+    if (wifiOk() && noaaswx_client.connect(svr_host, HTTPPORT)) {
 
-    be4.ba[3] = bp[0];
-    be4.ba[2] = bp[1];
-    be4.ba[1] = bp[2];
-    be4.ba[0] = bp[3];
+        resetWatchdog();
+        updateClocks(false);
 
-    return (be4.be);
-}
+        // fetch page
+        httpGET (noaaswx_client, svr_host, noaaswx_page);
 
-/* called when RSS has just been turned on: update now and restart refresh cycle
- */
-void scheduleRSSNow()
-{
-    next_rss = 0;
+        // skip header then read the data lines
+        if (httpSkipHeader (noaaswx_client)) {
+
+            for (int i = 0; i < N_NOAASW_C; i++) {
+
+                // read next line
+                if (!getTCPLine (noaaswx_client, line, sizeof(line), NULL)) {
+                    plotMessage (box, RA8875_RED, _FX("NOAASW missing data"));
+                    goto out;
+                }
+                // Serial.printf ("NOAA: %d %s\n", i, line);
+
+                // parse
+                // sprintf (line, "%c 1 2 3 4", 'A'+i);  // test line
+                if (sscanf (line, "%c %d %d %d %d", &noaa_spw.cat[i], &noaa_spw.val[i][0],
+                                &noaa_spw.val[i][1], &noaa_spw.val[i][2], &noaa_spw.val[i][3]) != 5) {
+                    plotMessage (box, RA8875_RED, line);
+                    goto out;
+                }
+            }
+
+            // all ok: mark for getSpaceWeather() and display
+            noaa_update = now();
+            plotNOAASWx (box, noaa_spw);
+            ok = true;
+
+        } else {
+            plotMessage (box, RA8875_RED, _FX("NOAASW header short"));
+            goto out;
+        }
+    } else
+        plotMessage (box, RA8875_RED, _FX("NOAASW connection failed"));
+
+out:
+
+    // finished with connection
+    noaaswx_client.stop();
+
+    printFreeHeap (F("updateNOAASWx"));
+    return (ok);
 }
 
 /* display next RSS feed item if on, return whether ok
@@ -2477,8 +2720,8 @@ static bool updateRSS ()
                 goto out;
             }
 
-            // get up to NRSS more rss_titles[]
-            for (n_rss_titles = 0; n_rss_titles < NRSS; n_rss_titles++) {
+            // get up to RSS_MAXN more rss_titles[]
+            for (n_rss_titles = 0; n_rss_titles < RSS_MAXN; n_rss_titles++) {
                 if (!getTCPLine (rss_client, line, line_mem.getSize(), NULL))
                     goto out;
                 if (rss_titles[n_rss_titles])
@@ -2576,73 +2819,56 @@ static bool updateRSS ()
     return (true);
 }
 
-/* display the RSG NOAA solar environment scale values.
+/* get next line from client in line[] then return true, else nothing and return false.
+ * line[] will have \r and \n removed and end with \0, optional line length in *ll will not include \0.
+ * if line is longer than line_len it will be silently truncated.
  */
-static bool updateNOAASWx(const SBox &box)
+bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll)
 {
-    // expecting 3 reply lines of the form, anything else is an error message
-    //  R  0 0 0 0
-    //  S  0 0 0 0
-    //  G  0 0 0 0
-    char line[100];
-    bool ok = false;
+    // decrement available length so there's always room to add '\0'
+    line_len -= 1;
 
-    // TCP client
-    WiFiClient noaaswx_client;
+    // read until find \n or time out.
+    uint16_t i = 0;
+    while (true) {
+        char c;
+        if (!getChar (client, &c))
+            return (false);
+        if (c == '\r')
+            continue;
+        if (c == '\n') {
+            line[i] = '\0';
+            if (ll)
+                *ll = i;
+            // Serial.println(line);
+            return (true);
+        } else if (i < line_len)
+            line[i++] = c;
+    }
+}
 
-    // starting msg
-        
-    // read scales
-    Serial.println(noaaswx_page);
-    resetWatchdog();
-    if (wifiOk() && noaaswx_client.connect(svr_host, HTTPPORT)) {
+/* convert an array of 4 big-endian network-order bytes into a uint32_t
+ */
+static uint32_t crackBE32 (uint8_t bp[])
+{
+    union {
+        uint32_t be;
+        uint8_t ba[4];
+    } be4;
 
-        resetWatchdog();
-        updateClocks(false);
+    be4.ba[3] = bp[0];
+    be4.ba[2] = bp[1];
+    be4.ba[1] = bp[2];
+    be4.ba[0] = bp[3];
 
-        // fetch page
-        httpGET (noaaswx_client, svr_host, noaaswx_page);
+    return (be4.be);
+}
 
-        // skip header then read the data lines
-        if (httpSkipHeader (noaaswx_client)) {
-
-            for (int i = 0; i < N_NOAASW_C; i++) {
-
-                // read next line
-                if (!getTCPLine (noaaswx_client, line, sizeof(line), NULL)) {
-                    plotMessage (box, RA8875_RED, _FX("NOAASW missing data"));
-                    goto out;
-                }
-                // Serial.printf ("NOAA: %d %s\n", i, line);
-
-                // parse
-                // sprintf (line, "%c 1 2 3 4", 'A'+i);  // test line
-                if (sscanf (line, "%c %d %d %d %d", &noaa_spw.cat[i], &noaa_spw.val[i][0],
-                                &noaa_spw.val[i][1], &noaa_spw.val[i][2], &noaa_spw.val[i][3]) != 5) {
-                    plotMessage (box, RA8875_RED, line);
-                    goto out;
-                }
-            }
-
-            // all ok, display
-            noaa_update = now();
-            plotNOAASWx (box, noaa_spw);
-            ok = true;
-
-        } else {
-            plotMessage (box, RA8875_RED, _FX("NOAASW header short"));
-            goto out;
-        }
-    } else
-        plotMessage (box, RA8875_RED, _FX("NOAASW connection failed"));
-
-out:
-
-    // finished with connection
-    noaaswx_client.stop();
-
-    printFreeHeap (F("updateNOAASWx"));
-    return (ok);
+/* called when RSS has just been turned on: update now and restart refresh cycle
+ */
+void scheduleRSSNow()
+{
+    next_rss = 0;
 }
 
 /* it is MUCH faster to print F() strings in a String than using them directly.
@@ -2679,7 +2905,7 @@ bool wifiOk()
  */
 void initWiFiRetry()
 {
-    next_flux = 0;
+    next_sflux = 0;
     next_ssn = 0;
     next_xray = 0;
     next_kp = 0;
@@ -2768,10 +2994,11 @@ void showDXWX()
     }
 }
 
-/* return most recent space weather info and its age. values never read will be zero and ancient.
+/* return most recent space weather info and its age. values never read will be ancient.
  * most are value+age but xray is a string and pathrel is an array of PROP_MAP_N.
+ * N.B. values will be SPW_ERR if unknown.
  */
-void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, SPWxValue &drap,
+void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, SPWxValue &drap,
 NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,
 float pathrel[PROP_MAP_N], time_t &pathrel_age)
 {
@@ -2781,8 +3008,8 @@ float pathrel[PROP_MAP_N], time_t &pathrel_age)
     // these are easy scalars
     ssn.value = ssn_spw;
     ssn.age = t0 - ssn_update;
-    flux.value = flux_spw;
-    flux.age = t0 - flux_update;
+    sflux.value = sflux_spw;
+    sflux.age = t0 - sflux_update;
     kp.value = kp_spw;
     kp.age = t0 - kp_update;
     swind.value = swind_spw;
@@ -2842,7 +3069,7 @@ bool setRSSTitle (const char *title, int &n_titles, int &max_titles)
         // erase list if network on or asked to do so
         if (!rss_local || title[0] == '\0') {
             n_rss_titles = rss_title_i = 0;
-            for (int i = 0; i < NRSS; i++) {
+            for (int i = 0; i < RSS_MAXN; i++) {
                 if (rss_titles[i]) {
                     free (rss_titles[i]);
                     rss_titles[i] = NULL;
@@ -2855,14 +3082,14 @@ bool setRSSTitle (const char *title, int &n_titles, int &max_titles)
 
         // add title if room unless blank
         if (title[0] != '\0') {
-            if (n_rss_titles < NRSS) {
+            if (n_rss_titles < RSS_MAXN) {
                 if (rss_titles[n_rss_titles])       // just paranoid
                     free (rss_titles[n_rss_titles]);
                 rss_titles[n_rss_titles] = strdup (title);
                 rss_title_i = n_rss_titles++;       // show new title
             } else {
-                n_titles = NRSS;
-                max_titles = NRSS;
+                n_titles = RSS_MAXN;
+                max_titles = RSS_MAXN;
                 return (false);
             }
         }
@@ -2870,9 +3097,189 @@ bool setRSSTitle (const char *title, int &n_titles, int &max_titles)
 
     // update info and refresh
     n_titles = n_rss_titles;
-    max_titles = NRSS;
+    max_titles = RSS_MAXN;
     scheduleRSSNow();
 
     // ok
     return (true);
+}
+
+/* freshen space stats if not updated already by pane.
+ * return whether any have changed.
+ */
+bool checkSpaceStats (time_t t0)
+{
+    bool any_new = false;
+
+    if (checkSSN(t0))
+        any_new = true;
+    if (checkKp(t0))
+        any_new = true;
+    if (checkXRay(t0))
+        any_new = true;
+    if (checkSolarFlux(t0))
+        any_new = true;
+
+    return (any_new);
+}
+
+/* given touch location s known to be within NCDXF_b, insure the given space stat is in a visible Pane.
+ * N.B. coordinate layout with drawSpaceStats()
+ */
+void doSpaceStatsTouch (const SCoord &s)
+{
+    // decide which row
+    int r = 4*(s.y - NCDXF_b.y)/NCDXF_b.h;
+
+    // decide which PLOT_CH
+    PlotChoice pc;
+    switch (r) {
+    case 0:
+        pc = PLOT_CH_SSN;
+        break;
+
+    case 1:
+        pc = PLOT_CH_FLUX;
+        break;
+
+    case 2:
+        pc = PLOT_CH_XRAY;
+        break;
+
+    default:
+    case 3:
+        pc = PLOT_CH_KP;
+        break;
+    }
+
+    // done if the chosen pane is already on display
+    if (findPaneChoiceNow (pc) != PANE_NONE)
+        return;
+
+    // not on display, choose a pane to use
+    PlotPane pp = PANE_NONE;
+
+    // start by looking for a pane with the new stat already in its rotation set (we know it's not visible)
+    for (int i = PANE_1; i < PANE_N; i++) {
+        if (plot_rotset[i] & (1<<pc)) {
+            pp = (PlotPane)i;
+            break;
+        }
+    }
+
+    // else look for a pane with no solar stats anywhere in its rotation set
+    if (pp == PANE_NONE) {
+        const uint32_t allss_mask = ((1<<PLOT_CH_SSN)|(1<<PLOT_CH_XRAY)|(1<<PLOT_CH_KP)|(1<<PLOT_CH_FLUX));
+        for (int i = PANE_1; i < PANE_N; i++) {
+            if ((plot_rotset[i] & allss_mask) == 0) {
+                pp = (PlotPane)i;
+                break;
+            }
+        }
+    }
+
+    // else just pick the pane next to the stats summary
+    if (pp == PANE_NONE)
+        pp = PANE_3;
+
+    // install alone
+    (void) setPlotChoice (pp, pc);
+    plot_rotset[pp] = 1 << pc;
+    savePlotOps();
+}
+
+/* draw each *_spw in NCDXF_b
+ * N.B. we assume NCDXF_b is already erased.
+ * N.B. coordinate layout with doSpaceStatsTouch()
+ */
+void drawSpaceStats()
+{
+    // ignore if not showing these now
+    if (brb_mode != BRB_SHOW_SWSTATS)
+        return;
+
+    // string and y location
+    static const char err[] = "Err";
+    char str[20];
+    uint16_t y = NCDXF_b.y + 2;
+    const int rect_dy = -23;
+    const int rect_h = 26;
+
+    // title
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    strcpy (str, "SSN");
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.setTextColor (RA8875_WHITE);
+    tft.print (str);
+
+    y += 31;
+
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (SSPOT_COLOR);
+    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    // tft.drawRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_RED);
+    if (ssn_spw == SPW_ERR)
+        strcpy (str, err);
+    else
+        sprintf (str, "%.0f", ssn_spw);
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 5;
+
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    strcpy (str, "SFI");
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 31;
+
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (SFLUX_COLOR);
+    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    if (sflux_spw == SPW_ERR)
+        strcpy (str, err);
+    else
+        sprintf (str, "%.0f", sflux_spw);
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 5;
+
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    strcpy (str, "X-Ray");
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 31;
+
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (RGB565(255,134,0));               // XRAY_LCOLOR is too alarming
+    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    xrayLevel(xray_spw, str);
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 5;
+
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    strcpy (str, "Kp");
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
+
+    y += 31;
+
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (KP_COLOR);
+    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    if (kp_spw == SPW_ERR)
+        strcpy (str, err);
+    else
+        sprintf (str, "%.0f", kp_spw);
+    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
+    tft.print (str);
 }

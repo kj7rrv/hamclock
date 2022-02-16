@@ -11,10 +11,7 @@ void selectFontStyle (FontWeight w, FontSize s)
         else
             tft.setFont(&Germano_Regular16pt7b);
     } else if (s == LARGE_FONT) {
-        if (w == BOLD_FONT)
-            tft.setFont(&Germano_Bold30pt7b);
-        else
-            tft.setFont(&Germano_Bold30pt7b);
+        tft.setFont(&Germano_Bold30pt7b);
     } else /* FAST_FONT */ {
         tft.setFont(NULL);
     }

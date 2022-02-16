@@ -90,7 +90,7 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
 
 /* count how many items in the same group and type as ii are set
  */
-static int menuCountItemsSet (Menu &menu, int ii)
+static int menuCountItemsSet (MenuInfo &menu, int ii)
 {
     MenuItem &menu_ii = menu.items[ii];
     int n_set = 0;
@@ -111,7 +111,7 @@ static int menuCountItemsSet (Menu &menu, int ii)
 
 /* turn off all items in same group and type as item ii.
  */
-static void menuItemsAllOff (Menu &menu, SBox *boxes, int ii)
+static void menuItemsAllOff (MenuInfo &menu, SBox *boxes, int ii)
 {
     MenuItem &menu_ii = menu.items[ii];
 
@@ -135,14 +135,14 @@ static void menuItemsAllOff (Menu &menu, SBox *boxes, int ii)
  * N.B. menu.menu_b.x/y are required but may be adjusted to prevent edge spill.
  * N.B. incomig menu.menu_b.w/h are ignored, we set here by shrink wrapping to fit around menu items.
  */
-bool runMenu (Menu &menu)
+bool runMenu (MenuInfo &menu)
 {
     // font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (MENU_FGC);
 
     // find number of non-ignore items and longest based on longest label
-    int n_nirows = 0;
+    int n_activerows = 0;
     menu.menu_b.w = 0;
     for (int i = 0; i < menu.n_items; i++) {
         MenuItem &mi = menu.items[i];
@@ -153,18 +153,18 @@ bool runMenu (Menu &menu)
                 menu.menu_b.w = iw;
 
             // another non-ignore item
-            n_nirows++;
+            n_activerows++;
         }
     }
 
     // width is duplicated for each column plus add a bit of right margin
     menu.menu_b.w = menu.menu_b.w * menu.n_cols + MENU_RM;
 
-    // number of visible rows in each column
-    int n_vrows = (n_nirows + menu.n_cols - 1)/menu.n_cols;
+    // number of rows in each column
+    int n_rowspercol = (n_activerows + menu.n_cols - 1)/menu.n_cols;
 
     // set menu height, +1 for ok/cancel
-    menu.menu_b.h = MENU_TBM + (n_vrows+1)*MENU_RH + MENU_TBM;
+    menu.menu_b.h = MENU_TBM + (n_rowspercol+1)*MENU_RH + MENU_TBM;
 
     // set ok button size, don't know position yet
     menu.ok_b.w = getTextWidth (ok_label) + MENU_BDX*2;
@@ -175,9 +175,14 @@ bool runMenu (Menu &menu)
     cancel_b.w = getTextWidth (cancel_label) + MENU_BDX*2;
     cancel_b.h = MENU_BH;
 
-    // insure menu width accommodates ok and cancel buttons
-    if (menu.menu_b.w < MENU_BB + menu.ok_b.w + MENU_BB + cancel_b.w + MENU_BB)
-        menu.menu_b.w = MENU_BB + menu.ok_b.w + MENU_BB + cancel_b.w + MENU_BB;
+    // insure menu width accommodates ok and/or cancel buttons
+    if (menu.no_cancel) {
+        if (menu.menu_b.w < MENU_BB + menu.ok_b.w + MENU_BB)
+            menu.menu_b.w = MENU_BB + menu.ok_b.w + MENU_BB;
+    } else {
+        if (menu.menu_b.w < MENU_BB + menu.ok_b.w + MENU_BB + cancel_b.w + MENU_BB)
+            menu.menu_b.w = MENU_BB + menu.ok_b.w + MENU_BB + cancel_b.w + MENU_BB;
+    }
 
     // reposition box if needed to avoid spillage
     if (menu.menu_b.x + menu.menu_b.w >= tft.width())
@@ -186,48 +191,60 @@ bool runMenu (Menu &menu)
         menu.menu_b.y = tft.height() - menu.menu_b.h - 2;
 
     // now we can set button positions within the menu box
-    menu.ok_b.x = menu.menu_b.x + MENU_BB;
-    menu.ok_b.y = menu.menu_b.y + menu.menu_b.h - MENU_TBM - menu.ok_b.h;
-    cancel_b.x = menu.menu_b.x + menu.menu_b.w - cancel_b.w - MENU_BB;
-    cancel_b.y = menu.menu_b.y + menu.menu_b.h - MENU_TBM - cancel_b.h;
+    if (menu.no_cancel) {
+        menu.ok_b.x = menu.menu_b.x + (menu.menu_b.w - menu.ok_b.w)/2;
+        menu.ok_b.y = menu.menu_b.y + menu.menu_b.h - MENU_TBM - menu.ok_b.h;
+        cancel_b.x = 0;
+        cancel_b.y = 0;
+    } else {
+        menu.ok_b.x = menu.menu_b.x + MENU_BB;
+        menu.ok_b.y = menu.menu_b.y + menu.menu_b.h - MENU_TBM - menu.ok_b.h;
+        cancel_b.x = menu.menu_b.x + menu.menu_b.w - cancel_b.w - MENU_BB;
+        cancel_b.y = menu.menu_b.y + menu.menu_b.h - MENU_TBM - cancel_b.h;
+    }
 
     // ready! prepare new menu box
     tft.fillRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, MENU_BGC);
     tft.drawRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, MENU_FGC);
 
-    // add buttons
+    // display buttons
     tft.fillRect (menu.ok_b.x, menu.ok_b.y, menu.ok_b.w, menu.ok_b.h, MENU_BGC);
     tft.drawRect (menu.ok_b.x, menu.ok_b.y, menu.ok_b.w, menu.ok_b.h, MENU_FGC);
     tft.setCursor (menu.ok_b.x+MENU_BDX, menu.ok_b.y+MENU_BDY);
     tft.print (ok_label);
-    tft.fillRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_BGC);
-    tft.drawRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_FGC);
-    tft.setCursor (cancel_b.x+MENU_BDX, cancel_b.y+MENU_BDY);
-    tft.print (cancel_label);
+    if (!menu.no_cancel) {
+        tft.fillRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_BGC);
+        tft.drawRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_FGC);
+        tft.setCursor (cancel_b.x+MENU_BDX, cancel_b.y+MENU_BDY);
+        tft.print (cancel_label);
+    }
 
     // display each item in its own pick box
     StackMalloc ibox_mem(menu.n_items*sizeof(SBox));
     SBox *items_b = (SBox *) ibox_mem.getMem();
     uint16_t col_w = (menu.menu_b.w - MENU_RM)/menu.n_cols;
-    uint8_t row_i = 0;                          // visual row, only incremented for non-IGNORE items
+    int vrow_i = 0;                          // visual row, only incremented for non-IGNORE items
     for (int i = 0; i < menu.n_items; i++) {
 
-        SBox &ib = items_b[i];
         MenuItem &mi = menu.items[i];
 
-        ib.x = menu.menu_b.x + (row_i/n_vrows)*col_w;
-        ib.y = menu.menu_b.y + MENU_TBM + (row_i%n_vrows)*MENU_RH;
-        ib.w = col_w;
-        ib.h = MENU_RH;
-        menuDrawItem (mi, ib, true);
+        // assign item next location and draw unless to be ignored
+        if (mi.type != MENU_IGNORE) {
+            SBox &ib = items_b[i];
 
-        // increment row unless IGNORE
-        if (mi.type != MENU_IGNORE)
-            row_i++;
+            ib.x = menu.menu_b.x + (vrow_i/n_rowspercol)*col_w;
+            ib.y = menu.menu_b.y + MENU_TBM + (vrow_i%n_rowspercol)*MENU_RH;
+            ib.w = col_w;
+            ib.h = MENU_RH;
+            menuDrawItem (mi, ib, true);
+
+            vrow_i++;
+        }
     }
-    if (row_i != n_nirows)                      // sanity check
-        fatalError (_FX("Bug! menu row %d != %d / %d"), row_i, n_nirows, menu.n_items);
+    if (vrow_i != n_activerows)                      // sanity check
+        fatalError (_FX("Bug! menu row %d != %d / %d"), vrow_i, n_activerows, menu.n_items);
 
+    // immediate draw if menu is over map
     tft.drawPR();
 
     // run
@@ -240,16 +257,16 @@ bool runMenu (Menu &menu)
             ok = true;
             break;
         }
-        if (inBox (tap, cancel_b)) {
+        if (!menu.no_cancel && inBox (tap, cancel_b)) {
             break;
         }
 
-        // check for tap in menu items
+        // check for tap in active menu items
         for (int i = 0; i < menu.n_items; i++) {
             SBox &ib = items_b[i];
+            MenuItem &mi = menu.items[i];
 
-            if (inBox (tap, ib)) {
-                MenuItem &mi = menu.items[i];
+            if (mi.type != MENU_IGNORE && inBox (tap, ib)) {
 
                 // implement each type of behavior
                 switch (mi.type) {

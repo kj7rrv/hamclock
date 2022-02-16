@@ -30,6 +30,9 @@
 
 #include "HamClock.h"
 
+// public state
+bool found_phot;                                // set if initial read > 1, else manual clock settings
+uint8_t brb_mode;                               // one of BRB_MODE
 
 // configuration values
 #define BPWM_MAX        255                     // PWM for 100% brightness
@@ -44,14 +47,13 @@
 #define BRIGHT_COL      RA8875_RED              // dim marker color  
 #define DIM_COL         RA8875_BLUE             // dim marker color  
 #define N_ROWS          11                      // rows of clock info, including gaps
-#define TOP_GAP         4                       // pixels above clock info title
+#define SFONT_H         7                       // small font height
 #define MARKER_H        3                       // scaler marker height
 #define SCALE_W         5                       // scale width
 #define FOLLOW_DT       100                     // read phot this often, ms
 
 static int16_t bpwm;                            // current brightness PWM value 0 .. BPWM_M
 static uint16_t phot;                           // current photorestistor value
-bool found_phot;                                // set if initial read > 1, else manual clock settings
 
 // fast access to what is in NVRAM
 static uint16_t fast_phot_bright, fast_phot_dim;
@@ -115,7 +117,7 @@ static void setDisplayBrightness(bool log)
             const char *cmd = bpwm < BPWM_MAX/2 ? "vcgencmd display_power 0" : "vcgencmd display_power 1";
             if (log)
                 Serial.printf ("BR: %s\n", cmd);
-            system (cmd);
+            (void) !system (cmd);
         }
 
     #endif
@@ -130,6 +132,8 @@ static uint16_t readPhot()
         resetWatchdog();
 
         uint16_t new_phot = PHOT_MAX - analogRead (PHOT_PIN);           // brighter gives smaller value
+
+        // Serial.println (new_phot);
 
         resetWatchdog();
 
@@ -150,16 +154,16 @@ static void getPhotControl (SBox &p)
 {
         // N.B. match getBrControl()
         p.w = SCALE_W;
-        p.y = brightness_b.y + brightness_b.h/9;
-        p.h = 6*brightness_b.h/10;
+        p.y = NCDXF_b.y + NCDXF_b.h/9;
+        p.h = 6*NCDXF_b.h/10;
 
         // right third
-        p.x = brightness_b.x + 2*(brightness_b.w - SCALE_W)/3;
+        p.x = NCDXF_b.x + 2*(NCDXF_b.w - SCALE_W)/3;
 }
 
 
 
-/* draw a symbol for the photresistor in brightness_b.
+/* draw a symbol for the photresistor in NCDXF_b.
  * skip if stopwatch is up.
  */
 static void drawPhotSymbol()
@@ -169,9 +173,9 @@ static void drawPhotSymbol()
 
         uint8_t n = 2;                                                  // number of \/
         uint16_t w = 2*n+8;                                             // n steps across
-        uint16_t s = brightness_b.w/w;                                  // 1 x step length
-        uint16_t x = brightness_b.x + (brightness_b.w-w*s)/2 + 2*s;     // initial x to center
-        uint16_t y = brightness_b.y + brightness_b.h - 3*s;             // y center-line
+        uint16_t s = NCDXF_b.w/w;                                  // 1 x step length
+        uint16_t x = NCDXF_b.x + (NCDXF_b.w-w*s)/2 + 2*s;     // initial x to center
+        uint16_t y = NCDXF_b.y + NCDXF_b.h - 3*s;             // y center-line
 
         // lead in from left then up
         tft.drawLine (x, y, x+s, y, PHOT_COL);
@@ -193,7 +197,7 @@ static void drawPhotSymbol()
         tft.drawLine (x, y, x+s, y, PHOT_COL);
 
         // incoming light arrows
-        uint16_t ax = brightness_b.x + 6*s;                     // arrow head location
+        uint16_t ax = NCDXF_b.x + 6*s;                     // arrow head location
 
         tft.drawLine (ax, y-2*s, ax-1*s,   y-3*s,    PHOT_COL); // main shaft
         tft.drawLine (ax, y-2*s, ax-3*s/4, y-19*s/8, PHOT_COL); // lower shaft
@@ -234,20 +238,20 @@ static void drawPhotControl()
 }
 
 
-/* get dimensions of the brightness slider control
+/* get dimensions of the brightness slider control, depends on whether we alone or with phot scale.
  */
 static void getBrControl (SBox &b)
 {
         // N.B. match getPhotControl()
         b.w = SCALE_W;
-        b.y = brightness_b.y + brightness_b.h/9;
-        b.h = 6*brightness_b.h/10;
+        b.y = NCDXF_b.y + NCDXF_b.h/9;
+        b.h = 6*NCDXF_b.h/10;
 
         // x depends on mode
         if (brb_mode == BRB_SHOW_PHOT)
-            b.x = brightness_b.x + (brightness_b.w - SCALE_W)/3;
+            b.x = NCDXF_b.x + (NCDXF_b.w - SCALE_W)/3;
         else
-            b.x = brightness_b.x + (brightness_b.w - SCALE_W)/2;
+            b.x = NCDXF_b.x + (NCDXF_b.w - SCALE_W)/2;
 }
 
 
@@ -264,10 +268,8 @@ static void drawBrControl()
         SBox b;
         getBrControl (b);
 
-        int16_t bh;
-
         // draw bpwm scale
-        bh = (b.h-2-MARKER_H)*(bpwm-user_off)/(user_on - user_off) + MARKER_H+1;
+        int16_t bh = (b.h-2-MARKER_H)*(bpwm-user_off)/(user_on - user_off) + MARKER_H+1;
         tft.fillRect (b.x+1, b.y+1, b.w-2, b.h-2, RA8875_BLACK);    // leave border to avoid flicker
         tft.drawRect (b.x, b.y, b.w, b.h, BPWM_COL);
         tft.fillRect (b.x, b.y+b.h-bh, b.w, MARKER_H, BPWM_COL);
@@ -283,6 +285,7 @@ static void drawBrControl()
 
 /* draw mins_on/mins_off and idle controls.
  * skip if stopwatch is up or not in proper mode.
+ * N.B. coordinate layout with changeOnOffSetting().
  */
 static void drawOnOffControls()
 {
@@ -291,22 +294,22 @@ static void drawOnOffControls()
         if (getSWDisplayState() != SWD_NONE || brb_mode != BRB_SHOW_ONOFF)
             return;
 
-        tft.fillRect (brightness_b.x+1, brightness_b.y+1, brightness_b.w-2, brightness_b.h-2, RA8875_BLACK);
-        tft.drawLine (brightness_b.x, brightness_b.y, brightness_b.x+brightness_b.w, brightness_b.y, GRAY);
+        tft.fillRect (NCDXF_b.x+1, NCDXF_b.y+1, NCDXF_b.w-2, NCDXF_b.h-2, RA8875_BLACK);
+        tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w, NCDXF_b.y, GRAY);
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor (RA8875_WHITE);
 
         // left x values
-        uint16_t xl = brightness_b.x + 7;               // label indent
-        uint16_t xn = brightness_b.x + 12;              // number indent
-
-        // walk down by dy each time
-        uint16_t y = brightness_b.y + TOP_GAP;
-        uint8_t dy = (brightness_b.h - TOP_GAP)/N_ROWS;
+        uint16_t xl = NCDXF_b.x + 7;               // label indent
+        uint16_t xn = NCDXF_b.x + 12;              // number indent
 
         // title
-        tft.setCursor (xl, y);
+        tft.setCursor (xl, NCDXF_b.y+2);
         tft.print (F("Display"));
+
+        // walk down by dy each time
+        uint8_t dy = NCDXF_b.h/N_ROWS;
+        uint16_t y = NCDXF_b.y + dy - SFONT_H/2;
 
         // gap
         y += dy;
@@ -391,20 +394,21 @@ static void getPersistentOnOffTimes (int dow, uint16_t &on, uint16_t &off)
     off = ootimes[dow+DAYSPERWEEK];
 }
 
-/* given screen tap location known to be within brightness_b, allow user to change on/off/idle setting
+/* given screen tap location known to be within NCDXF_b, allow user to change on/off/idle setting
+ * N.B. coordinate layout with drawOnOffControls().
  */
 static void changeOnOffSetting (const SCoord &s)
 {
-
         // decide which row and which left-right half were tapped
-        uint8_t row = (s.y - (brightness_b.y+TOP_GAP))/((brightness_b.h - TOP_GAP)/N_ROWS);
-        bool left_half = s.x - brightness_b.x < brightness_b.w/2;
+        int dy = NCDXF_b.h/N_ROWS;
+        int row = (s.y - NCDXF_b.y + dy/2 - SFONT_H/2)/dy;          // center of rows in drawOnOffControls
+        bool left_half = s.x - NCDXF_b.x < NCDXF_b.w/2;
 
         // minutes deltas, always forward
         uint16_t on_dt = 0, off_dt = 0;
 
         switch (row) {
-        case 2:
+        case 3:
             // increase idle time
             idle_mins += 5;
             NVWriteUInt16 (NV_BR_IDLE, idle_mins);
@@ -418,7 +422,7 @@ static void changeOnOffSetting (const SCoord &s)
             }
             break;
 
-        case 5:
+        case 6:
             if (left_half) {
                 // increase on-time one hour
                 on_dt = 60;
@@ -438,7 +442,7 @@ static void changeOnOffSetting (const SCoord &s)
             }
             break;
 
-        case 8:
+        case 9:
             if (left_half) {
                 // increase off-time one hour
                 off_dt = 60;
@@ -471,7 +475,6 @@ static void changeOnOffSetting (const SCoord &s)
 
         // redraw with new settings
         drawOnOffControls();
-
 }
 
 
@@ -545,7 +548,8 @@ static void checkOnOffTimers()
 
 
 
-/* set brightness to bpwm and update GUI controls if visible
+/* set brightness to bpwm and update GUI controls if visible.
+ * N.B. beware states that should not be drawn
  */
 static void engageDisplayBrightness(bool log)
 {
@@ -553,11 +557,13 @@ static void engageDisplayBrightness(bool log)
 
         // Serial.printf (_FX("BR: engage mode %d\n"), brb_mode);
 
-        if (brb_mode == BRB_SHOW_BR)
-            drawBrControl();
-        else if (brb_mode == BRB_SHOW_PHOT) {
-            drawBrControl();
-            drawPhotControl();
+        if (getSWDisplayState() == SWD_NONE && !wifiMeterIsUp()) {
+            if (brb_mode == BRB_SHOW_BR)
+                drawBrControl();
+            else if (brb_mode == BRB_SHOW_PHOT) {
+                drawBrControl();
+                drawPhotControl();
+            }
         }
 }
 
@@ -749,15 +755,16 @@ void setupBrightness()
         if (!NVReadUInt8 (NV_BRB_MODE, &brb_mode)
                         || (brb_mode == BRB_SHOW_ONOFF && !support_onoff)
                         || (brb_mode == BRB_SHOW_PHOT && (!support_phot || !found_phot))
-                        || (brb_mode == BRB_SHOW_BR && !support_dim)) {
+                        || (brb_mode == BRB_SHOW_BR && (!support_dim || (support_phot && found_phot)))) {
+            Serial.printf (_FX("BR: Bogus initial brb_mode %d, resetting to %d\n"),brb_mode,BRB_SHOW_BEACONS);
             brb_mode = BRB_SHOW_BEACONS;
             NVWriteUInt8 (NV_BRB_MODE, brb_mode);
         }
 }
 
 /* refresh brightness display depending on current capability and pane control.
- * N.B. we assume brightness_b is already erased
- * N.B. we cooperate with drawBeaconBox() for BRB_SHOW_BEACONS and BRB_SHOW_NOTHING
+ * N.B. we assume NCDXF_b is already erased
+ * N.B. we cooperate with drawBeaconBox() for BRB_SHOW_BEACONS and BRB_SHOW_SWSTATS
  */
 void drawBrightness()
 {
@@ -872,9 +879,9 @@ void brightnessOff()
         clock_off = true;
 }
 
-/* given a tap within brightness_b, change brightness or clock setting
+/* given a tap within NCDXF_b, change brightness or clock setting
  */
-void changeBrightness (SCoord &s)
+static void changeBrightness (const SCoord &s)
 {
         if (brb_mode == BRB_SHOW_PHOT) {
 
@@ -943,56 +950,86 @@ void changeBrightness (SCoord &s)
 }
 
 
-/* return whether s is within the beacon control box.
- * if so, rotate brb_mode in prep for next refresh.
+/* perform proper action given s known to be within NCDXF_b.
  */
-bool checkBeaconTouch (SCoord &s)
+void doNCDXFTouch (const SCoord &s)
 {
-        bool in_ncdfc = inBox (s, NCDXF_b);
+        if (s.y < NCDXF_b.y + NCDXF_b.h/10) {     // pretty small so doSpaceStatsTouch can change top value
 
-        if (in_ncdfc) {
+            // show menu unless just two options in which case just toggle
+            if ((!support_phot || !found_phot) && !support_dim && !support_onoff) {
 
-            switch (brb_mode) {
+                // just toggle the only twp options
+                brb_mode = (brb_mode == BRB_SHOW_BEACONS) ? BRB_SHOW_SWSTATS : BRB_SHOW_BEACONS;
 
-            case BRB_SHOW_BEACONS:
-                if (support_onoff) {
-                    brb_mode = BRB_SHOW_ONOFF;
-                    getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
-                } else if (support_phot && found_phot)
-                    brb_mode = BRB_SHOW_PHOT;
-                else if (support_dim)
-                    brb_mode = BRB_SHOW_BR;
-                else
-                    brb_mode = BRB_SHOW_NOTHING;
-                break;
+                // show new option
+                drawBeaconBox();
 
-            case BRB_SHOW_ONOFF:
-                if (support_phot && found_phot)
-                    brb_mode = BRB_SHOW_PHOT;
-                else if (support_dim)
-                    brb_mode = BRB_SHOW_BR;
-                else
-                    brb_mode = BRB_SHOW_BEACONS;
-                break;
+            } else {
 
-            case BRB_SHOW_PHOT:
-                brb_mode = BRB_SHOW_BEACONS;
-                break;
+                // show menu of options
 
-            case BRB_SHOW_BR:
-                brb_mode = BRB_SHOW_BEACONS;
-                break;
+                // list of each BRB to avoid knowing their values; N.B. must be in same order as mitems[]
+                static uint8_t mi_brb_order[BRB_N] =
+                    { BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR };
 
-            case BRB_SHOW_NOTHING:
-                brb_mode = BRB_SHOW_BEACONS;
-                break;
+                // build menu, depending on current configuration
+                #define _MI_INDENT 2
+                MenuItem mitems[BRB_N] = {
+                     {MENU_1OFN, brb_mode == BRB_SHOW_BEACONS, 1, _MI_INDENT, "NCDXF"},     // always show
+                     {MENU_1OFN, brb_mode == BRB_SHOW_SWSTATS, 1, _MI_INDENT, "SpcWx"},     // always show
+                     {support_onoff ? MENU_1OFN : MENU_IGNORE,
+                                brb_mode == BRB_SHOW_ONOFF, 1, _MI_INDENT, "On/Off"},
+                     {support_phot && found_phot ? MENU_1OFN : MENU_IGNORE,
+                                brb_mode == BRB_SHOW_PHOT, 1, _MI_INDENT, "PhotoR"},
+                     {support_dim && !(support_phot && found_phot) ? MENU_1OFN : MENU_IGNORE,
+                                brb_mode == BRB_SHOW_BR, 1, _MI_INDENT, "Brite"},
+                };
+
+                // boxes
+                SBox menu_b = NCDXF_b;                      // copy, not ref, so can be tweaked
+                menu_b.x += 3;
+                menu_b.y += 20;
+                SBox ok_b;
+
+                // run menu
+                MenuInfo menu = {menu_b, ok_b, true, true, 1, BRB_N, mitems};
+                bool ok = runMenu(menu);
+
+                // engage new option unless canceled
+                if (ok) {
+
+                    // find the set item
+                    for (int i = 0; i < BRB_N; i++) {
+                        if (mitems[i].set) {
+                            brb_mode = mi_brb_order[i];
+                            break;
+                        }
+                    }
+
+                    // update on/off times if now used
+                    if (brb_mode == BRB_SHOW_ONOFF)
+                        getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
+                }
+
+                // show new option, even if no change in order to erase menu
+                drawBeaconBox();
 
             }
 
+            // save
             NVWriteUInt8 (NV_BRB_MODE, brb_mode);
-        }
+            Serial.printf ("BR: now mode %d\n", brb_mode);
 
-        return (in_ncdfc);
+        } else {
+
+            // operate current option
+            if (brb_mode == BRB_SHOW_SWSTATS)
+                doSpaceStatsTouch (s);
+            else
+                changeBrightness (s);
+
+        }
 }
 
 /* set on/off/idle times for the given dow then update display if today is dow.

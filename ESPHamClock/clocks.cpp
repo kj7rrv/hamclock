@@ -34,6 +34,7 @@ static int32_t utc_offset;                      // nowWO() offset from UTC, secs
 #define MDY_C           RA8875_WHITE            // MDY color
 
 /* the UTC "button" in clock_b depending on whether utc_offset is 0.
+ * if offset is not 0 show red/black depending on even/odd second
  */
 static void drawUTCButton()
 {
@@ -47,9 +48,12 @@ static void drawUTCButton()
         strcpy (msg, "UTC");
     } else {
         // unknown or time is other than UTC
-        tft.fillRect (clock_b.x+clock_b.w-UTC_W, clock_b.y, UTC_W, UTC_H, RA8875_RED);
-        tft.drawRect (clock_b.x+clock_b.w-UTC_W, clock_b.y, UTC_W, UTC_H, RA8875_RED);
-        tft.setTextColor(HMS_C);
+        bool toggle = (millis()%2000) > 1000;
+        uint16_t fg = toggle ? RA8875_WHITE : RA8875_BLACK;
+        uint16_t bg = RA8875_RED;
+        tft.fillRect (clock_b.x+clock_b.w-UTC_W, clock_b.y, UTC_W, UTC_H, bg);
+        tft.drawRect (clock_b.x+clock_b.w-UTC_W, clock_b.y, UTC_W, UTC_H, bg);
+        tft.setTextColor(fg);
         strcpy (msg, "OFF");
     }
 
@@ -705,6 +709,10 @@ void updateClocks(bool all)
             showRotatingBorder ((sc&1) == 1, (PlotPane)i);
         }
     }
+
+    // flash UTC if not current
+    if (utc_offset != 0 || !clockTimeOk())
+        drawUTCButton();
 }
 
 /* draw DE sun rise and set info
@@ -858,8 +866,7 @@ bool checkClockTouch (SCoord &s, TouchType tt)
     // save new offset
     NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
 
-    // show new time
-    updateClocks(false);
+    // show whether UTC now
     drawUTCButton();
 
     // restart systems if likely effected by time change
@@ -916,7 +923,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
     // create menu
     #define N_NEW_TZ 5
     #define MAX_NEW_TZ 20
-    #define TZ_MENU_INDENT 10
+    #define TZ_MENU_INDENT 5
     MenuItem mitems[N_NEW_TZ];
     char tz_label[N_NEW_TZ][MAX_NEW_TZ];
     for (int i = 0; i < N_NEW_TZ; i++) {
@@ -938,7 +945,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
 
     // run
     SBox ok_b;
-    Menu menu = {menu_b, ok_b, false, 1, N_NEW_TZ, mitems};
+    MenuInfo menu = {menu_b, ok_b, false, true, 1, N_NEW_TZ, mitems};
     bool menu_ok = runMenu (menu);
 
     // erase our box regardless

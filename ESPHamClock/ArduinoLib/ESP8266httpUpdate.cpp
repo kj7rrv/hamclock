@@ -70,9 +70,9 @@ bool ESPhttpUpdate::runCommand (bool use_euid, int p0, int p1, int pn, const cha
 
             // set uid for sh if need euid
             if (use_euid)
-                setuid(geteuid());
+                (void) !setuid(geteuid());
             else
-                seteuid(getuid());
+                (void) !seteuid(getuid());
             // printf ("OTA: uid %d euid %d\n", getuid(), geteuid());
 
             // go

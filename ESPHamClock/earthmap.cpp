@@ -463,7 +463,7 @@ static void drawMouseLoc()
     // erase data area if going to show new data or clean up for azm not over hemispheres
     static bool was_overmap;
     if (overmap || (azm_on && was_overmap))
-        tft.fillRect (tx, ty, VIEWBTN_W, MOUSELOC_H, RA8875_BLACK);
+        tft.fillRect (tx, ty, view_btn_b.w, 62, RA8875_BLACK);
     was_overmap = overmap;
 
     // that's it if mouse is not over map
@@ -667,7 +667,7 @@ void drawMapMenu()
         {MENU_TOGGLE, false, 4, PRI_INDENT, "RSS"},
         {MENU_TOGGLE, false, 5, PRI_INDENT, "Night"},
         #if defined(_IS_UNIX)
-            {MENU_TOGGLE, false, 6, PRI_INDENT, "Names"},
+            {MENU_TOGGLE, false, 6, PRI_INDENT, "Cities"},
         #endif
     };
 
@@ -710,7 +710,7 @@ void drawMapMenu()
 
     // run menu
     SBox ok_b;
-    Menu menu = {menu_b, ok_b, true, 1, MI_N, mitems};
+    MenuInfo menu = {menu_b, ok_b, true, false, 1, MI_N, mitems};
     bool menu_ok = runMenu (menu);
 
     bool full_redraw = false;

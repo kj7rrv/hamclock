@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <math.h>
 #include <unistd.h>
 #include <time.h>
 #include <fcntl.h>
@@ -12,6 +13,10 @@
 #include <sys/resource.h>
 
 #include "Arduino.h"
+
+// max cpu usage, throttle with -t
+#define MAX_CPU_USAGE 0.8F
+static float max_cpu_usage = MAX_CPU_USAGE;
 
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
@@ -67,7 +72,7 @@ void delay (uint32_t ms)
 
 long random(int max)
 {
-	return ((long)((max-1.0F)*::random()/RAND_MAX));
+        return (::random() / (RAND_MAX / max + 1));
 }
 
 uint16_t analogRead(int pin)
@@ -107,7 +112,7 @@ static void stdout2File()
             fprintf (stderr, "%s: %s\n", new_log_fn, strerror(errno));
             exit(1);
         }
-        fchown (logfd, getuid(), getgid());
+        (void) !fchown (logfd, getuid(), getgid());
 
         // just need fd 1
         close (logfd);
@@ -151,7 +156,7 @@ static void mkAppDir(const char *user_dir)
             fprintf (stderr, "%s: %s\n", path, strerror(errno));
             exit(1);
         }
-        chown (path, getuid(), getgid());
+        (void) !chown (path, getuid(), getgid());
         umask(old_um);
 }
 
@@ -184,6 +189,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -l l : set mercator center lng to l degs; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
+        fprintf (stderr, " -t p : throttle max cpu to p percent; default %.0f\n", MAX_CPU_USAGE*100);
         fprintf (stderr, " -w p : set web server port p instead of %d\n", svr_port);
 
         exit(1);
@@ -256,6 +262,14 @@ static void crackArgs (int ac, char *av[])
                     diag_to_file = false;
                     break;
                     break;
+                case 't':
+                    if (ac < 2)
+                        usage ("missing percentage for -t");
+                    max_cpu_usage = atoi (*++av)/100.0F;
+                    if (max_cpu_usage <0.2F || max_cpu_usage>1)
+                        usage ("-t percentage must be 20 .. 100");
+                    ac--;
+                    break;
                 case 'w':
                     if (ac < 2)
                         usage ("missing port number for -w");
@@ -317,45 +331,54 @@ int main (int ac, char *av[])
         printf ("Calling Arduino setup()\n");
 	setup();
 
-        // usage stats
-        struct rusage ru0;
-        struct timeval tv0;
-        memset (&ru0, 0, sizeof(ru0));
-        memset (&tv0, 0, sizeof(tv0));
-        bool usage_init = false;
+        // performance measurements
+        int cpu_us = 0, et_us = 0;      // cpu and elapsed time
+        int sleep_us = 100;             // sleep, usecs
 
 	// call Arduino loop forever
+        // this loop by itself would run 100% CPU so try to be a better citizen and throttle back
         printf ("Starting Arduino loop()\n");
 	for (;;) {
+
+            // get time and usage before calling loop()
+            struct rusage ru0;
+            getrusage (RUSAGE_SELF, &ru0);
+            struct timeval tv0;
+            gettimeofday (&tv0, NULL);
+
+            // Ardino loop
 	    loop();
 
-            // this loop by itself would run 100% CPU so try to be a better citizen and throttle back
+            // cap cpu usage by sleeping based on a simple integral controller
+            if (cpu_us > et_us*max_cpu_usage) {
+                sleep_us += 10;
+                if (sleep_us > 10000)
+                    sleep_us = 10000;
+            } else {
+                if (sleep_us >= 10)
+                    sleep_us -= 10;
+            }
+            usleep (sleep_us);
 
-            // measure elapsed time during previous loop
-            struct timeval tv1;
-            gettimeofday (&tv1, NULL);
-            int et_us = (tv1.tv_sec - tv0.tv_sec)*1000000 + (tv1.tv_usec - tv0.tv_usec);
-            tv0 = tv1;
-
-            // measure cpu time used during previous loop
+            // get time and usage after running loop() and our usleep
             struct rusage ru1;
             getrusage (RUSAGE_SELF, &ru1);
+            struct timeval tv1;
+            gettimeofday (&tv1, NULL);
+
+            // find cpu time used
             struct timeval *ut0 = &ru0.ru_utime;
             struct timeval *ut1 = &ru1.ru_utime;
             struct timeval *st0 = &ru0.ru_stime;
             struct timeval *st1 = &ru1.ru_stime;
             int ut_us = (ut1->tv_sec - ut0->tv_sec)*1000000 + (ut1->tv_usec - ut0->tv_usec);
             int st_us = (st1->tv_sec - st0->tv_sec)*1000000 + (st1->tv_usec - st0->tv_usec);
-            int cpu_us = ut_us + st_us;
-            ru0 = ru1;
-            // printf ("ut %d st %d et %d\n", ut_us, st_us, et_us);
+            cpu_us = ut_us + st_us;
 
-            // cap cpu usage a little below max
-            #define MAX_CPU_USAGE 0.9F
-            int s_us = cpu_us/MAX_CPU_USAGE - et_us;
-            if (usage_init && s_us > 0)
-                usleep (s_us);
-            usage_init = true;
+            // find elapsed time
+            et_us = (tv1.tv_sec - tv0.tv_sec)*1000000 + (tv1.tv_usec - tv0.tv_usec);
+
+            // printf ("sleep_us= %10d cpu= %10d et= %10d %g\n", sleep_us, cpu_us, et_us, fmin(100,100.0*cpu_us/et_us));
 
 	}
 }

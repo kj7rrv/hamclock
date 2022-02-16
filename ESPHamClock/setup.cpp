@@ -2139,6 +2139,7 @@ static void runSetup()
                     eraseBPState (&bool_pr[CLUSTER_BPR]);
                     drawSPPromptValue (&string_pr[DXHOST_SPR]);
                     drawSPPromptValue (&string_pr[DXPORT_SPR]);
+                    drawBPPrompt (&bool_pr[CLMAP_BPR]);
                     drawBoolPair (CLMAP_BPR, CLLABEL_BPR);
                 } else {
                     // hide all and say No

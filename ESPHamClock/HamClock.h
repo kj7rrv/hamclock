@@ -156,6 +156,11 @@
 #include <WiFiServer.h>
 #include <WiFiUdp.h>
 #include <LittleFS.h>
+
+// screen coordinates, upper left at [0,0]
+typedef struct {
+    uint16_t x, y;
+} SCoord;
 #include "Adafruit_RA8875_R.h"
 
 // HamClock modules
@@ -322,11 +327,6 @@ typedef struct {
 extern const char *svr_host;    // backend server name
 extern int svr_port;            // web server port
 
-// screen coordinates, upper left at [0,0]
-typedef struct {
-    uint16_t x, y;
-} SCoord;
-
 // screen coords of box ul and size
 typedef struct {
     uint16_t x, y, w, h;
@@ -371,9 +371,7 @@ typedef struct {
 
 extern Adafruit_RA8875_R tft;           // compat layer
 extern TZInfo de_tz, dx_tz;             // time zone info
-extern SBox NCDXF_b;                    // NCDXF box
-
-extern SBox brightness_b;               // brightness controls
+extern SBox NCDXF_b;                    // NCDXF box, and more
 
 #define PLOTBOX_W 160                   // common plot box width
 #define PLOTBOX_H 148                   // common plot box height, ends just above map border
@@ -396,14 +394,15 @@ enum {
     DXSRSS_N,
 };
 
-// show NCDXF beacons or up to one of several brightness controls in brightness_b
+// show NCDXF beacons or one of other controls
 extern uint8_t brb_mode;
 typedef enum {
     BRB_SHOW_BEACONS,                   // NCDXF beacons
     BRB_SHOW_ONOFF,                     // on/off/idle times
     BRB_SHOW_PHOT,                      // brightness and phot controls
     BRB_SHOW_BR,                        // just brightness control
-    BRB_SHOW_NOTHING,                   // blank region
+    BRB_SHOW_SWSTATS,                   // space weather stats
+    BRB_N,                              // count
 } BRB_MODE;
 
 
@@ -418,11 +417,7 @@ extern SBox dx_maid_b;                  // dx maidenhead pick
 extern SBox de_maid_b;                  // de maidenhead pick
 extern SBox lkscrn_b;                   // screen lock icon button
 
-#define VIEWBTN_W       60              // map View button width
-#define VIEWBTN_H       13              // map View button height
-#define MOUSELOC_H      62              // height of mouse loc box
-
-extern const SBox skip_b;               // common "Skip" button
+extern SBox skip_b;                     // common "Skip" button
 extern bool skip_skip;                  // whether to skip skipping
 extern bool init_iploc;                 // init DE using our IP location
 extern const char *init_locip;          // init DE from given IP
@@ -607,14 +602,13 @@ extern void drawBrightness (void);
 extern void initBrightness (void);
 extern void setupBrightness (void);
 extern void followBrightness (void);
-extern void changeBrightness (SCoord &s);
 extern bool brightnessOn(void);
 extern void brightnessOff(void);
-extern bool checkBeaconTouch (SCoord &s);
 extern bool setDisplayOnOffTimes (int dow, uint16_t on, uint16_t off, int &idle);
 extern bool getDisplayOnOffTimes (int dow, uint16_t &on, uint16_t &off);
 extern bool getDisplayInfo (uint16_t &percent, uint16_t &idle_min, uint16_t &idle_left_sec);
 extern void setFullBrightness(void);
+extern void doNCDXFTouch (const SCoord &s);
 extern bool brControlOk(void);
 extern bool brOnOffOk(void);
 extern bool found_phot;
@@ -896,9 +890,8 @@ extern void drawDXSatMenu(const SCoord &s);
  *
  */
 
-extern void initGimbalGUI(const SBox &box);
 extern bool haveGimbal(void);
-extern void updateGimbal (void);
+extern void updateGimbal (const SBox &box);
 extern bool checkGimbalTouch (const SCoord &s, const SBox &box);
 extern void stopGimbalNow(void);
 extern void closeGimbal(void);
@@ -1086,12 +1079,13 @@ typedef struct {
     SBox &menu_b;               // initial menu box -- sized automatically and may be moved
     SBox &ok_b;                 // box for Ok button -- user may use later with menuRedrawOk()
     bool update_clocks;         // whether to update clocks while waiting
+    bool no_cancel;             // whether to just have Ok button
     int n_cols;                 // number of columns in which to display items
     int n_items;                // number of items[]
     MenuItem *items;            // list -- user must manage memory
-} Menu;
+} MenuInfo;
 
-extern bool runMenu (Menu &menu);
+extern bool runMenu (MenuInfo &menu);
 extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
 
 
@@ -1126,7 +1120,6 @@ extern void updateBeaconScreenLocations(void);
 extern bool overAnyBeacon (const SCoord &s);
 extern void drawBeaconBox();
 
-typedef uint8_t BeaconID;
 
 
 
@@ -1169,7 +1162,7 @@ typedef enum {
     NV_UTC_OFFSET,              // offset from UTC, seconds
     NV_PLOT_1,                  // Pane 1 PlotChoice
     NV_PLOT_2,                  // Pane 2 PlotChoice
-    NV_BRB_MODE,                // Beacon box mode: 0=bcns; 1=On/Off; 2=photresistor; 3=brightness, 4=blank
+    NV_BRB_MODE,                // Beacon box mode: 0=bcns; 1=On/Off; 2=photresistor; 3=brightness, 4=sp wx
     NV_PLOT_3,                  // Pane 3 PlotChoice
 
     NV_RSS_ON,                  // whether to display RSS
@@ -1226,7 +1219,7 @@ typedef enum {
     NV_SATFOOTCOLOR,            // satellite footprint color as RGB 565
     NV_X11FLAGS,                // set if want full screen
 
-    NV_BCFLAGS,                 // Big Clock bitmask: 1=date; 2=wx; 4=digital; 8=12 hr; 16=no sec hand
+    NV_BCFLAGS,                 // Big Clock bitmask: 1=date;2=wx;4=dig;8=12hr;16=nosec;32=UTC;64=an+dig;128=hrs;256=SpWx;512=hands
     NV_DAILYONOFF,              // 7 2-byte on times then 7 off times, each mins from midnight
     NV_TEMPCORR2,               // BME280 77 temperature correction, NV_METRIC_ON units
     NV_PRESCORR2,               // BME280 77 pressure correction, NV_METRIC_ON units
@@ -1473,8 +1466,12 @@ typedef enum {
     SW_BCWXBIT   =  (1<<1),                     // showing bigclock weather
     SW_BCDIGBIT  =  (1<<2),                     // big clock is digital else analog
     SW_DB12HBIT  =  (1<<3),                     // digital clock is 12 else 24
-    SW_ANOSHBIT  =  (1<<4),                     // set if not showing analog second hand
+    SW_NOSECBIT  =  (1<<4),                     // set if not showing seconds
     SW_UTCBIT    =  (1<<5),                     // set if Big Clock showing 24 hr UTC 
+    SW_ANWDBIT   =  (1<<6),                     // set if analog clock also showing digital time
+    SW_ANNUMBIT  =  (1<<7),                     // set if analog clock also shows hour numbers on face
+    SW_BCSPWXBIT =  (1<<8),                     // showing bigclock space weather
+    SW_ANCOLHBIT =  (1<<9),                     // color the analog hands
 } SWBCBits;
 
 // state of stopwatch engine, _not_ what is being display
@@ -1555,6 +1552,7 @@ typedef struct {
 } NTPServer;
 #define NTP_TOO_LONG 5000U                      // too long response time, millis()
 
+#define SPW_ERR (-9999)                         // bad cookie value for space weather stats
 
 extern void initSys (void);
 extern void initWiFiRetry(void);
@@ -1578,11 +1576,15 @@ extern void FWIFIPR (WiFiClient &client, const __FlashStringHelper *str);
 extern void FWIFIPRLN (WiFiClient &client, const __FlashStringHelper *str);
 extern int getNTPServers (const NTPServer **listp);
 extern bool setRSSTitle (const char *title, int &n_titles, int &max_titles);
+extern bool checkSpaceStats (time_t t0);
+extern void doSpaceStatsTouch (const SCoord &s);
+extern void drawSpaceStats(void);
+
 extern uint16_t bc_power;
 extern uint8_t bc_utc_tl;
 extern uint8_t rss_interval;
 
-extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPWxValue &swind, 
+extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, 
     SPWxValue &drap, NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,
     float pathrel[PROP_MAP_N], time_t &pathrel_age);
 
@@ -1597,8 +1599,9 @@ extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &flux, SPWxValue &kp, SPW
 
 
 #define MIN_WIFI_RSSI (-60)                     // minimum acceptable signal strength, dBm
-extern void runWiFiMeter (bool warn, bool &ignore_on);
+extern int runWiFiMeter (bool warn, bool &ignore_on);
 extern bool readWiFiRSSI(int &rssi);
+extern bool wifiMeterIsUp();
 
 
 

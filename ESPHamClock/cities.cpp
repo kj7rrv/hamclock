@@ -11,30 +11,79 @@
 // one city entry
 typedef struct {
     const char *name;           // malloced name
-    float lat, lng;             // degs +N +E
-    int16_t lngbin;             // deg bin
+    float lat_d, lng_d;         // degs +N +E
 } City;
 
 // one row descriptor
 typedef struct {
-    City *lngs;                 // malloc array of City sorted by increasing lng
-    int n_lngs;                 // number of Cities
+    City *cities;               // malloc array of City sorted by increasing lng
+    int n_cities;               // number of Cities
 } LatRow;
 
 // rows
 static int LAT_SIZ, LNG_SIZ;    // region size
-static LatRow *latrows;         // malloced list of 180/LAT_SIZ rows
+static LatRow *lat_rows;        // malloced list of 180/LAT_SIZ rows
 
 // name of server file containing cities
 static const char cities_fn[] = "/ham/HamClock/cities.txt";
 
-/* qsort-style function to compare a pair of pointers to City by lngbin
+/* return 2D separation between two locations in degrees squared.
+ */
+static float separation2D (const LatLong &ll, const float lat_d, const float lng_d)
+{
+    float dlng = cosf(ll.lat) * (ll.lng_d - lng_d);
+    float dlat = ll.lat_d - lat_d;
+    return (dlng*dlng + dlat*dlat);
+}
+
+/* qsort-style function to compare a pair of pointers to City by lng
  */
 static int cityQS (const void *p1, const void *p2)
 {
-    return (((City*)p1)->lngbin - ((City*)p2)->lngbin);
+    float lng1 = ((City*)p1)->lng_d;
+    float lng2 = ((City*)p2)->lng_d;
+
+    if (lng1 < lng2)
+        return (-1);
+    if (lng1 > lng2)
+        return (1);
+    return (0);
 }
 
+/* find closest City in the given row within row size, if any.
+ * N.B. row assumed to have at least one entry and be sorted by increasing lng
+ */
+static City *closestCityInRow (const LatRow &lr, const LatLong &ll)
+{
+        // find closest longitude
+        int a = 0, b = lr.n_cities - 1;
+        while (b > a + 1) {
+            int m = (a + b)/2;
+            City &cm = lr.cities[m];
+            if (ll.lng_d < cm.lng_d)
+                b = m;
+            else
+                a = m;
+        }
+        int c_lng = (a != b && fabsf(lr.cities[a].lng_d - ll.lng_d) < fabsf(lr.cities[b].lng_d - ll.lng_d))
+                        ? a : b;
+
+        // check a few either side considering latitude
+        float c_dist = 1e10;
+        int c_i = c_lng;
+        for (int d_i = -1; d_i <= 1; d_i++) {
+            int c_di = c_lng + d_i;
+            if (c_di >= 0 && c_di < lr.n_cities) {
+                float m_dist = separation2D (ll, lr.cities[c_di].lat_d, lr.cities[c_di].lng_d); 
+                if (m_dist < c_dist) {
+                    c_dist = m_dist;
+                    c_i = c_di;
+                }
+            }
+        }
+
+        return (c_dist < LAT_SIZ ? &lr.cities[c_i] : NULL);
+}
 
 /* query for list of cities, fill regions.
  * harmless if called more than once.
@@ -44,7 +93,7 @@ void readCities()
 {
 
         // ignore if already done
-        if (latrows)
+        if (lat_rows)
             return;
 
         // connection
@@ -79,11 +128,8 @@ void readCities()
             }
 
             // create row array
-            latrows = (LatRow *) calloc (180/LAT_SIZ, sizeof(LatRow));
-            if (!latrows) {
-                Serial.print (F("Cities: no latrows memory\n"));
-                goto out;
-            }
+            int n_rows = 180/LAT_SIZ;
+            lat_rows = (LatRow *) calloc (n_rows, sizeof(LatRow));
 
             // read each city
             int n_cities = 0;
@@ -93,9 +139,8 @@ void readCities()
                 float rlat, rlng;
                 if (sscanf (line, "%f, %f", &rlat, &rlng) != 2)
                     continue;
-                int latbin = LAT_SIZ*floorf(rlat/LAT_SIZ);
-                int lngbin = LAT_SIZ*floorf(rlng/LNG_SIZ);
-                if (latbin<-90 || latbin>=90 || lngbin<-180 || lngbin>=180)
+                int lat_row = (rlat+90)/LAT_SIZ;
+                if (lat_row < 0 || lat_row >= n_rows)
                     continue;
                 char *city_start = strchr (line, '"');
                 if (!city_start)
@@ -107,23 +152,22 @@ void readCities()
                 *city_end = '\0';
 
                 // append to appropriate latrow, sort later
-                LatRow *lrp = &latrows[(latbin+90)/LAT_SIZ];
-                lrp->lngs = (City *) realloc (lrp->lngs, (lrp->n_lngs+1) * sizeof(City));
-                City *cp = &lrp->lngs[lrp->n_lngs++];
+                LatRow *lrp = &lat_rows[lat_row];
+                lrp->cities = (City *) realloc (lrp->cities, (lrp->n_cities+1) * sizeof(City));
+                City *cp = &lrp->cities[lrp->n_cities++];
                 cp->name = strdup (city_start);
-                cp->lngbin = lngbin;
-                cp->lat = rlat;
-                cp->lng = rlng;
+                cp->lat_d = rlat;
+                cp->lng_d = rlng;
 
                 // good
                 n_cities++;
 
             }
-            Serial.printf (_FX("Cities: found %d\n"), n_cities);
+            Serial.printf (_FX("Cities: found %d %d x %d\n"), n_cities, LAT_SIZ, LNG_SIZ);
 
-            // sort each row
-            for (int i = 0; i < 180/LAT_SIZ; i++)
-                qsort (latrows[i].lngs, latrows[i].n_lngs, sizeof(City), cityQS);
+            // sort each row by lng
+            for (int i = 0; i < n_rows; i++)
+                qsort (lat_rows[i].cities, lat_rows[i].n_cities, sizeof(City), cityQS);
         }
 
     out:
@@ -131,31 +175,29 @@ void readCities()
 
 }
 
-/* return name of city and location near the given ll, else NULL.
+/* return name of city and location nearest the given ll, else NULL.
  */
 const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
 {
 
         // ignore if not ready
-        if (!latrows)
+        if (!lat_rows)
             return (NULL);
 
-        // decide row based on latitude bin, not all have entries
-        LatRow *lrp = &latrows[(int)((ll.lat_d+90)/LAT_SIZ)];
-        if (!lrp->lngs)
+        // decide row based on latitude bin
+        int lat_row = (ll.lat_d+90)/LAT_SIZ;
+        if (lat_row < 0 || lat_row >= 180/LAT_SIZ || lat_rows[lat_row].n_cities < 1)
             return (NULL);
 
-        // binary search this row for matching lng bin
-        City key;
-        key.lngbin = LNG_SIZ*(int)floorf(ll.lng_d/LNG_SIZ);
-        City *found = (City *) bsearch (&key, lrp->lngs, lrp->n_lngs, sizeof(City), cityQS);
+        // check this row for closest city row size, if any
+        City *best_cp = closestCityInRow (lat_rows[lat_row], ll);
 
         // report results if successful
-        if (found) {
-            city_ll.lat_d = found->lat;
-            city_ll.lng_d = found->lng;
+        if (best_cp) {
+            city_ll.lat_d = best_cp->lat_d;
+            city_ll.lng_d = best_cp->lng_d;
             normalizeLL (city_ll);
-            return (found->name);
+            return (best_cp->name);
         } else {
             return (NULL);
         }

@@ -22,6 +22,14 @@ const char platform[] = "HamClock-UNIX";
 #endif
 
 
+// persistent server for listening for remote connections
+static WiFiServer *remoteServer;
+
+// handy default message strings
+static const char garbcmd[] = "Garbled command";
+static const char notsupp[] = "Not supported";
+
+
 // list of DEMO mode choice codes
 typedef enum {
     // 0
@@ -54,12 +62,152 @@ typedef enum {
 } DemoChoice;
 static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[]);
 
-// persistent server for listening for remote connections
-static WiFiServer *remoteServer;
 
-// handy default messages
-static const char garbcmd[] = "Garbled command";
-static const char notsupp[] = "Not supported";
+#define MAX_WEBARGS     10
+
+typedef struct {
+    const char *name[MAX_WEBARGS];              // name to look for
+    const char *value[MAX_WEBARGS];             // ptr to its value, or NULL
+    bool found[MAX_WEBARGS];                    // whether this name was found in the original GET command
+    int nargs;
+} WebArgs;
+
+/* remove leading and trailing white space IN PLACE, return new start.
+ */
+static char *trim (char *str)
+{
+    if (!str)
+        return (str);
+    while (isspace(*str))
+        str++;
+    size_t sl = strlen (str);
+    while (sl > 0 && isspace(str[sl-1]))
+        str[--sl] = '\0';
+    return (str);
+}
+
+/* set name to value in wa.
+ * return whether found.
+ * N.B. we accommodate name pointing within ynot
+ */
+static bool setWCValue (WebArgs &wa, const char *name, const char *value, char ynot[])
+{
+    // name is required
+    if (!name || name[0] == '\0') {
+        strcpy (ynot, _FX("missing name"));
+        return (false);
+    }
+
+    // copy name in case is within ynot
+    char *name_copy = strdup (name);
+
+    for (int i = 0; i < wa.nargs; i++) {
+        if (strcmp (name_copy, wa.name[i]) == 0) {
+            if (wa.found[i]) {
+                sprintf (ynot, _FX("%s set more than once"), name_copy);
+                free (name_copy);
+                return (false);
+            }
+            wa.value[i] = value;
+            wa.found[i] = true;
+            return (true);
+        }
+    }
+
+    sprintf (ynot, _FX("unknown arg: %s"), name_copy);
+    free (name_copy);
+    return (false);
+}
+
+/* given wa containing all expected names, parse the given web GET command for each of their values, if any.
+ * line is one or more of <empty> A or A=x separated by &.
+ * we assume line[] starts just after "GET /xxx?" and has the trailing http/n removed.
+ * line will be modified by changing all '&' and '=' to '\0'.
+ * all value pointers will point into line[].
+ * value will be NULL if no '=' or "" if nothing after '='.
+ * return true if ok else false with excuse in ynot.
+ * N.B. we accommodate line and ynot being the same memory
+ */
+static bool parseWebCommand (WebArgs &wa, char line[], char ynot[])
+{
+    // init all unknown
+    memset (wa.value, 0, sizeof (wa.value));
+    memset (wa.found, 0, sizeof (wa.found));
+
+    // parser states
+    typedef enum {
+        PWC_LOOKING_4_NAME,
+        PWC_LOOKING_4_VALUE,
+    } PWCState;
+    PWCState state = PWC_LOOKING_4_NAME;
+
+    // init working name and value pointers
+    char *name = line, *value = NULL;
+
+    // scan entire line -- N.B. this loop returns when it finds '\0'
+    for (; ; line++) {
+        switch (state) {
+        case PWC_LOOKING_4_NAME:
+            if (*line == '=') {
+                if (name[0] == '\0') {
+                    strcpy (ynot, _FX("missing name"));
+                    return (false);
+                }
+                *line = '\0';                                   // terminate name
+                value = line + 1;                               // start value
+                state = PWC_LOOKING_4_VALUE;                    // now look for value
+            } else if (*line == '&') {
+                *line = '\0';                                   // terminate name
+                if (!setWCValue (wa, trim(name), NULL, ynot))
+                    return (false);
+                name = line + 1;                                // start next name
+                value = NULL;                                   // no value yet
+            } else if (*line == '\0') {
+                if (name[0] == '\0')                            // no name at all is ok
+                    return (true);
+                return (setWCValue (wa, trim(name), trim(value), ynot));
+            }
+            break;
+
+        case PWC_LOOKING_4_VALUE:
+            if (*line == '&') {
+                *line = '\0';                                   // terminate value
+                if (!setWCValue (wa, trim(name), trim(value), ynot))
+                    return (false);
+                name = line + 1;                                // start next name
+                value = NULL;                                   // no value yet
+                state = PWC_LOOKING_4_NAME;                     // now look for name
+            } else if (*line == '\0') {
+                return (setWCValue (wa, trim(name), trim(value), ynot));
+            }
+            break;
+        }
+    }
+
+    // should never get here
+    strcpy (ynot, _FX("Bogus syntax"));
+    return (false);
+}
+
+
+/* convert the given string to integer.
+ * return whether the string was entirely valid digits.
+ */
+static bool atoiOnly (const char *str, int *ip)
+{
+    if (str == NULL)
+        return (false);
+
+    char *endp;
+    int i = (int) strtol (str, &endp, 10);
+    if (*str != '\0' && *endp == '\0') {
+        *ip = i;
+        return (true);
+    }
+
+    return (false);
+}
+
 
 /* convert a hex digit to its numeric value.
  * N.B. assumes ASCII encoding.
@@ -170,9 +318,9 @@ static void reportPaneChoices (WiFiClient client, PlotPane pp)
 
 /* send screen capture
  */
-static bool getWiFiScreenCapture(WiFiClient client, char *line)
+static bool getWiFiScreenCapture(WiFiClient client, char *unused)
 {
-    (void)(line);
+    (void)(unused);
 
     #define CORESZ 14                           // always 14 bytes at front
     #define HDRVER 108                          // BITMAPV4HEADER, also n bytes in subheader
@@ -305,7 +453,7 @@ static bool getWiFiStopwatch (WiFiClient client, char *unused)
     int sc = ms/1000;
     ms -= sc*1000;
     char timebuf[30];
-    snprintf (timebuf, sizeof(timebuf), _FX("%02d:%02d:%02d.%03d"), hr, mn, sc, (int)ms);
+    snprintf (timebuf, sizeof(timebuf), _FX("%02d:%02d:%02d.%02d"), hr, mn, sc, (int)ms);
 
     // report
     switch (sws) {
@@ -511,16 +659,16 @@ static bool getWiFiDEDXInfo_helper (WiFiClient client, char *unused, bool want_d
 
 /* remote report DE info
  */
-static bool getWiFiDEInfo (WiFiClient client, char *line)
+static bool getWiFiDEInfo (WiFiClient client, char *unused)
 {
-    return (getWiFiDEDXInfo_helper (client, line, false));
+    return (getWiFiDEDXInfo_helper (client, unused, false));
 }
 
 /* remote report DX info
  */
-static bool getWiFiDXInfo (WiFiClient client, char *line)
+static bool getWiFiDXInfo (WiFiClient client, char *unused)
 {
-    return (getWiFiDEDXInfo_helper (client, line, true));
+    return (getWiFiDEDXInfo_helper (client, unused, true));
 }
 
 /* remote report current set of DX spots
@@ -544,11 +692,11 @@ static bool getWiFiDXSpots (WiFiClient client, char *line)
     float cdelat = cosf(de_ll.lat);
     for (uint8_t i = 0; i < nspots; i++) {
         DXClusterSpot *sp = &spots[i];
-        char line[100];
+        char buf[100];
 
         // pretty freq, fixed 8 chars
         const char *f_fmt = sp->freq < 1e6 ? "%8.1f" : "%8.0f";
-        (void) sprintf (line, f_fmt, sp->freq);
+        size_t bufl = sprintf (buf, f_fmt, sp->freq);
 
         // cdist will be cos of short-path anglar separation in radians, so acos is 0..pi
         // bear will be bearing from DE to spot east-to-north in radians, -pi..pi
@@ -566,9 +714,9 @@ static bool getWiFiDXSpots (WiFiClient client, char *line)
             dist *= 1.609344F;                          // miles -> km
 
         // print together
-        snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u %s   %6.2f %7.2f   %6.0f   %4.0f\n"),
+        snprintf (buf+bufl, sizeof(buf)-bufl, _FX(" %-*s %04u %s   %6.2f %7.2f   %6.0f   %4.0f\n"),
                 MAX_SPOTCALL_LEN-1, sp->call, sp->utcs, sp->grid, sp->ll.lat_d, sp->ll.lng_d, dist, bear);
-        client.print(line);
+        client.print(buf);
     }
 
     // ok
@@ -860,8 +1008,10 @@ static bool getWiFiSatellite (WiFiClient client, char *unused)
         FWIFIPR (client, F("No rise or set\n"));
     } else {
         // next events
-        snprintf (line, sizeof(line), _FX("NextRiseIn    %02dh%02d\n"), (int)rhrs,
+        if (rhrs > 0) {
+            snprintf (line, sizeof(line), _FX("NextRiseIn    %02dh%02d\n"), (int)rhrs,
                 (int)(60*(rhrs-(int)rhrs)+0.5F)); client.print(line);
+        }
         snprintf (line, sizeof(line), _FX("NextSetIn     %02dh%02d\n"),(int)shrs,
                 (int)(60*(shrs-(int)shrs)+0.5F)); client.print(line);
 
@@ -1164,17 +1314,28 @@ static bool getWiFiTime (WiFiClient client, char *unused)
     int hr = hour (t);
     int mn = minute (t);
     int sc = second (t);
-    int bl = snprintf (buf, sizeof(buf)-10, _FX("Clock_UTC %d-%02d-%02dT%02d:%02d:%02d"),
+    int bl = snprintf (buf, sizeof(buf)-10, _FX("Clock_UTC %d-%02d-%02dT%02d:%02d:%02d "),
                         yr, mo, dy, hr, mn, sc);
 
     // indicate any time offset
-    int32_t off = utcOffset();
+    int32_t off = utcOffset();                  // seconds
     if (off == 0) {
-        buf[bl++] = 'Z';                        // append Z if time really is UTC
-        buf[bl] = 0;
-    } else
-        sprintf (buf+bl, " %+g", off/3600.0);   // else show offset in hours
-    client.println (buf);
+        strcat (buf, "Z\n");                    // append Z if above time really is UTC
+    } else {
+        int off_abs = abs(off);
+        int dy_os = off_abs/SECSPERDAY;
+        off_abs -= dy_os*SECSPERDAY;
+        int hr_os = off_abs/3600;
+        off_abs -= hr_os*3600;
+        int mn_os = off_abs/60;
+        off_abs -= mn_os*60;
+        int sc_os = off_abs;
+        bl += sprintf (buf+bl, "= Z%c", off < 0 ? '-' : '+');
+        if (dy_os != 0)
+            bl += sprintf (buf+bl, "%dd", dy_os);
+        bl += sprintf (buf+bl, "%02d:%02d:%02d\n", hr_os, mn_os, sc_os);
+    }
+    client.print (buf);
 
     return (true);
 }
@@ -1184,39 +1345,25 @@ static bool getWiFiTime (WiFiClient client, char *unused)
  */
 static bool setWiFiTitle (WiFiClient client, char line[])
 {
-    // find each possible keyword -- remember all are optional
-    char *msg = strstr (line, "msg=");
-    char *fg = strstr (line, "fg=");
-    char *bg = strstr (line, "bg=");
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "msg";
+    wa.name[wa.nargs++] = "fg";
+    wa.name[wa.nargs++] = "bg";
 
-    // check for any unexpected & args
-    for (char *amp = strchr (line, '&'); amp; amp = strchr (amp+1, '&')) {
-        if ((!msg || amp != msg-1) && (!fg || amp != fg-1) && (!bg || amp != bg-1)) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-    }
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
 
-    // check for any unexpected = args
-    for (char *eq = strchr (line, '='); eq; eq = strchr (eq+1, '=')) {
-        if ((!msg || eq != msg+3) && (!fg || eq != fg+2) && (!bg || eq != bg+2)) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-    }
-
-    // if msg, terminate at next & if any
-    if (msg) {
-        msg += 4;                  // skip msg=
-        char *amp = strchr (msg, '&');
-        if (amp)
-            *amp = '\0';
-    }
+    // handy
+    const char *msg = wa.value[0];
+    const char *fg = wa.value[1];
+    const char *bg = wa.value[2];
 
     // crack fg if found
     uint16_t fg_c = 0;
     if (fg) {
-        fg += 3;        // skip fg=
         int r, g, b;
         if (sscanf (fg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || r < 0 || r > 255 || g < 0 || g > 255
                         || b < 0 || b > 255) {
@@ -1230,8 +1377,7 @@ static bool setWiFiTitle (WiFiClient client, char line[])
     uint16_t bg_c = 0;
     bool rainbow = false;
     if (bg) {
-        bg += 3;        // skip bg=
-        if (strncmp (bg, "rainbow", 7) == 0)
+        if (strcmp (bg, "rainbow") == 0)
             rainbow = true;
         else {
             int r, g, b;
@@ -1284,41 +1430,58 @@ static bool setWiFiTitle (WiFiClient client, char line[])
  */
 static bool setWiFiDemo (WiFiClient client, char line[])
 {
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "on";
+    wa.name[wa.nargs++] = "off";
+    wa.name[wa.nargs++] = "n";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
     char buf[100];
-    int choice;
 
     // crack
-    if (strcmp (line, "on") == 0) {
+    if (wa.found[0] && wa.value[0] == NULL) {
+        // on
         setDemoMode(true);
         drawScreenLock();
         strcpy (buf, "Demo mode on\n");
         Serial.print (buf);
-    } else if (strcmp (line, "off") == 0) {
+
+    } else if (wa.found[1] && wa.value[1] == NULL) {
+        // off
         setDemoMode(false);
         drawScreenLock();
         strcpy (buf, "Demo mode off\n");
         Serial.print (buf);
-    } else if (sscanf (line, "n=%d", &choice) == 1) {
-        if (choice >= 0 && choice < DEMO_N) {
-            // turn on if not already
-            if (!getDemoMode()) {
-                setDemoMode(true);
-                drawScreenLock();
-            }
 
-            // run it
-            bool slow;
-            if (runDemoChoice ((DemoChoice)choice, slow, buf)) {
-                strcat (buf, "\n");
-                Serial.print (buf);
-            } else {
-                strcpy (line, buf);
-                return (false);
-            }
-        } else {
-            sprintf (line, _FX("Demo are 0 .. %d"), DEMO_N-1);
+    } else if (wa.found[2] && wa.value[2] != NULL && wa.value[2][0] != '\0') {
+        // n=x
+        int choice;
+        if (!atoiOnly(wa.value[2], &choice) || choice < 0 || choice >= DEMO_N) {
+            sprintf (line, _FX("Demo codes 0 .. %d"), DEMO_N-1);
             return (false);
         }
+
+        // turn on if not already
+        if (!getDemoMode()) {
+            setDemoMode(true);
+            drawScreenLock();
+        }
+
+        // run it
+        bool slow;
+        if (runDemoChoice ((DemoChoice)choice, slow, buf)) {
+            strcat (buf, "\n");
+            Serial.print (buf);
+        } else {
+            strcpy (line, buf);
+            return (false);
+        }
+
     } else {
         strcpy (line, garbcmd);
         return (false);
@@ -1333,19 +1496,32 @@ static bool setWiFiDemo (WiFiClient client, char line[])
 }
 
 
-/* remote command to set the DE time format and atin
+/* remote command to set the DE time format and/or atin
  * set_defmt?fmt=[one from menu]&atin=RSAtAt|RSInAgo"
  */
 static bool setWiFiDEformat (WiFiClient client, char line[])
 {
-    char fmt[20], atin[20];
-    int ns = sscanf (line, "fmt=%20[^&]&atin=%20s", fmt, atin);
-    if (ns < 1 || (ns == 1 && strchr(line,'&')) || ns > 2) {
-        strcpy (line, garbcmd);
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "fmt";
+    wa.name[wa.nargs++] = "atin";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // fmt is required
+    if (!wa.found[0]) {
+        strcpy (line, _FX("fmt is required"));
         return (false);
     }
 
-    // search names
+    // handy
+    const char *fmt = wa.value[0];
+    const char *atin = wa.value[1];
+
+    // search format options
     int new_fmt = -1;
     for (int i = 0; i < DETIME_N; i++) {
         if (strcmp (fmt, detime_names[i]) == 0) {
@@ -1354,13 +1530,15 @@ static bool setWiFiDEformat (WiFiClient client, char line[])
         }
     }
     if (new_fmt < 0) {
-        strcpy (line, "unknown format");
+        size_t ll = sprintf (line, "Formats: %s", detime_names[0]);
+        for (int i = 1; i < DETIME_N; i++)
+            ll += sprintf (line+ll, ", %s", detime_names[i]);
         return (false);
     }
 
-    // if info, also allow setting in/at
+    // if fmt is DETIME_INFO, also allow setting optional at/in
     uint8_t new_desrss = desrss;
-    if (ns == 2) {
+    if (atin) {
         if (new_fmt != DETIME_INFO) {
             sprintf (line, "atin requires %s", detime_names[DETIME_INFO]);
             return (false);
@@ -1384,7 +1562,7 @@ static bool setWiFiDEformat (WiFiClient client, char line[])
 
     // ack
     startPlainText (client);
-    sprintf (line, "%s %s\n", fmt, ns == 2 ? atin : "");
+    sprintf (line, "%s %s\n", fmt, atin ? atin : "");
     client.println (line);
 
     // ok
@@ -1396,18 +1574,27 @@ static bool setWiFiDEformat (WiFiClient client, char line[])
  */
 static bool setWiFiAlarm (WiFiClient client, char line[])
 {
-    // crack
-    char state[10];
-    int hr = 0, mn = 0;
-    int ns = sscanf (line, _FX("state=%10[^&]&time=%d:%d"), state, &hr, &mn);
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "state";
+    wa.name[wa.nargs++] = "time";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *state = wa.value[0];
+    const char *timespec = wa.value[1];
 
     // get current state
     AlarmState as;
     uint16_t hr16, mn16;
     getAlarmState (as, hr16, mn16);
 
-    // parse
-    if (ns == 1 || ns == 3) {
+    // crack new state
+    if (state) {
         if (strcmp (state, "off") == 0)
             as = ALMS_OFF;
         else if (strcmp (state, "armed") == 0)
@@ -1417,17 +1604,23 @@ static bool setWiFiAlarm (WiFiClient client, char line[])
             return (false);
         }
     } else {
-        strcpy (line, garbcmd);
+        strcpy (line, _FX("state is required"));
         return (false);
     }
-    if (ns == 3) {
-        if (hr >= 0 && hr < 24 && mn >= 0 && mn < 60) {
-            hr16 = hr;
-            mn16 = mn;
-        } else {
-            strcpy (line, "invalid time");
+
+    // crack new time spec if given
+    if (timespec) {
+        if (as == ALMS_OFF) {
+            strcpy (line, _FX("can set time only if armed"));
+            return(false);
+        }
+        int hr = 0, mn = 0;
+        if (sscanf (timespec, "%d:%d", &hr, &mn) != 2 || hr < 0 || hr >= 24 || mn < 0 || mn >= 60) {
+            strcpy (line, _FX("invalid time spec"));
             return (false);
         }
+        hr16 = hr;
+        mn16 = mn;
     }
 
     // engage
@@ -1452,13 +1645,23 @@ static bool setWiFiDisplayOnOff (WiFiClient client, char line[])
 {
     if (brOnOffOk()) {
 
+        // define all possible args
+        WebArgs wa;
+        wa.nargs = 0;
+        wa.name[wa.nargs++] = "on";
+        wa.name[wa.nargs++] = "off";
+
         // parse
-        if (strcmp (line, "on") == 0)
+        if (!parseWebCommand (wa, line, line))
+            return (false);
+
+        // engage
+        if (wa.found[0] && wa.value[0] == NULL)
             brightnessOn();
-        else if (strcmp (line, "off") == 0)
+        else if (wa.found[1] && wa.value[1] == NULL)
             brightnessOff();
         else {
-            strcpy (line, _FX("Specify on or off"));
+            strcpy (line, _FX("Specify just on or off"));
             return (false);
         }
 
@@ -1483,13 +1686,13 @@ static bool setWiFiDisplayOnOff (WiFiClient client, char line[])
  */
 static bool crackDOW (const char *daystr, int &dow)
 {
-        for (uint8_t i = 1; i <= DAYSPERWEEK; i++) {
-            if (strncmp (dayShortStr(i), daystr, 3) == 0) {
-                dow = i;
-                return (true);
-            }
+    for (uint8_t i = 1; i <= DAYSPERWEEK; i++) {
+        if (strcmp (dayShortStr(i), daystr) == 0) {
+            dow = i;
+            return (true);
         }
-        return (false);
+    }
+    return (false);
 }
 
 /* remote command to set display on/off/idle times
@@ -1500,16 +1703,30 @@ static bool setWiFiDisplayTimes (WiFiClient client, char line[])
 
     if (brOnOffOk()) {
 
-        // parse -- idle and dow are optional
+        // define all possible args
+        WebArgs wa;
+        wa.nargs = 0;
+        wa.name[wa.nargs++] = "on";
+        wa.name[wa.nargs++] = "off";
+        wa.name[wa.nargs++] = "day";
+        wa.name[wa.nargs++] = "idle";
+
+        // parse
+        if (!parseWebCommand (wa, line, line))
+            return (false);
+
+        // handy
+        const char *on = wa.value[0];
+        const char *off = wa.value[1];
+        const char *day = wa.value[2];
+        const char *idle = wa.value[3];
+
+        // crack -- on and off are required, day and idle are optional
         int on_hr, on_mn, off_hr, off_mn, idle_mins = -1, dow = -1;
-        char *on = strstr (line, _FX("on="));
-        char *off = strstr (line, _FX("off="));
-        char *day = strstr (line, _FX("day="));
-        char *idle = strstr (line, _FX("idle="));
-        if (!on || sscanf (on+3, _FX("%d:%d"), &on_hr, &on_mn) != 2
-                                || !off || sscanf (off+4, _FX("%d:%d"), &off_hr, &off_mn) != 2
-                                || (day && !crackDOW (day+4, dow))
-                                || (idle && sscanf (idle+5, "%d", &idle_mins) != 1)) {
+        if ((!wa.found[0] || !on || sscanf (on, _FX("%d:%d"), &on_hr, &on_mn) != 2)
+                    || (!wa.found[1] || !off || sscanf (off, _FX("%d:%d"), &off_hr, &off_mn) != 2)
+                    || (wa.found[2] && (!day || !crackDOW (day, dow)))
+                    || (wa.found[3] && !atoiOnly(idle,&idle_mins))) {
             strcpy (line, garbcmd);
             return (false);
         }
@@ -1526,7 +1743,7 @@ static bool setWiFiDisplayTimes (WiFiClient client, char line[])
         if (dow < 0)
             dow = DEWeekday();
 
-        // set
+        // engage
         if (!setDisplayOnOffTimes (dow, on_mins, off_mins, idle_mins)) {
             strcpy (line, notsupp);
             return (false);
@@ -1551,10 +1768,7 @@ static bool setWiFiDisplayTimes (WiFiClient client, char line[])
         }
 
         FWIFIPR (client, F("Day   "));
-        if (day)
-            snprintf (buf, sizeof(buf), "%.3s", day+4);
-        else
-            strcpy (buf, dayShortStr(DEWeekday()));
+        strcpy (buf, dayShortStr(dow));
         client.println (buf);
 
         // ok
@@ -1574,18 +1788,40 @@ static bool setWiFiDisplayTimes (WiFiClient client, char line[])
  */
 static bool setWiFiNewDEDX_helper (WiFiClient client, bool new_dx, char line[])
 {
-    LatLong ll;
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "lat";
+    wa.name[wa.nargs++] = "lng";
 
-    // crack
-    float lat, lng;
-    if (sscanf(line, "lat=%f&lng=%f", &lat, &lng) != 2 || lng < -180 || lng >= 180 || lat < -90 || lat > 90) {
-        strcpy (line, garbcmd);
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *lat = wa.value[0];
+    const char *lng = wa.value[1];
+
+    // check required
+    if (!lat || !lng) {
+        strcpy (line, _FX("lat and lng are required"));
         return (false);
     }
-    ll.lat_d = lat;
-    ll.lng_d = lng;
 
-    // engage -- including normalization
+    // crack
+    LatLong ll;
+    ll.lat_d = atof (lat);
+    if (ll.lat_d < -90 || ll.lat_d > 90) {
+        strcpy (line, _FX("lat must be -90 .. +90"));
+        return (false);
+    }
+    ll.lng_d = atof (lng);
+    if (ll.lng_d < -180 || ll.lng_d >= 180) {
+        strcpy (line, _FX("lng must be -180 .. +180"));
+        return (false);
+    }
+
+    // engage
     if (new_dx)
         newDX (ll, NULL, NULL);
     else
@@ -1618,8 +1854,6 @@ static bool setWiFiNewDX (WiFiClient client, char line[])
  */
 static bool setWiFiNewGrid_helper (WiFiClient client, bool new_dx, char line[])
 {
-    Serial.println (line);
-
     // check and convert
     size_t linelen = strlen(line);
     if (linelen < 4 || linelen > MAID_CHARLEN-1) {
@@ -1666,12 +1900,25 @@ static bool setWiFiNewDXGrid (WiFiClient client, char line[])
  */
 static bool setWiFiMapView (WiFiClient client, char line[])
 {
-    // look for each keyword
-    char *S = strstr (line, _FX("Style="));
-    char *G = strstr (line, _FX("Grid="));
-    char *P = strstr (line, _FX("Projection="));
-    char *R = strstr (line, _FX("RSS="));
-    char *N = strstr (line, _FX("Night="));
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "Style";
+    wa.name[wa.nargs++] = "Grid";
+    wa.name[wa.nargs++] = "Projection";
+    wa.name[wa.nargs++] = "RSS";
+    wa.name[wa.nargs++] = "Night";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *S = wa.value[0];
+    const char *G = wa.value[1];
+    const char *P = wa.value[2];
+    const char *R = wa.value[3];
+    const char *N = wa.value[4];
 
     // require at least 1
     if (!S && !G && !P && !R && !N) {
@@ -1679,33 +1926,19 @@ static bool setWiFiMapView (WiFiClient client, char line[])
         return (false);
     }
 
-    // look for unknown keywords
-    for (char *sep = line-1, *kw = line; sep != NULL; sep = strchr (kw, '&'), kw = sep + 1) {
-        if (S != kw && G != kw && P != kw && R != kw && N != kw) {
-            strcpy_P (line, PSTR("unknown keyword"));
-            return (false);
-        }
-    }
-
-    // sscanf buffer and matching safe sscanf format
-    char buf[20];
-    const char sfmt[] = "%20[^&]";
-
     // check style
     CoreMaps my_cm = CM_NONE;
     if (S) {
-        if (sscanf (S+6, sfmt, buf) != 1) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
         for (int i = 0; i < CM_N; i++) {
-            if (strcmp (buf, map_styles[i]) == 0) {
+            if (strcmp (S, map_styles[i]) == 0) {
                 my_cm = (CoreMaps) i;
                 break;
             }
         }
         if (my_cm == CM_NONE) {
-            strcpy_P (line, PSTR("unknown style"));
+            size_t ll = sprintf (line, "Styles: %s", map_styles[0]);
+            for (int i = 1; i < CM_N; i++)
+                ll += sprintf (line+ll, ", %s", map_styles[i]);
             return (false);
         }
     }
@@ -1713,18 +1946,16 @@ static bool setWiFiMapView (WiFiClient client, char line[])
     // check grid
     int my_llg = -1;
     if (G) {
-        if (sscanf (G+5, sfmt, buf) != 1) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
         for (int i = 0; i < MAPGRID_N; i++) {
-            if (strcmp (buf, grid_styles[i]) == 0) {
+            if (strcmp (G, grid_styles[i]) == 0) {
                 my_llg = i;
                 break;
             }
         }
         if (my_llg < 0) {
-            strcpy_P (line, PSTR("unknown grid"));
+            size_t ll = sprintf (line, "Grid: %s", grid_styles[0]);
+            for (int i = 1; i < MAPGRID_N; i++)
+                ll += sprintf (line+ll, ", %s", grid_styles[i]);
             return (false);
         }
     }
@@ -1732,16 +1963,12 @@ static bool setWiFiMapView (WiFiClient client, char line[])
     // check projection
     int my_azm = -1;
     if (P) {
-        if (sscanf (P+11, sfmt, buf) != 1) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-        if (!strcmp (buf, _FX("Azimuthal")))
+        if (!strcmp (P, _FX("Azimuthal")))
             my_azm = 1;
-        else if (!strcmp (buf, _FX("Mercator")))
+        else if (!strcmp (P, _FX("Mercator")))
             my_azm = 0;
         else {
-            strcpy_P (line, PSTR("unknown projection"));
+            strcpy_P (line, PSTR("Projection: Azimuthal, Mercator"));
             return (false);
         }
     }
@@ -1749,16 +1976,12 @@ static bool setWiFiMapView (WiFiClient client, char line[])
     // check RSS
     int my_rss = -1;
     if (R) {
-        if (sscanf (R+4, sfmt, buf) != 1) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-        if (!strcmp (buf, "on"))
+        if (!strcmp (R, "on"))
             my_rss = 1;
-        else if (!strcmp (buf, "off"))
+        else if (!strcmp (R, "off"))
             my_rss = 0;
         else {
-            strcpy_P (line, PSTR("unknown RSS"));
+            strcpy_P (line, PSTR("RSS: on or off"));
             return (false);
         }
     }
@@ -1766,16 +1989,12 @@ static bool setWiFiMapView (WiFiClient client, char line[])
     // check Night
     int my_night = -1;
     if (N) {
-        if (sscanf (N+6, sfmt, buf) != 1) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-        if (!strcmp (buf, "on"))
+        if (!strcmp (N, "on"))
             my_night = 1;
-        else if (!strcmp (buf, "off"))
+        else if (!strcmp (N, "off"))
             my_night = 0;
         else {
-            strcpy_P (line, PSTR("unknown Night"));
+            strcpy_P (line, PSTR("Night: on or off"));
             return (false);
         }
     }
@@ -1821,8 +2040,7 @@ static bool setWiFiMapView (WiFiClient client, char line[])
 
     // ack
     startPlainText (client);
-    strncpySubChar (line, line, '\n', '&', strlen(line));
-    client.println(line);
+    client.print("ok\n");
 
     // good
     return (true);
@@ -1838,30 +2056,38 @@ static bool setWiFiSensorCorr (WiFiClient client, char line[])
         return (false);
     }
 
-    // look for each keyword, if any
-    char *S = strstr (line, _FX("sensor="));
-    char *T = strstr (line, _FX("dTemp="));
-    char *P = strstr (line, _FX("dPres="));
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "sensor";
+    wa.name[wa.nargs++] = "dTemp";
+    wa.name[wa.nargs++] = "dPres";
 
-    // look for unknown keywords
-    for (char *sep = line-1, *kw = line; sep != NULL; sep = strchr (kw, '&'), kw = sep + 1) {
-        if (*kw && S != kw && T != kw && P != kw) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-    }
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *S = wa.value[0];
+    const char *T = wa.value[1];
+    const char *P = wa.value[2];
 
     // sensor is required
     if (!S) {
         strcpy (line, "missing sensor");
         return (false);
     }
-    int sensor = atoi (S+7);
-    if (sensor == 76)
-        sensor = BME_76;
-    else if (sensor == 77)
-        sensor = BME_77;
-    else {
+    int sensor;
+    bool s_ok = atoiOnly (S, &sensor);
+    if (s_ok) {
+        if (sensor == 76)
+            sensor = BME_76;
+        else if (sensor == 77)
+            sensor = BME_77;
+        else
+            s_ok = false;
+    }
+    if (!s_ok) {
         strcpy (line, "sensor must be 76 or 77");
         return (false);
     }
@@ -1874,7 +2100,7 @@ static bool setWiFiSensorCorr (WiFiClient client, char line[])
 
     // try dPres if set
     if (P) {
-        if (!setBMEPresCorr(sensor, atof(P+6))) {
+        if (!setBMEPresCorr(sensor, atof(P))) {
             strcpy (line, "bad dPres sensor");
             return (false);
         }
@@ -1882,7 +2108,7 @@ static bool setWiFiSensorCorr (WiFiClient client, char line[])
 
     // try dTemp if set
     if (T) {
-        if (!setBMETempCorr(sensor, atof(T+6))) {
+        if (!setBMETempCorr(sensor, atof(T))) {
             strcpy (line, "bad dTemp sensor");
             return (false);
         }
@@ -1890,7 +2116,7 @@ static bool setWiFiSensorCorr (WiFiClient client, char line[])
 
     // ack
     startPlainText (client);
-    client.print("Ok\n");
+    client.print("ok\n");
 
     // good
     return (true);
@@ -1905,37 +2131,52 @@ static bool setWiFiSensorCorr (WiFiClient client, char line[])
  */
 static bool setWiFiRSS (WiFiClient client, char line[])
 {
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "reset";
+    wa.name[wa.nargs++] = "add";
+    wa.name[wa.nargs++] = "file";
+    wa.name[wa.nargs++] = "network";
+    wa.name[wa.nargs++] = "interval";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
     StackMalloc buf_mem(150);
     char *buf = (char *) buf_mem.getMem();
     int n_titles, n_max;
 
-    // set buf initially empty, fill with default reply if still empty after processing
-    buf[0] = '\0';
-
     // check args -- full buf with suitable message
-    if (strcmp (line, "network") == 0) {
+    if (wa.found[3] && wa.value[3] == NULL) {
         // restore normal rss network queries
         (void) setRSSTitle (NULL, n_titles, n_max);
         strcpy (buf, "Restored RSS network feeds\n");
-    } else if (strcmp (line, "reset") == 0) {
+
+    } else if (wa.found[0] && wa.value[0] == NULL) {
         // turn off network and empty local list
         (void) setRSSTitle ("", n_titles, n_max);
-    } else if (strncmp (line, "add=", 4) == 0) {
+        buf[0] = '\0';                                  // use default reply
+
+    } else if (wa.found[1] && wa.value[1] != NULL) {
         // turn off network and add title to local list if room
-        if (setRSSTitle (line+4, n_titles, n_max)) {
-        } else {
+        if (!setRSSTitle (wa.value[1], n_titles, n_max)) {
             sprintf (line, "List is full -- max %d", n_max);
             return (false);
         }
-    } else if (strcmp (line, "file") == 0) {
+        buf[0] = '\0';                                  // use default reply
+
+    } else if (wa.found[2] && wa.value[2] == NULL) {
         // titles follow header
         (void) setRSSTitle ("", n_titles, n_max);       // reset list
         while (getTCPLine (client, buf, buf_mem.getSize(), NULL))
             (void) setRSSTitle (buf, n_titles, n_max);
-        buf[0] = '\0';                                  // want default reply
-    } else if (strncmp (line, "interval=", 9) == 0) {
-        int new_i = atoi(line+9);
-        if (new_i >= RSS_MIN_INT) {
+        buf[0] = '\0';                                  // use default reply
+
+    } else if (wa.found[4] && wa.value[4] != NULL) {
+        int new_i;
+        if (atoiOnly (wa.value[4], &new_i) && new_i >= RSS_MIN_INT) {
             rss_interval = new_i;
             snprintf (buf, buf_mem.getSize(), "RSS interval now %d secs\n", rss_interval);
             NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
@@ -1943,6 +2184,7 @@ static bool setWiFiRSS (WiFiClient client, char line[])
             sprintf (line, "Min interval %d seconds", RSS_MIN_INT);
             return (false);
         }
+
     } else {
         strcpy (line, garbcmd);
         return (false);
@@ -1950,7 +2192,7 @@ static bool setWiFiRSS (WiFiClient client, char line[])
 
     // create default reply if buf empty
     if (buf[0] == '\0')
-        snprintf (buf, buf_mem.getSize(), "Now %d of %d local titles\n", n_titles, n_max);
+        snprintf (buf, buf_mem.getSize(), _FX("Now %d of %d local titles are defined\n"), n_titles, n_max);
 
     // ack
     startPlainText (client);
@@ -2081,35 +2323,35 @@ static bool setWiFiSatName (WiFiClient client, char line[])
  */
 static bool setWiFiSatTLE (WiFiClient client, char line[])
 {
-    resetWatchdog();
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "name";
+    wa.name[wa.nargs++] = "t1";
+    wa.name[wa.nargs++] = "t2";
 
-    // find components
-    char *name = strstr (line, "name=");
-    char *t1 = strstr (line, "&t1=");
-    char *t2 = strstr (line, "&t2=");
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *name = wa.value[0];
+    const char *t1 = wa.value[1];
+    const char *t2 = wa.value[2];
     if (!name || !t1 || !t2) {
         strcpy (line, garbcmd);
         return (false);
     }
 
-    // break into proper separate strings
-    name += 5; *t1 = '\0';
-    t1 += 4; *t2 = '\0';
-    t2 += 4;
-
     // enforce known line lengths
-    size_t t1l = strlen(t1);
-    if (t1l < TLE_LINEL-1) {
-        strcpy (line, _FX("t1 short"));
+    if (strlen(t1) != TLE_LINEL-1) {
+        strcpy (line, _FX("bogus t1"));
         return(false);
     }
-    t1[TLE_LINEL-1] = '\0';
-    size_t t2l = strlen(t2);
-    if (t2l < TLE_LINEL-1) {
-        strcpy (line, _FX("t2 short"));
+    if (strlen(t2) != TLE_LINEL-1) {
+        strcpy (line, _FX("bogus t2"));
         return(false);
     }
-    t2[TLE_LINEL-1] = '\0';
 
     // try to install
     if (setSatFromTLE (name, t1, t2))
@@ -2124,20 +2366,33 @@ static bool setWiFiSatTLE (WiFiClient client, char line[])
  */
 static bool setWiFiStopwatch (WiFiClient client, char line[])
 {
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "reset";
+    wa.name[wa.nargs++] = "run";
+    wa.name[wa.nargs++] = "stop";
+    wa.name[wa.nargs++] = "lap";
+    wa.name[wa.nargs++] = "countdown";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
     // crack
     SWEngineState sws;
-    int mins;
-    if (sscanf (line, "countdown=%d", &mins) == 1)
+    int mins = 0;
+    if (wa.found[4] && atoiOnly(wa.value[4], &mins)) {
         sws = SWE_COUNTDOWN;
-    else if (strcmp (line, "reset") == 0)
+    } else if (wa.found[0] && wa.value[0] == NULL) {
         sws = SWE_RESET;
-    else if (strcmp (line, "run") == 0)
+    } else if (wa.found[1] && wa.value[1] == NULL) {
         sws = SWE_RUN;
-    else if (strcmp (line, "stop") == 0)
+    } else if (wa.found[2] && wa.value[2] == NULL) {
         sws = SWE_STOP;
-    else if (strcmp (line, "lap") == 0)
+    } else if (wa.found[3] && wa.value[3] == NULL) {
         sws = SWE_LAP;
-    else {
+    } else {
         strcpy (line, garbcmd);
         return (false);
     }
@@ -2163,32 +2418,51 @@ static bool setWiFiStopwatch (WiFiClient client, char line[])
  */
 static bool setWiFiTime (WiFiClient client, char line[])
 {
-    resetWatchdog();
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "ISO";
+    wa.name[wa.nargs++] = "unix";
+    wa.name[wa.nargs++] = "Now";
 
-    int yr, mo, dy, hr, mn, sc;
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
 
-    if (strcmp (line, "Now") == 0) {
+
+    // crack
+    if (wa.found[2] && wa.value[2] == NULL) {
 
         changeTime (0);
 
-    } else if (strncmp (line, "UNIX=", 5) == 0) {
+    } else if (wa.found[1] && wa.value[1] != NULL) {
 
         // crack and engage
-        changeTime (atol(line+5));
+        changeTime (atol(wa.value[1]));
 
-    } else if (sscanf (line, _FX("ISO=%d-%d-%dT%d:%d:%d"), &yr, &mo, &dy, &hr, &mn, &sc) == 6) {
+    } else if (wa.found[0] && wa.value[0] != NULL) {
 
-        // reformat
-        tmElements_t tm;
-        tm.Year = yr - 1970;
-        tm.Month = mo;
-        tm.Day = dy;
-        tm.Hour = hr;
-        tm.Minute = mn;
-        tm.Second = sc;
+        int yr, mo, dy, hr, mn, sc;
+        if (sscanf (wa.value[0], _FX("%d-%d-%dT%d:%d:%d"), &yr, &mo, &dy, &hr, &mn, &sc) == 6) {
 
-        // convert and engage
-        changeTime (makeTime(tm));
+            // reformat
+            tmElements_t tm;
+            tm.Year = yr - 1970;
+            tm.Month = mo;
+            tm.Day = dy;
+            tm.Hour = hr;
+            tm.Minute = mn;
+            tm.Second = sc;
+
+            // convert and engage
+            changeTime (makeTime(tm));
+
+        } else {
+
+            strcpy (line, _FX("garbled ISO"));
+            return (false);
+
+        }
 
     } else {
 
@@ -2199,7 +2473,7 @@ static bool setWiFiTime (WiFiClient client, char line[])
     // reply
     startPlainText(client);
     char buf[30];
-    snprintf (buf, sizeof(buf), "UNIX_time %ld\n", nowWO());
+    snprintf (buf, sizeof(buf), "UNIX_time %ld\n", (long int) nowWO());
     client.print (buf);
 
     return (true);
@@ -2210,16 +2484,29 @@ static bool setWiFiTime (WiFiClient client, char line[])
  */
 static bool setWiFiTouch (WiFiClient client, char line[])
 {
-    // crack raw screen x and y and optional hold
-    int x, y, h = 0;
-    if (sscanf (line, _FX("%*[xX]=%d&%*[yY]=%d&hold=%d"), &x, &y, &h) < 2) {
-        strcpy (line, garbcmd);
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "x";
+    wa.name[wa.nargs++] = "y";
+    wa.name[wa.nargs++] = "hold";
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // require x and y within screen size
+    int x, y;
+    if (!atoiOnly(wa.value[0],&x) || x < 0 || x >= tft.width()
+                || !atoiOnly(wa.value[1],&y) || y < 0 || y >= tft.height()) {
+        sprintf (line, _FX("require 0 .. x .. %d and 0 .. y .. %d"), tft.width()-1, tft.height()-1);
         return (false);
     }
 
-    // must be over display
-    if (x < 0 || x >= tft.width() || y < 0 || y >= tft.height()) {
-        strcpy (line, _FX("Invalid range"));
+    // hold is optional but must be valid if given
+    int h = 0;
+    if (wa.found[2] && (!atoiOnly(wa.value[2],&h) || (h != 0 && h != 1))) {
+        strcpy (line, _FX("hold must be 0 or 1"));
         return (false);
     }
 
@@ -2230,8 +2517,9 @@ static bool setWiFiTouch (WiFiClient client, char line[])
 
     // ack
     startPlainText (client);
-    FWIFIPR (client, F("Touch_x ")); client.println (wifi_tt_s.x);
-    FWIFIPR (client, F("Touch_y ")); client.println (wifi_tt_s.y);
+    char buf[50];
+    snprintf (buf, sizeof(buf), "Touch %d %d %s\n", x, y, h ? "hold" : "tap");
+    client.print(buf);
 
     // ok
     return (true);
@@ -2242,24 +2530,27 @@ static bool setWiFiTouch (WiFiClient client, char line[])
  */
 static bool setWiFiVOACAP (WiFiClient client, char line[])
 {
-    // look for each keyword, if any
-    char *B = strstr (line, _FX("band="));
-    char *P = strstr (line, _FX("power="));
-    char *T = strstr (line, _FX("tl="));
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "band";
+    wa.name[wa.nargs++] = "power";
+    wa.name[wa.nargs++] = "tl";
 
-    // look for unknown keywords
-    for (char *sep = line-1, *kw = line; sep != NULL; sep = strchr (kw, '&'), kw = sep + 1) {
-        if (*kw && P != kw && B != kw && T != kw) {
-            strcpy (line, garbcmd);
-            return (false);
-        }
-    }
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // handy
+    const char *B = wa.value[0];
+    const char *P = wa.value[1];
+    const char *T = wa.value[2];
 
     // crack band
     PropMapSetting new_pms = prop_map;
     if (B) {
-        int band = 0;
-        if (sscanf (B+5, "%d", &band) != 1) {
+        int band;
+        if (!atoiOnly(B,&band)) {
             strcpy (line, garbcmd);
             return (false);
         }
@@ -2281,9 +2572,9 @@ static bool setWiFiVOACAP (WiFiClient client, char line[])
     // crack power
     int new_power = bc_power;
     if (P) {
-        int p = atoi(P+6);
-        if (p != 1 && p != 10 && p != 100 && p != 1000) {
-            strcpy (line, _FX("Invalid power"));
+        int p;
+        if (!atoiOnly(P,&p) || (p != 1 && p != 10 && p != 100 && p != 1000)) {
+            strcpy (line, _FX("power must be 1,10,100,1000"));
             return (false);
         }
         new_power = p;
@@ -2292,9 +2583,9 @@ static bool setWiFiVOACAP (WiFiClient client, char line[])
     // crack timeline
     int new_utc = bc_utc_tl;
     if (T) {
-        if (strncmp(T+3, _FX("UTC"), 3) == 0) {
+        if (strcmp (T, _FX("UTC")) == 0) {
             new_utc = 1;
-        } else if (strncmp(T+3, _FX("DE"), 2) == 0) {
+        } else if (strcmp (T, _FX("DE")) == 0) {
             new_utc = 0;
         } else {
             strcpy (line, _FX("tl must be DE or UTC"));
@@ -2305,18 +2596,22 @@ static bool setWiFiVOACAP (WiFiClient client, char line[])
     // engage or revert
     PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
     if (B || P) {
-        // new band or power so schedule fresh map and BC as required
+        // new band or power so schedule fresh map and/or BC as required
         bc_power = new_power;
-        scheduleNewVOACAPMap (new_pms);
-        scheduleNewBC();        // this will also update time line
+        bc_utc_tl = new_utc;
+        if (new_pms != PROP_MAP_OFF)
+            scheduleNewVOACAPMap (new_pms);
+        if (bc_pp != PANE_NONE)
+            scheduleNewBC();        // this will also update time line
     } else if (T) {
-        // only changing timeline units so just redraw if different
+        // only changing timeline units so just change if different and redraw BC if up
         if (new_utc != bc_utc_tl) {
             bc_utc_tl = new_utc;
-            plotBandConditions (plot_b[bc_pp], 0, NULL, NULL);
+            if (bc_pp != PANE_NONE)
+                plotBandConditions (plot_b[bc_pp], 0, NULL, NULL);
         }
     } else {
-        // off: schedule default core map and update BC pane if up
+        // none: schedule default core map and update BC pane if up
         scheduleNewVOACAPMap (PROP_MAP_OFF);
         scheduleNewCoreMap (core_map);
         if (bc_pp != PANE_NONE)
@@ -2443,7 +2738,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one from menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
-    { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=DOW&idle=mins" },
+    { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
     { "set_newde?",         setWiFiNewDE,          "lat=X&lng=Y" },
     { "set_newdegrid?",     setWiFiNewDEGrid,      "AB12" },
@@ -2460,7 +2755,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_time?",          setWiFiTime,           "unix=secs_since_1970" },
     { "set_title?",         setWiFiTitle,          "msg=hello&fg=R,G,B&bg=R,G,B|rainbow" },
     { "set_touch?",         setWiFiTouch,          "x=X&y=Y&hold=0|1" },
-    { "set_voacap?",        setWiFiVOACAP,         "band=80-10&power=p&tl=DE/UTC" },
+    { "set_voacap?",        setWiFiVOACAP,         "band=80-10&power=p&tl=DE|UTC" },
     { "restart ",           doWiFiReboot,          "restart HamClock" },
     { "updateVersion ",     doWiFiUpdate,          "update to latest version"},
 
@@ -2500,23 +2795,24 @@ static bool runWebserverCommand (WiFiClient client, bool ro, char *command)
             size_t cmd_len = strlen_P (ctp->command);
             if (strncmp_P (command, ctp->command, cmd_len) == 0) {
 
-                // found command, skip to start of args
-                char *args = command+cmd_len;
+                // found command, skip to start of params
+                char *params = command+cmd_len;
 
                 // replace any %XX encoded values
-                if (replaceEncoding (args))
-                    Serial.printf ("Decoded: %s\n", args);      // print decoded version
+                if (replaceEncoding (params))
+                    Serial.printf ("Decoded: %s\n", params);      // print decoded version
 
                 // chop off trailing HTTP _after_ looking for commands because get_ commands end with blank.
-                char *http = strstr (args, " HTTP");
+                char *http = strstr (params, " HTTP");
                 if (http)
                     *http = '\0';
 
                 // run handler, passing string starting right after the command, reply with error if trouble.
+                resetWatchdog();
                 PCTF funp = CT_FUNP(ctp);
-                if (!(*funp)(client, args)) {
-                    StackMalloc errmsg(strlen(args)+20);
-                    snprintf (errmsg.getMem(), errmsg.getSize(), "Error: %s", args);
+                if (!(*funp)(client, params)) {
+                    StackMalloc errmsg(strlen(params)+20);
+                    snprintf (errmsg.getMem(), errmsg.getSize(), "Error: %s", params);
                     sendHTTPError (client, errmsg.getMem());
                 }
 
@@ -2880,7 +3176,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
 
     case DEMO_NCDXF:
         // TODO: brightness, on/off times?
-        brb_mode = brb_mode == BRB_SHOW_NOTHING ? BRB_SHOW_BEACONS : BRB_SHOW_NOTHING;
+        brb_mode = brb_mode == BRB_SHOW_SWSTATS ? BRB_SHOW_BEACONS : BRB_SHOW_SWSTATS;
         drawBeaconBox();
         updateBeacons(true, true, true);
         ok = true;

@@ -252,7 +252,7 @@ TouchType readCalTouch (SCoord &s)
 
 #endif
 
-    Serial.printf(_FX("Touch:\t%4d %4d\ttype %d\n"), s.x, s.y, (int)tt);
+    Serial.printf(_FX("Touch @ %lu s: \t%4d %4d\ttype %d\n"), millis()/1000U, s.x, s.y, (int)tt);
     
     // return hold or tap
     return (tt);

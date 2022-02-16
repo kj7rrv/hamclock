@@ -193,7 +193,7 @@ size_t TwoWire::write(const uint8_t *data, size_t quantity)
 {
         if (transmitting) {
             if (verbose)
-                printf ("I2C: transmitting %d\n", quantity);
+                printf ("I2C: transmitting %lu\n", (long unsigned)quantity);
             for(size_t i = 0; i < quantity; i++) {
                 if(!write(data[i])) {
                     return (i);

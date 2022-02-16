@@ -3,9 +3,11 @@
 
 #include "HamClock.h"
 
-#define WN_MIN_DB   (-70)               // minimum graphed dBm
+#define WN_MIN_DB   (-80)               // minimum graphed dBm
 #define WN_MAX_DB   (-20)               // max graphed dBm
 #define WN_TRIS     10                  // triangle marker half-size
+
+static bool wifi_meter_up;              // whether visible now
 
 /* given a screen coord x, return its wifi power color for drawing in the given box
  */
@@ -46,15 +48,17 @@ bool readWiFiRSSI(int &rssi)
 }
 
 /* run the wifi meter screen until op taps Dismiss or Ignore.
- * show ignore based on incoming update and update if user changes.
+ * show ignore based on incoming ignore_on and update if user changes.
+ * return last known rssi.
  */
-void runWiFiMeter(bool warn, bool &ignore_on)
+int runWiFiMeter(bool warn, bool &ignore_on)
 {
     // prep
+    Serial.printf (_FX("WiFiM @ %lu start Ignore %s\n"), millis()/1000U, ignore_on ? "on" : "off");
+    wifi_meter_up = true;
     eraseScreen();
     closeDXCluster();
     closeGimbal();
-    Serial.println (F("WiFi meter: start"));
 
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     uint16_t y = 35;
@@ -64,9 +68,9 @@ void runWiFiMeter(bool warn, bool &ignore_on)
         tft.setTextColor(RA8875_WHITE);
         tft.printf (_FX("WiFi signal strength is too low -- recommend at least %d dBm"), MIN_WIFI_RSSI);
     } else {
-        tft.setCursor (250, y);
+        tft.setCursor (100, y);
         tft.setTextColor(RA8875_WHITE);
-        tft.printf (_FX("WiFi Signal Strength Meter"));
+        tft.printf (_FX("WiFi Signal Strength Meter -- to improve signal strength:"));
     }
 
     y += 25;
@@ -112,6 +116,7 @@ void runWiFiMeter(bool warn, bool &ignore_on)
     drawStringInBox ("Resume", dismiss_b, false, RA8875_GREEN);
     drawStringInBox ("Ignore", ignore_b, ignore_on, RA8875_GREEN);
 
+    tft.setTextColor(RA8875_WHITE);
     for (uint16_t i = rssi_b.x; i < rssi_b.x + rssi_b.w; i++)
         tft.fillRect (i, rssi_b.y, 1, rssi_b.h, getWiFiMeterColor (rssi_b,i));
     tft.setCursor (rssi_b.x - 20, rssi_b.y + rssi_b.h + 2*WN_TRIS + 25);
@@ -125,52 +130,72 @@ void runWiFiMeter(bool warn, bool &ignore_on)
     tft.drawLine (min_x, rssi_b.y, min_x, rssi_b.y + rssi_b.h, RA8875_BLACK);
 
     bool done = false;
+    uint32_t log_t = millis();
     int prev_rssi_x = rssi_b.x + 1;
-    while (!done) {
+    int rssi = 0;
+    do {
 
+        // erase marker and value
+        tft.fillRect (prev_rssi_x-WN_TRIS-1, rssi_b.y+rssi_b.h+1, 2*WN_TRIS+2, 2*WN_TRIS, RA8875_BLACK);
+        tft.fillRect (rssi_b.x + rssi_b.w/2 - 20, rssi_b.y + rssi_b.h + 2*WN_TRIS + 1, 40, 30,
+                                                                                    RA8875_BLACK);
+        // read and update
+        if (readWiFiRSSI(rssi)) {
+            rssi = fminf (WN_MAX_DB, fmaxf (WN_MIN_DB, rssi));
+            uint16_t rssi_x = rssi_b.x+1 + (rssi_b.w-3)*(rssi - WN_MIN_DB)/(WN_MAX_DB-WN_MIN_DB);
+            tft.fillTriangle (rssi_x, rssi_b.y+rssi_b.h+1,
+                                rssi_x-WN_TRIS, rssi_b.y+rssi_b.h+2*WN_TRIS,
+                                rssi_x+WN_TRIS, rssi_b.y+rssi_b.h+2*WN_TRIS,
+                                getWiFiMeterColor (rssi_b,rssi_x));
+            tft.setCursor (rssi_b.x + rssi_b.w/2 - 20, rssi_b.y + rssi_b.h + 2*WN_TRIS + 25);
+            tft.setTextColor(RA8875_WHITE);
+            tft.print (rssi);
+            prev_rssi_x = rssi_x;
+
+            // log occassionally
+            if (timesUp (&log_t, 1000))
+                Serial.printf (_FX("WiFiM @ %lu %d\n"), log_t/1000U, rssi);
+        }
+
+        // check touch
         SCoord tap;
         TouchType tt = readCalTouchWS (tap);
         if (tt != TT_NONE) {
 
-            // update brightness, that's all if tap restores full brightness
+            // update BME and brightness, that's all if tap restores full brightness
+            readBME280();
             followBrightness();
             if (brightnessOn())
                 continue;
 
             // check controls
             if (inBox (tap, dismiss_b)) {
+                Serial.printf (_FX("WiFiM @ %lu Resume\n"), millis()/1000U);
                 done = true;
             } else if (inBox (tap, ignore_b)) {
                 ignore_on = !ignore_on;
                 drawStringInBox ("Ignore", ignore_b, ignore_on, RA8875_GREEN);
-                done = true;
+                if (ignore_on) {
+                    Serial.printf (_FX("WiFiM @ %lu Ignore\n"), millis()/1000U);
+                    done = true;
+                }
             }
 
-        } else {
+        } else
 
-            // erase marker and value
-            tft.fillRect (prev_rssi_x-WN_TRIS-1, rssi_b.y+rssi_b.h+1, 2*WN_TRIS+2, 2*WN_TRIS, RA8875_BLACK);
-            tft.fillRect (rssi_b.x + rssi_b.w/2 - 20, rssi_b.y + rssi_b.h + 2*WN_TRIS + 1, 40, 30,
-                                                                                        RA8875_BLACK);
-            // read and update
-            int rssi;
-            if (readWiFiRSSI(rssi)) {
-                uint16_t rssi_x = rssi_b.x+1 + (rssi_b.w-3)*(rssi - WN_MIN_DB)/(WN_MAX_DB-WN_MIN_DB);
-                tft.fillTriangle (rssi_x, rssi_b.y+rssi_b.h+1,
-                                    rssi_x-WN_TRIS, rssi_b.y+rssi_b.h+2*WN_TRIS,
-                                    rssi_x+WN_TRIS, rssi_b.y+rssi_b.h+2*WN_TRIS,
-                                    getWiFiMeterColor (rssi_b,rssi_x));
-                tft.setCursor (rssi_b.x + rssi_b.w/2 - 20, rssi_b.y + rssi_b.h + 2*WN_TRIS + 25);
-                tft.print (rssi);
-                prev_rssi_x = rssi_x;
-            }
-        }
+            wdDelay (100);
 
-        wdDelay (100);
-    }
+    } while (!done);
 
+    // new state
+    wifi_meter_up = false;
     initScreen();
 
-    Serial.println (F("WiFi meter: end"));
+    return (rssi);
 
+}
+
+bool wifiMeterIsUp()
+{
+    return (wifi_meter_up);
 }
