@@ -946,6 +946,9 @@ void newDX (LatLong &ll, const char *grid, const char *ovprefix)
     // persist
     NVWriteFloat (NV_DX_LAT, dx_ll.lat_d);
     NVWriteFloat (NV_DX_LNG, dx_ll.lng_d);
+
+    // log
+    Serial.printf (_FX("New DX: %g %g\n"), dx_ll.lat_d, dx_ll.lng_d);
 }
 
 /* set new DE location, and optional grid
@@ -1016,6 +1019,9 @@ void newDE (LatLong &ll, const char *grid)
     sendDXClusterDELLGrid();
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
+
+    // log
+    Serial.printf (_FX("New DE: %g %g\n"), de_ll.lat_d, de_ll.lng_d);
 }
 
 /* return next color after current in basic series of primary colors that is nicely different from contrast.
@@ -1250,13 +1256,14 @@ bool waiting4DXPath()
 
 void drawDXMarker (bool force)
 {
-    // test for over visible map unless force, eg might be under RSS now
-    if (!force && !overMap(dx_c.s))
-        return;
+    // draw if force or overmap and not showing sat
+    if (force || (!dx_info_for_sat && overMap(dx_c.s))) {
 
-    tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
-    tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
-    tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
+        tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
+        tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
+        tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
+
+    }
 }
 
 /* return the bounding box of the given string in the current font.
@@ -1613,7 +1620,8 @@ bool overMap (const SCoord &s)
  */
 bool overAnySymbol (const SCoord &s)
 {
-    return (inCircle(s, de_c) || inCircle(s, dx_c) || inCircle(s, deap_c)
+    return (inCircle(s, de_c)
+                || (!dx_info_for_sat && (inCircle(s, dx_c) || inCircle(s, deap_c)))
                 || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
                 || overMapScale(s));
@@ -2329,12 +2337,12 @@ void getWorstMem (int *heap, int *stack)
 #if defined (_IS_ESP8266)
 
 /* call with FLASH string, return pointer to RAM heap string.
- * used to save a lot of RAM for calls that only accept RAM strings, eg, *printf format 
+ * used to save a lot of RAM for calls that only accept RAM strings, eg, printf's format 
  * N.B. we accommodate nesting these pointers only a few deep then they are reused.
  */
 const char *_FX_helper(const __FlashStringHelper *flash_string)
 {
-    #define N_PTRS 3
+    #define N_PTRS 5
     static char *ram_string[N_PTRS];
     static uint8_t nxt_i;
 

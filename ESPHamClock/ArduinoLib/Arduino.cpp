@@ -180,6 +180,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, "Purpose: display time and other information useful to amateur radio operators\n");
         fprintf (stderr, "Usage: %s [options]\n", me);
         fprintf (stderr, "Options:\n");
+        fprintf (stderr, " -a l : set gimbal trace level\n");
         fprintf (stderr, " -b h : set backend host to h instead of %s\n", svr_host);
         fprintf (stderr, " -d d : set working dir d instead of %s\n", defaultAppDir().c_str());
         fprintf (stderr, " -f o : display full screen initially \"on\" or \"off\"\n");
@@ -209,6 +210,12 @@ static void crackArgs (int ac, char *av[])
             char *s = *av;
             while (*++s) {
                 switch (*s) {
+                case 'a':
+                    if (ac < 2)
+                        usage ("missing trace level for -a");
+                    gimbal_trace_level = atoi(*++av);
+                    ac--;
+                    break;
                 case 'b':
                     if (ac < 2)
                         usage ("missing host name for -b");

@@ -30,7 +30,7 @@ const char *plot_names[PLOT_CH_N] = {
     "Space_Wx",         // PLOT_CH_NOAASWX,
     "Sunspot_N",        // PLOT_CH_SSN,
     "X-Ray",            // PLOT_CH_XRAY,
-    "Gimbal",           // PLOT_CH_GIMBAL,
+    "Rotator",          // PLOT_CH_GIMBAL,
     "ENV_Temp",         // PLOT_CH_TEMPERATURE,
     "ENV_Press",        // PLOT_CH_PRESSURE,
     "ENV_Humid",        // PLOT_CH_HUMIDITY,
@@ -545,6 +545,8 @@ void savePlotOps()
     NVWriteUInt8 (NV_PLOT_1, plot_ch[PANE_1]);
     NVWriteUInt8 (NV_PLOT_2, plot_ch[PANE_2]);
     NVWriteUInt8 (NV_PLOT_3, plot_ch[PANE_3]);
+
+    logState();
 }
 
 /* draw a plot border nearly ready to change or not

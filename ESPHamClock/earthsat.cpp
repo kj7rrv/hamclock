@@ -39,7 +39,6 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define FONT_H          (dx_info_b.h/6) // font height
 #define FONT_D          5               // font descent
 #define SAT_COLOR       RA8875_RED      // annotation color
-#define GIMBALWRAP_COL  RA8875_CYAN     // gimbal wrap az marker color
 #define SOON_COLOR      RA8875_GREEN    // text color for pass soon
 #define SOON_MINS       10              // "soon", minutes
 #define CB_SIZE         20              // size of selection check box
@@ -428,14 +427,6 @@ static void drawNextPass()
         uint16_t yr = lroundf(yc - r0*sinf(a));
         tft.fillCircle (xr, yr, 1, RA8875_WHITE);
         tft.drawLine (xc, yc, xr, yr, HGRIDCOL);
-    }
-
-    float gwaz;
-    if (getGimbalWrapAz (&gwaz)) {
-        uint16_t xr = lroundf(xc + r0*sinf(deg2rad(gwaz)));
-        uint16_t yr = lroundf(yc - r0*cosf(deg2rad(gwaz)));
-        tft.fillCircle (xr, yr, 2, GIMBALWRAP_COL);
-        Serial.printf (_FX("az_mnt0 %g\n"), gwaz);
     }
 
     // draw elevations

@@ -22,10 +22,11 @@
   #define _IS_FREEBSD
 #endif
 
-// TODO: any better way to detect linux on RPi?
-#if defined(__arm__) && defined(_IS_LINUX)
-  #if __has_include(<bcm_host.h>)
-    #define _IS_LINUX_RPI
+#if (defined(__arm__) || defined(__aarch64__)) && defined(_IS_LINUX)
+  #if defined(__has_include)
+      #if __has_include(<bcm_host.h>) || __has_include(<pigpio.h>) || __has_include(<wiringPi.h>) 
+        #define _IS_LINUX_RPI
+      #endif
   #endif
 #endif
 
@@ -895,7 +896,8 @@ extern void updateGimbal (const SBox &box);
 extern bool checkGimbalTouch (const SCoord &s, const SBox &box);
 extern void stopGimbalNow(void);
 extern void closeGimbal(void);
-extern bool getGimbalWrapAz (float *azp);
+extern bool getGimbalState (bool &vis_now, bool &has_el, bool &tracking, float &az, float &el);
+
 
 
 
@@ -964,6 +966,7 @@ extern uint16_t getGridColor(void);
 extern int16_t getCenterLng(void);
 extern void setCenterLng(int16_t);
 extern DateFormat getDateFormat(void);
+extern bool getRotctld (char host[], int *portp);
 
 
 
@@ -1244,6 +1247,9 @@ typedef enum {
     NV_RSS_INTERVAL,            // RSS update interval, seconds
     NV_DATEMDY,                 // 0 = MDY 1 = see NV_DATEDMYYMD
     NV_DATEDMYYMD,              // 0 = DMY 1 = YMD
+    NV_ROTUSE,                  // whether to use rotctld
+    NV_ROTHOST,                 // rotctld tcp host
+    NV_ROTPORT,                 // rotctld tcp port
 
     NV_N
 } NV_Name;
@@ -1261,6 +1267,7 @@ typedef enum {
 #define NV_DAILYONOFF_LEN       28      // (2*DAYSPERWEEK*sizeof(uint16_t))
 #define NV_DE_GRID_LEN          MAID_CHARLEN
 #define NV_DX_GRID_LEN          MAID_CHARLEN
+#define NV_ROTHOST_LEN          18
 
 
 // accessor functions
@@ -1598,7 +1605,7 @@ extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SP
  */
 
 
-#define MIN_WIFI_RSSI (-60)                     // minimum acceptable signal strength, dBm
+#define MIN_WIFI_RSSI (-65)                     // minimum acceptable signal strength, dBm
 extern int runWiFiMeter (bool warn, bool &ignore_on);
 extern bool readWiFiRSSI(int &rssi);
 extern bool wifiMeterIsUp();

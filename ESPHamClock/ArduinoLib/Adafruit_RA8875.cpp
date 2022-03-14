@@ -386,7 +386,7 @@ bool Adafruit_RA8875::begin (int not_used)
         size_t si_bytes = BYTESPFBPIX * fb_si.xres * fb_si.yres;
         fb_fb = (fbpix_t*) mmap (NULL, si_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
 	if (!fb_fb) {
-	    printf ("mmap(%u): %s\n", si_bytes, strerror(errno));
+	    printf ("mmap(%u): %s\n", (unsigned) si_bytes, strerror(errno));
 	    close (fb_fd);
 	    exit(1);
 	}

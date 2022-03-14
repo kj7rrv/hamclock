@@ -536,7 +536,7 @@ void plotMessage (const SBox &box, uint16_t color, const char *message)
     // prep box
     prepPlotBox (box);
 
-    // make a copy so we can use destructive maxStringW
+    // make a copy so we can use make destructive line breaks
     char *msg_cpy = strdup (message);
     size_t msg_len = strlen (message);
     uint16_t msg_printed = 0;
@@ -546,14 +546,26 @@ void plotMessage (const SBox &box, uint16_t color, const char *message)
     resetWatchdog();
     for (int n_lines = 0; n_lines < 5 && msg_printed < msg_len; n_lines++) {
 
-        // draw one line
-        uint16_t msgw = maxStringW (msg_cpy, box.w-2);
-        tft.setCursor (box.x+(box.w-msgw)/2, y);                // horizontally centered
+        // chop at max width -- maxStringW overwrites all beyond with 0's
+        size_t l_before = strlen(msg_cpy);
+        (void) maxStringW (msg_cpy, box.w-2);
+        size_t l_after = strlen(msg_cpy);
+
+        // unless finished, look for a closer blank but still print it so it's counted in msg_printed
+        if (l_after < l_before) {
+            char *blank = strrchr (msg_cpy, ' ');
+            if (blank)
+                blank[1] = '\0';
+        }
+
+        // draw what remains
+        uint16_t msgw = getTextWidth (msg_cpy);
+        tft.setCursor (box.x+(box.w-msgw)/2, y);
         tft.print(msg_cpy);
 
         // advance
         msg_printed += strlen (msg_cpy);
-        strcpy (msg_cpy, message + msg_printed);
+        strcpy (msg_cpy, message+msg_printed+(message[msg_printed] == ' ' ? 1 : 0));
         y += 2*FONTH;
     }
 

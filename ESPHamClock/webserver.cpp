@@ -379,6 +379,7 @@ static bool getWiFiScreenCapture(WiFiClient client, char *unused)
     FWIFIPRLN (client, F("HTTP/1.0 200 OK"));
     sendUserAgent (client);
     FWIFIPRLN (client, F("Content-Type: image/bmp"));
+    FWIFIPRLN (client, F("Cache-Control: no-cache"));
     FWIFIPR (client, F("Content-Length: ")); client.println (BHDRSZ+nbytes);
     FWIFIPRLN (client, F("Connection: close\r\n"));
     // Serial.println(F("web header sent"));
@@ -767,12 +768,13 @@ static bool getWiFiConfig (WiFiClient client, char *unused)
 
     // report NCDXF beacon box state
     FWIFIPR (client, F("NCDXF     "));
-    switch (brb_mode) {
+    switch ((BRB_MODE)brb_mode) {
     case BRB_SHOW_BEACONS:  FWIFIPRLN (client, F("Beacons")); break;
     case BRB_SHOW_ONOFF:    FWIFIPRLN (client, F("OnOff_timers")); break;
     case BRB_SHOW_PHOT:     FWIFIPRLN (client, F("Photocell")); break;
     case BRB_SHOW_BR:       FWIFIPRLN (client, F("Brightness")); break;
-    default:                FWIFIPRLN (client, F("Off")); break;
+    case BRB_SHOW_SWSTATS:  FWIFIPRLN (client, F("SpaceWX stats")); break;
+    case BRB_N:             FWIFIPRLN (client, F("???")); break;
     }
 
     // report display brightness and timers
@@ -846,6 +848,22 @@ static bool getWiFiConfig (WiFiClient client, char *unused)
     else
         strcpy (buf, _FX("Error\n"));
     client.print(buf);
+
+    // gimbal activity
+    bool vis_now, has_el, tracking;
+    float az, el;
+    bool at_all = getGimbalState (vis_now, has_el, tracking, az, el);
+    if (at_all) {
+        size_t bufl = 0;
+        bufl += snprintf (buf+bufl, sizeof(buf)-bufl, _FX("Gimbal    %s, %s @ "),
+                        vis_now ? "In use" : "Not up",
+                        tracking ? "tracking" : "idle");
+        if (has_el)
+            bufl += snprintf (buf+bufl, sizeof(buf)-bufl, "%.1f %.1f\n", az, el);
+        else
+            bufl += snprintf (buf+bufl, sizeof(buf)-bufl, "%.1f\n", az);
+        client.print(buf);
+    }
 
 
     // report what DE pane is being used for
@@ -1233,6 +1251,7 @@ static bool getWiFiSys (WiFiClient client, char *unused)
     FWIFIPR (client, F("Platform ")); client.println (platform);
     FWIFIPR (client, F("Backend  ")); client.println (svr_host);
     FWIFIPR (client, F("SvrPort  ")); client.println (svr_port);
+    FWIFIPR (client, F("S/N      ")); client.println (ESP.getChipId());
 #if defined(_IS_ESP8266)
     FWIFIPR (client, F("MinHeap  ")); client.println (worst_heap);
     FWIFIPR (client, F("FreeNow  ")); client.println (ESP.getFreeHeap());

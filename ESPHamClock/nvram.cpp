@@ -111,6 +111,9 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_RSS_INTERVAL
     1,                          // NV_DATEMDY
     1,                          // NV_DATEDMYYMD
+    1,                          // NV_ROTUSE
+    NV_ROTHOST_LEN,             // NV_ROTHOST
+    2,                          // NV_ROTPORT
 };
 
 

@@ -103,6 +103,9 @@ void eraseDEAPMarker()
  */
 void drawDEAPMarker()
 {
+    if (dx_info_for_sat)
+        return;
+
     tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R, DE_COLOR);
     tft.drawCircle (deap_c.s.x, deap_c.s.y, DEAP_R, RA8875_BLACK);
     tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R/2, RA8875_BLACK);

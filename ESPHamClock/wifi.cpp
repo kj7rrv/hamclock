@@ -176,7 +176,7 @@ static time_t next_stereo_a;
 // persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
 static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update;
 static time_t drap_update, path_update;
-static float ssn_spw = SPW_ERR, xray_spw, sflux_spw = SPW_ERR, kp_spw = SPW_ERR, swind_spw, drap_spw;
+static float ssn_spw = SPW_ERR, xray_spw = SPW_ERR, sflux_spw = SPW_ERR, kp_spw = SPW_ERR, swind_spw, drap_spw;
 static float path_spw[PROP_MAP_N]; 
 static NOAASpaceWx noaa_spw;
 
@@ -1937,6 +1937,13 @@ void sendUserAgent (WiFiClient &client)
         // combine rss_on and rss_local
         int rss_code = rss_on + 2*rss_local;
 
+        // gimbal
+        bool vis_now, has_el, tracking;
+        float az, el;
+        bool at_all = getGimbalState (vis_now, has_el, tracking, az, el);
+        int gimbal_score = at_all ? (1 + (has_el ? 1 : 0)) : 0;
+
+
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
@@ -1946,7 +1953,7 @@ void sendUserAgent (WiFiClient &client)
             desrss, dxsrss, BUILD_W, use_fb0,
             // new for LV5:
             (int)as, getCenterLng(), doy, names_on, getDemoMode(), (int)getSWEngineState(cd_timer), 
-            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, (int)getDateFormat(), 0);
+            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, (int)getDateFormat(), gimbal_score);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);

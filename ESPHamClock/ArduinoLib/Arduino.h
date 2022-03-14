@@ -95,6 +95,7 @@ extern int svr_port;
 extern bool skip_skip;
 extern bool init_iploc;
 extern const char *init_locip;
+extern int gimbal_trace_level;
 
 
 

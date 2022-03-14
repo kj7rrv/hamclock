@@ -389,6 +389,8 @@ std::string WiFi::hostname(void)
 int WiFi::channel(void)
 {
 	int channel = 0;
+
+#ifdef _IS_LINUX
 	FILE *pf = popen ("iw wlan0 info", "r");
 	if (pf) {
 	    char buf[1024];
@@ -397,6 +399,8 @@ int WiFi::channel(void)
 		    break;
 	    pclose (pf);
 	}
+#endif
+
 	return (channel);
 }
 

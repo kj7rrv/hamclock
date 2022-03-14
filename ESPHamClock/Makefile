@@ -21,13 +21,6 @@ ifeq ($(shell uname -s), Darwin)
 endif
 
 
-# RPi needs vc support
-ifeq ($(shell [ -r /opt/vc ]; echo $$?), 0)
-    CXXFLAGS += -I/opt/vc/include
-    LDXXFLAGS += -L/opt/vc/lib
-    LIBS += -lbcm_host
-endif
-
 # FreeBSD needs libgpio
 ifeq ($(shell [ -r /usr/include/libgpio.h ]; echo $$?), 0)
     LIBS += -lgpio

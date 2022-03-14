@@ -65,7 +65,9 @@ int WiFiClient::connect_to (int sockfd, struct sockaddr *serv_addr, int addrlen,
         }
 
         /* looks good - restore blocking */
-        (void) fcntl (sockfd, F_SETFL, flags);
+        if (fcntl (sockfd, F_SETFL, flags) < 0)
+            printf ("WiFiCl: fcntl socket %d: %s\n", sockfd, strerror(errno));
+
         return (0);
 }
 
@@ -107,7 +109,7 @@ bool WiFiClient::connect(const char *host, int port)
         sprintf (port_str, "%d", port);
         int error = ::getaddrinfo (host, port_str, &hints, &aip);
         if (error) {
-            printf ("getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
+            printf ("WiFiCl: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
             return (false);
         }
 
@@ -115,13 +117,13 @@ bool WiFiClient::connect(const char *host, int port)
         sockfd = ::socket (aip->ai_family, aip->ai_socktype, aip->ai_protocol);
         if (sockfd < 0) {
             freeaddrinfo (aip);
-            printf ("socket(%s:%d): %s\n", host, port, strerror(errno));
+            printf ("WiFiCl: socket(%s:%d): %s\n", host, port, strerror(errno));
 	    return (false);
         }
 
         /* connect */
         if (connect_to (sockfd, aip->ai_addr, aip->ai_addrlen, 5000) < 0) {
-            printf ("connect(%s,%d): %s\n", host,port,strerror(errno));
+            printf ("WiFiCl: connect(%s,%d): %s\n", host,port,strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (false);
@@ -151,7 +153,7 @@ void WiFiClient::setNoDelay(bool on)
         // control Nagle algorithm
         socklen_t flag = on;
         if (setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (void *) &flag, sizeof(flag)) < 0)
-            printf ("TCP_NODELAY(%d): %s\n", on, strerror(errno));     // not fatal
+            printf ("WiFiCl: TCP_NODELAY(%d): %s\n", on, strerror(errno));     // not fatal
 }
 
 void WiFiClient::stop()
@@ -190,7 +192,7 @@ int WiFiClient::available()
         tv.tv_usec = 0;
         int s = select (socket+1, &rset, NULL, NULL, &tv);
         if (s < 0) {
-            printf ("socket %d select err: %s\n", socket, strerror(errno));
+            printf ("WiFiCl: socket %d select err: %s\n", socket, strerror(errno));
 	    stop();
 	    return (0);
 	}
@@ -230,11 +232,29 @@ int WiFiClient::write (const uint8_t *buf, int n)
 	for (int ntot = 0; ntot < n; ntot += nw) {
 	    nw = ::write (socket, buf+ntot, n-ntot);
 	    if (nw < 0) {
-		printf ("write: %s\n", strerror(errno));
-                stop();         // avoid repeated failed attempts
-		return (0);
+                // select says it won't block but it still might be temporarily EAGAIN
+                if (errno != EAGAIN) {
+                    printf ("WiFiCl: write: %s\n", strerror(errno));
+                    stop();             // avoid repeated failed attempts
+                    return (0);
+                } else
+                    nw = 0;             // act like nothing happened
 	    }
-	    if (_trace_client) printf ("WiFiCl: write %.*s", nw, buf+ntot);
+	    if (_trace_client) {
+                printf ("WiFiCl: write %d", nw);
+                bool all_printable = true;
+                for (int i = 0; i < nw; i++) {
+                    if (!isprint(buf[ntot+i])) {
+                        all_printable = false;
+                        break;
+                    }
+                }
+                if (all_printable)
+                    printf (" %.*s\n", nw, buf+ntot);
+                else
+                    printf ("\n");
+            }
+
 	}
 	return (n);
 }

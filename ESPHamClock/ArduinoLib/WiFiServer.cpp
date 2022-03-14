@@ -83,7 +83,7 @@ bool WiFiServer::begin(char ynot[])
 	}
 
         /* willing to accept connections with a backlog of 5 pending */
-        if (::listen (sfd, 50) < 0) {
+        if (::listen (sfd, 5) < 0) {
             sprintf (ynot, "listen: %s", strerror(errno));
 	    close (sfd);
 	    return (false);

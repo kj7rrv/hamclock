@@ -74,7 +74,7 @@ static bool support_phot;                       // whether we support a photores
 static const char dsi_path_buster[] = "/sys/class/backlight/rpi_backlight/brightness";
 static const char dsi_path_bullseye[] = "/sys/class/backlight/10-0045/brightness";
 #endif
-static const char *dsi_path;                    // one of above if one works
+static const char *dsi_path = "x";              // one of above if one works, non-null now just for lint
 
 // forward references
 static void engageDisplayBrightness(bool log);
@@ -86,6 +86,9 @@ static void engageDisplayBrightness(bool log);
  */
 static void setDisplayBrightness(bool log)
 {
+    // lint
+    (void) dsi_path;
+
     #if defined(_IS_ESP8266)
 
         if (log)
@@ -93,9 +96,6 @@ static void setDisplayBrightness(bool log)
 
         // ESP: control backlight
         tft.PWM1out(bpwm);
-
-        // lint
-        (void) dsi_path;
 
     #else
 
@@ -114,10 +114,18 @@ static void setDisplayBrightness(bool log)
             }
         } else if (support_onoff) {
             // control HDMI on or off
-            const char *cmd = bpwm < BPWM_MAX/2 ? "vcgencmd display_power 0" : "vcgencmd display_power 1";
-            if (log)
-                Serial.printf ("BR: %s\n", cmd);
-            (void) !system (cmd);
+            // N.B. can't use system() because we need to retain suid root
+            const char *argv[] = {
+                "vcgencmd", "display_power", bpwm > BPWM_MAX/2 ? "1" : "0", NULL
+            };
+            if (fork() == 0)
+                execvp (argv[0], (char**)argv);
+            if (log) {
+                Serial.printf ("BR:");
+                for (unsigned i = 0; i < NARRAY(argv)-1; i++)
+                    Serial.printf (" %s", argv[i]);
+                Serial.printf ("\n");
+            }
         }
 
     #endif
@@ -582,6 +590,7 @@ static bool isRPiDSI()
             resetWatchdog();
 
             // try both
+            dsi_path = NULL;
             int dsifd = open (dsi_path_buster, O_WRONLY);
             if (dsifd >= 0) {
                 dsi_path = dsi_path_buster;
@@ -757,7 +766,7 @@ void setupBrightness()
                         || (brb_mode == BRB_SHOW_PHOT && (!support_phot || !found_phot))
                         || (brb_mode == BRB_SHOW_BR && (!support_dim || (support_phot && found_phot)))) {
             Serial.printf (_FX("BR: Bogus initial brb_mode %d, resetting to %d\n"),brb_mode,BRB_SHOW_BEACONS);
-            brb_mode = BRB_SHOW_BEACONS;
+            brb_mode = BRB_SHOW_SWSTATS;
             NVWriteUInt8 (NV_BRB_MODE, brb_mode);
         }
 }
