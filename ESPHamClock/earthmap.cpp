@@ -103,12 +103,12 @@ void eraseDEAPMarker()
  */
 void drawDEAPMarker()
 {
-    if (dx_info_for_sat)
-        return;
-
-    tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R, DE_COLOR);
-    tft.drawCircle (deap_c.s.x, deap_c.s.y, DEAP_R, RA8875_BLACK);
-    tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R/2, RA8875_BLACK);
+    // draw if overmap and not showing sat or DX WX
+    if ((!dx_info_for_sat || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE) && overMap(deap_c.s)) {
+        tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R, DE_COLOR);
+        tft.drawCircle (deap_c.s.x, deap_c.s.y, DEAP_R, RA8875_BLACK);
+        tft.fillCircle (deap_c.s.x, deap_c.s.y, DEAP_R/2, RA8875_BLACK);
+    }
 }
 
 /* draw the NVRAM grid square to 4 chars in the given screen location
@@ -147,7 +147,7 @@ void drawDEInfo()
 
         // lat and lon
         char buf[30];
-        sprintf (buf, "%.0f%c  %.0f%c",
+        sprintf (buf, _FX("%.0f%c  %.0f%c"),
                     roundf(fabsf(de_ll.lat_d)), de_ll.lat_d < 0 ? 'S' : 'N',
                     roundf(fabsf(de_ll.lng_d)), de_ll.lng_d < 0 ? 'W' : 'E');
         tft.setCursor (de_info_b.x, de_info_b.y+2*vspace-6);
@@ -195,9 +195,9 @@ void drawDECalTime(bool center)
     // generate text
     char buf[32];
     if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
-        sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+        sprintf (buf, _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
     else
-        sprintf (buf, "%02d:%02d %d %s", hr, mn, dy, monthShortStr(mo));
+        sprintf (buf, _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
 
     // set position
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -508,14 +508,14 @@ static void drawMouseLoc()
     if (show_km)
         dist *= 1.609344F;                      // mi - > km
     tft.setCursor (tx+1, ty+=line_dy);
-    tft.printf ("%s %3.0f", show_lp ? "LP" : "SP", bearing);
+    tft.printf (_FX("%s %3.0f"), show_lp ? "LP" : "SP", bearing);
     tft.setCursor (tx+1, ty+=line_dy);
     if (dist <= 999)
-        tft.printf ("%s %3.0f", show_km ? "km" : "mi", dist);
+        tft.printf (_FX("%s %3.0f"), show_km ? "km" : "mi", dist);
     else if (dist <= 9900)
-        tft.printf ("%s%3.1fk", show_km ? "km" : "mi", dist/1000);
+        tft.printf (_FX("%s%3.1fk"), show_km ? "km" : "mi", dist/1000);
     else
-        tft.printf ("%s %2.0fk", show_km ? "km" : "mi", dist/1000);
+        tft.printf (_FX("%s %2.0fk"), show_km ? "km" : "mi", dist/1000);
 
     // prefix
     char prefix[MAX_PREF_LEN+1];
@@ -804,10 +804,9 @@ void drawMapMenu()
     }
 
     if (!menu_ok || !full_redraw) {
-        // just erase menu
-        // TODO: black rectangle is for azm mode, better to restore stars
+        // just restore map
+        // TODO: restore stars
         resetWatchdog();
-        tft.fillRect (menu_b.x, menu_b.y, menu_b.w, menu_b.h, RA8875_BLACK);
         for (uint16_t dy = 0; dy < menu_b.h; dy++)
             for (uint16_t dx = 0; dx < menu_b.w; dx++)
                 drawMapCoord (menu_b.x+dx, menu_b.y+dy);
@@ -1399,7 +1398,7 @@ void drawDXInfo ()
 
     // lat and long
     char buf[30];
-    sprintf (buf, "%.0f%c  %.0f%c",
+    sprintf (buf, _FX("%.0f%c  %.0f%c"),
                 roundf(fabsf(dx_ll.lat_d)), dx_ll.lat_d < 0 ? 'S' : 'N',
                 roundf(fabsf(dx_ll.lng_d)), dx_ll.lng_d < 0 ? 'W' : 'E');
     tft.setCursor (dx_info_b.x, dx_info_b.y+3*vspace-8);
@@ -1524,9 +1523,9 @@ void drawDXTime()
 
     char buf[32];
     if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
-        sprintf (buf, "%02d:%02d %s %d", hr, mn, monthShortStr(mo), dy);
+        sprintf (buf, _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
     else
-        sprintf (buf, "%02d:%02d %d %s", hr, mn, dy, monthShortStr(mo));
+        sprintf (buf, _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
     tft.print(buf);
 }
 

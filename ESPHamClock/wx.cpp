@@ -4,7 +4,7 @@
 
 #include "HamClock.h"
 
-static const char wx_base[] = "/ham/HamClock/wx.pl";
+static const char wx_base[] = "/wx.pl";
 
 /* look up current weather info for the given location.
  * if wip is filled ok return true, else return false with short reason in ynot[]
@@ -26,11 +26,11 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
         // query web page
         snprintf (line, sizeof(line), _FX("%s?is_de=%d&lat=%g&lng=%g"), wx_base, is_de, ll.lat_d, ll.lng_d);
         Serial.println (line);
-        httpGET (wx_client, svr_host, line);
+        httpHCGET (wx_client, svr_host, line);
 
         // skip response header
         if (!httpSkipHeader (wx_client)) {
-            strcpy_P (ynot, PSTR("WX timeout"));
+            strcpy (ynot, _FX("WX timeout"));
             goto out;
         }
 
@@ -51,31 +51,37 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
             char *vstart = strchr (line, '=');
             if (!vstart)
                 continue;
-            vstart++;
+            *vstart++ = '\0';   // eos for name and move to value
 
             // check for content line
-            if (strncmp_P (line, PSTR("city="), 5) == 0) {
+            if (strcmp (line, _FX("city")) == 0) {
                 strncpy (wip->city, vstart, sizeof(wip->city)-1);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("temperature_c="), 14) == 0) {
+            } else if (strcmp (line, _FX("temperature_c")) == 0) {
                 wip->temperature_c = atof (vstart);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("humidity_percent="), 17) == 0) {
+            } else if (strcmp (line, _FX("pressure_hPa")) == 0) {
+                wip->pressure_hPa = atof (vstart);
+                n_found++;
+            } else if (strcmp (line, _FX("pressure_chg")) == 0) {
+                wip->pressure_chg = atof (vstart);
+                n_found++;
+            } else if (strcmp (line, _FX("humidity_percent")) == 0) {
                 wip->humidity_percent = atof (vstart);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("wind_speed_mps="), 15) == 0) {
+            } else if (strcmp (line, _FX("wind_speed_mps")) == 0) {
                 wip->wind_speed_mps = atof (vstart);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("wind_dir_name="), 14) == 0) {
+            } else if (strcmp (line, _FX("wind_dir_name")) == 0) {
                 strncpy (wip->wind_dir_name, vstart, sizeof(wip->wind_dir_name)-1);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("clouds="), 7) == 0) {
+            } else if (strcmp (line, _FX("clouds")) == 0) {
                 strncpy (wip->clouds, vstart, sizeof(wip->clouds)-1);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("conditions="), 11) == 0) {
+            } else if (strcmp (line, _FX("conditions")) == 0) {
                 strncpy (wip->conditions, vstart, sizeof(wip->conditions)-1);
                 n_found++;
-            } else if (strncmp_P (line, PSTR("attribution="), 12) == 0) {
+            } else if (strcmp (line, _FX("attribution")) == 0) {
                 strncpy (wip->attribution, vstart, sizeof(wip->attribution)-1);
                 n_found++;
             }
@@ -84,7 +90,7 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
         }
 
         if (n_found < N_WXINFO_FIELDS) {
-            strcpy_P (ynot, PSTR("No WX data"));
+            strcpy (ynot, _FX("Missing WX data"));
             goto out;
         }
 
@@ -93,7 +99,7 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
 
     } else {
 
-        strcpy_P (ynot, PSTR("WX connection failed"));
+        strcpy (ynot, _FX("WX connection failed"));
 
     }
 

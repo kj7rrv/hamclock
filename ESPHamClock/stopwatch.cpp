@@ -173,7 +173,7 @@ static void setAlarmPin (bool set) { (void) set; }
 #define ALM_EY          ALM_Y0                  // alarm time display box y
 #define ALM_EW          SW_CDP_W                // alarm time display box w
 #define ALM_TOVFLOW     (24U*60U)               // hrmn overflow value
-#define ALM_RINGTO      30000                   // alarm clock ringing timeout, millis
+#define ALM_RINGTO      60000                   // alarm clock ringing timeout, millis
 
 // countdown params
 #define SW_CD_X         ALM_X0                  // countdown button x
@@ -1599,7 +1599,7 @@ static void showAlarmRinging()
         // off
         alarm_state = ALMS_ARMED;
         drawMainPageStopwatch (true);
-        logState();
+        setAlarmPin (false);
 
         // restart -- init doesn't include our own countdown pane
         if (findPaneChoiceNow(PLOT_CH_COUNTDOWN) == alarm_pane)
@@ -1957,7 +1957,6 @@ static void checkSWPageTouch()
             if (alarm_state == ALMS_RINGING) {
                 alarm_state = ALMS_ARMED;
                 drawAlarmIndicator(false);
-                logState();
             }
         } else {
             // show menu and redraw to engage any changes even if cancelled just to erase menu
@@ -2110,14 +2109,12 @@ bool runStopwatch()
         // record time and indicate alarm has just gone off
         alarm_ringtime = now();
         alarm_state = ALMS_RINGING;
-        logState();
         showAlarmRinging();
     }
     if (alarm_state == ALMS_RINGING) {
         if (alarmPinIsSet() || now() - alarm_ringtime >= ALM_RINGTO/1000) {
             // op hit the cancel pin or timed out
             alarm_state = ALMS_ARMED;
-            logState();
             if (sws_display == SWD_NONE)
                 drawMainPageStopwatch (true);
             else
@@ -2189,6 +2186,7 @@ bool setSWEngineState (SWEngineState new_sws, uint32_t ms)
 {
     switch (new_sws) {
     case SWE_RESET:
+        setLEDState (SWCDS_OFF);
         if (sws_engine == SWE_RESET)
             return (true);                      // ignore if no change
         sws_engine = SWE_RESET;
@@ -2233,33 +2231,36 @@ bool setSWEngineState (SWEngineState new_sws, uint32_t ms)
     // draw new state appearance
     drawSWState();
 
-    // log
-    logState();
-
     return (true);
 }
 
-/* retrieve current engine state and associated ms timer value
+/* return current engine state and associated timer value and cd period in ms.
+ * both can be NULL if not interested.
  */
-SWEngineState getSWEngineState (uint32_t &sw_timer)
+SWEngineState getSWEngineState (uint32_t *sw_timer, uint32_t *cd_period)
 {
-    switch (sws_engine) {
-    case SWE_RESET:
-        sw_timer = 0;
-        break;
-    case SWE_RUN:
-        sw_timer = millis() - start_t;
-        break;
-    case SWE_STOP:
-        sw_timer = stop_dt;
-        break;
-    case SWE_LAP:
-        sw_timer = stop_dt;
-        break;
-    case SWE_COUNTDOWN:
-        sw_timer = getCountdownLeft();
-        break;
+    if (sw_timer) {
+        switch (sws_engine) {
+        case SWE_RESET:
+            *sw_timer = 0;
+            break;
+        case SWE_RUN:
+            *sw_timer = millis() - start_t;
+            break;
+        case SWE_STOP:
+            *sw_timer = stop_dt;
+            break;
+        case SWE_LAP:
+            *sw_timer = stop_dt;
+            break;
+        case SWE_COUNTDOWN:
+            *sw_timer = getCountdownLeft();
+            break;
+        }
     }
+
+    if (cd_period)
+        *cd_period = countdown_period;
 
     return (sws_engine);
 }

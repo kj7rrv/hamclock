@@ -63,6 +63,7 @@ int runWiFiMeter(bool warn, bool &ignore_on)
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     uint16_t y = 35;
 
+    // title
     if (warn) {
         tft.setCursor (75, y);
         tft.setTextColor(RA8875_WHITE);
@@ -75,19 +76,20 @@ int runWiFiMeter(bool warn, bool &ignore_on)
 
     y += 25;
 
-    static const char *msg[] = {
-        "Try different HamClock orientations",
-        "Try different WiFi router orientations",
-        "Try moving closer to WiFi router",
-        "Try increasing WiFi router power",
-        "Try adding a WiFi repeater",
-        "Try experimenting with a foil reflector",
-        "Try moving metal objects out of line-of-sight with router",
+    // tips
+    static const char msg0[] PROGMEM = "Try different HamClock orientations";
+    static const char msg1[] PROGMEM = "Try different WiFi router orientations";
+    static const char msg2[] PROGMEM = "Try moving closer to WiFi router";
+    static const char msg3[] PROGMEM = "Try increasing WiFi router power";
+    static const char msg4[] PROGMEM = "Try adding a WiFi repeater";
+    static const char msg5[] PROGMEM = "Try experimenting with a foil reflector";
+    static const char msg6[] PROGMEM = "Try moving metal objects out of line-of-sight with router";
+    static const char *msg[] PROGMEM = {
+        msg0, msg1, msg2, msg3, msg4, msg5, msg6
     };
-
     for (unsigned i = 0; i < NARRAY(msg); i++) {
         tft.setCursor (50, y += 32);
-        tft.print (msg[i]);
+        tft.print ((const __FlashStringHelper *)pgm_read_ptr(&msg[i]));
     }
 
     y += 60;

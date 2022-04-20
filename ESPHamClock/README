@@ -1,5 +1,8 @@
 Project web site: http://www.clearskyinstitute.com/ham/HamClock
 
+On UNIX systems, type make for size options, then sudo make install.
+On ESP, load into Arduino API, prep as per web page (above), point to this directory then Sketch -> Compile
+
 
 *********************************************************************************************
 

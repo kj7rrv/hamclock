@@ -362,7 +362,7 @@ static bool installFilePixels (const char *dfile, const char *nfile)
             else
                 Serial.printf (_FX("%s not open\n"), dfile);
             if (day_pixels == MAP_FAILED)
-                Serial.printf ("%s mmap failed: %s\n", dfile, strerror(errno));
+                Serial.printf (_FX("%s mmap failed: %s\n"), dfile, strerror(errno));
             else if (day_pixels)
                 munmap (day_pixels, day_fbytes);
             day_pixels = NULL;
@@ -372,7 +372,7 @@ static bool installFilePixels (const char *dfile, const char *nfile)
             else
                 Serial.printf (_FX("%s not open\n"), nfile);
             if (night_pixels == MAP_FAILED)
-                Serial.printf ("%s mmap failed: %s\n", nfile, strerror(errno));
+                Serial.printf (_FX("%s mmap failed: %s\n"), nfile, strerror(errno));
             else if (night_pixels)
                 munmap (night_pixels, night_fbytes);
             night_pixels = NULL;
@@ -447,11 +447,11 @@ static bool bmpHdrOk (char *buf, uint32_t w, uint32_t h, uint32_t *filesizep)
 static void buildMapNames (const char *style, char *dfile, char *nfile, char *dtitle, char *ntitle)
 {
         if (strcmp (style, "DRAP") == 0) {
-            sprintf (dfile, "/map-D-%dx%d-%s-S.bmp", HC_MAP_W, HC_MAP_H, style);
-            sprintf (nfile, "/map-N-%dx%d-%s-S.bmp", HC_MAP_W, HC_MAP_H, style);
+            sprintf (dfile, _FX("/map-D-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
+            sprintf (nfile, _FX("/map-N-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
         } else {
-            sprintf (dfile, "/map-D-%dx%d-%s.bmp", HC_MAP_W, HC_MAP_H, style);
-            sprintf (nfile, "/map-N-%dx%d-%s.bmp", HC_MAP_W, HC_MAP_H, style);
+            sprintf (dfile, _FX("/map-D-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
+            sprintf (nfile, _FX("/map-N-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
         }
 
         sprintf (dtitle, _FX("%s D map"), style);
@@ -526,7 +526,7 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
                 return (false);
             #else
                 // use non-standard File members for richer error msg
-                fatalError ("Error creating required file:\n%s\n%s", f.fpath.c_str(), f.errstr.c_str());
+                fatalError (_FX("Error creating required file:\n%s\n%s"), f.fpath.c_str(), f.errstr.c_str());
                 // never returns
             #endif
         }
@@ -623,8 +623,8 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
 
         // start remote file download, even if only to check whether newer
         if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
-            snprintf (hdr_buf, sizeof(hdr_buf), _FX("/ham/HamClock/maps/%s"), file);
-            httpGET (client, svr_host, hdr_buf);
+            snprintf (hdr_buf, sizeof(hdr_buf), _FX("/maps/%s"), file);
+            httpHCGET (client, svr_host, hdr_buf);
             if (!httpSkipHeader (client, &remote_time) || remote_time == 0) {
                 mapMsg (1000, _FX("%s: err - try local"), title);
                 client.stop();
@@ -720,7 +720,7 @@ static bool installQueryMaps (const char *page, const char *style, const float M
             page, yr, mo, hr, de_ll.lat_d, de_ll.lng_d, show_lp, bc_power, HC_MAP_W, HC_MAP_H,
             MHz, DEF_TOA);
 
-        Serial.printf ("%s query: %s\n", style, query);
+        Serial.printf (_FX("%s query: %s\n"), style, query);
 
         // assign a style and compose names and titles
         char dfile[32];                 // match LFS_NAME_MAX
@@ -738,7 +738,7 @@ static bool installQueryMaps (const char *page, const char *style, const float M
         WiFiClient client;
         bool ok = false;
         if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
-            httpGET (client, svr_host, query);
+            httpHCGET (client, svr_host, query);
             ok = httpSkipHeader (client) && downloadMapFile (client, dfile, dtitle)
                                          && downloadMapFile (client, nfile, ntitle);
             client.stop();
@@ -809,8 +809,8 @@ static bool installFileMaps()
  */
 static bool installMUFMaps()
 {
-        mapMsg (0, "Calculating %s...", muf_style);
-        return (installQueryMaps (_FX("/ham/HamClock/fetchVOACAP-MUF.pl"), muf_style, 0));
+        mapMsg (0, _FX("Calculating %s..."), muf_style);
+        return (installQueryMaps (_FX("/fetchVOACAP-MUF.pl"), muf_style, 0));
 }
 
 /* retrieve and install VOACAP maps for the current time and given band.
@@ -819,8 +819,8 @@ static bool installMUFMaps()
 static bool installPropMaps (float MHz)
 {
         char s[NV_MAPSTYLE_LEN];
-        mapMsg (0, "Calculating %s %s...", getMapStyle(s), prop_style);
-        return (installQueryMaps (_FX("/ham/HamClock/fetchVOACAPArea.pl"), prop_style, MHz));
+        mapMsg (0, _FX("Calculating %s %s..."), getMapStyle(s), prop_style);
+        return (installQueryMaps (_FX("/fetchVOACAPArea.pl"), prop_style, MHz));
 }
 
 /* install fresh maps depending on prop_map and core_map.
@@ -887,7 +887,7 @@ FS_Info *getConfigDirInfo (int *n_info, char **fs_name, uint64_t *fs_size, uint6
         LittleFS.info(fs_info);
 
         // pass back basic info
-        *fs_name = strdup ("HamClock file system");
+        *fs_name = strdup (_FX("HamClock file system"));
         *fs_size = fs_info.totalBytes;
         *fs_used = fs_info.usedBytes;
 
@@ -916,7 +916,8 @@ FS_Info *getConfigDirInfo (int *n_info, char **fs_name, uint64_t *fs_size, uint6
             int hr = hour(t);
             int mn = minute(t);
             int sc = second(t);
-            snprintf (fip->date, sizeof(fip->date), "%04d-%02d-%02dT%02d:%02d:%02dZ", yr, mo, dy, hr, mn, sc);
+            snprintf (fip->date, sizeof(fip->date), _FX("%04d-%02d-%02dT%02d:%02d:%02dZ"),
+                                yr, mo, dy, hr, mn, sc);
 
             // store length
             fip->len = dir.fileSize();
@@ -1032,7 +1033,7 @@ void drawMapScale()
         title = "% Chance";
         break;
     default:
-        fatalError ("Bug! drawMapScale core_map %d", (int)core_map);
+        fatalError (_FX("Bug! drawMapScale core_map %d"), (int)core_map);
         return;         // lint
     }
 

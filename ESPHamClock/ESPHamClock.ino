@@ -36,7 +36,7 @@ TZInfo de_tz = {{85, 158, 50, 17}, DE_COLOR, 0};
 TZInfo dx_tz = {{85, 307, 50, 17}, DX_COLOR, 0};
 
 // NCDFX box, also used for brightness, on/off controls and space wx stats
-SBox NCDXF_b = {745, 0, 55, PLOTBOX_H};
+SBox NCDXF_b = {740, 0, 60, PLOTBOX_H};
 
 // common "skip" button in several places
 SBox skip_b    = {730,10,55,35};
@@ -575,7 +575,9 @@ void loop()
     followBrightness();
     checkOnAir();
     readBME280();
+    updateBMEStats();
     runNextDemoCommand();
+    updateGPSDLoc();
 
     // check for touch events
     checkTouch();
@@ -583,10 +585,12 @@ void loop()
 
 
 /* draw the one-time portion of de_info either because we just booted or because
- * we are transitioning back from being in sat mode
+ * we are transitioning back from being in sat mode or a menu
  */
-static void drawOneTimeDE()
+void drawOneTimeDE()
 {
+    tft.drawLine (0, map_b.y-1, map_b.x, map_b.y-1, GRAY);                        // top
+
     selectFontStyle (BOLD_FONT, SMALL_FONT);
     tft.setTextColor(DE_COLOR);
     tft.setCursor(de_info_b.x, de_tz.box.y+18);
@@ -663,11 +667,10 @@ void initScreen()
 
     // set up beacon box
     resetWatchdog();
-    drawBeaconBox();
+    drawNCDXFBox();
 
-    // draw all the clocks
+    // enable clocks
     showClocks();
-    updateClocks(true);
     drawMainPageStopwatch(true);
 
     // start 
@@ -783,7 +786,7 @@ static void checkTouch()
     } else if (inBox (s, stopwatch_b)) {
         // check this before checkClockTouch
         checkStopwatchTouch(tt);
-    } else if (checkClockTouch(s, tt)) {
+    } else if (checkClockTouch(s)) {
         updateClocks(true);
     } else if (inBox (s, de_tz.box)) {
         if (TZMenu (de_tz, de_ll)) {
@@ -851,7 +854,7 @@ static void checkTouch()
     } else if (checkPlotTouch(s, PANE_3, tt)) {
         updateWiFi();
     } else if (inBox (s, NCDXF_b)) {
-        doNCDXFTouch(s);
+        doNCDXFBoxTouch(s);
     } else if (checkSatNameTouch(s)) {
         dx_info_for_sat = querySatSelection();
         initScreen();
@@ -896,7 +899,7 @@ void normalizeLL (LatLong &ll)
  * use the given grid, else look up from ll.
  * also set override prefix unless NULL
  */
-void newDX (LatLong &ll, const char *grid, const char *ovprefix)
+void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
 {
     resetWatchdog();
 
@@ -948,12 +951,14 @@ void newDX (LatLong &ll, const char *grid, const char *ovprefix)
     NVWriteFloat (NV_DX_LNG, dx_ll.lng_d);
 
     // log
-    Serial.printf (_FX("New DX: %g %g\n"), dx_ll.lat_d, dx_ll.lng_d);
+    char dx_grid[MAID_CHARLEN];
+    getNVMaidenhead (NV_DX_GRID, dx_grid);
+    Serial.printf (_FX("New DX: %g %g %s\n"), dx_ll.lat_d, dx_ll.lng_d, dx_grid);
 }
 
 /* set new DE location, and optional grid
  */
-void newDE (LatLong &ll, const char *grid)
+void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
 {
     resetWatchdog();
 
@@ -1021,7 +1026,9 @@ void newDE (LatLong &ll, const char *grid)
     displaySatInfo();
 
     // log
-    Serial.printf (_FX("New DE: %g %g\n"), de_ll.lat_d, de_ll.lng_d);
+    char de_grid[MAID_CHARLEN];
+    getNVMaidenhead (NV_DE_GRID, de_grid);
+    Serial.printf (_FX("New DE: %g %g %s\n"), de_ll.lat_d, de_ll.lng_d, de_grid);
 }
 
 /* return next color after current in basic series of primary colors that is nicely different from contrast.
@@ -1256,9 +1263,8 @@ bool waiting4DXPath()
 
 void drawDXMarker (bool force)
 {
-    // draw if force or overmap and not showing sat
-    if (force || (!dx_info_for_sat && overMap(dx_c.s))) {
-
+    // draw if force or overmap and not showing sat or DX WX
+    if (force || ((!dx_info_for_sat || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE) && overMap(dx_c.s))) {
         tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
         tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
         tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
@@ -1620,8 +1626,10 @@ bool overMap (const SCoord &s)
  */
 bool overAnySymbol (const SCoord &s)
 {
+    // only showing dx and deap if not showing sat or showing DX WX
+    bool show_dxap = !dx_info_for_sat || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE;
     return (inCircle(s, de_c)
-                || (!dx_info_for_sat && (inCircle(s, dx_c) || inCircle(s, deap_c)))
+                || (show_dxap && (inCircle(s, dx_c) || inCircle(s, deap_c)))
                 || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
                 || overMapScale(s));
@@ -2152,7 +2160,7 @@ static void shutdown(void)
         _SDC_SHUTDOWN
     };
     ShutDownCtrl sdc[] = {              // N.B. must be in order of _SDC_* enum
-        {"Never mind -- resume",        {x0, y,                 w, h}, RA8875_GREEN},
+        {"Disregard -- resume",         {x0, y,                 w, h}, RA8875_GREEN},
         {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW},
         #if defined(_IS_UNIX)
             {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA},
@@ -2227,7 +2235,7 @@ static void shutdown(void)
         for(;;);
  #endif // _IS_UNIX
     default:
-        fatalError ("Shutdown choice bug: %d", selection);
+        fatalError (_FX("Shutdown choice bug: %d"), selection);
         return;
 
     }
@@ -2340,7 +2348,7 @@ void getWorstMem (int *heap, int *stack)
  * used to save a lot of RAM for calls that only accept RAM strings, eg, printf's format 
  * N.B. we accommodate nesting these pointers only a few deep then they are reused.
  */
-const char *_FX_helper(const __FlashStringHelper *flash_string)
+const char *_FX_helper(const char *flash_string)
 {
     #define N_PTRS 5
     static char *ram_string[N_PTRS];
@@ -2351,8 +2359,7 @@ const char *_FX_helper(const __FlashStringHelper *flash_string)
     nxt_i = (nxt_i + 1) % N_PTRS;
 
     // convert and copy 
-    String _s(flash_string);
-    strcpy (*sp = (char *) realloc (*sp, strlen(_s.c_str())+1), _s.c_str());
+    strcpy_P (*sp = (char *) realloc (*sp, strlen_P(flash_string)+1), flash_string);
     return (*sp);
 }
 
@@ -2379,4 +2386,40 @@ void printFreeHeap (const __FlashStringHelper *label)
         worst_heap = free_heap;
     if (stack_used > worst_stack)
         worst_stack = stack_used;
+}
+
+/* gnu stack trace
+ */
+#if defined(__GNUC__) && defined(_IS_UNIX)
+#include <execinfo.h>
+// only works with -O0
+void printStacktrace(const char *fmt, ...)
+{
+    // header
+    va_list ap;
+    va_start(ap, fmt);
+    printf (_FX("************ "));
+    vprintf (fmt, ap);
+    printf ("\n");
+    va_end(ap);
+
+    // stack
+    void *array[10];
+    char **strings;
+    int size;
+    size = backtrace (array, 10);
+    strings = backtrace_symbols (array, size);
+    if (strings != NULL) {
+        printf (_FX("%d stack frames:\n"), size);
+        for (int i = 0; i < size; i++)
+            printf ("  %s\n", strings[i]);
+    }
+
+    // clean up
+    free (strings);
+#else
+void printStacktrace()
+{
+    Serial.println (F("No stack trace available"));
+#endif // (__GNUC__)
 }

@@ -38,8 +38,9 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define TBORDER         50              // top border
 #define FONT_H          (dx_info_b.h/6) // font height
 #define FONT_D          5               // font descent
-#define SAT_COLOR       RA8875_RED      // annotation color
-#define SOON_COLOR      RA8875_GREEN    // text color for pass soon
+#define SAT_COLOR       RA8875_RED      // overall annotation color
+#define SATUP_COLOR     RGB565(0,200,0) // time color when sat is up
+#define SOON_COLOR      RGB565(200,0,0) // table text color for pass soon
 #define SOON_MINS       10              // "soon", minutes
 #define CB_SIZE         20              // size of selection check box
 #define CELL_H          32              // display cell height
@@ -60,8 +61,8 @@ typedef struct {
 } SatRiseSet;
 
 
-static const char sat_get_all[] = "/ham/HamClock/esats.pl?getall=";     // command to get all TLE
-static const char sat_one_page[] = "/ham/HamClock/esats.pl?tlename=%s"; // command to get one TLE
+static const char sat_get_all[] PROGMEM = "/esats.pl?getall=";     // command to get all TLE
+static const char sat_one_page[] = "/esats.pl?tlename=%s"; // command to get one TLE
 static Satellite *sat;                  // satellite definition, if any
 static Observer *obs;                   // DE
 static SatRiseSet sat_rs;               // event info for current sat
@@ -78,30 +79,6 @@ static char sat_name[NV_SATNAME_LEN];   // NV_SATNAME cache (spaces are undersco
 static time_t tle_refresh;              // last TLE update
 static bool new_pass;                   // set when new pass is ready
 
-
-/* completely undefine the current sat
- */
-static void unsetSat()
-{
-    if (sat) {
-        delete sat;
-        sat = NULL;
-    }
-    if (sat_path) {
-        free (sat_path);
-        sat_path = NULL;
-    }
-    for (int i = 0; i < N_FOOT; i++) {
-        if (sat_foot[i]) {
-            free (sat_foot[i]);
-            sat_foot[i] = NULL;
-        }
-    }
-
-    sat_name[0] = '\0';
-    NVWriteString (NV_SATNAME, sat_name);
-    dx_info_for_sat = false;
-}
 
 /* copy from_str to to_str up to maxlen, changing all from_char to to_char
  */
@@ -174,7 +151,7 @@ static void risetAlarm (int rate)
         pthread_t tid;
         int e = pthread_create (&tid, NULL, gpioThread, NULL);
         if (e != 0)
-            Serial.printf ("GPIO thread err: %s\n", strerror(e));
+            Serial.printf (_FX("GPIO thread err: %s\n"), strerror(e));
     }
 
     // tell helper thread what we want done
@@ -191,6 +168,34 @@ static void risetAlarm (int rate)
 }
 
 #endif // _SUPPORT_GPIO
+
+
+
+/* completely undefine the current sat
+ */
+static void unsetSat()
+{
+    if (sat) {
+        delete sat;
+        sat = NULL;
+    }
+    if (sat_path) {
+        free (sat_path);
+        sat_path = NULL;
+    }
+    for (int i = 0; i < N_FOOT; i++) {
+        if (sat_foot[i]) {
+            free (sat_foot[i]);
+            sat_foot[i] = NULL;
+        }
+    }
+
+    sat_name[0] = '\0';
+    NVWriteString (NV_SATNAME, sat_name);
+    dx_info_for_sat = false;
+
+    risetAlarm (-1);
+}
 
 /* fill sat_foot with loci of points that see the sat at various viewing altitudes.
  * N.B. call this before updateSatPath malloc's its memory
@@ -637,65 +642,87 @@ static void drawSatNow()
     tft.fillCircle (x, y, SAT_UP_R, SAT_COLOR);
 }
 
-/* draw event title and time t in the dx_info box unless t < 0 then just show title.
+/* draw event label and time t in the dx_info box unless t < 0 then just show title.
  * t is in days: if > 1 hour show HhM else M:S
  */
-static void drawSatTime (const char *title, float t)
+static void drawSatTime (const char *label, uint16_t color, float t)
 {
     if (!sat)
         return;
 
     resetWatchdog();
 
-    static char prev_title[30];
+    // previous state
+    static char prev_label[3];                  // use just first few chars
     static uint8_t prev_a, prev_b;
 
+    // layout
+    const uint16_t font_y = dx_info_b.y+2*FONT_H-FONT_D;
+    const uint16_t erase_h = 26;
+    const uint16_t erase_y = font_y-erase_h+3;
+
+    // prep font
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (SAT_COLOR);
+    tft.setTextColor (color);
+    uint16_t l_w = getTextWidth(label) + 2;     // right end can be slightly chopped
 
-    // erase if different title
-    if (strcmp (title, prev_title)) {
-        tft.fillRect (dx_info_b.x, dx_info_b.y+FONT_H, dx_info_b.w, FONT_H, RA8875_BLACK);
-        strncpy (prev_title, title, sizeof(prev_title)-1);
-    }
+    // note whether label has changed
+    bool new_label = strncmp (label, prev_label, sizeof(prev_label)) != 0;
+    if (new_label)
+        memcpy (prev_label, label, sizeof(prev_label));
 
-    // draw title (even if the same, in case it was erased for some other reason)
-    tft.setCursor (dx_info_b.x+1, dx_info_b.y+2*FONT_H-5);
-    tft.print (title);
-    uint16_t timex = tft.getCursorX();
-
-    // draw time unless coded to be ignored
+    // draw
     if (t >= 0) {
-        // assume H:M
+
+        // draw label and time
+
+        // draw label right-justified in left half
+        if (new_label) {
+            tft.fillRect (dx_info_b.x+1, erase_y, dx_info_b.w/2-1, erase_h, RA8875_BLACK);
+            // tft.drawRect (dx_info_b.x+1, erase_y, dx_info_b.w/2-1, erase_h, RA8875_RED);
+        }
+        tft.setCursor (dx_info_b.x + dx_info_b.w/2 - l_w, font_y);
+        tft.print (label);
+
+        // format time as HhM else M:S
+        t *= 24;                        // t is now hours
+        uint8_t a, b;
         char sep = 'h';
-        t *= 24;
-        uint8_t a = t, b;
-        if (a == 0) {
-            // change to M:S
+        if (t < 1) {
+            t *= 60;                    // t is now minutes
             sep = ':';
-            t *= 60;
-            a = t;
-        }
-        b = (t - a)*60;
-
-        // erase if different time
-        if (a != prev_a || b != prev_b) {
-            tft.fillRect (timex, dx_info_b.y+FONT_H, dx_info_b.w-(timex-dx_info_b.x), FONT_H, RA8875_BLACK);
-            prev_a = a;
-            prev_b = b;
+            a = (int)t;
+            b = (int)((t-(int)t)*60);
+        } else {
+            a = (int)t;
+            b = (int)((t-(int)t)*60);
         }
 
-        // draw time (even if the same, like title, in case it was erased for some other reason)
-        tft.print(a);
-        tft.print(sep);
-        if (b < 10)
-            tft.print('0');
-        tft.print(b);
-        // tft.printf (_FX("%d:%02d"), a, b);           often causes panic
+        // draw time centered in right half
+        if (new_label || a != prev_a || b != prev_b) {
+            char t_buf[10];
+            snprintf (t_buf, sizeof(t_buf), "%d%c%02d", a, sep, b);
+            uint16_t t_w = getTextWidth(t_buf);
+            tft.fillRect (dx_info_b.x + dx_info_b.w/2, erase_y, dx_info_b.w/2-1, erase_h, RA8875_BLACK);
+            // tft.drawRect (dx_info_b.x + dx_info_b.w/2, erase_y, dx_info_b.w/2-1, erase_h, RA8875_RED);
+            tft.setCursor (dx_info_b.x + dx_info_b.w/2 + (dx_info_b.w/2-t_w)/2, font_y);
+            tft.print(t_buf);
+        }
+
+        // remember last time drawn
+        prev_a = a;
+        prev_b = b;
 
     } else {
-        // erase time
-        tft.fillRect (timex, dx_info_b.y+FONT_H, dx_info_b.w-(timex-dx_info_b.x), FONT_H, RA8875_BLACK);
+
+        // just draw label centered across entire box
+
+        if (new_label) {
+            tft.fillRect (dx_info_b.x+1, erase_y, dx_info_b.w-2, erase_h, RA8875_BLACK);
+            // tft.drawRect (dx_info_b.x+1, erase_y, dx_info_b.w-2, erase_h, RA8875_RED);
+        }
+        tft.setCursor (dx_info_b.x + (dx_info_b.w-l_w)/2, font_y);
+        tft.print(label);
     }
 }
 
@@ -789,7 +816,7 @@ static bool satLookup ()
 
         // query
         snprintf (name, name_mem.getSize(), sat_one_page, sat_name);
-        httpGET (tle_client, svr_host, name);
+        httpHCGET (tle_client, svr_host, name);
         if (!httpSkipHeader (tle_client)) {
             fatalSatError (_FX("Bad http header"));
             goto out;
@@ -881,8 +908,8 @@ static bool askSat()
     tft.setCursor (tft.width()-280, title_y);
     tft.printf (_FX("<%d Mins"), SOON_MINS);
 
-    // show what SAT_COLOR means
-    tft.setTextColor (SAT_COLOR);
+    // show what SATUP_COLOR means
+    tft.setTextColor (SATUP_COLOR);
     tft.setCursor (tft.width()-170, title_y);
     tft.print (F("Up Now"));
 
@@ -907,7 +934,7 @@ static bool askSat()
 
     // query page and skip header
     resetWatchdog();
-    httpGET (sat_client, svr_host, sat_get_all);
+    httpHCPGET (sat_client, svr_host, sat_get_all);
     if (!httpSkipHeader (sat_client))
         goto out;
 
@@ -977,14 +1004,14 @@ static bool askSat()
                 tft.print (' ');
             } else {
                 // pass in progress
-                tft.setTextColor (SAT_COLOR);
+                tft.setTextColor (SATUP_COLOR);
                 tft.print (F("Up "));
             }
         } else if (!rs.ever_up) {
             tft.setTextColor (GRAY);
             tft.print (F("NoR "));
         } else if (!rs.ever_down) {
-            tft.setTextColor (SAT_COLOR);
+            tft.setTextColor (SATUP_COLOR);
             tft.print (F("NoS "));
         }
 
@@ -1106,7 +1133,7 @@ static bool satEpochOk(time_t t)
 
 }
 
-/* show pass time and process key rise/set events
+/* show pass time and process key rise/set alarms
  */
 static void drawSatRSEvents()
 {
@@ -1120,11 +1147,11 @@ static void drawSatRSEvents()
     if (sat_rs.rise_time < sat_rs.set_time) {
         if (t_now < sat_rs.rise_time) {
             // pass lies ahead
-            drawSatTime ("Rise in ", days_to_rise);
+            drawSatTime ("Rise in", SAT_COLOR, days_to_rise);
             risetAlarm(days_to_rise < ALARM_DT ? RISING_RATE : -1);
         } else if (t_now < sat_rs.set_time) {
             // pass in progress
-            drawSatTime (" Set in ", days_to_set);
+            drawSatTime ("Set in", SAT_COLOR, days_to_set);
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
@@ -1135,7 +1162,7 @@ static void drawSatRSEvents()
     } else {
         if (t_now < sat_rs.set_time) {
             // pass in progress
-            drawSatTime (" Set in ", days_to_set);
+            drawSatTime ("Set in", SAT_COLOR, days_to_set);
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
@@ -1232,11 +1259,11 @@ void updateSatPass()
 
     // check edge cases
     if (!sat_rs.ever_up) {
-        drawSatTime (_FX("     No rise"), -1);
+        drawSatTime (_FX("No rise"), SAT_COLOR, -1);
         return;
     }
     if (!sat_rs.ever_down) {
-        drawSatTime (_FX("      No set"), -1);
+        drawSatTime (_FX("No set"), SAT_COLOR, -1);
         return;
     }
 
@@ -1607,7 +1634,7 @@ bool isNewPass()
  */
 bool isSatMoon()
 {
-    return (sat && !strcmp_P (sat_name, PSTR("Moon")));
+    return (sat && !strcmp (sat_name, _FX("Moon")));
 }
 
 /* return malloced array of malloced strings containing all available satellite names and their TLE;
@@ -1628,7 +1655,7 @@ const char **getAllSatNames()
 
     // query page and skip header
     resetWatchdog();
-    httpGET (sat_client, svr_host, sat_get_all);
+    httpHCPGET (sat_client, svr_host, sat_get_all);
     if (!httpSkipHeader (sat_client)) {
         sat_client.stop();
         return (NULL);
@@ -1660,11 +1687,11 @@ const char **getAllSatNames()
     return (all_names);
 }
 
-/* return count of parallel lists of next several days UTC rise and set times for the current sat.
+/* return count of parallel lists of next several days UTC rise and set events for the current sat.
  * caller can assume each rises[i] < sets[i].
  * N.B. caller must free each list iff return > 0.
  */
-int nextSatRSEvents (time_t **rises, time_t **sets)
+int nextSatRSEvents (time_t **rises, float **raz, time_t **sets, float **saz)
 {
 
     // start now
@@ -1693,14 +1720,20 @@ int nextSatRSEvents (time_t **rises, time_t **sets)
                 // init tables for realloc
                 if (n_table == 0) {
                     *rises = NULL;
+                    *raz = NULL;
                     *sets = NULL;
+                    *saz = NULL;
                 }
 
                 *rises = (time_t *) realloc (*rises, (n_table+1) * sizeof(time_t *));
+                *raz = (float *) realloc (*raz, (n_table+1) * sizeof(float *));
                 *sets = (time_t *) realloc (*sets, (n_table+1) * sizeof(time_t *));
+                *saz = (float *) realloc (*saz, (n_table+1) * sizeof(float *));
 
                 (*rises)[n_table] = rt;
+                (*raz)[n_table] = rs.rise_az;
                 (*sets)[n_table] = st;
+                (*saz)[n_table] = rs.set_az;
 
                 n_table++;
             }
@@ -1721,66 +1754,88 @@ int nextSatRSEvents (time_t **rises, time_t **sets)
     return (n_table);
 }
 
-/* display table of several local DE rise/set events for the current sat overlaid on the main map.
- * return after user has clicked ok and map has been primed for fresh redraw.
+/* display table of several local DE rise/set events for the current sat using whole screen.
+ * return after user has clicked ok or time out.
+ * caller should call initScreen() after return.
  */
-void showNextSatEvents ()
+static void showNextSatEvents ()
 {
-    // fresh map as touch feedback
-    tft.fillRect (map_b.x, map_b.y, map_b.w, map_b.h, RA8875_BLACK);
+    // clean
+    hideClocks();
+    eraseScreen();
+    resetWatchdog();
 
     // setup layout
-    #define _SNS_LR_B     40            // left-right border
-    #define _SNS_TOP_B    9             // top border
-    #define _SNS_DAY_W    60            // width of day column
-    #define _SNS_HHMM_W   70            // width of HH:MM columns
-    #define _SNS_TIMEOUT  MENU_TO       // ms
+    #define _SNS_LR_B     10                    // left-right border
+    #define _SNS_TOP_B    10                    // top border
+    #define _SNS_DAY_W    60                    // width of day column
+    #define _SNS_HHMM_W   130                   // width of HH:MM@az columns
+    #define _SNS_ROWH     34                    // row height
+    #define _SNS_TIMEOUT  30000                 // ms
+    #define _SNS_HILITE   RGB565(0,50,0)        // highlight color
 
     // init scan coords
-    uint16_t x = map_b.x + _SNS_LR_B;
-    uint16_t y = map_b.y + CELL_H + _SNS_TOP_B;
+    uint16_t x = _SNS_LR_B;
+    uint16_t y = _SNS_ROWH + _SNS_TOP_B;
 
     // draw header prompt
+    char user_name[NV_SATNAME_LEN];
+    strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setCursor (x, y);
     tft.setTextColor (DE_COLOR);
-    tft.print (F("Day     Rise     Set       Up"));
+    tft.setCursor (x, y); tft.print (F("Day"));
+    tft.setCursor (x+_SNS_DAY_W, y); tft.print (F("Rise @Az"));
+    tft.setCursor (x+_SNS_DAY_W+_SNS_HHMM_W, y); tft.print (F("Set @Az"));
+    tft.setCursor (x+_SNS_DAY_W+2*_SNS_HHMM_W, y); tft.print (F("Up"));
+        tft.setTextColor (RA8875_RED); tft.print (F("  >10 Mins      "));
+    tft.setTextColor (DE_COLOR);
+    tft.print (user_name);
 
-    // draw resume button box
-    SBox resume_b;
-    resume_b.w = 100;
-    resume_b.x = map_b.x + map_b.w - resume_b.w - _SNS_LR_B;
-    resume_b.y = map_b.y + _SNS_TOP_B + FONT_D;
-    resume_b.h = CELL_H;
-    static const char button_name[] = "Resume";
-    drawStringInBox (button_name, resume_b, false, RA8875_GREEN);
-
-    // ready for table
-    tft.drawPR();
+    // draw ok button box
+    SBox ok_b;
+    ok_b.w = 100;
+    ok_b.x = tft.width() - ok_b.w - _SNS_LR_B;
+    ok_b.y = FONT_D;
+    ok_b.h = _SNS_ROWH;
+    static const char button_name[] = "Ok";
+    drawStringInBox (button_name, ok_b, false, RA8875_GREEN);
 
     // advance to first data row
-    y += CELL_H;
+    y += _SNS_ROWH;
 
     // get list of times (ESP takes a while so show signs of life)
     tft.setCursor (x, y);
-    tft.print (F("Computing..."));
+    tft.print (F("Calculating..."));
     time_t *rises, *sets;
-    int n_times = nextSatRSEvents (&rises, &sets);
-    tft.fillRect (x, y-22, 200, 100, RA8875_BLACK);     // font y - font height
+    float *razs, *sazs;
+    int n_times = nextSatRSEvents (&rises, &razs, &sets, &sazs);
+    tft.fillRect (x, y-24, 250, 100, RA8875_BLACK);     // font y - font height
 
     // show list, if any
+    resetWatchdog();
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor (RA8875_WHITE);
     if (n_times == 0) {
 
         tft.setCursor (x, y);
         tft.print (F("No events"));
-        tft.drawPR();
 
     } else {
 
+
+        // a little visual organization aid
+        for (int i = 0; i < (tft.height()-y)/_SNS_ROWH; i++) {
+            if ((i & 1) == 0)
+                tft.fillRect (0, y + i*_SNS_ROWH + 8, tft.width(), _SNS_ROWH, _SNS_HILITE);
+        }
+        tft.fillRect (0, y-_SNS_ROWH+7, tft.width()-1, 3, _SNS_HILITE);
+        tft.fillRect (tft.width()/2-1, y-_SNS_ROWH+8,
+                            3, _SNS_ROWH*((tft.height()-(y-_SNS_ROWH+8))/_SNS_ROWH), _SNS_HILITE);
+
         // draw table
         for (int i = 0; i < n_times; i++) {
+
+            resetWatchdog();
 
             // font is variable width so we must space each column separately
             char buf[30];
@@ -1794,72 +1849,66 @@ void showNextSatEvents ()
             int rt_wd = weekday(rt);
             int st_wd = weekday(st);
 
-            // show rise time
+            // show rise day
             snprintf (buf, sizeof(buf), "%.3s", dayShortStr(rt_wd));
+            tft.setTextColor (RA8875_WHITE);
             tft.setCursor (x, y);
             tft.print (buf);
 
-            snprintf (buf, sizeof(buf), "%02dh%02d", hour(rt), minute(rt));
+            // show rise time/az
+            snprintf (buf, sizeof(buf), _FX("%02dh%02d @%.0f"), hour(rt), minute(rt), razs[i]);
             tft.setCursor (x+_SNS_DAY_W, y);
             tft.print (buf);
 
             // if set time is tomorrow start new line with blank rise time
             if (rt_wd != st_wd) {
                 // next row with wrap
-                if ((y += CELL_H) > map_b.y + map_b.h - CELL_H) {
-                    if ((x += map_b.w/2) > map_b.x + map_b.w)
-                        break;
-                    y = map_b.y + 2*CELL_H + _SNS_TOP_B;        // skip resume_b
+                if ((y += _SNS_ROWH) > tft.height()) {
+                    if ((x += tft.width()/2) > tft.width())
+                        break;                          // no more room
+                    y = 2*_SNS_ROWH + _SNS_TOP_B;       // skip ok_b
                 }
 
                 snprintf (buf, sizeof(buf), "%.3s", dayShortStr(st_wd));
                 tft.setCursor (x, y);
                 tft.print (buf);
-
-                snprintf (buf, sizeof(buf), "     ");
-                tft.setCursor (x+_SNS_DAY_W, y);
-                tft.print (buf);
             }
 
-            // show set time
-            snprintf (buf, sizeof(buf), "%02dh%02d", hour(st), minute(st));
+            // show set time/az
+            snprintf (buf, sizeof(buf), _FX("%02dh%02d @%.0f"), hour(st), minute(st), sazs[i]);
             tft.setCursor (x+_SNS_DAY_W+_SNS_HHMM_W, y);
             tft.print (buf);
 
             // show up time, beware longer than 1 hour (moon!)
             if (up >= 3600)
-                snprintf (buf, sizeof(buf), "%02dh%02d", up/3600, (up-3600*(up/3600))/60);
+                snprintf (buf, sizeof(buf), _FX("%02dh%02d"), up/3600, (up-3600*(up/3600))/60);
             else
-                snprintf (buf, sizeof(buf), "%02d:%02d", up/60, up-60*(up/60));
+                snprintf (buf, sizeof(buf), _FX("%02d:%02d"), up/60, up-60*(up/60));
             tft.setCursor (x+_SNS_DAY_W+2*_SNS_HHMM_W, y);
+            tft.setTextColor (up >= 600 ? RA8875_RED : RA8875_WHITE);
             tft.print (buf);
 
-            // draw as each is computed
-            tft.drawPR();
-
             // next row with wrap
-            if ((y += CELL_H) > map_b.y + map_b.h - CELL_H) {
-                if ((x += map_b.w/2) > map_b.x + map_b.w)
-                    break;
-                y = map_b.y + 2*CELL_H + _SNS_TOP_B;        // skip resume_b
+            if ((y += _SNS_ROWH) > tft.height()) {
+                if ((x += tft.width()/2) > tft.width())
+                    break;                              // no more room
+                y = 2*_SNS_ROWH + _SNS_TOP_B;           // skip ok_b
             }
         }
 
-        // finished with time lists
+        // finished with lists
         free ((void*)rises);
+        free ((void*)razs);
         free ((void*)sets);
+        free ((void*)sazs);
     }
 
     // wait for fresh tap or timeout
     SCoord tap;
-    (void) waitForTap (resume_b, NULL, _SNS_TIMEOUT, false, tap);
+    (void) waitForTap (ok_b, NULL, _SNS_TIMEOUT, false, tap);
 
     // ack
-    drawStringInBox (button_name, resume_b, true, RA8875_GREEN);
-    tft.drawPR();
-
-    // restore map
-    initEarthMap();
+    drawStringInBox (button_name, ok_b, true, RA8875_GREEN);
 }
 
 /* called when tap within dx_info_b while showing a sat to show menu of choices.
@@ -1908,10 +1957,9 @@ void drawDXSatMenu (const SCoord &s)
             initEarthMap();
 
         } else if (mitems[_DXS_SATRST].set) {
-            // erase menu then show table of rise/set
-            displaySatInfo();
-            drawSatRSEvents();
+            // uses entire screen
             showNextSatEvents();
+            initScreen();
 
         } else {
             fatalError (_FX("Bug! no dx sat menu"));

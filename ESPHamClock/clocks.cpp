@@ -18,16 +18,15 @@ const char *gpsd_server, *ntp_server;           // at most one set to static sto
 static bool hide_clocks;                        // run but don't display
 static int prev_yr, prev_mo, prev_dy, prev_hr, prev_mn, prev_sc, prev_wd;
 static bool time_was_bad = true;                // used to erase ? when confirmed ok again
-static uint8_t doy_on;                          // show day of year instead of month date.
 
 // TimeLib's now() stays at real UTC, but user can adjust time offset
 static int32_t utc_offset;                      // nowWO() offset from UTC, secs
 
 // display 
-#define UTC_W           14                      // UTC button width
+#define UTC_W           14                      // UTC button width in upper right corner of clock_b
+#define UTC_H           (hms_h-1)               // UTC button height in upper right corner of clock_b
 #define QUESTION_W      28                      // Question mark width
 #define hms_h           (5*clock_b.h/8-7)       // HMS height
-#define UTC_H           (hms_h-1)               // UTC button height
 #define FFONT_W         6                       // fixed font width
 #define FFONT_H         8                       // fixed font height
 #define HMS_C           RA8875_WHITE            // HMS color
@@ -72,7 +71,7 @@ static time_t getTime(void)
     gpsd_server = NULL;
     ntp_server = NULL;
 
-    if (useGPSD())
+    if (useGPSDTime())
         t = getGPSDUTC(&gpsd_server);
     if (t == 0)
         t = getNTPUTC(&ntp_server);
@@ -87,7 +86,7 @@ static time_t getTime(void)
     return (t);
 }
 
-/* given number of seconds, print HH:MM
+/* given number of seconds into a day, print HH:MM
  */
 static void prHM (const uint32_t t)
 {
@@ -97,6 +96,25 @@ static void prHM (const uint32_t t)
     char buf[20];
     sprintf (buf, "%d:%02d", hh, mm);
     tft.print(buf);
+}
+
+/* given unix seconds print 12 H:MM followed by AM/PM or A/P to always use exactly 6 chars
+ */
+static void prHM6 (const time_t t)
+{
+    uint16_t h = hour(t);
+    uint16_t m = minute(t);
+
+    int h12 = h%12;
+    if (h12 == 0)
+        h12 = 12;
+
+    char buf[20];
+    if (h12 < 10)
+        snprintf (buf, sizeof(buf), "%d:%02d%s", h12, m, h < 12 ? "AM" : "PM");
+    else
+        snprintf (buf, sizeof(buf), "%d:%02d%c", h12, m, h < 12 ? 'A' : 'P');
+    tft.print (buf);
 }
 
 /* common portion for drawing the rise set info in the given box.
@@ -193,39 +211,47 @@ static void drawAnalogClock (time_t delocal_t)
     int mo = month(delocal_t);
 
     // convert hours and minutes to degrees CCW from 3 oclock
-    int16_t hr360 = 30*(3-(((hr+24)%12) + mn/60.0F));                 // + partial hour
-    int16_t mn360 = 6*(15-mn);
+    float hr360 = 30.0F*(3-(((hr+24)%12) + mn/60.0F));                 // + partial hour
+    float mn360 = 6.0F*(15-mn);
+
+    float dcr = 0.96F*r;                                        // dots center radius
+    float mfr = 0.90F*r;                                        // minute hand far radius
+    float mnr = 0.04F*r;                                        // minute hand near radius
+    float hfr = 0.45F*r;                                        // hour hand far radius
+    float hnr = 0.06F*r;                                        // hour hand near radius
 
     // start clock face
     tft.fillRect (de_info_b.x, de_info_b.y, de_info_b.w, de_info_b.h-1, RA8875_BLACK);
     tft.drawCircle (x0, y0, r, DE_COLOR);
     for (uint16_t a = 0; a < 360; a += 30)
-        tft.fillCircle (x0+0.95F*r*cosf(deg2rad(a)), y0+0.95F*r*sinf(deg2rad(a)), 2, DE_COLOR);
+        tft.fillCircle (roundf(x0+dcr*cosf(deg2rad(a))), roundf(y0+dcr*sinf(deg2rad(a))), 2, DE_COLOR);
 
     // draw full length minute hand
-    float cosmn = r*cosf(deg2rad(mn360));
-    float sinmn = r*sinf(deg2rad(mn360));
-    uint16_t farmnx = floorf(x0+0.90F*cosmn+0.5F);
-    uint16_t farmny = floorf(y0-0.90F*sinmn+0.5F);                    // -y up
-    int16_t nearmnx = floorf(0.04F*sinmn+0.5F);
-    int16_t nearmny = floorf(0.04F*cosmn+0.5F);
+    float cosmn = cosf(deg2rad(mn360));
+    float sinmn = sinf(deg2rad(mn360));
+    uint16_t farmnx = roundf(x0+mfr*cosmn);
+    uint16_t farmny = roundf(y0-mfr*sinmn);                     // -y up
+    int16_t nearmnx = roundf(mnr*sinmn);
+    int16_t nearmny = roundf(mnr*cosmn);
     tft.drawLine (x0+nearmnx, y0+nearmny, farmnx, farmny, DE_COLOR);
     tft.drawLine (x0-nearmnx, y0-nearmny, farmnx, farmny, DE_COLOR);
-    tft.drawCircle (x0, y0, r*0.04F+0.5F, DE_COLOR);
+    tft.drawCircle (x0, y0, roundf(mnr), DE_COLOR);
 
     // draw shorter hour hand
-    float coshr = r*cosf(deg2rad(hr360));
-    float sinhr = r*sinf(deg2rad(hr360));
-    uint16_t farhrx = floorf(x0+0.45F*coshr+0.5F);
-    uint16_t farhry = floorf(y0-0.45F*sinhr+0.5F);                    // -y up
-    int16_t nearhrx = floorf(0.06F*sinhr+0.5F);
-    int16_t nearhry = floorf(0.06F*coshr+0.5F);
+    float coshr = cosf(deg2rad(hr360));
+    float sinhr = sinf(deg2rad(hr360));
+    uint16_t farhrx = roundf(x0+hfr*coshr);
+    uint16_t farhry = roundf(y0-hfr*sinhr);                     // -y up
+    int16_t nearhrx = roundf(hnr*sinhr);
+    int16_t nearhry = roundf(hnr*coshr);
     tft.drawLine (x0+nearhrx, y0+nearhry, farhrx, farhry, DE_COLOR);
     tft.drawLine (x0-nearhrx, y0-nearhry, farhrx, farhry, DE_COLOR);
-    tft.drawCircle (x0, y0, r*0.06F+0.5F, DE_COLOR);
+    tft.drawCircle (x0, y0, roundf(hnr), DE_COLOR);
 
     // draw time labels too if on
     if (de_time_fmt == DETIME_ANALOG_DTTM) {
+
+        // dow
         const uint16_t indent = 5;
         const uint16_t rowh = 12;
         const uint16_t charw = 6;
@@ -234,16 +260,54 @@ static void drawAnalogClock (time_t delocal_t)
         tft.setTextColor (DE_COLOR);
         tft.setCursor (tx, y0-r);
         tft.print (dayShortStr(wd));
+
+        // am/pm
         tft.setCursor (tx, y0-r+rowh);
         tft.print (hr < 12 ? "AM" : "PM");
+
+        // mon
         tx = de_info_b.x+de_info_b.w-indent-3*charw;
         tft.setCursor (tx, y0-r);
         tft.print (monthShortStr(mo));
+
+        // date
         tx = de_info_b.x+de_info_b.w-indent-charw;
         if (dy > 9)
             tx -= charw;
         tft.setCursor (tx, y0-r+rowh);
         tft.print (dy);
+
+        // sunrise/set
+        time_t trise, tset, t0 = nowWO();
+        getSolarRS (t0, de_ll, &trise, &tset);
+
+        // sunrise symbol
+        // const uint16_t sx = de_info_b.x + 17;
+        // const uint16_t sy = de_info_b.y + de_info_b.h - 15;
+        // const uint16_t sr = 4;
+        // tft.fillCircle (sx, sy, sr, RA8875_WHITE);
+        // tft.fillRect (sx - sr, sy - 1, 2*sr+1, sr + 2, RA8875_BLACK);
+        // tft.drawLine (sx - 2*sr, sy - 1, sx + 2*sr, sy - 1, DE_COLOR);
+
+        // labels
+        tft.setCursor (de_info_b.x + indent, de_info_b.y + de_info_b.h - 2*rowh);
+        tft.print (F("SR"));
+        tft.setCursor (de_info_b.x + de_info_b.w - (2*charw+indent), de_info_b.y + de_info_b.h - 2*rowh);
+        tft.print (F("SS"));
+
+        // rise
+        tft.setCursor (de_info_b.x + indent, de_info_b.y + de_info_b.h - rowh);
+        if (trise == 0 || tset == 0)
+            tft.print ("NoRise");
+        else
+            prHM6 (trise+de_tz.tz_secs);
+
+        // set
+        tft.setCursor (de_info_b.x + de_info_b.w - (6*charw+indent),  de_info_b.y + de_info_b.h - rowh);
+        if (trise == 0 || tset == 0)
+            tft.print (" NoSet");
+        else
+            prHM6 (tset+de_tz.tz_secs);
     }
 }
 
@@ -393,12 +457,6 @@ void initTime()
 
     // start using time source
     enableSyncProvider();
-
-    // init doy_on
-    if (!NVReadUInt8 (NV_DOY_ON, &doy_on)) {
-        doy_on = 0;
-        NVWriteUInt8 (NV_DOY_ON, doy_on);
-    }
 }
 
 /* do not display clocks
@@ -591,7 +649,7 @@ void updateClocks(bool all)
         tft.setTextColor(MDY_C);
 
         // print in desired format
-        if (doy_on) {
+        if (getDOY()) {
 
             // Weekday DOY <doy> year
 
@@ -692,7 +750,7 @@ void updateClocks(bool all)
             drawDigitalClock (t + de_tz.tz_secs);
             break;
         default:
-            fatalError ("Bug! unknown de fmt %d", de_time_fmt);
+            fatalError (_FX("Bug! unknown de fmt %d"), de_time_fmt);
             break;
         }
 
@@ -746,86 +804,118 @@ void drawDXSunRiseSetInfo()
 
 }
 
-/* return whether touch event at s involved the clocks.
- * if so, update utc_offset and possibly restart maps if large change.
+/* return whether touch event at s was in clock_b OTHER THAN lkscrn_b and stopwatch_b which have already
+ *   been checked.
+ * if so, offer menu to change time then update utc_offset and possibly restart maps if large change.
  * N.B. we expect caller to call updateClocks if we return true.
  */
-bool checkClockTouch (SCoord &s, TouchType tt)
+bool checkClockTouch (SCoord &s)
 {
-    // ignore if not in clock box
-    if (!inBox (s, clock_b))
+    // ignore if not in clock box or in stopwatch_b or lkscrn_b
+    if (!inBox (s, clock_b) || inBox (s, lkscrn_b) || inBox (s, stopwatch_b))
         return (false);
 
-    // find position within box
-    int16_t dx = s.x - clock_b.x;
-    int16_t dy = s.y - clock_b.y;
+    // find touch position within clock_b
+    uint16_t dx = s.x - clock_b.x;
+    uint16_t dy = s.y - clock_b.y;
 
-    // get time now
+    // get time state now
     uint32_t real_utc = now();
-    uint32_t user_utc = real_utc + utc_offset;
-
-    // see how much time changes
+    uint32_t user_utc = real_utc + utc_offset;          // don't use nowWO
     int32_t off0 = utc_offset;
 
-    // update depending on where touch occurred
-    if (dy < hms_h) {
-        // touched HMS or utc
-        if (dx > clock_b.w-UTC_W) {
-            // touched UTC
-            if (utc_offset != 0 || !clockTimeOk()) {
-                utc_offset = 0;
-                setSyncProvider (getTime);
-            }
-        } else {
-            // touched HMS
-            uint16_t mid_h = hms_h/2;
-            if (dx < clock_b.w/3) {
-                // touched hours
-                if (dy < mid_h/2)
-                    utc_offset += 2*3600;
-                else if (dy < mid_h)
-                    utc_offset += 3600;
-                else if (dy < 3*mid_h/2)
-                    utc_offset -= 3600;
-                else
-                    utc_offset -= 2*3600;
-            } else if (dx < 2*clock_b.w/3) {
-                // touched minutes
-                if (dy < mid_h/2)
-                    utc_offset += 10*60;
-                else if (dy < mid_h)
-                    utc_offset += 60;
-                else if (dy < 3*mid_h/2)
-                    utc_offset -= 60;
-                else
-                    utc_offset -= 10*60;
-            } else if (dx < clock_b.w-UTC_W-QUESTION_W) {
-                // touched seconds -- chop to whole minute
-                utc_offset = 60*(user_utc/60) - real_utc;
-            }
+    // check a few special cases but mostly we put up a menu to allow editing time
+
+    if (dx >= clock_b.w-UTC_W && dy <= UTC_H) {
+
+        // tapped UTC "button": return to UTC if not already
+
+        if (utc_offset != 0 || !clockTimeOk()) {
+            utc_offset = 0;
+            setSyncProvider (getTime);
         }
-    } else {
-        // DMY
-        uint16_t mid_h = hms_h + (clock_b.h-hms_h)/2;
-        uint16_t s_n = dx/(clock_b.w/6);              // 0 1 .. 4 5 section
-        DateFormat df = getDateFormat();        
-        if (s_n <= 1) {
-            // touched day of week in any format
-            if (dy < mid_h)
-                utc_offset += SECSPERDAY;
-            else
-                utc_offset -= SECSPERDAY;
-        } else if ((s_n == 2 && df == DF_MDY) || (s_n == 3 && (df == DF_DMY || df == DF_YMD))) {
-            // touched month
-            if (tt == TT_HOLD) {
-                // just toggle DOY, no change in time
-                doy_on = !doy_on;
-                NVWriteUInt8 (NV_DOY_ON, doy_on);
-                logState();
-            } else if (!doy_on) {
+
+    } else if (dx < 7*clock_b.w/8) {
+
+        // show and engage menu of time change choices
+
+        // list of menu choices. N.B. must be in same order as mitems[]
+        enum {     
+            _CT_TITLE,
+            _CT_DIRLBL,
+                _CT_DIR_FRW,
+                _CT_DIR_BKW,
+            _CT_MODLBL,
+                _CT_MOD_1MIN,
+                _CT_MOD_10MINS,
+                _CT_MOD_1HOUR,
+                _CT_MOD_2HOURS,
+                _CT_MOD_1DAY,
+                _CT_MOD_1WEEK,
+                _CT_MOD_1MON,
+                _CT_MOD_1YEAR,
+                _CT_MOD_0SECS,
+            _CT_N
+        };
+        #define _CT_INDENT1 5
+        #define _CT_INDENT2 10
+
+        // preset to previous settings
+        static uint8_t prev_dir = _CT_DIR_FRW;
+        static uint8_t prev_mod = _CT_MOD_1HOUR;
+
+        // menu
+        MenuItem mitems[_CT_N] = {
+            { MENU_LABEL, false, 0, _CT_INDENT1, " Change Time"},
+            { MENU_LABEL, false, 0, _CT_INDENT1, "Direction:"},
+                { MENU_1OFN, prev_dir == _CT_DIR_FRW, 1, _CT_INDENT2, "Forward"},
+                { MENU_1OFN, prev_dir == _CT_DIR_BKW, 1, _CT_INDENT2, "Backward"},
+            { MENU_LABEL, false, 2, _CT_INDENT1, "Amount:"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1MIN, 3, _CT_INDENT2, "1 minute"},
+                { MENU_1OFN, prev_mod == _CT_MOD_10MINS, 3, _CT_INDENT2, "10 minutes"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1HOUR, 3, _CT_INDENT2, "1 hour"},
+                { MENU_1OFN, prev_mod == _CT_MOD_2HOURS, 3, _CT_INDENT2, "2 hours"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1DAY, 3, _CT_INDENT2, "1 day"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1WEEK, 3, _CT_INDENT2, "1 week"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1MON, 3, _CT_INDENT2, "1 month"},
+                { MENU_1OFN, prev_mod == _CT_MOD_1YEAR, 3, _CT_INDENT2, "1 year"},
+                { MENU_1OFN, prev_mod == _CT_MOD_0SECS, 3, _CT_INDENT2, "Zero seconds"},
+        };
+
+        // run, do nothing if cancelled
+        SBox menu_b = clock_b;
+        menu_b.x += 20;
+        SBox ok_b;
+        MenuInfo menu = {menu_b, ok_b, false, false, 1, _CT_N, mitems};
+        if (runMenu(menu)) {
+
+            // find change direction
+            int sign = mitems[_CT_DIR_FRW].set ? 1 : -1;
+            prev_dir = sign > 0 ? _CT_DIR_FRW : _CT_DIR_BKW;
+
+            // update utc_offset according to desired change
+            if (mitems[_CT_MOD_1MIN].set) {
+                utc_offset += 60 * sign;
+                prev_mod = _CT_MOD_1MIN;
+            } else if (mitems[_CT_MOD_10MINS].set) {
+                utc_offset += 600 * sign;
+                prev_mod = _CT_MOD_10MINS;
+            } else if (mitems[_CT_MOD_1HOUR].set) {
+                utc_offset += 3600 * sign;
+                prev_mod = _CT_MOD_1HOUR;
+            } else if (mitems[_CT_MOD_2HOURS].set) {
+                utc_offset += 2*3600 * sign;
+                prev_mod = _CT_MOD_2HOURS;
+            } else if (mitems[_CT_MOD_1DAY].set) {
+                utc_offset += SECSPERDAY * sign;
+                prev_mod = _CT_MOD_1DAY;
+            } else if (mitems[_CT_MOD_1WEEK].set) {
+                utc_offset += 7*SECSPERDAY * sign;
+                prev_mod = _CT_MOD_1WEEK;
+            } else if (mitems[_CT_MOD_1MON].set) {
                 tmElements_t tm;
                 breakTime (user_utc, tm);
-                if (dy < mid_h) {
+                if (sign > 0) {
                     if (++tm.Month > 12) {
                         tm.Month = 1;
                         tm.Year += 1;
@@ -837,34 +927,26 @@ bool checkClockTouch (SCoord &s, TouchType tt)
                     }
                 }
                 utc_offset = makeTime(tm) - real_utc;
-            }
-        } else if ((s_n == 2 && df == DF_DMY) || (s_n == 3 && df == DF_MDY) || (s_n == 4 && df == DF_YMD)) {
-            // touched date of month
-            if (tt == TT_HOLD) {
-                // just toggle DOY, no change in time
-                doy_on = !doy_on;
-                NVWriteUInt8 (NV_DOY_ON, doy_on);
-                logState();
+                prev_mod = _CT_MOD_1MON;
+            } else if (mitems[_CT_MOD_1YEAR].set) {
+                tmElements_t tm;
+                breakTime (user_utc, tm);
+                tm.Year += sign;
+                utc_offset = makeTime(tm) - real_utc;
+                prev_mod = _CT_MOD_1YEAR;
+            } else if (mitems[_CT_MOD_0SECS].set) {
+                time_t ut = now();      // need fresh time because of time spent in menu
+                utc_offset = 60*((ut + utc_offset)/60) - ut;
+                prev_mod = _CT_MOD_0SECS;
             } else {
-                if (dy < mid_h)
-                    utc_offset += SECSPERDAY;
-                else
-                    utc_offset -= SECSPERDAY;
+                fatalError (_FX("No clock menu set"));
             }
-        } else if ((s_n == 2 && df == DF_YMD) || (s_n == 4 && (df == DF_DMY || df == DF_MDY))) {
-            // touched year
-            tmElements_t tm;
-            breakTime (user_utc, tm);
-            if (dy < mid_h)
-                tm.Year += 1;
-            else
-                tm.Year -= 1;
-            utc_offset = makeTime(tm) - real_utc;
         }
     }
 
     // save new offset
     NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
+    logState();
 
     // show whether UTC now
     drawUTCButton();
@@ -878,6 +960,10 @@ bool checkClockTouch (SCoord &s, TouchType tt)
     }
     if (dt >= 30)
         displaySatInfo();
+
+    // menu probably clobbered this
+    drawOneTimeDE();
+    drawDEInfo();
 
     return (true);
 }

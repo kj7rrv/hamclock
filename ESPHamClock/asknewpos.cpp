@@ -316,15 +316,15 @@ static bool allNPFieldsOK (const SBox &b, const NPField f[NPF_N], LatLong &ll, c
     bool ok = true;
 
     if (!maidenhead2ll (grid_ll, f[NPF_GRID].str)) {
-        showNPFieldError (b, f[NPF_GRID], strlen(f[NPF_GRID].str) > 0 ? "Bad grid" : "Missing grid");
+        showNPFieldError (b, f[NPF_GRID], strlen(f[NPF_GRID].str) > 0 ? _FX("Bad grid"):_FX("Missing grid"));
         ok = false;
     }
     if (!latSpecIsValid(f[NPF_LAT].str, lt)) {
-        showNPFieldError (b, f[NPF_LAT], strlen(f[NPF_LAT].str) > 0 ? "Bad lat" : "Missing lat");
+        showNPFieldError (b, f[NPF_LAT], strlen(f[NPF_LAT].str) > 0 ? _FX("Bad lat") : _FX("Missing lat"));
         ok = false;
     }
     if (!lngSpecIsValid(f[NPF_LNG].str, lg)) {
-        showNPFieldError (b, f[NPF_LNG], strlen(f[NPF_LNG].str) > 0 ? "Bad long" : "Missing long");
+        showNPFieldError (b, f[NPF_LNG], strlen(f[NPF_LNG].str) > 0 ? _FX("Bad long") : _FX("Missing long"));
         ok = false;
     }
 
@@ -464,7 +464,7 @@ bool askNewPos (const SBox &b, LatLong &op_ll, char op_grid[MAID_CHARLEN])
 
         // see whatever happened
         int tap = processNPTap (kbc, focus_fn, b, s);
-        // Serial.printf ("ask %d %c\n", tap, isalnum(tap) ? tap : '*');
+        // Serial.printf (_FX("ask %d %c\n"), tap, isalnum(tap) ? tap : '*');
 
         // update action
         switch (tap) {

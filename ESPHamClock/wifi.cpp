@@ -7,7 +7,7 @@
 
 // RSS info
 #define RSS_MAXN        15                      // max number RSS entries to cache
-static const char rss_page[] = "/ham/HamClock/RSS/web15rss.pl";
+static const char rss_page[] PROGMEM = "/RSS/web15rss.pl";
 static char *rss_titles[RSS_MAXN];                  // malloced titles
 static uint8_t n_rss_titles, rss_title_i;       // n titles and rolling index
 static bool rss_local;                          // if set: don't poll server, assume local titles
@@ -16,7 +16,7 @@ uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
 // kp historical and predicted info, new data posted every 3 hours
 #define KP_INTERVAL     3500                    // polling period, secs
 #define KP_COLOR        RA8875_YELLOW           // loading message text color
-static const char kp_page[] = "/ham/HamClock/geomag/kindex.txt";
+static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
 #define KP_VPD           8                      // number of values per day
 #define KP_NHD           7                      // N historical days
 #define KP_NPD           2                      // N predicted days
@@ -26,45 +26,45 @@ static const char kp_page[] = "/ham/HamClock/geomag/kindex.txt";
 #define XRAY_INTERVAL   610                     // polling interval, secs
 #define XRAY_LCOLOR     RGB565(255,50,50)       // long wavelength plot color, reddish
 #define XRAY_SCOLOR     RGB565(50,50,255)       // short wavelength plot color, blueish
-static const char xray_page[] = "/ham/HamClock/xray/xray.txt";
+static const char xray_page[] PROGMEM = "/xray/xray.txt";
 #define XRAY_NV         150                     // n lines to collect = 25 hours @ 10 mins per line
 
 // sunspot info, new data posted daily
 #define SSPOT_INTERVAL  3400                    // polling interval, secs
 #define SSPOT_COLOR     RA8875_CYAN             // loading message text color
-static const char ssn_page[] = "/ham/HamClock/ssn/ssn-31.txt";
+static const char ssn_page[] PROGMEM = "/ssn/ssn-31.txt";
 #define SSPOT_NV        31                      // n ssn to plot, 1 per day back 30 days, including 0
 
 // solar flux info, new data posted three times a day
 #define SFLUX_INTERVAL  3300                    // polling interval, secs
 #define SFLUX_COLOR     RA8875_GREEN            // loading message text color
-static const char sf_page[] = "/ham/HamClock/solar-flux/solarflux-99.txt";
+static const char sf_page[] PROGMEM = "/solar-flux/solarflux-99.txt";
 #define SFLUX_NV        99                      // n solar flux values, three per day for 33 days
 
 // solar wind info, new data posted every five minutes
 #define SWIND_INTERVAL  340                     // polling interval, secs
 #define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
-static const char swind_page[] = "/ham/HamClock/solar-wind/swind-24hr.txt";
+static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
 
 // STEREO A image and info, new data posted every few hours
 #define STEREO_A_INTERVAL  3800                 // polling interval, secs
 #define STEREO_A_COLOR     RA8875_BLUE          // loading message text color
-static const char stereo_a_sep_page[] = "/ham/HamClock/STEREO/sepangle.txt";
+static const char stereo_a_sep_page[] PROGMEM = "/STEREO/sepangle.txt";
 static const char stereo_a_img_page[] = 
     #if defined(_CLOCK_1600x960) 
-        "/ham/HamClock/STEREO/STEREO-A-195-320.bmp";
+        "/STEREO/STEREO-A-195-320.bmp";
     #elif defined(_CLOCK_2400x1440)
-        "/ham/HamClock/STEREO/STEREO-A-195-480.bmp";
+        "/STEREO/STEREO-A-195-480.bmp";
     #elif defined(_CLOCK_3200x1920)
-        "/ham/HamClock/STEREO/STEREO-A-195-640.bmp";
+        "/STEREO/STEREO-A-195-640.bmp";
     #else
-        "/ham/HamClock/STEREO/STEREO-A-195-160.bmp";
+        "/STEREO/STEREO-A-195-160.bmp";
     #endif
 
 // band conditions and voacap map, models change each hour
 #define BC_INTERVAL     2400                    // polling interval, secs
 #define VOACAP_INTERVAL 2500                    // polling interval, secs
-static const char bc_page[] = "/ham/HamClock/fetchBandConditions.pl";
+static const char bc_page[] = "/fetchBandConditions.pl";
 static bool bc_reverting;                       // set while waiting for BC after WX
 static time_t bc_time;                          // effective time when BC was loaded
 uint16_t bc_power;                              // VOACAP power setting
@@ -82,14 +82,14 @@ static time_t map_time;                         // effective time when map was l
 // DRAP plot info, new data posted every few minutes
 #define DRAPPLOT_INTERVAL    (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
 #define DRAPPLOT_COLOR  RA8875_RED              // loading message text color
-static const char drap_page[] = "/ham/HamClock/drap/stats.txt";
+static const char drap_page[] PROGMEM = "/drap/stats.txt";
 
 // NOAA RSG space weather scales
 #define NOAASWX_INTERVAL     3700               // polling interval, secs
-static const char noaaswx_page[] = "/ham/HamClock/NOAASpaceWX/noaaswx.txt";
+static const char noaaswx_page[] PROGMEM = "/NOAASpaceWX/noaaswx.txt";
 
 // geolocation web page
-static const char locip_page[] = "/ham/HamClock/fetchIPGeoloc.pl";
+static const char locip_page[] = "/fetchIPGeoloc.pl";
 
 // SDO images
 #define SDO_INTERVAL    3200                    // polling interval, secs
@@ -97,25 +97,25 @@ static const char locip_page[] = "/ham/HamClock/fetchIPGeoloc.pl";
 // N.B. files must match order in plot_names[]
 static const char *sdo_filename[4] = {
     #if defined(_CLOCK_1600x960) 
-        "/ham/HamClock/SDO/f_211_193_171_340.bmp",
-        "/ham/HamClock/SDO/latest_340_HMIIC.bmp",
-        "/ham/HamClock/SDO/latest_340_HMIB.bmp",
-        "/ham/HamClock/SDO/f_193_340.bmp",
+        "/SDO/f_211_193_171_340.bmp",
+        "/SDO/latest_340_HMIIC.bmp",
+        "/SDO/latest_340_HMIB.bmp",
+        "/SDO/f_193_340.bmp",
     #elif defined(_CLOCK_2400x1440)
-        "/ham/HamClock/SDO/f_211_193_171_510.bmp",
-        "/ham/HamClock/SDO/latest_510_HMIIC.bmp",
-        "/ham/HamClock/SDO/latest_510_HMIB.bmp",
-        "/ham/HamClock/SDO/f_193_510.bmp",
+        "/SDO/f_211_193_171_510.bmp",
+        "/SDO/latest_510_HMIIC.bmp",
+        "/SDO/latest_510_HMIB.bmp",
+        "/SDO/f_193_510.bmp",
     #elif defined(_CLOCK_3200x1920)
-        "/ham/HamClock/SDO/f_211_193_171_680.bmp",
-        "/ham/HamClock/SDO/latest_680_HMIIC.bmp",
-        "/ham/HamClock/SDO/latest_680_HMIB.bmp",
-        "/ham/HamClock/SDO/f_193_680.bmp",
+        "/SDO/f_211_193_171_680.bmp",
+        "/SDO/latest_680_HMIIC.bmp",
+        "/SDO/latest_680_HMIB.bmp",
+        "/SDO/f_193_680.bmp",
     #else
-        "/ham/HamClock/SDO/f_211_193_171_170.bmp",
-        "/ham/HamClock/SDO/latest_170_HMIIC.bmp",
-        "/ham/HamClock/SDO/latest_170_HMIB.bmp",
-        "/ham/HamClock/SDO/f_193_170.bmp",
+        "/SDO/f_211_193_171_170.bmp",
+        "/SDO/latest_170_HMIIC.bmp",
+        "/SDO/latest_170_HMIB.bmp",
+        "/SDO/f_193_170.bmp",
     #endif
 };
 
@@ -130,10 +130,10 @@ static bool moon_reverting;                     // flag for revertPlot1();
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
-    {"pool.ntp.org", 0},
     {"time.google.com", 0},
     {"time.apple.com", 0},
     {"time.nist.gov", 0},
+    {"pool.ntp.org", 0},
     {"europe.pool.ntp.org", 0},
     {"asia.pool.ntp.org", 0},
 };
@@ -262,7 +262,7 @@ static void geolocateIP (const char *ip)
         Serial.println(llline);
 
         // send
-        httpGET (iploc_client, svr_host, llline);
+        httpHCGET (iploc_client, svr_host, llline);
         if (!httpSkipHeader (iploc_client)) {
             Serial.println (F("geoIP header short"));
             goto out;
@@ -428,7 +428,7 @@ static void initWiFi (bool verbose)
     if (WiFi.status() == WL_CONNECTED || !strcmp (mac, mac_lh)) {
         char buf[200];
         if (!initWebServer(buf)) {
-            Serial.printf ("Web server on port %d failed: %s\n", svr_port, buf);
+            Serial.printf (_FX("Web server on port %d failed: %s\n"), svr_port, buf);
             strcpy (buf, _FX("Web server failed"));
         } else {
             snprintf (buf, sizeof(buf), _FX("Start web server on port %d"), svr_port);
@@ -456,12 +456,12 @@ void initSys()
             geolocateIP (init_locip);
         else
             tftMsg (true, 0, _FX("no network for geo IP"));
-    } else if (useGPSD()) {
-        LatLong lltmp;
-        if (getGPSDLatLong(&lltmp)) {
+    } else if (useGPSDLoc()) {
+        LatLong ll;
+        if (getGPSDLatLong(&ll)) {
 
             // good -- set de_ll
-            de_ll = lltmp;
+            de_ll = ll;
             normalizeLL (de_ll);
             NVWriteFloat (NV_DE_LAT, de_ll.lat_d);
             NVWriteFloat (NV_DE_LNG, de_ll.lng_d);
@@ -485,7 +485,7 @@ void initSys()
 
 
     // init time service as desired
-    if (useGPSD()) {
+    if (useGPSDTime()) {
         if (getGPSDUTC(&gpsd_server)) {
             tftMsg (true, 0, _FX("GPSD: time ok"));
             initTime();
@@ -731,7 +731,7 @@ static bool retrieveSunSpots (float x[SSPOT_NV], float ssn[SSPOT_NV])
         updateClocks(false);
 
         // query web page
-        httpGET (ss_client, svr_host, ssn_page);
+        httpHCPGET (ss_client, svr_host, ssn_page);
 
         // skip response header
         if (!httpSkipHeader (ss_client)) {
@@ -821,7 +821,7 @@ static bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
         resetWatchdog();
 
         // query web page
-        httpGET (sf_client, svr_host, sf_page);
+        httpHCPGET (sf_client, svr_host, sf_page);
 
         // skip response header
         if (!httpSkipHeader (sf_client)) {
@@ -909,7 +909,7 @@ static bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
         resetWatchdog();
 
         // query web page
-        httpGET (kp_client, svr_host, kp_page);
+        httpHCPGET (kp_client, svr_host, kp_page);
 
         // skip response header
         if (!httpSkipHeader (kp_client)) {
@@ -995,7 +995,7 @@ static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XR
         updateClocks(false);
 
         // query web page
-        httpGET (xray_client, svr_host, xray_page);
+        httpHCPGET (xray_client, svr_host, xray_page);
 
         // soak up remaining header
         if (!httpSkipHeader (xray_client)) {
@@ -1292,8 +1292,6 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
     // display box
     SBox &box = plot_b[pp];
 
-    uint32_t sw_timer;
-
     switch (ch) {
 
     case PLOT_CH_BC:
@@ -1418,7 +1416,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         break;
 
     case PLOT_CH_COUNTDOWN:
-        if (getSWEngineState(sw_timer) != SWE_COUNTDOWN)
+        if (getSWEngineState(NULL,NULL) != SWE_COUNTDOWN)
             return (false);
         plot_ch[pp] = ch;
         if (getSWDisplayState() == SWD_NONE)
@@ -1573,7 +1571,7 @@ void updateWiFi(void)
 
         case PLOT_CH_TEMPERATURE:
             // plot when pane reverts or new data is ready
-            if ((next_bme280_t > 0 && t0 >= next_bme280_t) || (next_bme280_t == 0 && newBME280data(ch))) {
+            if ((next_bme280_t > 0 && t0 >= next_bme280_t) || (next_bme280_t == 0 && newBME280data())) {
                 drawOneBME280Pane (box, ch);
                 next_bme280_t = 0;
             }
@@ -1581,7 +1579,7 @@ void updateWiFi(void)
 
         case PLOT_CH_PRESSURE:
             // plot when pane reverts or new data is ready
-            if ((next_bme280_p > 0 && t0 >= next_bme280_p) || (next_bme280_p == 0 && newBME280data(ch))) {
+            if ((next_bme280_p > 0 && t0 >= next_bme280_p) || (next_bme280_p == 0 && newBME280data())) {
                 drawOneBME280Pane (box, ch);
                 next_bme280_p = 0;
             }
@@ -1589,7 +1587,7 @@ void updateWiFi(void)
 
         case PLOT_CH_HUMIDITY:
             // plot when pane reverts or new data is ready
-            if ((next_bme280_h > 0 && t0 >= next_bme280_h) || (next_bme280_h == 0 && newBME280data(ch))) {
+            if ((next_bme280_h > 0 && t0 >= next_bme280_h) || (next_bme280_h == 0 && newBME280data())) {
                 drawOneBME280Pane (box, ch);
                 next_bme280_h = 0;
             }
@@ -1597,7 +1595,7 @@ void updateWiFi(void)
 
         case PLOT_CH_DEWPOINT:
             // plot when pane reverts or new data is ready
-            if ((next_bme280_d > 0 && t0 >= next_bme280_d) || (next_bme280_d == 0 && newBME280data(ch))) {
+            if ((next_bme280_d > 0 && t0 >= next_bme280_d) || (next_bme280_d == 0 && newBME280data())) {
                 drawOneBME280Pane (box, ch);
                 next_bme280_d = 0;
             }
@@ -1876,8 +1874,6 @@ void sendUserAgent (WiFiClient &client)
 
     if (logUsageOk()) {
 
-        uint32_t cd_timer;
-
         // encode full-screen with fb0
         int use_fb0 = 0;
         #if defined(_USE_FB0)
@@ -1910,10 +1906,6 @@ void sendUserAgent (WiFiClient &client)
         uint16_t hr, mn;
         getAlarmState (as, hr, mn);
 
-        // DOY
-        uint8_t doy = 0;
-        NVReadUInt8 (NV_DOY_ON, &doy);
-
         // encode plot options
         // prior to V2.67: value was either plot_ch or 99
         // since V2.67:    value is 100 + plot_ch
@@ -1937,12 +1929,20 @@ void sendUserAgent (WiFiClient &client)
         // combine rss_on and rss_local
         int rss_code = rss_on + 2*rss_local;
 
-        // gimbal
+        // gimbal and rig bit mask: 4 = rig, 2 = azel  1 = az only
         bool vis_now, has_el, tracking;
         float az, el;
-        bool at_all = getGimbalState (vis_now, has_el, tracking, az, el);
-        int gimbal_score = at_all ? (1 + (has_el ? 1 : 0)) : 0;
+        bool gbl_on = getGimbalState (vis_now, has_el, tracking, az, el);
+        bool rig_on = getRigctld (NULL, NULL);
+        bool flrig = getFlrig (NULL, NULL);
+        int rr_score = (gbl_on ? (has_el ? 2 : 1) : 0) | (rig_on ? 4 : 0) | (flrig ? 8 : 0);
 
+        // GPSD
+        int gpsd = 0;
+        if (useGPSDTime())
+            gpsd |= 1;
+        if (useGPSDLoc())
+            gpsd |= 2;
 
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
@@ -1952,8 +1952,8 @@ void sendUserAgent (WiFiClient &client)
             getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, use_fb0,
             // new for LV5:
-            (int)as, getCenterLng(), doy, names_on, getDemoMode(), (int)getSWEngineState(cd_timer), 
-            (int)getBigClockBits(), utcOffset(), useGPSD(), rss_interval, (int)getDateFormat(), gimbal_score);
+            (int)as, getCenterLng(), getDOY(), names_on, getDemoMode(), (int)getSWEngineState(NULL,NULL), 
+            (int)getBigClockBits(), utcOffset(), gpsd, rss_interval, (int)getDateFormat(), rr_score);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
@@ -1963,7 +1963,7 @@ void sendUserAgent (WiFiClient &client)
     client.print(ua);
 }
 
-/* issue an HTTP Get
+/* issue an HTTP Get for an arbitary page
  */
 void httpGET (WiFiClient &client, const char *server, const char *page)
 {
@@ -1975,6 +1975,23 @@ void httpGET (WiFiClient &client, const char *server, const char *page)
     FWIFIPRLN (client, F("Connection: close\r\n"));
 
     resetWatchdog();
+}
+
+/* issue an HTTP Get to a /ham/HamClock page named in ram
+ */
+void httpHCGET (WiFiClient &client, const char *server, const char *hc_page)
+{
+    static const char hc[] PROGMEM = "/ham/HamClock";
+    char full_hc_page[strlen(hc_page) + sizeof(hc)];       // sizeof includes the EOS
+    snprintf (full_hc_page, sizeof(full_hc_page), "%s%s", _FX_helper(hc), hc_page);
+    httpGET (client, server, full_hc_page);
+}
+
+/* issue an HTTP Get to a /ham/HamClock page named in PROGMEM
+ */
+void httpHCPGET (WiFiClient &client, const char *server, const char *hc_page_progmem)
+{
+    httpHCGET (client, server, _FX_helper(hc_page_progmem));
 }
 
 /* given a standard 3-char abbreviation for month, set *monp to 1-12 and return true, else false
@@ -2184,7 +2201,7 @@ static bool updateSolarWind(const SBox &box)
         resetWatchdog();
 
         // query web page
-        httpGET (swind_client, svr_host, swind_page);
+        httpHCPGET (swind_client, svr_host, swind_page);
 
         // skip response header
         if (!httpSkipHeader (swind_client)) {
@@ -2291,7 +2308,7 @@ static bool updateDRAPPlot(const SBox &box)
         resetWatchdog();
 
         // query web page
-        httpGET (drap_client, svr_host, drap_page);
+        httpHCPGET (drap_client, svr_host, drap_page);
 
         // skip response header
         if (!httpSkipHeader (drap_client)) {
@@ -2310,25 +2327,29 @@ static bool updateDRAPPlot(const SBox &box)
             // crack
             long utime;
             float min, max, mean;
-            if (sscanf (line, "%ld : %f %f %f", &utime, &min, &max, &mean) != 4) {
+            if (sscanf (line, _FX("%ld : %f %f %f"), &utime, &min, &max, &mean) != 4) {
                 plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data garbled"));
                 goto out;
             }
+            // Serial.printf (_FX("DRAP: %ld %g %g %g\n", utime, min, max, mean);
 
-            // skip if crazy new or too old
+            // find age for this datum, skip if crazy new or too old
             int age = t_now - utime;
-            if (utime > t_now || age > _DRAP_PERIOD)
-                continue;
-
-            // find which array index this is and hours ago for x coord
             int xi = _DRAP_NPLOT*(_DRAP_PERIOD - age)/_DRAP_PERIOD;
-            x[xi] = age/(-3600.0F);                             // hours ago
+            if (xi < 0 || xi >= _DRAP_NPLOT) {
+                // Serial.printf (_FX("DRAP: skipping age %g hrs\n"), age/3600.0F);
+                continue;
+            }
+            x[xi] = age/(-3600.0F);                             // seconds to hours ago
 
             // set in array if larger
-            if (max > y[xi])
+            if (max > y[xi]) {
+                // if (y[xi] > 0)
+                    // Serial.printf (_FX("DRAP: saw xi %d utime %ld age %d again\n"), xi, utime, age);
                 y[xi] = max;
+            }
 
-            // Serial.printf ("DRAP %3d: %f %f\n", xi, x[xi], y[xi]);
+            // Serial.printf (_FX("DRAP %3d %6d: %g %g\n"), xi, age, x[xi], y[xi]);
         }
         Serial.printf (_FX("DRAP: read %d lines\n"), n_lines);
 
@@ -2344,7 +2365,7 @@ static bool updateDRAPPlot(const SBox &box)
                 x[i] = (_DRAP_PERIOD - i*_DRAP_PERIOD/_DRAP_NPLOT)/-3600.0F;
                 if (i > 0)
                     y[i] = y[i-1];                      // fill with previous
-                Serial.printf (_FX("DRAP: filling missing interval %d at age %g days to %g\n"), i, x[i], y[i]);
+                Serial.printf (_FX("DRAP: filling missing interval %d at age %g hrs to %g\n"), i, x[i], y[i]);
                 n_missing++;
             } else {
                 maxi_good = i;
@@ -2418,7 +2439,7 @@ static bool updateBandConditions(const SBox &box)
         resetWatchdog();
 
         // query web page
-        httpGET (bc_client, svr_host, query);
+        httpHCGET (bc_client, svr_host, query);
 
         // skip header
         if (!httpSkipHeader (bc_client)) {
@@ -2552,7 +2573,7 @@ static bool updateSTEREO_A (const SBox &box)
         updateClocks(false);
 
         // query and skip header
-        httpGET (client, svr_host, stereo_a_sep_page);
+        httpHCPGET (client, svr_host, stereo_a_sep_page);
 
         char buf[20];
         if (httpSkipHeader(client) && getTCPLine (client, buf, sizeof(buf), NULL)) {
@@ -2635,7 +2656,7 @@ static bool updateNOAASWx(const SBox &box)
         updateClocks(false);
 
         // fetch page
-        httpGET (noaaswx_client, svr_host, noaaswx_page);
+        httpHCPGET (noaaswx_client, svr_host, noaaswx_page);
 
         // skip header then read the data lines
         if (httpSkipHeader (noaaswx_client)) {
@@ -2647,11 +2668,11 @@ static bool updateNOAASWx(const SBox &box)
                     plotMessage (box, RA8875_RED, _FX("NOAASW missing data"));
                     goto out;
                 }
-                // Serial.printf ("NOAA: %d %s\n", i, line);
+                // Serial.printf (_FX("NOAA: %d %s\n"), i, line);
 
                 // parse
-                // sprintf (line, "%c 1 2 3 4", 'A'+i);  // test line
-                if (sscanf (line, "%c %d %d %d %d", &noaa_spw.cat[i], &noaa_spw.val[i][0],
+                // sprintf (line, _FX("%c 1 2 3 4"), 'A'+i);  // test line
+                if (sscanf (line, _FX("%c %d %d %d %d"), &noaa_spw.cat[i], &noaa_spw.val[i][0],
                                 &noaa_spw.val[i][1], &noaa_spw.val[i][2], &noaa_spw.val[i][3]) != 5) {
                     plotMessage (box, RA8875_RED, line);
                     goto out;
@@ -2719,7 +2740,7 @@ static bool updateRSS ()
             updateClocks(false);
 
             // fetch feed page
-            httpGET (rss_client, svr_host, rss_page);
+            httpHCPGET (rss_client, svr_host, rss_page);
 
             // skip response header
             if (!httpSkipHeader (rss_client)) {
@@ -3131,73 +3152,22 @@ bool checkSpaceStats (time_t t0)
 }
 
 /* given touch location s known to be within NCDXF_b, insure the given space stat is in a visible Pane.
- * N.B. coordinate layout with drawSpaceStats()
+ * N.B. coordinate with drawSpaceStats()
  */
 void doSpaceStatsTouch (const SCoord &s)
 {
-    // decide which row
-    int r = 4*(s.y - NCDXF_b.y)/NCDXF_b.h;
+    // list of pane choices
+    PlotChoice pcs[NCDXF_B_NFIELDS];
+    pcs[0] = PLOT_CH_SSN;
+    pcs[1] = PLOT_CH_FLUX;
+    pcs[2] = PLOT_CH_XRAY;
+    pcs[3] = PLOT_CH_KP;
 
-    // decide which PLOT_CH
-    PlotChoice pc;
-    switch (r) {
-    case 0:
-        pc = PLOT_CH_SSN;
-        break;
-
-    case 1:
-        pc = PLOT_CH_FLUX;
-        break;
-
-    case 2:
-        pc = PLOT_CH_XRAY;
-        break;
-
-    default:
-    case 3:
-        pc = PLOT_CH_KP;
-        break;
-    }
-
-    // done if the chosen pane is already on display
-    if (findPaneChoiceNow (pc) != PANE_NONE)
-        return;
-
-    // not on display, choose a pane to use
-    PlotPane pp = PANE_NONE;
-
-    // start by looking for a pane with the new stat already in its rotation set (we know it's not visible)
-    for (int i = PANE_1; i < PANE_N; i++) {
-        if (plot_rotset[i] & (1<<pc)) {
-            pp = (PlotPane)i;
-            break;
-        }
-    }
-
-    // else look for a pane with no solar stats anywhere in its rotation set
-    if (pp == PANE_NONE) {
-        const uint32_t allss_mask = ((1<<PLOT_CH_SSN)|(1<<PLOT_CH_XRAY)|(1<<PLOT_CH_KP)|(1<<PLOT_CH_FLUX));
-        for (int i = PANE_1; i < PANE_N; i++) {
-            if ((plot_rotset[i] & allss_mask) == 0) {
-                pp = (PlotPane)i;
-                break;
-            }
-        }
-    }
-
-    // else just pick the pane next to the stats summary
-    if (pp == PANE_NONE)
-        pp = PANE_3;
-
-    // install alone
-    (void) setPlotChoice (pp, pc);
-    plot_rotset[pp] = 1 << pc;
-    savePlotOps();
+    // do it
+    doNCDXFStatsTouch (s, pcs);
 }
 
 /* draw each *_spw in NCDXF_b
- * N.B. we assume NCDXF_b is already erased.
- * N.B. coordinate layout with doSpaceStatsTouch()
  */
 void drawSpaceStats()
 {
@@ -3205,88 +3175,49 @@ void drawSpaceStats()
     if (brb_mode != BRB_SHOW_SWSTATS)
         return;
 
-    // string and y location
+    // arrays for drawNCDXFStats()
     static const char err[] = "Err";
-    char str[20];
-    uint16_t y = NCDXF_b.y + 2;
-    const int rect_dy = -23;
-    const int rect_h = 26;
+    char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN];
+    char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN];
+    uint16_t colors[NCDXF_B_NFIELDS];
+    int i = 0;
 
-    // title
-    selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setTextColor (RA8875_WHITE);
-    strcpy (str, "SSN");
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.setTextColor (RA8875_WHITE);
-    tft.print (str);
-
-    y += 31;
-
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (SSPOT_COLOR);
-    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
-    // tft.drawRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_RED);
+    // SSN
+    strcpy (titles[i], "SSN");
     if (ssn_spw == SPW_ERR)
-        strcpy (str, err);
+        strcpy (values[i], err);
     else
-        sprintf (str, "%.0f", ssn_spw);
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
+        snprintf (values[i], sizeof(values[i]), "%.1f", ssn_spw);
+    colors[i] = SSPOT_COLOR;
+    i++;
 
-    y += 5;
-
-    selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setTextColor (RA8875_WHITE);
-    strcpy (str, "SFI");
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
-
-    y += 31;
-
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (SFLUX_COLOR);
-    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    // SFI
+    strcpy (titles[i], "SFI");
     if (sflux_spw == SPW_ERR)
-        strcpy (str, err);
+        strcpy (values[i], err);
     else
-        sprintf (str, "%.0f", sflux_spw);
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
+        snprintf (values[i], sizeof(values[i]), "%.1f", sflux_spw);
+    colors[i] = SFLUX_COLOR;
+    i++;
 
-    y += 5;
+    // Xray
+    strcpy (titles[i], "X-Ray");
+    xrayLevel(xray_spw, values[i]);
+    colors[i] = RGB565(255,134,0);      // XRAY_COLOR is too alarming
+    i++;
 
-    selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setTextColor (RA8875_WHITE);
-    strcpy (str, "X-Ray");
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
-
-    y += 31;
-
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (RGB565(255,134,0));               // XRAY_LCOLOR is too alarming
-    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
-    xrayLevel(xray_spw, str);
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
-
-    y += 5;
-
-    selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setTextColor (RA8875_WHITE);
-    strcpy (str, "Kp");
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
-
-    y += 31;
-
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (KP_COLOR);
-    tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+    // Kp
+    strcpy (titles[i], "Kp");
     if (kp_spw == SPW_ERR)
-        strcpy (str, err);
+        strcpy (values[i], err);
     else
-        sprintf (str, "%.0f", kp_spw);
-    tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(str))/2, y);
-    tft.print (str);
+        snprintf (values[i], sizeof(values[i]), "%.0f", kp_spw);
+    colors[i] = KP_COLOR;
+    i++;
+
+    if (i != NCDXF_B_NFIELDS)
+        fatalError (_FX("drawSpaceStats wrong count %d"), i);
+
+    // do it
+    drawNCDXFStats (titles, values, colors);
 }

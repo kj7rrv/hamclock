@@ -107,7 +107,7 @@ static void setDisplayBrightness(bool log)
                 Serial.printf ("BR: %s: %s\n", dsi_path, strerror(errno));
             } else {
                 if (log)
-                    Serial.printf ("BR: setting bpwm %d\n", bpwm);
+                    Serial.printf (_FX("BR: setting bpwm %d\n"), bpwm);
                 FILE *dsifp = fdopen (dsifd, "w");
                 fprintf (dsifp, "%d\n", bpwm);
                 fclose (dsifp); // also closes dsifd
@@ -688,7 +688,7 @@ void initBrightness()
         (void) photOk();
 
         // log
-        Serial.printf ("BR: 0 onoff= %d dim= %d phot= %d\n", support_onoff, support_dim, support_phot);
+        Serial.printf (_FX("BR: 0 onoff= %d dim= %d phot= %d\n"), support_onoff, support_dim, support_phot);
 
         // check whether photo resistor is connected: discard first read then spin up the blend
         (void) readPhot();
@@ -721,7 +721,7 @@ void setupBrightness()
         (void) photOk();
 
         // log
-        Serial.printf ("BR: 1 onoff= %d dim= %d phot= %d\n", support_onoff, support_dim, support_phot);
+        Serial.printf (_FX("BR: 1 onoff= %d dim= %d phot= %d\n"), support_onoff, support_dim, support_phot);
 
         // init to user's full brightness
         user_on = (getBrMax()*BPWM_MAX+50)/100;         // round
@@ -771,9 +771,7 @@ void setupBrightness()
         }
 }
 
-/* refresh brightness display depending on current capability and pane control.
- * N.B. we assume NCDXF_b is already erased
- * N.B. we cooperate with drawBeaconBox() for BRB_SHOW_BEACONS and BRB_SHOW_SWSTATS
+/* draw any of the brightness controls in NCDXF_b.
  */
 void drawBrightness()
 {
@@ -958,88 +956,112 @@ static void changeBrightness (const SCoord &s)
 
 }
 
-
 /* perform proper action given s known to be within NCDXF_b.
  */
-void doNCDXFTouch (const SCoord &s)
+void doNCDXFBoxTouch (const SCoord &s)
 {
-        if (s.y < NCDXF_b.y + NCDXF_b.h/10) {     // pretty small so doSpaceStatsTouch can change top value
+    if (s.y < NCDXF_b.y + NCDXF_b.h/10) {
 
-            // show menu unless just two options in which case just toggle
-            if ((!support_phot || !found_phot) && !support_dim && !support_onoff) {
+        // near the top so show menu of options, or toggle if only 2
 
-                // just toggle the only twp options
-                brb_mode = (brb_mode == BRB_SHOW_BEACONS) ? BRB_SHOW_SWSTATS : BRB_SHOW_BEACONS;
+        // list of each BRB to avoid knowing their values; N.B. must be in same order as mitems[]
+        static uint8_t mi_brb_order[BRB_N] = {
+            BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR,
+            BRB_SHOW_BME76, BRB_SHOW_BME77
+        };
 
-                // show new option
-                drawBeaconBox();
+        // build menu, depending on current configuration
+        #define _MI_INDENT 2
+        MenuItem mitems[BRB_N] = {
+             {MENU_1OFN, brb_mode == BRB_SHOW_BEACONS, 1, _MI_INDENT, "NCDXF"},     // always show
+             {MENU_1OFN, brb_mode == BRB_SHOW_SWSTATS, 1, _MI_INDENT, "SpcWx"},     // always show
+             {support_onoff ? MENU_1OFN : MENU_IGNORE,
+                        brb_mode == BRB_SHOW_ONOFF, 1, _MI_INDENT, "On/Off"},
+             {support_phot && found_phot ? MENU_1OFN : MENU_IGNORE,
+                        brb_mode == BRB_SHOW_PHOT, 1, _MI_INDENT, "PhotoR"},
+             {support_dim && !(support_phot && found_phot) ? MENU_1OFN : MENU_IGNORE,
+                        brb_mode == BRB_SHOW_BR, 1, _MI_INDENT, "Brite"},
+             {getBMEData(BME_76,false) != NULL ? MENU_1OFN : MENU_IGNORE,
+                        brb_mode == BRB_SHOW_BME76, 1, _MI_INDENT, "BME@76"},
+             {getBMEData(BME_77,false) != NULL ? MENU_1OFN : MENU_IGNORE,
+                        brb_mode == BRB_SHOW_BME77, 1, _MI_INDENT, "BME@77"},
+        };
 
-            } else {
+        // if just two options, toggle without using menu
+        int n_set = 0;
+        for (int i = 0; i < BRB_N; i++)
+            if (mitems[i].type != MENU_IGNORE)
+                n_set++;
+        if (n_set == 2) {
 
-                // show menu of options
-
-                // list of each BRB to avoid knowing their values; N.B. must be in same order as mitems[]
-                static uint8_t mi_brb_order[BRB_N] =
-                    { BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR };
-
-                // build menu, depending on current configuration
-                #define _MI_INDENT 2
-                MenuItem mitems[BRB_N] = {
-                     {MENU_1OFN, brb_mode == BRB_SHOW_BEACONS, 1, _MI_INDENT, "NCDXF"},     // always show
-                     {MENU_1OFN, brb_mode == BRB_SHOW_SWSTATS, 1, _MI_INDENT, "SpcWx"},     // always show
-                     {support_onoff ? MENU_1OFN : MENU_IGNORE,
-                                brb_mode == BRB_SHOW_ONOFF, 1, _MI_INDENT, "On/Off"},
-                     {support_phot && found_phot ? MENU_1OFN : MENU_IGNORE,
-                                brb_mode == BRB_SHOW_PHOT, 1, _MI_INDENT, "PhotoR"},
-                     {support_dim && !(support_phot && found_phot) ? MENU_1OFN : MENU_IGNORE,
-                                brb_mode == BRB_SHOW_BR, 1, _MI_INDENT, "Brite"},
-                };
-
-                // boxes
-                SBox menu_b = NCDXF_b;                      // copy, not ref, so can be tweaked
-                menu_b.x += 3;
-                menu_b.y += 20;
-                SBox ok_b;
-
-                // run menu
-                MenuInfo menu = {menu_b, ok_b, true, true, 1, BRB_N, mitems};
-                bool ok = runMenu(menu);
-
-                // engage new option unless canceled
-                if (ok) {
-
-                    // find the set item
-                    for (int i = 0; i < BRB_N; i++) {
-                        if (mitems[i].set) {
-                            brb_mode = mi_brb_order[i];
-                            break;
-                        }
-                    }
-
-                    // update on/off times if now used
-                    if (brb_mode == BRB_SHOW_ONOFF)
-                        getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
-                }
-
-                // show new option, even if no change in order to erase menu
-                drawBeaconBox();
-
-            }
-
-            // save
-            NVWriteUInt8 (NV_BRB_MODE, brb_mode);
-            Serial.printf ("BR: now mode %d\n", brb_mode);
+            brb_mode = (brb_mode == BRB_SHOW_BEACONS) ? BRB_SHOW_SWSTATS : BRB_SHOW_BEACONS;
 
         } else {
 
-            // operate current option
-            if (brb_mode == BRB_SHOW_SWSTATS)
-                doSpaceStatsTouch (s);
-            else
-                changeBrightness (s);
+            // boxes
+            SBox menu_b = NCDXF_b;                      // copy, not ref, so can be tweaked
+            menu_b.x += 3;
+            menu_b.y += 20;
+            SBox ok_b;
 
+            // run menu
+            MenuInfo menu = {menu_b, ok_b, true, true, 1, BRB_N, mitems};
+            bool ok = runMenu(menu);
+
+            // engage new option unless canceled
+            if (ok) {
+
+                // find the set item
+                for (int i = 0; i < BRB_N; i++) {
+                    if (mitems[i].set) {
+                        brb_mode = mi_brb_order[i];
+                        break;
+                    }
+                }
+
+                // update on/off times if now used
+                if (brb_mode == BRB_SHOW_ONOFF)
+                    getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
+            }
         }
+
+        // show new option, even if no change in order to erase menu
+        drawNCDXFBox();
+
+        // save
+        NVWriteUInt8 (NV_BRB_MODE, brb_mode);
+        Serial.printf (_FX("BR: now mode %d\n"), brb_mode);
+
+    } else {
+
+        // tapped below title so pass to appropriate handler
+
+        switch ((BRB_MODE)brb_mode) {
+
+        case BRB_SHOW_BEACONS:
+
+        case BRB_SHOW_ONOFF:    // fallthru
+        case BRB_SHOW_PHOT:     // fallthru
+        case BRB_SHOW_BR:
+            changeBrightness (s);
+            break;
+
+        case BRB_SHOW_SWSTATS:
+            doSpaceStatsTouch (s);
+            break;
+
+        case BRB_SHOW_BME76:
+        case BRB_SHOW_BME77:
+            doBMETouch (s);
+            break;
+
+        case BRB_N:
+            // lint
+            break;
+        }
+    }
 }
+
 
 /* set on/off/idle times for the given dow then update display if today is dow.
  * times are minutes since DE midnight; idle is mins or ignored if < 0; dow is 1..7 Sun..Sat else "today".

@@ -27,9 +27,9 @@ static int tickmarks (float min, float max, int numdiv, float ticks[]);
 bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel, const char *ylabel,
 uint16_t color, float y_min, float y_max, float label_value)
 {
-        char buf[32];
-        sprintf (buf, "%.*f", label_value >= 1000 ? 0 : 1, label_value);
-        return (plotXYstr (box, x, y, nxy, xlabel, ylabel, color, y_min, y_max, buf));
+    char buf[32];
+    sprintf (buf, "%.*f", label_value >= 1000 ? 0 : 1, label_value);
+    return (plotXYstr (box, x, y, nxy, xlabel, ylabel, color, y_min, y_max, buf));
 }
 
 /* same as plotXY but label is a string
@@ -265,7 +265,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     // prep
     prepPlotBox (box);
 
-    const uint8_t indent = FONTW+1;     // allow for attribution down right side
+    const uint8_t attr_w = FONTW+1;     // allow for attribution down right side
     uint16_t dy = box.h/3;
     uint16_t ddy = box.h/5;
     float f;
@@ -277,8 +277,8 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     selectFontStyle (BOLD_FONT, LARGE_FONT);
     f = useMetricUnits() ? wi.temperature_c : 9*wi.temperature_c/5+32;
     sprintf (buf, "%.0f %c", f, useMetricUnits() ? 'C' : 'F');
-    w = maxStringW (buf, box.w-indent);
-    tft.setCursor (box.x+(box.w-indent-w)/2, box.y+dy);
+    w = maxStringW (buf, box.w-attr_w);
+    tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
     tft.print(buf);
     uint16_t bw, bh;
     getTextBounds (buf+strlen(buf)-2, &bw, &bh);
@@ -288,33 +288,95 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     dy += ddy;
 
 
-    // remaining info smaller
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    // humidity and pressure and optional pressure change symbol
 
-    // humidity
-    sprintf (buf, "%.0f%% RH", wi.humidity_percent);
-    w = maxStringW (buf, box.w-indent);
-    tft.setCursor (box.x+(box.w-indent-w)/2, box.y+dy);
-    tft.print (buf);
-    dy += ddy;
+    if (wi.pressure_chg >= -1 && wi.pressure_chg <= 1) {
+
+        // include pressure change symbol
+
+        #define PCHG_H      20          // change arrow height
+        #define PCHG_SH     3           // steady arrow half-height
+        #define PCHG_LW     10          // small font label width
+        #define PCHG_W      5           // half-width of change arrow
+        #define PCHG_LG     3           // gap either side of label
+
+        // main info line
+
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        if (useMetricUnits())
+            sprintf (buf, _FX("%.0f%% %.0f"), wi.humidity_percent, wi.pressure_hPa);
+        else
+            sprintf (buf, _FX("%.0f%% %.2f"), wi.humidity_percent, wi.pressure_hPa/33.8639);
+        w = maxStringW (buf, box.w-attr_w-PCHG_W-PCHG_LW-2*PCHG_LG);
+        tft.setCursor (box.x+(box.w-attr_w-w-PCHG_W-PCHG_LW-2*PCHG_LG)/2, box.y+dy);
+        tft.print (buf);
+        dy += ddy;
+
+        // add units after value
+        uint16_t pchg_x = tft.getCursorX() + PCHG_LG;
+        uint16_t pchg_y = tft.getCursorY() - PCHG_H - 1;
+        selectFontStyle (LIGHT_FONT, FAST_FONT);
+        if (useMetricUnits()) {
+            tft.setCursor (pchg_x, pchg_y); tft.print ("h");
+            tft.setCursor (pchg_x, pchg_y+8); tft.print ("P");
+            tft.setCursor (pchg_x, pchg_y+14); tft.print ("a");
+        } else {
+            #ifdef _INHG
+                tft.setCursor (pchg_x, pchg_y-4); tft.print ("i");
+                tft.setCursor (pchg_x, pchg_y+3); tft.print ("n");
+                tft.setCursor (pchg_x, pchg_y+10); tft.print ("H");
+                tft.setCursor (pchg_x, pchg_y+17); tft.print ("g");
+            #else
+                tft.setCursor (pchg_x, pchg_y+4); tft.print ("i");
+                tft.setCursor (pchg_x, pchg_y+12); tft.print ("n");
+            #endif
+        }
+        pchg_x += PCHG_LW + PCHG_LG;
+
+        // add pressure arrow after units
+        if (wi.pressure_chg > 0)
+            tft.fillTriangle(pchg_x+PCHG_W, pchg_y, pchg_x, pchg_y+PCHG_H,
+                             pchg_x+2*PCHG_W, pchg_y+PCHG_H, color);
+        else if (wi.pressure_chg < 0)
+            tft.fillTriangle(pchg_x, pchg_y, pchg_x+2*PCHG_W, pchg_y, pchg_x+PCHG_W, pchg_y+PCHG_H, color);
+        else
+            tft.fillTriangle(pchg_x, pchg_y+10-PCHG_SH, pchg_x+2*PCHG_W, pchg_y+10,
+                             pchg_x, pchg_y+10+PCHG_SH, color);
+
+    } else {
+
+        // no pressure change symbol
+
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        if (useMetricUnits())
+            sprintf (buf, _FX("%.0f%% %.0f hPa"), wi.humidity_percent, wi.pressure_hPa);
+        else
+            sprintf (buf, _FX("%.0f%% %.2f in"), wi.humidity_percent, wi.pressure_hPa/33.8639);
+        w = maxStringW (buf, box.w-attr_w);
+        tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
+        tft.print (buf);
+        dy += ddy;
+
+    }
 
     // wind
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
     f = (useMetricUnits() ? 3.6 : 2.237) * wi.wind_speed_mps; // kph or mph
-    sprintf (buf, "%s @ %.0f %s", wi.wind_dir_name, f, useMetricUnits() ? "kph" : "mph");
-    w = maxStringW (buf, box.w-indent);
+    sprintf (buf, _FX("%s @ %.0f %s"), wi.wind_dir_name, f, useMetricUnits() ? "kph" : "mph");
+    w = maxStringW (buf, box.w-attr_w);
     if (buf[strlen(buf)-1] != 'h') {
         // try shorter string in case of huge speed
-        sprintf (buf, "%s @ %.0f%s", wi.wind_dir_name, f, useMetricUnits() ? "k/h" : "m/h");
-        w = maxStringW (buf, box.w-indent);
+        sprintf (buf, _FX("%s @ %.0f%s"), wi.wind_dir_name, f, useMetricUnits() ? "k/h" : "m/h");
+        w = maxStringW (buf, box.w-attr_w);
     }
-    tft.setCursor (box.x+(box.w-indent-w)/2, box.y+dy);
+    tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
     tft.print (buf);
     dy += ddy;
 
     // nominal conditions
     strcpy (buf, wi.conditions);
-    w = maxStringW (buf, box.w-indent);
-    tft.setCursor (box.x+(box.w-indent-w)/2, box.y+dy);
+    w = maxStringW (buf, box.w-attr_w);
+    tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
     tft.print(buf);
 
     // attribution very small down the right side
@@ -322,7 +384,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     uint8_t ylen = strlen(wi.attribution);
     uint16_t ly0 = box.y + (box.h - ylen*FONTH)/2;
     for (uint8_t i = 0; i < ylen; i++) {
-        tft.setCursor (box.x+box.w-indent, ly0+i*FONTH);
+        tft.setCursor (box.x+box.w-attr_w, ly0+i*FONTH);
         tft.print (wi.attribution[i]);
     }
 
@@ -443,7 +505,7 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     // center title across the top
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor(RA8875_WHITE);
-    const char *title = "VOACAP DE-DX";
+    const char *title = _FX("VOACAP DE-DX");
     uint16_t tw = getTextWidth (title);
     tft.setCursor (box.x+(box.w-tw)/2, box.y + TOP_B);
     tft.print ((char*)title);
@@ -496,7 +558,7 @@ void plotNOAASWx (const SBox &box, const NOAASpaceWx &noaaspw)
     tft.setTextColor(RA8875_YELLOW);
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     uint16_t h = box.h/5-2;                             // text row height
-    char *title = (char *) "NOAA SpaceWx";
+    const char *title = _FX("NOAA SpaceWx");
     uint16_t bw = getTextWidth (title);
     tft.setCursor (box.x+(box.w-bw)/2, box.y+h);
     tft.print (title);

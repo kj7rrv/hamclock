@@ -25,7 +25,7 @@ static int LAT_SIZ, LNG_SIZ;    // region size
 static LatRow *lat_rows;        // malloced list of 180/LAT_SIZ rows
 
 // name of server file containing cities
-static const char cities_fn[] = "/ham/HamClock/cities.txt";
+static const char cities_fn[] PROGMEM = "/cities.txt";
 
 /* return 2D separation between two locations in degrees squared.
  */
@@ -108,7 +108,7 @@ void readCities()
             resetWatchdog();
 
             // send query
-            httpGET (cities_client, svr_host, cities_fn);
+            httpHCPGET (cities_client, svr_host, cities_fn);
 
             // skip http header
             if (!httpSkipHeader (cities_client)) {

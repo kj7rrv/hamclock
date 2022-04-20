@@ -43,14 +43,17 @@
 // static storage for published setup items
 static char wifissid[NV_WIFI_SSID_LEN];
 static char wifipw[NV_WIFI_PW_LEN];
-static char call[NV_CALLSIGN_LEN];
+static char callsign[NV_CALLSIGN_LEN];
+static char dxlogin[NV_DXLOGIN_LEN];
 static char dxhost[NV_DXHOST_LEN];
 static char rothost[NV_ROTHOST_LEN];
+static char righost[NV_RIGHOST_LEN];
+static char flrighost[NV_FLRIGHOST_LEN];
 static char gpsdhost[NV_GPSDHOST_LEN];
 static char ntphost[NV_NTPHOST_LEN];
 static uint8_t bright_min, bright_max;
 static uint16_t dxport;
-static uint16_t rotport;
+static uint16_t rigport, rotport, flrigport;
 static float temp_corr[MAX_N_BME];
 static float pres_corr[MAX_N_BME];
 static int16_t center_lng;
@@ -78,7 +81,8 @@ static bool alt_center_lng_set;
 #define PR_D            9                       // descending height below font baseline
 #define PR_H            (PR_A+PR_D)             // prompt height
 #define ASK_TO          10                      // user option timeout, seconds
-#define PAGE_W          100                     // page button width
+#define PAGE_W          120                     // page button width
+#define PAGE_H          35                      // page button height
 #define CURSOR_DROP     2                       // pixels to drop cursor rot
 #define NVMS_NONE       0                       // NV_MAPSPOTS to map nothing
 #define NVMS_PREFIX     1                       // NV_MAPSPOTS to map just prefix
@@ -86,9 +90,9 @@ static bool alt_center_lng_set;
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index return screen y
 
 // color selector constants
-#define CSEL_WXC        570                     // x coord of center of color wheel
-#define CSEL_WYC        100                     // y coord of center of color wheel
-#define CSEL_WR         70                      // radius of color wheel
+#define CSEL_WXC        560                     // x coord of center of color wheel
+#define CSEL_WYC        95                      // y coord of center of color wheel
+#define CSEL_WR         80                      // radius of color wheel
 #define CSEL_DX         220                     // demo strip left x
 #define CSEL_DW         150                     // demo strip width
 #define CSEL_DH         4                       // demo strip height
@@ -132,6 +136,10 @@ static bool alt_center_lng_set;
 // NV_X11FLAGS bit defns
 #define X11BIT_FULLSCREEN       0x1
 
+// NV_USEGPD bit defns
+#define USEGPSD_FORTIME_BIT     0x1
+#define USEGPSD_FORLOC_BIT      0x2
+
 
 // define a string prompt
 typedef struct {
@@ -151,20 +159,29 @@ typedef enum {
     LAT_SPR,
     LNG_SPR,
     GPSDHOST_SPR,
-    CENTERLNG_SPR,
-    SSID_SPR,
-    PASS_SPR,
+    WIFISSID_SPR,
+    WIFIPASS_SPR,
+
+    NTPHOST_SPR,
     DXHOST_SPR,
     DXPORT_SPR,
-    ROTHOST_SPR,
+    DXLOGIN_SPR,
+
+    RIGPORT_SPR,
+    RIGHOST_SPR,
     ROTPORT_SPR,
-    NTPHOST_SPR,
+    ROTHOST_SPR,
+    FLRIGPORT_SPR,
+    FLRIGHOST_SPR,
+
+    CENTERLNG_SPR,
     TEMPCORR_SPR,
-    TEMPCORR2_SPR,
-    BRMIN_SPR,
     PRESCORR_SPR,
+    TEMPCORR2_SPR,
     PRESCORR2_SPR,
+    BRMIN_SPR,
     BRMAX_SPR,
+
     N_SPR
 } SPIds; 
 
@@ -173,34 +190,46 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 1" -- index 0
 
-    {0, {10,  R2Y(0), 70, PR_H}, {110, R2Y(0), 270, PR_H}, "Call:",   call, NV_CALLSIGN_LEN, 0}, 
-    {0, {380, R2Y(0), 90, PR_H}, {480, R2Y(0), 110, PR_H}, "DE Lat:", NULL, 0, 0},             // shadowed
-    {0, {590, R2Y(0), 70, PR_H}, {670, R2Y(0), 129, PR_H}, "Lng:",    NULL, 0, 0},             // shadowed
-
-    {0, {330, R2Y(1), 70, PR_H}, {400, R2Y(1), 270, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
-    {0, {480, R2Y(2),120, PR_H}, {600, R2Y(2), 70,  PR_H}, "Center Lng:", NULL, 0, 0},         // shadowed
-    {0, {110, R2Y(3), 65, PR_H}, {180, R2Y(3), 480, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
-    {0, {670, R2Y(3),110, PR_H}, { 10, R2Y(4), 789, PR_H}, "Password:", wifipw, NV_WIFI_PW_LEN, 0},
+    {0, {10,  R2Y(0), 70, PR_H}, {100, R2Y(0), 270, PR_H}, "Call:",   callsign, NV_CALLSIGN_LEN, 0}, 
+    {0, {100, R2Y(1),180, PR_H}, {280, R2Y(1), 110, PR_H}, "Enter DE Lat:", NULL, 0, 0},       // shadowed
+    {0, {390, R2Y(1), 70, PR_H}, {480, R2Y(1), 110, PR_H}, "Lng:", NULL, 0, 0},                // shadowed
+    {0, {400, R2Y(2), 70, PR_H}, {470, R2Y(2), 320, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
+    {0, {110, R2Y(4), 65, PR_H}, {180, R2Y(4), 480, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
+    {0, {670, R2Y(4),110, PR_H}, { 10, R2Y(5), 789, PR_H}, "Password:", wifipw, NV_WIFI_PW_LEN, 0},
 
     // "page 2" -- index 1
 
-    {1, {110, R2Y(0), 60, PR_H}, {170, R2Y(0), 330, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
-    {1, {510, R2Y(0), 60, PR_H}, {575, R2Y(0),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, {100, R2Y(0), 60, PR_H}, {200, R2Y(0), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
+    {1, {100, R2Y(2), 60, PR_H}, {200, R2Y(2), 330, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
+    {1, {100, R2Y(3), 60, PR_H}, {200, R2Y(3),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, {100, R2Y(4), 60, PR_H}, {200, R2Y(4), 330, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
 
-    {1, {110, R2Y(1), 60, PR_H}, {170, R2Y(1), 330, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
-    {1, {510, R2Y(1), 60, PR_H}, {575, R2Y(1),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-
-    {1, {110, R2Y(2), 60, PR_H}, {170, R2Y(2), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
-
-    {1, {220, R2Y(3),120, PR_H}, {350, R2Y(3),  70, PR_H}, "dTemp@76:", NULL, 0, 0},           // shadowed
-    {1, {430, R2Y(3),120, PR_H}, {560, R2Y(3),  70, PR_H}, "dTemp@77:", NULL, 0, 0},           // shadowed
-    {1, {640, R2Y(3), 90, PR_H}, {740, R2Y(3),  50, PR_H}, "brMin%:", NULL, 0, 0},             // shadowed
-
-    {1, {220, R2Y(4),120, PR_H}, {350, R2Y(4),  70, PR_H}, "dPres@76:", NULL, 0, 0},           // shadowed
-    {1, {430, R2Y(4),120, PR_H}, {560, R2Y(4),  70, PR_H}, "dPres@77:", NULL, 0, 0},           // shadowed
-    {1, {640, R2Y(4), 90, PR_H}, {740, R2Y(4),  50, PR_H}, "brMax%:", NULL, 0, 0},             // shadowed
 
     // "page 3" -- index 2
+
+    {2, {160, R2Y(2), 60, PR_H}, {220, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", righost, NV_RIGHOST_LEN, 0},
+    {2, {160, R2Y(3), 60, PR_H}, {220, R2Y(3),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {320, R2Y(3), 60, PR_H}, {380, R2Y(3), 400, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
+    {2, {160, R2Y(4), 60, PR_H}, {220, R2Y(4),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {320, R2Y(4), 60, PR_H}, {380, R2Y(4), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
+
+    // "page 4" -- index 3
+
+    {3, {10,  R2Y(0), 200, PR_H}, {250, R2Y(0),  70, PR_H}, "Map center lng:", NULL, 0, 0},     // shadowed
+    {3, {100, R2Y(2), 120, PR_H}, {250, R2Y(2),  70, PR_H}, "dTemp@76:", NULL, 0, 0},           // shadowed
+    {3, {350, R2Y(2), 120, PR_H}, {500, R2Y(2),  70, PR_H}, "dPres@76:", NULL, 0, 0},           // shadowed
+    {3, {100, R2Y(3), 120, PR_H}, {250, R2Y(3),  70, PR_H}, "dTemp@77:", NULL, 0, 0},           // shadowed
+    {3, {350, R2Y(3), 120, PR_H}, {500, R2Y(3),  70, PR_H}, "dPres@77:", NULL, 0, 0},           // shadowed
+
+    {3, {10,  R2Y(5), 200, PR_H}, {250, R2Y(5),  70, PR_H}, "Brightness Min%:", NULL, 0, 0},    // shadowed
+    {3, {350, R2Y(5), 120, PR_H}, {500, R2Y(5),  70, PR_H}, "Max%:", NULL, 0, 0},               // shadowed
+
+
+
+    // "page 5" -- index 4
+
+    // "page 6" -- index 5
 
     // color scale and on/off table
 
@@ -222,65 +251,93 @@ typedef struct {
 
 // N.B. must match bool_pr[] order
 typedef enum {
-    GEOIP_BPR,
     GPSDON_BPR,
-    LOGUSAGE_BPR,
-    DEMO_BPR,
+    GPSDFOLLOW_BPR,
+    GEOIP_BPR,
     WIFI_BPR,
+
+    NTPSET_BPR,
     CLUSTER_BPR,
     CLMAP_BPR,
     CLLABEL_BPR,
+
+    RIGUSE_BPR,
     ROTUSE_BPR,
-    NTPSET_BPR,
-    DATEFMT_MDY_BPR,
-    DATEFMT_DMYYMD_BPR,
-    UNITS_BPR,
-    X11_FULLSCRN_BPR,
+    FLRIGUSE_BPR,
+
     GPIOOK_BPR,
     KX3ON_BPR,
     KX3BAUD_BPR,
+
+    DATEFMT_MDY_BPR,
+    DATEFMT_DMYYMD_BPR,
+    UNITS_BPR,
+    LOGUSAGE_BPR,
+    DATEDOY_BPR,
+    DEMO_BPR,
+    X11_FULLSCRN_BPR,
     FLIP_BPR,
+
     N_BPR
 } BPIds;
 
 /* bool prompts. N.B. must match BPIds order
- * N.B. date format, cluster map and kx3 use two "entangled" bools to create 3 states
+ * N.B. date format, cluster map, kx3 and date format use two "entangled" bools to create 3 states
  */
 static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 1" -- index 0
 
-    {0, {10,  R2Y(1), 140, PR_H}, {160, R2Y(1), 40,  PR_H}, false, "IP Geolocate?", "No", "Yes"},
-    {0, {260, R2Y(1),  60, PR_H}, {330, R2Y(1), 30,  PR_H}, false, "gpsd?", "No", NULL},
-    {0, {10,  R2Y(2), 120, PR_H}, {140, R2Y(2), 90,  PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
-    {0, {260, R2Y(2), 150, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "Demo mode?", "No", "Yes"},
-    {0, {10,  R2Y(3),  70, PR_H}, {110, R2Y(3), 30,  PR_H}, false, "WiFi?", "No", NULL},
+    {0, {100, R2Y(2), 180, PR_H}, {280, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", NULL},
+    {0, {280, R2Y(2),  80, PR_H}, {360, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes"},
+    {0, {100, R2Y(3), 180, PR_H}, {280, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes"},
+    {0, {10,  R2Y(4),  70, PR_H}, {110, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL},
 
     // "page 2" -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {110, R2Y(0), 30,  PR_H}, false, "Cluster?", "No", NULL},
-    {1, {665, R2Y(0),  70, PR_H},  {735, R2Y(0), 60,  PR_H}, false, "Map?", "No", NULL},         // map on/off
-    {1, {735, R2Y(0),   0, PR_H},  {735, R2Y(0), 60,  PR_H}, false, NULL, "Prefix", "Call"},     // how
-                                                                // prefix must be the false state
+    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 300, PR_H}, false, "NTP?", "Use default set of servers", 0},
 
-    {1, {10,  R2Y(1),  90, PR_H},  {110, R2Y(1), 110, PR_H}, false, "rotctld?", "No", NULL},
+    {1, {10,  R2Y(1),  90, PR_H},  {100, R2Y(1), 60,  PR_H}, false, "Cluster?", "No", "Yes"},
 
-    {1, {10,  R2Y(2),  90, PR_H},  {110, R2Y(2), 110, PR_H}, false, "NTP?", "Default set", NULL},
-    {1, {510, R2Y(2), 130, PR_H},  {642, R2Y(2), 150, PR_H}, false, "Date format?", "Mon Day Year", NULL},
-    {1, {642, R2Y(2), 130, PR_H},  {642, R2Y(2), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
-            // MDY: F X   DMY: T F  YMD:  T T
-
-    {1, {10,  R2Y(3),  90, PR_H},  {110, R2Y(3), 110, PR_H}, false, "Units?", "Imperial", "Metric"},
-
-    {1, {10,  R2Y(4),  90, PR_H},  {110, R2Y(4), 110, PR_H}, false, "Full scrn?", "No", "Yes"},
-                                                                // state box wide enough for "Won't fit"
-
-    {1, {10,  R2Y(5),  90, PR_H},  {110, R2Y(5), 110, PR_H}, false, "GPIO?", "Off", "Active"},
-    {1, {220, R2Y(5), 120, PR_H},  {350, R2Y(5),  70, PR_H}, false, "KX3?", "No", NULL},        // kx3 on/off
-    {1, {340, R2Y(5),   0, PR_H},  {350, R2Y(5),  70, PR_H}, false, NULL, "4800", "38400"},     // baud
-    {1, {510, R2Y(5), 130, PR_H},  {640, R2Y(5),  40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+    {1, {100, R2Y(5),  70, PR_H},  {200, R2Y(5), 60,  PR_H}, false, "Map?", "No", NULL},
+    {1, {200, R2Y(5),   0, PR_H},  {200, R2Y(5), 60,  PR_H}, false, NULL, "Prefix", "Call"},
+                                                        // entangled: None: F X  Prefix: T F  Call: T T
 
     // "page 3" -- index 2
+
+    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "rigctld?", "No", "Yes"},
+    {2, {10,  R2Y(3), 100, PR_H},  {100, R2Y(3),  60, PR_H}, false, "rotctld?", "No", "Yes"},
+    {2, {10,  R2Y(4), 100, PR_H},  {100, R2Y(4),  60, PR_H}, false, "flrig?", "No", "Yes"},
+
+
+    // "page 4" -- index 3
+
+    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active"},
+
+    {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  70, PR_H}, false, "KX3?", "No", NULL},
+    {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  70, PR_H}, false, NULL, "4800", "38400"},
+                                                        // entangled: Off: F X   4800: T F   38400: T T
+
+
+    // "page 5" -- index 4
+
+    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL},
+    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
+                                                        // entangled: MDY: F X   DMY: T F  YMD:  T T
+
+
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Units?", "Imperial", "Metric"},
+
+
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Day-of-Year?", "No", "Yes"},
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
+    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
+                                                                // state box wide enough for "Won't fit"
+
+    {4, {10,  R2Y(6), 140, PR_H},  {150, R2Y(6),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+
+    // "page 6" -- index 5
 
     // color scale and on/off table
 
@@ -295,6 +352,8 @@ typedef struct {
 } Focus;
 
 // current focus and page
+#define N_PAGES         6
+#define COLOR_PAGE      5
 static Focus cur_focus;
 static int cur_page;
 
@@ -378,7 +437,7 @@ static const uint8_t qroff[NQR] = {
 static const SBox delete_b  = {KB_INDENT, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
 static const SBox space_b   = {SBAR_X, KB_SPC_Y, SBAR_W, KB_SPC_H};
 static const SBox done_b    = {SBAR_X+SBAR_W, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
-static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, KB_Y0-37, PAGE_W, 35};
+static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 2, PAGE_W, PAGE_H};
 
 // note whether ll edited
 static bool ll_edited;
@@ -394,7 +453,7 @@ static void checkLLEdit()
 static void drawPageButton()
 {
     char buf[32];
-    snprintf (buf, sizeof(buf), _FX("Page %d ..."), cur_page+1);      // user sees 1-based
+    snprintf (buf, sizeof(buf), _FX("< Page %d >"), cur_page+1);      // user sees 1-based
     drawStringInBox (buf, page_b, false, DONE_C);
 }
 
@@ -458,10 +517,20 @@ static bool boolIsRelevant (BoolPrompt *bp)
         #endif
     }
 
+    if (bp == &bool_pr[DATEFMT_DMYYMD_BPR]) {
+        if (!bool_pr[DATEFMT_MDY_BPR].state)
+            return (false);
+    }
+
     if (bp == &bool_pr[GPIOOK_BPR]) {
         #if !defined(_SUPPORT_GPIO) || !defined(_SUPPORT_ENVSENSOR)
             return (false);
         #endif
+    }
+
+    if (bp == &bool_pr[GPSDFOLLOW_BPR]) {
+        if (!bool_pr[GPSDON_BPR].state)
+            return (false);
     }
 
     return (true);
@@ -474,7 +543,7 @@ static bool stringIsRelevant (StringPrompt *sp)
     if (sp->page != cur_page)
         return (false);
 
-    if (sp == &string_pr[SSID_SPR] || sp == &string_pr[PASS_SPR]) {
+    if (sp == &string_pr[WIFISSID_SPR] || sp == &string_pr[WIFIPASS_SPR]) {
         #if defined(_WIFI_NEVER)
             return (false);
         #endif
@@ -484,13 +553,23 @@ static bool stringIsRelevant (StringPrompt *sp)
         #endif
     }
 
-    if (sp == &string_pr[DXHOST_SPR] || sp == &string_pr[DXPORT_SPR]) {
+    if (sp == &string_pr[DXHOST_SPR] || sp == &string_pr[DXPORT_SPR] || sp == &string_pr[DXLOGIN_SPR]) {
         if (!bool_pr[CLUSTER_BPR].state)
+            return (false);
+    }
+
+    if (sp == &string_pr[RIGHOST_SPR] || sp == &string_pr[RIGPORT_SPR]) {
+        if (!bool_pr[RIGUSE_BPR].state)
             return (false);
     }
 
     if (sp == &string_pr[ROTHOST_SPR] || sp == &string_pr[ROTPORT_SPR]) {
         if (!bool_pr[ROTUSE_BPR].state)
+            return (false);
+    }
+
+    if (sp == &string_pr[FLRIGHOST_SPR] || sp == &string_pr[FLRIGPORT_SPR]) {
+        if (!bool_pr[FLRIGUSE_BPR].state)
             return (false);
     }
 
@@ -541,43 +620,63 @@ static void nextTabFocus()
      */
     static const Focus tab_fields[] = {
         // page 1
+
         {       &string_pr[CALL_SPR], NULL},
         {       &string_pr[LAT_SPR], NULL},
         {       &string_pr[LNG_SPR], NULL},
-        { NULL, &bool_pr[GEOIP_BPR] },
         { NULL, &bool_pr[GPSDON_BPR] },
+        { NULL, &bool_pr[GPSDFOLLOW_BPR] },
         {       &string_pr[GPSDHOST_SPR], NULL},
-        { NULL, &bool_pr[LOGUSAGE_BPR] },
-        { NULL, &bool_pr[DEMO_BPR] },
-        {       &string_pr[CENTERLNG_SPR], NULL},
+        { NULL, &bool_pr[GEOIP_BPR] },
         { NULL, &bool_pr[WIFI_BPR] },
-        {       &string_pr[SSID_SPR], NULL},
-        {       &string_pr[PASS_SPR], NULL},
+        {       &string_pr[WIFISSID_SPR], NULL},
+        {       &string_pr[WIFIPASS_SPR], NULL},
 
         // page 2
+
+        { NULL, &bool_pr[NTPSET_BPR] },
+        {       &string_pr[NTPHOST_SPR], NULL},
         { NULL, &bool_pr[CLUSTER_BPR] },
         {       &string_pr[DXHOST_SPR], NULL},
         {       &string_pr[DXPORT_SPR], NULL},
+        {       &string_pr[DXLOGIN_SPR], NULL},
         { NULL, &bool_pr[CLMAP_BPR] },
         { NULL, &bool_pr[CLLABEL_BPR] },
+
+        // page 3
+
+        { NULL, &bool_pr[RIGUSE_BPR] },
+        {       &string_pr[RIGPORT_SPR], NULL},
+        {       &string_pr[RIGHOST_SPR], NULL},
         { NULL, &bool_pr[ROTUSE_BPR] },
-        {       &string_pr[ROTHOST_SPR], NULL},
         {       &string_pr[ROTPORT_SPR], NULL},
-        { NULL, &bool_pr[NTPSET_BPR] },
-        { NULL, &bool_pr[DATEFMT_MDY_BPR] },
-        { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
-        {       &string_pr[NTPHOST_SPR], NULL},
-        { NULL, &bool_pr[UNITS_BPR] },
-        {       &string_pr[TEMPCORR_SPR], NULL},
-        {       &string_pr[TEMPCORR2_SPR], NULL},
-        {       &string_pr[BRMIN_SPR], NULL},
-        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
-        {       &string_pr[PRESCORR_SPR], NULL},
-        {       &string_pr[PRESCORR2_SPR], NULL},
-        {       &string_pr[BRMAX_SPR], NULL},
+        {       &string_pr[ROTHOST_SPR], NULL},
+        { NULL, &bool_pr[FLRIGUSE_BPR] },
+        {       &string_pr[FLRIGPORT_SPR], NULL},
+        {       &string_pr[FLRIGHOST_SPR], NULL},
+
+        // page 4
+
+        {       &string_pr[CENTERLNG_SPR], NULL},
         { NULL, &bool_pr[GPIOOK_BPR] },
+        {       &string_pr[TEMPCORR_SPR], NULL},
+        {       &string_pr[PRESCORR_SPR], NULL},
+        {       &string_pr[TEMPCORR2_SPR], NULL},
+        {       &string_pr[PRESCORR2_SPR], NULL},
         { NULL, &bool_pr[KX3ON_BPR] },
         { NULL, &bool_pr[KX3BAUD_BPR] },
+        {       &string_pr[BRMIN_SPR], NULL},
+        {       &string_pr[BRMAX_SPR], NULL},
+
+        // page 5
+
+        { NULL, &bool_pr[DATEFMT_MDY_BPR] },
+        { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
+        { NULL, &bool_pr[UNITS_BPR] },
+        { NULL, &bool_pr[LOGUSAGE_BPR] },
+        { NULL, &bool_pr[DATEDOY_BPR] },
+        { NULL, &bool_pr[DEMO_BPR] },
+        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
 
         // page 3
@@ -911,8 +1010,8 @@ static void noBlanks (char *s)
  */
 static bool s2char (SCoord &s, char *cp)
 {
-    // no KB on page 2
-    if (cur_page == 2)
+    // no KB on color page
+    if (cur_page == COLOR_PAGE)
         return (false);
 
     // check main qwerty
@@ -1081,14 +1180,16 @@ static void drawCSelPage()
     }
 
     // draw color wheel
-    resetWatchdog();
     for (int16_t y = CSEL_WYC-CSEL_WR; y < CSEL_WYC+CSEL_WR; y++) {
+        resetWatchdog();
         for (int16_t x = CSEL_WXC-CSEL_WR; x < CSEL_WXC+CSEL_WR; x++) {
             uint16_t c;
             if (getCSelBoxColor (x, y, c))
                 tft.drawPixel (x, y, c);
         }
     }
+
+    resetWatchdog();
 
 }
 
@@ -1302,27 +1403,31 @@ static void drawCurrentPageFields()
     drawCursor ();
 }
 
-/* cycle cur_page.
+/* change cur_page to the given page, do nothing is already set
  */
-static void drawNextPage()
+static void changePage (int new_page)
 {
-    // draw page button first for fast feedback afer tap
+    if (new_page == cur_page)
+        return;
 
-    switch (cur_page) {
-    case 0:
-        // from A to B: keyboard already ok
-        cur_page = 1;
-        tft.fillRect (0, 0, tft.width(), KB_Y0-1, BG_C);
-        drawCurrentPageFields();
-        drawPageButton();
-        break;
+    // save current then update
+    int prev_page = cur_page;
+    cur_page = new_page;
 
-    case 1:
-        // from B to C: fresh start, color, on/off
-        cur_page = 2;
+    // draw new page with minimal erasing if possible
+
+    if (new_page == 4) {
+        // new page is all bools, always a fresh start
         eraseScreen();
-        drawCSelPage();
         drawPageButton();
+        drawCurrentPageFields();
+        drawDoneButton();
+
+    } else if (new_page == 5) {
+        // new page is color and on/off table, always a fresh start
+        eraseScreen();
+        drawPageButton();
+        drawCSelPage();
         #if defined(_SHOW_ALL)
             drawOnOffControls();
         #else
@@ -1330,18 +1435,22 @@ static void drawNextPage()
                 drawOnOffControls();
         #endif
         drawDoneButton();
-        break;
 
-    default:
-    case 2:
-        // from scratch or C back to A:
-        cur_page = 0;
-        eraseScreen();
-        drawCurrentPageFields();
-        drawPageButton();
-        drawKeyboard();
-        drawDoneButton();
-        break;
+    } else {
+        // new page is 0-3 which all use a keyboard
+        if (prev_page >= 0 && prev_page <= 3) {
+            // just refresh top portion, keyboard already ok
+            tft.fillRect (0, 0, tft.width(), KB_Y0-1, BG_C);
+            drawPageButton();
+            drawCurrentPageFields();
+        } else {
+            // full refresh
+            eraseScreen();
+            drawPageButton();
+            drawCurrentPageFields();
+            drawKeyboard();
+            drawDoneButton();
+        }
     }
 }
 
@@ -1365,7 +1474,8 @@ static bool hostOK (char *host_str)
     noBlanks(host_str);
     char *dot = strchr (host_str, '.');
     size_t hl = strlen (host_str);
-    return (dot != NULL && host_str[0] != '.' && host_str[hl-1] != '.');
+    bool lh = !strcmp (host_str, "localhost");  // special case
+    return (lh || (dot != NULL && host_str[0] != '.' && host_str[hl-1] != '.'));
 }
 
 /* validate all string fields, temporarily indicate ones in error if on current page.
@@ -1398,12 +1508,28 @@ static bool validateStringPrompts()
             badsid[n_badsid++] = DXPORT_SPR;
     }
 
+    // check righost and port if used
+    if (bool_pr[RIGUSE_BPR].state) {
+        if (!hostOK(string_pr[RIGHOST_SPR].v_str))
+            badsid[n_badsid++] = RIGHOST_SPR;
+        if (!portOK (string_pr[RIGPORT_SPR].v_str, 1000, &rigport))
+            badsid[n_badsid++] = RIGPORT_SPR;
+    }
+
     // check rothost and port if used
     if (bool_pr[ROTUSE_BPR].state) {
         if (!hostOK(string_pr[ROTHOST_SPR].v_str))
             badsid[n_badsid++] = ROTHOST_SPR;
         if (!portOK (string_pr[ROTPORT_SPR].v_str, 1000, &rotport))
             badsid[n_badsid++] = ROTPORT_SPR;
+    }
+
+    // check flrig host and port if used
+    if (bool_pr[FLRIGUSE_BPR].state) {
+        if (!hostOK(string_pr[FLRIGHOST_SPR].v_str))
+            badsid[n_badsid++] = FLRIGHOST_SPR;
+        if (!portOK (string_pr[FLRIGPORT_SPR].v_str, 1000, &flrigport))
+            badsid[n_badsid++] = FLRIGPORT_SPR;
     }
 
     // check for plausible temperature corrections
@@ -1428,10 +1554,10 @@ static bool validateStringPrompts()
 
     // require ssid and pw if wifi
     if (bool_pr[WIFI_BPR].state) {
-        if (strlen (string_pr[SSID_SPR].v_str) == 0)
-            badsid[n_badsid++] = SSID_SPR;
-        if (strlen (string_pr[PASS_SPR].v_str) == 0)
-            badsid[n_badsid++] = PASS_SPR;
+        if (strlen (string_pr[WIFISSID_SPR].v_str) == 0)
+            badsid[n_badsid++] = WIFISSID_SPR;
+        if (strlen (string_pr[WIFIPASS_SPR].v_str) == 0)
+            badsid[n_badsid++] = WIFIPASS_SPR;
     }
 
     // allow no spaces in call sign
@@ -1476,14 +1602,35 @@ static bool validateStringPrompts()
     else
         badsid[n_badsid++] = CENTERLNG_SPR;
 
-    // indicate any values in error, changing pages if necessary to show all
+    // indicate any values in error, changing pages if necessary
     if (n_badsid > 0) {
 
-        bool show_bad = false;
 
-        do {
+        // starting with the current page, search for first page with any bad fields
 
-            // flag each erroneous value on current page
+        int bad_page = -1;
+        for (int p = 0; bad_page < 0 && p < N_PAGES; p++) {
+
+            // check this page for any bad values
+            int tmp_page = (cur_page + p) % N_PAGES;
+            for (int i = 0; i < n_badsid; i++) {
+                StringPrompt *sp = &string_pr[badsid[i]];
+                if (sp->page == tmp_page) {
+                    bad_page = tmp_page;
+                    break;
+                }
+            }
+        }
+
+        // if found, show bad page flagging all bad values
+
+        if (bad_page >= 0) {
+
+            // change page, if not already showing
+            if (bad_page != cur_page)
+                changePage(bad_page);
+
+            // flag each erroneous value
             for (uint8_t i = 0; i < n_badsid; i++) {
                 StringPrompt *sp = &string_pr[badsid[i]];
                 if (sp->page == cur_page) {
@@ -1491,37 +1638,25 @@ static bool validateStringPrompts()
                     tft.setTextColor (ERR_C);
                     tft.setCursor (sp->v_box.x, sp->v_box.y+sp->v_box.h-PR_D);
                     tft.print (F("Err"));
-                    show_bad = true;
                 }
             }
 
-            // next page if no bad fields on this one
-            if (!show_bad) {
+            // dwell error flag(s)
+            wdDelay(3000);
 
-                // no bad fields on this page, try next
-                drawNextPage();
-
-            } else {
-
-                // found bad field on this page
-
-                // dwell error flag(s)
-                wdDelay(2000);
-
-                // restore values
-                for (uint8_t i = 0; i < n_badsid; i++) {
-                    StringPrompt *sp = &string_pr[badsid[i]];
-                    if (sp->page == cur_page) {
-                        eraseSPValue (sp);
-                        drawSPValue (sp);
-                    }
+            // restore values
+            for (uint8_t i = 0; i < n_badsid; i++) {
+                StringPrompt *sp = &string_pr[badsid[i]];
+                if (sp->page == cur_page) {
+                    eraseSPValue (sp);
+                    drawSPValue (sp);
                 }
-
-                // redraw cursor in case it's value was flagged
-                drawCursor();
             }
 
-        } while (show_bad == false);
+            // redraw cursor in case it's value was flagged
+            drawCursor();
+
+        }
 
         // at least one bad field
         return (false);
@@ -1600,9 +1735,9 @@ static void initSetup()
 
     // init call sign
 
-    if (!NVReadString(NV_CALLSIGN, call)) {
-        strncpy (call, DEF_CALL, NV_CALLSIGN_LEN-1);
-        NVWriteString(NV_CALLSIGN, call);
+    if (!NVReadString(NV_CALLSIGN, callsign)) {
+        strncpy (callsign, DEF_CALL, NV_CALLSIGN_LEN-1);
+        NVWriteString(NV_CALLSIGN, callsign);
     }
 
 
@@ -1615,10 +1750,13 @@ static void initSetup()
     }
     uint8_t nv_gpsd;
     if (!NVReadUInt8 (NV_USEGPSD, &nv_gpsd)) {
-        nv_gpsd = bool_pr[GPSDON_BPR].state = false;
+        bool_pr[GPSDON_BPR].state = false;
+        bool_pr[GPSDFOLLOW_BPR].state = false;
         NVWriteUInt8 (NV_USEGPSD, 0);
-    } else
-        bool_pr[GPSDON_BPR].state = (nv_gpsd != 0);
+    } else {
+        bool_pr[GPSDON_BPR].state = (nv_gpsd & USEGPSD_FORTIME_BIT) != 0;
+        bool_pr[GPSDFOLLOW_BPR].state = bool_pr[GPSDON_BPR].state && (nv_gpsd & USEGPSD_FORLOC_BIT) != 0;
+    }
 
 
 
@@ -1636,11 +1774,29 @@ static void initSetup()
         bool_pr[NTPSET_BPR].state = (nv_ntp != 0);
 
 
+    // init rigctld host, port and option
+
+    if (!NVReadString (NV_RIGHOST, righost)) {
+        strcpy (righost, "localhost");
+        NVWriteString (NV_RIGHOST, righost);
+    }
+    if (!NVReadUInt16(NV_RIGPORT, &rigport)) {
+        rigport = 4532;
+        NVWriteUInt16(NV_RIGPORT, rigport);
+    }
+    uint8_t nv_rig;
+    if (!NVReadUInt8 (NV_RIGUSE, &nv_rig)) {
+        nv_rig = bool_pr[RIGUSE_BPR].state = false;
+        NVWriteUInt8 (NV_RIGUSE, 0);
+    } else
+        bool_pr[RIGUSE_BPR].state = (nv_rig != 0);
+
+
     // init rotctld host, port and option
 
     if (!NVReadString (NV_ROTHOST, rothost)) {
         strcpy (rothost, "localhost");
-        NVWriteString (NV_ROTHOST, ntphost);
+        NVWriteString (NV_ROTHOST, rothost);
     }
     if (!NVReadUInt16(NV_ROTPORT, &rotport)) {
         rotport = 4533;
@@ -1654,11 +1810,34 @@ static void initSetup()
         bool_pr[ROTUSE_BPR].state = (nv_rot != 0);
 
 
-    // init dx cluster host, port and map options
+    // init flrig host, port and option
+
+    if (!NVReadString (NV_FLRIGHOST, flrighost)) {
+        strcpy (flrighost, "localhost");
+        NVWriteString (NV_FLRIGHOST, flrighost);
+    }
+    if (!NVReadUInt16(NV_FLRIGPORT, &flrigport)) {
+        flrigport = 12345;
+        NVWriteUInt16(NV_FLRIGPORT, flrigport);
+    }
+    uint8_t nv_flrig;
+    if (!NVReadUInt8 (NV_FLRIGUSE, &nv_flrig)) {
+        nv_flrig = bool_pr[FLRIGUSE_BPR].state = false;
+        NVWriteUInt8 (NV_FLRIGUSE, 0);
+    } else
+        bool_pr[FLRIGUSE_BPR].state = (nv_flrig != 0);
+
+
+
+    // init dx cluster host, port, login and map options
 
     if (!NVReadString(NV_DXHOST, dxhost)) {
         memset (dxhost, 0, sizeof(dxhost));
         NVWriteString(NV_DXHOST, dxhost);
+    }
+    if (!NVReadString(NV_DXLOGIN, dxlogin)) {
+        strcpy (dxlogin, callsign);      // default to call
+        NVWriteString(NV_DXLOGIN, dxlogin);
     }
     if (!NVReadUInt16(NV_DXPORT, &dxport)) {
         dxport = 0;
@@ -1748,10 +1927,10 @@ static void initSetup()
     uint16_t x11flags;
     int dspw, dsph;
     tft.getScreenSize (&dspw, &dsph);
-    Serial.printf ("Display is %d x %d\n", dspw, dsph);
-    Serial.printf ("Built for %d x %d\n", BUILD_W, BUILD_H);
+    Serial.printf (_FX("Display is %d x %d\n"), dspw, dsph);
+    Serial.printf (_FX("Built for %d x %d\n"), BUILD_W, BUILD_H);
     if (NVReadUInt16 (NV_X11FLAGS, &x11flags)) {
-        Serial.printf ("x11flags found 0x%02X\n", x11flags);
+        Serial.printf (_FX("x11flags found 0x%02X\n"), x11flags);
         bool_pr[X11_FULLSCRN_BPR].state = (x11flags & X11BIT_FULLSCREEN) == X11BIT_FULLSCREEN;
         tft.X11OptionsEngageNow(getX11FullScreen());
     } else {
@@ -1817,6 +1996,13 @@ static void initSetup()
         NVWriteUInt8 (NV_ROTATE_SCRN, rot);
     }
     bool_pr[FLIP_BPR].state = (rot != 0);
+
+    uint8_t doy;
+    if (!NVReadUInt8 (NV_DOY_ON, &doy)) {
+        doy = 0;
+        NVWriteUInt8 (NV_DOY_ON, doy);
+    }
+    bool_pr[DATEDOY_BPR].state = (doy != 0);
 
     uint8_t met;
     if (!NVReadUInt8 (NV_METRIC_ON, &met)) {
@@ -1941,8 +2127,12 @@ static void initDisplay()
                                         "%.2f%c", fabsf(de_ll.lng_d), de_ll.lng_d < 0 ? 'W' : 'E');
     snprintf (string_pr[DXPORT_SPR].v_str = (char*)malloc(8), string_pr[DXPORT_SPR].v_len = 8,
                                         "%u", dxport);
+    snprintf (string_pr[RIGPORT_SPR].v_str = (char*)malloc(8), string_pr[RIGPORT_SPR].v_len = 8,
+                                        "%u", rigport);
     snprintf (string_pr[ROTPORT_SPR].v_str = (char*)malloc(8), string_pr[ROTPORT_SPR].v_len = 8,
                                         "%u", rotport);
+    snprintf (string_pr[FLRIGPORT_SPR].v_str = (char*)malloc(8), string_pr[FLRIGPORT_SPR].v_len = 8,
+                                        "%u", flrigport);
     snprintf (string_pr[TEMPCORR_SPR].v_str = (char*)malloc(8), string_pr[TEMPCORR_SPR].v_len = 8,
                                         "%.2f", temp_corr[BME_76]);
     snprintf (string_pr[PRESCORR_SPR].v_str = (char*)malloc(8), string_pr[PRESCORR_SPR].v_len = 8,
@@ -1961,12 +2151,13 @@ static void initDisplay()
 
 #if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
     // don't show my creds when testing
-    strcpy_P (wifissid, PSTR("mywifissid"));
-    strcpy_P (wifipw, PSTR("mywifipassword"));
+    strcpy (wifissid, _FX("mywifissid"));
+    strcpy (wifipw, _FX("mywifipassword"));
 #endif
 
-    // draw first page
-    drawNextPage();
+    // force drawing first page
+    cur_page = -1;
+    changePage(0);
 }
 
 /* display an entangled pair of bools: show A state if off else B state
@@ -2017,14 +2208,24 @@ static void runSetup()
 
         // process special cases first
 
-        if (inBox (s, page_b) || c == 27) {              // esc
+        if (inBox (s, page_b)) {
 
-            // show next page
-            drawNextPage();
+            // change page back or forward depending on whether tapped in left or right half
+            if (s.x > page_b.x + page_b.w/2)
+                changePage ((cur_page+1)%N_PAGES);
+            else
+                changePage ((N_PAGES+cur_page-1)%N_PAGES);
             continue;
         }
 
-        if (cur_page == 2) {
+        if (c == 27) {              // esc
+
+            // show next page
+            changePage ((cur_page+1)%N_PAGES);
+            continue;
+        }
+
+        if (cur_page == COLOR_PAGE) {
 
             if (handleCSelTouch(s) || checkOnOffTouch(s))
                 continue;
@@ -2166,9 +2367,10 @@ static void runSetup()
             else if (bp == &bool_pr[GEOIP_BPR]) {
                 // show/hide lat/lng prompts, gpsd
                 if (bp->state) {
-                    // no gpsd host
-                    bool_pr[GPSDON_BPR].state = false;
+                    // no gpsd
                     eraseSPPromptValue (&string_pr[GPSDHOST_SPR]);
+                    eraseBPPromptState (&bool_pr[GPSDFOLLOW_BPR]);
+                    bool_pr[GPSDON_BPR].state = false;
                     drawBPState (&bool_pr[GPSDON_BPR]);
                     // no lat/long
                     eraseSPPromptValue (&string_pr[LAT_SPR]);
@@ -2193,18 +2395,63 @@ static void runSetup()
                 }
             }
 
+            else if (bp == &bool_pr[RIGUSE_BPR]) {
+                // show/hide rigctld host and port
+                if (bp->state) {
+                    // show host and port prompts and say yes
+                    drawBPState (&bool_pr[RIGUSE_BPR]);
+                    drawSPPromptValue (&string_pr[RIGHOST_SPR]);
+                    drawSPPromptValue (&string_pr[RIGPORT_SPR]);
+                } else {
+                    // hide and say no
+                    drawBPState (&bool_pr[RIGUSE_BPR]);
+                    eraseSPPromptValue (&string_pr[RIGHOST_SPR]);
+                    eraseSPPromptValue (&string_pr[RIGPORT_SPR]);
+                }
+            }
+
             else if (bp == &bool_pr[ROTUSE_BPR]) {
                 // show/hide rotctld host and port
                 if (bp->state) {
-                    // show host and port prompts
-                    eraseBPState (&bool_pr[ROTUSE_BPR]);
+                    // show host and port prompts and say yes
+                    drawBPState (&bool_pr[ROTUSE_BPR]);
                     drawSPPromptValue (&string_pr[ROTHOST_SPR]);
                     drawSPPromptValue (&string_pr[ROTPORT_SPR]);
                 } else {
-                    // show default 
+                    // hide and say no
+                    drawBPState (&bool_pr[ROTUSE_BPR]);
                     eraseSPPromptValue (&string_pr[ROTHOST_SPR]);
                     eraseSPPromptValue (&string_pr[ROTPORT_SPR]);
+                }
+            }
+
+            else if (bp == &bool_pr[FLRIGUSE_BPR]) {
+                // show/hide flrig host and port
+                if (bp->state) {
+                    // show host and port prompts and say yes
+                    drawBPState (&bool_pr[FLRIGUSE_BPR]);
+                    drawSPPromptValue (&string_pr[FLRIGHOST_SPR]);
+                    drawSPPromptValue (&string_pr[FLRIGPORT_SPR]);
+                } else {
+                    // hide and say no
+                    drawBPState (&bool_pr[FLRIGUSE_BPR]);
+                    eraseSPPromptValue (&string_pr[FLRIGHOST_SPR]);
+                    eraseSPPromptValue (&string_pr[FLRIGPORT_SPR]);
+                }
+            }
+
+            else if (bp == &bool_pr[ROTUSE_BPR]) {
+                // show/hide rotctld host and port
+                if (bp->state) {
+                    // show host and port prompts and say yes
                     drawBPState (&bool_pr[ROTUSE_BPR]);
+                    drawSPPromptValue (&string_pr[ROTHOST_SPR]);
+                    drawSPPromptValue (&string_pr[ROTPORT_SPR]);
+                } else {
+                    // hide and say no
+                    drawBPState (&bool_pr[ROTUSE_BPR]);
+                    eraseSPPromptValue (&string_pr[ROTHOST_SPR]);
+                    eraseSPPromptValue (&string_pr[ROTPORT_SPR]);
                 }
             }
 
@@ -2212,18 +2459,20 @@ static void runSetup()
                 // show/hide dx cluster prompts
                 if (bp->state) {
                     // show query for host, port and map
-                    eraseBPState (&bool_pr[CLUSTER_BPR]);
+                    drawBPState (&bool_pr[CLUSTER_BPR]);
                     drawSPPromptValue (&string_pr[DXHOST_SPR]);
                     drawSPPromptValue (&string_pr[DXPORT_SPR]);
+                    drawSPPromptValue (&string_pr[DXLOGIN_SPR]);
                     drawBPPrompt (&bool_pr[CLMAP_BPR]);
                     drawBoolPair (CLMAP_BPR, CLLABEL_BPR);
                 } else {
                     // hide all and say No
+                    drawBPState (&bool_pr[CLUSTER_BPR]);
                     eraseSPPromptValue (&string_pr[DXHOST_SPR]);
                     eraseSPPromptValue (&string_pr[DXPORT_SPR]);
-                    eraseBPPromptState (&bool_pr[CLLABEL_BPR]);
+                    eraseSPPromptValue (&string_pr[DXLOGIN_SPR]);
                     eraseBPPromptState (&bool_pr[CLMAP_BPR]);
-                    drawBPState (&bool_pr[CLUSTER_BPR]);
+                    eraseBPPromptState (&bool_pr[CLLABEL_BPR]);
                 }
             }
 
@@ -2236,12 +2485,14 @@ static void runSetup()
                     // no geolocate
                     bool_pr[GEOIP_BPR].state = false;
                     drawBPState (&bool_pr[GEOIP_BPR]);
-                    // show gpsd host
+                    // show gpsd host and follow
                     eraseBPState (&bool_pr[GPSDON_BPR]);
                     drawSPPromptValue (&string_pr[GPSDHOST_SPR]);
+                    drawBPPromptState (&bool_pr[GPSDFOLLOW_BPR]);
                 } else {
-                    // no gpsd host
+                    // no gpsd host or follow
                     eraseSPPromptValue (&string_pr[GPSDHOST_SPR]);
+                    eraseBPPromptState (&bool_pr[GPSDFOLLOW_BPR]);
                     drawBPState (&bool_pr[GPSDON_BPR]);
                     // show lat/long
                     drawSPPromptValue (&string_pr[LAT_SPR]);
@@ -2286,11 +2537,11 @@ static void runSetup()
                 // show/hide wifi prompts
                 if (bp->state) {
                     eraseBPState (&bool_pr[WIFI_BPR]);
-                    drawSPPromptValue (&string_pr[SSID_SPR]);
-                    drawSPPromptValue (&string_pr[PASS_SPR]);
+                    drawSPPromptValue (&string_pr[WIFISSID_SPR]);
+                    drawSPPromptValue (&string_pr[WIFIPASS_SPR]);
                 } else {
-                    eraseSPPromptValue (&string_pr[SSID_SPR]);
-                    eraseSPPromptValue (&string_pr[PASS_SPR]);
+                    eraseSPPromptValue (&string_pr[WIFISSID_SPR]);
+                    eraseSPPromptValue (&string_pr[WIFIPASS_SPR]);
                     drawBPState (&bool_pr[WIFI_BPR]);
                 }
             }
@@ -2337,9 +2588,10 @@ static void finishSettingUp()
     NVWriteString(NV_WIFI_PASSWD, wifipw);
 #endif
 
-    NVWriteString(NV_CALLSIGN, call);
+    NVWriteString(NV_CALLSIGN, callsign);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
+    NVWriteUInt8 (NV_DOY_ON, bool_pr[DATEDOY_BPR].state);
     NVWriteUInt32 (NV_KX3BAUD, bool_pr[KX3ON_BPR].state ? (bool_pr[KX3BAUD_BPR].state ? 38400 : 4800) : 0);
     NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
     NVWriteFloat (NV_PRESCORR, pres_corr[BME_76]);
@@ -2347,11 +2599,13 @@ static void finishSettingUp()
     NVWriteFloat (NV_PRESCORR2, pres_corr[BME_77]);
     NVWriteUInt8 (NV_BR_MIN, bright_min);
     NVWriteUInt8 (NV_BR_MAX, bright_max);
-    NVWriteUInt8(NV_USEGPSD, bool_pr[GPSDON_BPR].state);
-    NVWriteString(NV_GPSDHOST, gpsdhost);
-    NVWriteUInt8(NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
-    NVWriteString(NV_DXHOST, dxhost);
-    NVWriteUInt16(NV_DXPORT, dxport);
+    NVWriteUInt8 (NV_USEGPSD, (bool_pr[GPSDON_BPR].state ? USEGPSD_FORTIME_BIT : 0)
+                | (bool_pr[GPSDON_BPR].state && bool_pr[GPSDFOLLOW_BPR].state ? USEGPSD_FORLOC_BIT : 0));
+    NVWriteString (NV_GPSDHOST, gpsdhost);
+    NVWriteUInt8 (NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
+    NVWriteString (NV_DXHOST, dxhost);
+    NVWriteUInt16 (NV_DXPORT, dxport);
+    NVWriteString (NV_DXLOGIN, dxlogin);
     NVWriteUInt8 (NV_LOGUSAGE, bool_pr[LOGUSAGE_BPR].state);
     NVWriteUInt8 (NV_MAPSPOTS,
             bool_pr[CLMAP_BPR].state ? (bool_pr[CLLABEL_BPR].state ? NVMS_CALL : NVMS_PREFIX) : NVMS_NONE);
@@ -2361,9 +2615,15 @@ static void finishSettingUp()
     NVWriteUInt8 (NV_DATEDMYYMD, bool_pr[DATEFMT_DMYYMD_BPR].state);
     NVWriteUInt8 (NV_GPIOOK, bool_pr[GPIOOK_BPR].state);
     NVWriteInt16 (NV_CENTERLNG, center_lng);
+    NVWriteUInt8 (NV_RIGUSE, bool_pr[RIGUSE_BPR].state);
+    NVWriteString (NV_RIGHOST, righost);
+    NVWriteUInt16 (NV_RIGPORT, rigport);
     NVWriteUInt8 (NV_ROTUSE, bool_pr[ROTUSE_BPR].state);
     NVWriteString (NV_ROTHOST, rothost);
-    NVWriteInt16 (NV_ROTPORT, rotport);
+    NVWriteUInt16 (NV_ROTPORT, rotport);
+    NVWriteUInt8 (NV_FLRIGUSE, bool_pr[FLRIGUSE_BPR].state);
+    NVWriteString (NV_FLRIGHOST, flrighost);
+    NVWriteUInt16 (NV_FLRIGPORT, flrigport);
 
     // save and engage user's X11 settings
     uint16_t x11flags = 0;
@@ -2392,7 +2652,9 @@ static void finishSettingUp()
     free (string_pr[LAT_SPR].v_str);
     free (string_pr[LNG_SPR].v_str);
     free (string_pr[DXPORT_SPR].v_str);
+    free (string_pr[RIGPORT_SPR].v_str);
     free (string_pr[ROTPORT_SPR].v_str);
+    free (string_pr[FLRIGPORT_SPR].v_str);
     free (string_pr[TEMPCORR_SPR].v_str);
     free (string_pr[PRESCORR_SPR].v_str);
     free (string_pr[TEMPCORR2_SPR].v_str);
@@ -2545,7 +2807,7 @@ const char *getWiFiPW()
  */
 const char *getCallsign()
 {
-    return (call);
+    return (callsign);
 }
 
 /* return pointer to static storage containing the DX cluster host
@@ -2557,7 +2819,7 @@ const char *getDXClusterHost()
 }
 
 /* return pointer to static storage containing the GPSD host
- * N.B. only sensible if useGPSD() is true
+ * N.B. only sensible if useGPSDTime() and/or useGPSDLoc() is true
  */
 const char *getGPSDHost()
 {
@@ -2623,11 +2885,18 @@ bool useGeoIP()
     return (bool_pr[GEOIP_BPR].state);
 }
 
-/* return whether to use GPSD for time and location
+/* return whether to use GPSD for time
  */
-bool useGPSD()
+bool useGPSDTime()
 {
     return (bool_pr[GPSDON_BPR].state);
+}
+
+/* return whether to use GPSD for location
+ */
+bool useGPSDLoc()
+{
+    return (bool_pr[GPSDON_BPR].state && bool_pr[GPSDFOLLOW_BPR].state);
 }
 
 /* return whether to use NTP host set here
@@ -2668,13 +2937,13 @@ bool GPIOOk ()
  * save in NV if ok.
  * return whether appropriate.
  */
-bool setBMETempCorr(int i, float delta)
+bool setBMETempCorr(BMEIndex i, float delta)
 {
     if ((i != BME_76 && i != BME_77) || !getBMEData(i, false))
         return (false);
 
     // engage
-    temp_corr[i] = delta;
+    temp_corr[(int)i] = delta;
 
     // persist
     NVWriteFloat (i == BME_76 ? NV_TEMPCORR : NV_TEMPCORR2, temp_corr[i]);
@@ -2695,13 +2964,13 @@ float getBMETempCorr(int i)
  * save in NV if ok.
  * return whether appropriate.
  */
-bool setBMEPresCorr(int i, float delta)
+bool setBMEPresCorr(BMEIndex i, float delta)
 {
     if ((i != BME_76 && i != BME_77) || !getBMEData(i, false))
         return (false);
 
     // engage
-    pres_corr[i] = delta;
+    pres_corr[(int)i] = delta;
 
     // persist
     NVWriteFloat (i == BME_76 ? NV_PRESCORR : NV_PRESCORR2, pres_corr[i]);
@@ -2815,6 +3084,21 @@ void setCenterLng (int16_t l)
     alt_center_lng_set = true;
 }
 
+/* get rigctld host and port and return whether it's to be used at all.
+ * if just want yes/no either or both pointers can be NULL.
+ */
+bool getRigctld (char host[NV_RIGHOST_LEN], int *portp)
+{
+    if (bool_pr[RIGUSE_BPR].state) {
+        if (host != NULL)
+            strcpy (host, righost);
+        if (portp != NULL)
+            *portp = rigport;
+        return (true);
+    }
+    return (false);
+}
+
 /* get rotctld host and port and return whether it's to be used at all.
  * if just want yes/no either or both pointers can be NULL.
  */
@@ -2828,4 +3112,33 @@ bool getRotctld (char host[NV_ROTHOST_LEN], int *portp)
         return (true);
     }
     return (false);
+}
+
+/* get flrig host and port and return whether it's to be used at all.
+ * if just want yes/no either or both pointers can be NULL.
+ */
+bool getFlrig (char host[NV_FLRIGHOST_LEN], int *portp)
+{
+    if (bool_pr[FLRIGUSE_BPR].state) {
+        if (host != NULL)
+            strcpy (host, flrighost);
+        if (portp != NULL)
+            *portp = flrigport;
+        return (true);
+    }
+    return (false);
+}
+
+/* get name to use for cluster login
+ */
+const char *getDXClusterLogin()
+{
+    return (dxlogin[0] != '\0' ? dxlogin : callsign);
+}
+
+/* return whether date should be displayed as day-of-year
+ */
+bool getDOY()
+{
+    return (bool_pr[DATEDOY_BPR].state);
 }

@@ -130,10 +130,11 @@ static void menuItemsAllOff (MenuInfo &menu, SBox *boxes, int ii)
 }
 
 /* operate the given menu until ok, cancel or timeout.
- * caller passes a box we use for ok so they can use it later with menuRedrawOk if necessary.
+ * caller passes a box we use for ok so they can use it later with menuRedrawOk if needed.
  * return true if op clicked ok else false for all other cases.
  * N.B. menu.menu_b.x/y are required but may be adjusted to prevent edge spill.
  * N.B. incomig menu.menu_b.w/h are ignored, we set here by shrink wrapping to fit around menu items.
+ *   then erase before returning.
  */
 bool runMenu (MenuInfo &menu)
 {
@@ -323,6 +324,9 @@ bool runMenu (MenuInfo &menu)
     }
 
     drainTouch();
+
+    // erase in prep for caller to restore covered content
+    tft.fillRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, RA8875_BLACK);
 
     return (ok);
 }

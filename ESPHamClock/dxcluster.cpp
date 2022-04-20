@@ -647,7 +647,7 @@ static void showDXClusterErr (const SBox &box, const char *msg)
         // show title and message
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor(RA8875_RED);
-        const char *title = "DX Cluster error:";
+        const char *title = _FX("DX Cluster error:");
         uint16_t tw = getTextWidth (title);
         tft.setCursor (box.x + (box.w-tw)/2, box.y + box.h/3);
         tft.print (title);
@@ -693,7 +693,8 @@ static void prefillDXList(const SBox &box)
         while (getTCPLine (dx_client, line, sizeof(line), &ll) && !isSpiderPrompt(line, ll)) {
             // dxcLog (line);
             int ut;
-            if (sscanf (line, "%f %20s %*s %d", &ss[n_ss].kHz, ss[n_ss].call, &ut) == 3 && n_ss < LISTING_N) {
+            if (sscanf (line, _FX("%f %20s %*s %d"), &ss[n_ss].kHz, ss[n_ss].call, &ut) == 3
+                                                                && n_ss < LISTING_N) {
                 dxcLog (line);
                 ss[n_ss++].ut = ut;
             }
@@ -744,10 +745,12 @@ static bool connectDXCluster (const SBox &box)
                 updateClocks(false);
                 dxcLog (_FX("connect ok"));
 
-                // assume we have been asked for our callsign
-                dx_client.println (getCallsign());
+                // assume first question is asking for call
+                const char *login = getDXClusterLogin();
+                dxcLog (_FX("login as %s\n"), login);
+                dx_client.println (login);
 
-                // read until find next prompt, looking for clue about type of cluster
+                // like lookForDXClusterPrompt() but look for clue about type of cluster along the way
                 uint16_t bl;
                 StackMalloc buf_mem(200);
                 char *buf = buf_mem.getMem();
@@ -776,6 +779,17 @@ static bool connectDXCluster (const SBox &box)
                     return (false);
                 }
 
+                // not here
+                snprintf (buf, buf_mem.getSize(), _FX("set/nohere"));
+                dx_client.println(buf);
+                dxcLog (buf);
+                if (!lookForDXClusterPrompt()) {
+                    showDXClusterErr (box, _FX("Failed sending set/nohere"));
+                    return (false);
+                }
+
+
+
                 // prefill list with old or new, depending on _USE_SHOWDX
 
               #if defined(_USE_SHOWDX)
@@ -794,6 +808,8 @@ static bool connectDXCluster (const SBox &box)
                 }
 
               #endif // _USE_SHOWDX
+
+
 
                 // confirm still ok
                 if (!dx_client) {
@@ -877,7 +893,7 @@ bool sendDXClusterDELLGrid()
         } else if (cl_type == CT_ARCLUSTER) {
 
             // friendly turn off skimmer just avoid getting swamped
-            strcpy_P (buf, PSTR("set dx filter not skimmer"));
+            strcpy (buf, _FX("set dx filter not skimmer"));
             dx_client.println(buf);
             dxcLog (buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "filter"))

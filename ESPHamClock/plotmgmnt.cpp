@@ -122,8 +122,6 @@ static int menuChoiceQS (const void *p1, const void *p2)
  */
 bool plotChoiceIsAvailable (PlotChoice ch)
 {
-    uint32_t sw_timer;
-
     switch (ch) {
 
     case PLOT_CH_DXCLUSTER:     return (useDXCluster());
@@ -132,7 +130,7 @@ bool plotChoiceIsAvailable (PlotChoice ch)
     case PLOT_CH_PRESSURE:      return (getNBMEConnected() > 0);
     case PLOT_CH_HUMIDITY:      return (getNBMEConnected() > 0);
     case PLOT_CH_DEWPOINT:      return (getNBMEConnected() > 0);
-    case PLOT_CH_COUNTDOWN:     return (getSWEngineState(sw_timer) == SWE_COUNTDOWN);
+    case PLOT_CH_COUNTDOWN:     return (getSWEngineState(NULL,NULL) == SWE_COUNTDOWN);
 
     case PLOT_CH_BC:            // fallthru
     case PLOT_CH_DEWX:          // fallthru
@@ -205,9 +203,9 @@ PlotChoice askPaneChoice (PlotPane pp)
     qsort (mitems, n_mitems, sizeof(MenuItem), menuChoiceQS);
 
     // run the menu in copy of plot box so its height is not changed
-    SBox pb = plot_b[pp];       // copy, not reference, because runMenu will shrink wrap
+    SBox box = plot_b[pp];       // copy, not reference, because runMenu will shrink wrap
     SBox ok_b;
-    MenuInfo menu = {pb, ok_b, true, false, 2, n_mitems, mitems};
+    MenuInfo menu = {box, ok_b, true, false, 2, n_mitems, mitems};
     bool menu_ok = runMenu (menu);
 
     // return current choice by default
@@ -218,27 +216,38 @@ PlotChoice askPaneChoice (PlotPane pp)
         // show feedback
         menuRedrawOk (ok_b, MENU_OK_BUSY);
 
-        // set new rotset
-        plot_rotset[pp] = 0;
+        // find new rotset
+        uint32_t new_rotset = 0;
         for (int i = 0; i < n_mitems; i++) {
             if (mitems[i].set) {
                 // find which choice this refers to by matching labels
                 for (int j = 0; j < PLOT_CH_N; j++) {
                     if (strcmp (plot_names[j], mitems[i].label) == 0) {
-                        plot_rotset[pp] |= (1 << j);
+                        new_rotset |= (1 << j);
                         break;
                     }
                 }
             }
         }
-        savePlotOps();
 
-        // return current choice if still in rotset, else just pick one
-        if (!(plot_rotset[pp] & (1 << return_ch))) {
-            for (int i = 0; i < PLOT_CH_N; i++) {
-                if (plot_rotset[pp] & (1 << i)) {
-                    return_ch = (PlotChoice)i;
-                    break;
+        // enforce cluster on its own
+        if ((new_rotset & (1<<PLOT_CH_DXCLUSTER)) && ((new_rotset & ~(1<<PLOT_CH_DXCLUSTER)) != 0)) {
+
+            plotMessage (box, RA8875_RED, _FX("DX Cluster may not be mixed with other choices"));
+            wdDelay(5000);
+
+        } else {
+
+            plot_rotset[pp] = new_rotset;
+            savePlotOps();
+
+            // return current choice if still in rotset, else just pick one
+            if (!(plot_rotset[pp] & (1 << return_ch))) {
+                for (int i = 0; i < PLOT_CH_N; i++) {
+                    if (plot_rotset[pp] & (1 << i)) {
+                        return_ch = (PlotChoice)i;
+                        break;
+                    }
                 }
             }
         }
@@ -353,8 +362,7 @@ bool paneIsRotating (PlotPane pp)
  */
 void insureCountdownPaneSensible()
 {
-    uint32_t sw_timer;
-    if (getSWEngineState(sw_timer) != SWE_COUNTDOWN) {
+    if (getSWEngineState(NULL,NULL) != SWE_COUNTDOWN) {
         for (int i = 0; i < PANE_N; i++) {
             if (plot_rotset[i] & (1 << PLOT_CH_COUNTDOWN)) {
                 plot_rotset[i] &= ~(1 << PLOT_CH_COUNTDOWN);
@@ -487,7 +495,7 @@ void initPlotPanes()
     NVReadUInt32 (NV_PANE2ROTSET, &plot_rotset[PANE_2]);
     NVReadUInt32 (NV_PANE3ROTSET, &plot_rotset[PANE_3]);
 
-    // rm any rotset not available
+    // rm any choice not available
     for (int i = 0; i < PANE_N; i++) {
         for (int j = 0; j < PLOT_CH_N; j++) {
             if ((plot_rotset[i] & (1 << j)) && !plotChoiceIsAvailable ((PlotChoice)j)) {
@@ -521,6 +529,16 @@ void initPlotPanes()
                     }
                 }
             }
+        }
+    }
+
+    // enforce cluster is alone, if any
+    for (int i = 0; i < PANE_N; i++) {
+        if (plot_rotset[i] & (1 << PLOT_CH_DXCLUSTER)) {
+            plot_rotset[i] = (1 << PLOT_CH_DXCLUSTER);
+            plot_ch[i] = PLOT_CH_DXCLUSTER;
+            Serial.printf (_FX("isolating DX Cluster in pane %d\n"), i+i);
+            break;
         }
     }
 
@@ -558,16 +576,16 @@ void showRotatingBorder (bool soon, PlotPane pp)
 
 }
 
-/* download the given url containing a bmp image and display in the given box.
+/* download the given hamclock url containing a bmp image and display in the given box.
  * show error messages in the given color.
  * return whether all ok
  */
-bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
+bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
 {
     WiFiClient client;
     bool ok = false;
 
-    Serial.println(url);
+    Serial.println(hc_url);
     resetWatchdog();
     if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
         updateClocks(false);
@@ -577,7 +595,7 @@ bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color)
         union { char c[2]; uint16_t x; } i16;
 
         // query web page
-        httpGET (client, svr_host, url);
+        httpHCGET (client, svr_host, hc_url);
 
         // skip response header
         if (!httpSkipHeader (client)) {

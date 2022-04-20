@@ -355,7 +355,7 @@ static void drawMPElPlot (time_t t0, time_t &t_start, time_t &t_end)
             prev_both_up = both_up;
         }
 
-        Serial.printf ("MP: rough start %02d:%02d end %02d:%02d\n",
+        Serial.printf (_FX("MP: rough start %02d:%02d end %02d:%02d\n"),
                                 hour(t_start), minute(t_start),
                                 hour(t_end), minute(t_end));
 }
@@ -397,7 +397,7 @@ static void drawMPBothUpTable (time_t t0, time_t t_start, time_t t_end)
             }
             better_end += 2*MP_US;              // return to last known !both_up
 
-            Serial.printf ("MP: better start %02d:%02d end %02d:%02d\n",
+            Serial.printf (_FX("MP: better start %02d:%02d end %02d:%02d\n"),
                                 hour(better_start), minute(better_start),
                                 hour(better_end), minute(better_end));
         }

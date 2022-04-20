@@ -1,8 +1,159 @@
 /* initial seed of radio control idea.
+ * first attempt was simple bit-bang serial to kx3 to set frequency for a spot.
+ * now we add hamlib's rigctld and w1hkj's flrig to rig they support without needing _SUPPORT_KX3.
  */
 
 
 #include "HamClock.h"
+
+
+/* setRigctldFreq helper to send the given command then read and discard response until find RPRT
+ * N.B. we assume cmd already includes trailing \n
+ */
+static void sendHLCmd (WiFiClient &client, const char cmd[])
+{
+    // send
+    Serial.printf ("RIG: %s", cmd);
+    client.print(cmd);
+
+    // absorb reply until fine RPRT
+    char buf[64];
+    bool ok = 0;
+    do {
+        ok = getTCPLine (client, buf, sizeof(buf), NULL);
+        if (ok)
+            Serial.printf ("  %s\n", buf);
+    } while (ok && !strstr (buf, "RPRT"));
+}
+
+/* connect to rigctld and set the given frequency.
+ * this can be used on all platforms.
+ */
+static void setRigctldFreq (float kHz)
+{
+    // get host and port, bale if nothing
+    char host[NV_RIGHOST_LEN];
+    int port;
+    if (!getRigctld (host, &port))
+        return;
+
+    // connect, bale if can't
+    WiFiClient rig_client;
+    Serial.printf (_FX("RIG: %s:%d\n"), host, port);
+    if (!wifiOk() || !rig_client.connect(host, port)) {
+        Serial.printf (_FX("RIG: %s:%d failed\n"), host, port);
+        return;
+    }
+
+    // stay alive
+    updateClocks(false);
+    resetWatchdog();
+
+    // send setup commands, require RPRT for each but ignore error values
+    #define _MAX_CMD_W 25
+    static const char setup_cmds[][_MAX_CMD_W] PROGMEM = {
+        "+\\set_split_vfo 0 VFOA\n",
+        "+\\set_vfo VFOA\n",
+        "+\\set_func RIT 0\n",
+        "+\\set_rit 0\n",
+        "+\\set_func XIT 0\n",
+        "+\\set_xit 0\n",
+    };
+    for (unsigned i = 0; i < NARRAY(setup_cmds); i++) {
+        char cmd[_MAX_CMD_W];
+        strcpy_P (cmd, setup_cmds[i]);
+        sendHLCmd (rig_client, cmd);
+    }
+
+    // send freq
+    char fcmd[32];
+    snprintf (fcmd, sizeof(fcmd), "+\\set_freq %d\n", (int)(kHz*1000));
+    sendHLCmd (rig_client, fcmd);
+
+    // finished
+    rig_client.stop();
+}
+
+/* setFlrigFreq helper to send and xml-rpc command and discard response
+ */
+static void sendXMLRPCCmd (WiFiClient &client, const char cmd[], const char value[], const char type[])
+{
+    static const char hdr_fmt[] PROGMEM =
+        "POST /RPC2 HTTP/1.1\r\n"
+        "Content-Type: text/xml\r\n"
+        "Content-length: %d\r\n"
+        "\r\n"
+        "%s"
+    ;
+    static const char body_fmt[] PROGMEM =
+        "<?xml version=\"1.0\" encoding=\"us-ascii\"?>\r\n"
+        "<methodCall>\r\n"
+        "    <methodName>%.50s</methodName>\r\n"
+        "    <params>\r\n"
+        "        <param><value><%.10s>%.50s</%.10s></value></param>\r\n"
+        "    </params>\r\n"
+        "</methodCall>\r\n"
+    ;
+
+    // copy each to mem
+    StackMalloc hdr_fmt_mem(sizeof(hdr_fmt));
+    strcpy_P (hdr_fmt_mem.getMem(), hdr_fmt);
+    StackMalloc body_fmt_mem(sizeof(body_fmt));
+    strcpy_P (body_fmt_mem.getMem(), body_fmt);
+
+    // format body
+    #define _BODY_SIZ (sizeof(body_fmt)+150)       // guard with %.Xs in body_fmt[]
+    StackMalloc body_mem(_BODY_SIZ);
+    char *body_buf = body_mem.getMem();
+    int body_l = snprintf (body_buf, _BODY_SIZ, body_fmt_mem.getMem(), cmd, type, value, type);
+
+    // format complete message
+    #define _MSG_SIZ (sizeof(hdr_fmt)+20+body_l)
+    StackMalloc msg_mem(_MSG_SIZ);
+    char *msg_buf = msg_mem.getMem();
+    snprintf (msg_buf, _MSG_SIZ, hdr_fmt_mem.getMem(), body_l, body_buf);
+
+    // send
+    Serial.printf (_FX("FLRIG: %s %s %s\n"), cmd, value, type);
+    client.print(msg_buf);
+
+    // absorb reply until </methodResponse>
+    bool ok = 0;
+    do {
+        ok = getTCPLine (client, msg_buf, _MSG_SIZ, NULL);
+        if (ok)
+            Serial.printf ("  %s\n", msg_buf);
+    } while (ok && !strstr (msg_buf, _FX("</methodResponse>")));
+}
+
+/* connect to flrig and set the given frequency.
+ * this can be used on all platforms.
+ */
+static void setFlrigFreq (float kHz)
+{
+    // get host and port, bale if nothing
+    char host[NV_FLRIGHOST_LEN];
+    int port;
+    if (!getFlrig (host, &port))
+        return;
+
+    // connect, bale if can't
+    WiFiClient flrig_client;
+    Serial.printf (_FX("FLRIG: %s:%d\n"), host, port);
+    if (!wifiOk() || !flrig_client.connect(host, port)) {
+        Serial.printf (_FX("FLRIG: %s:%d failed\n"), host, port);
+        return;
+    }
+
+    // send commands
+    char value[20];
+    snprintf (value, sizeof(value), "%.0f", kHz*1000);
+    sendXMLRPCCmd (flrig_client, _FX("rig.set_split"), "0", "int");
+    sendXMLRPCCmd (flrig_client, _FX("rig.set_vfoA"), value, "double");
+
+    // finished
+    flrig_client.stop();
+}
 
 
 #if defined(_SUPPORT_KX3)
@@ -63,7 +214,7 @@ static void prepIO()
  */
 static void sendOneMessage (const char cmd[])
 {
-    Serial.printf ("Elecraft: %s\n", cmd);
+    Serial.printf (_FX("Elecraft: %s\n"), cmd);
 
     // send each char, 8N1, MSByte first
     char c;
@@ -91,11 +242,15 @@ static void sendOneMessage (const char cmd[])
  */
 void setRadioSpot (float kHz)
 {
-    resetWatchdog();
+    // always try rigctld and flrig
+    setRigctldFreq (kHz);
+    setFlrigFreq (kHz);
 
     // ignore if not to use GPIO or baud 0
     if (!GPIOOk() || getKX3Baud() == 0)
         return;
+
+    resetWatchdog();
 
     // one-time IO setup
     static bool ready;
@@ -191,7 +346,7 @@ static uint32_t sendOneString (float correction, const char str[])
     hi_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
     bool hipri_ok = sched_setscheduler (0, SCHED_FIFO, &hi_param) == 0;
     if (!hipri_ok)
-        printf ("Failed to set new prioity %d: %s\n", hi_param.sched_priority, strerror(errno));
+        printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
 
     // get starting time
     struct timespec t0, t1;
@@ -243,7 +398,7 @@ static void sendOneMessage (const char cmd[])
         ns1 = sendOneString (correction, cmd);
     }
 
-    printf ("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n", correction, cmd_ns, ns0, ns1);
+    printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
 
 }
 
@@ -252,13 +407,16 @@ static void sendOneMessage (const char cmd[])
  */
 void setRadioSpot (float kHz)
 {
-    resetWatchdog();
+    // always try rigctld and flrig
+    setRigctldFreq (kHz);
+    setFlrigFreq (kHz);
 
     // ignore if not to use GPIO or baud 0
     if (!GPIOOk() || getKX3Baud() == 0)
         return;
 
     // one-time IO setup
+    resetWatchdog();
     static bool ready;
     if (!ready) {
         prepIO();
@@ -280,12 +438,13 @@ void setRadioSpot (float kHz)
 #else  // !_SUPPORT_KX3
 
 
-/* dummy for unsupported platforms
+/* same for system without any gpio
  */
-
 void setRadioSpot (float kHz)
 {
-    (void) kHz;
+    // always try rigctld and flrig
+    setRigctldFreq (kHz);
+    setFlrigFreq (kHz);
 }
 
 #endif // _SUPPORT_KX3

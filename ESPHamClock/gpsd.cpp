@@ -115,8 +115,8 @@ static bool lookforLatLong (const char *buf, void *arg)
  */
 static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *arg)
 {
-        // skip if no configured
-        if (!useGPSD())
+        // skip if not configured at all
+        if (!useGPSDTime() && !useGPSDLoc())
             return (false);
 
         // get host name
@@ -128,6 +128,9 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
         bool look_ok = false;
         bool connect_ok = false;
         bool got_something = false;
+        #define MAXGLL 2000                 // max line length
+        StackMalloc line_mem(MAXGLL);
+        char *line = (char *) line_mem.getMem();
 
         // connect to and read from gpsd server, 
         // N.B. do not use getTCPLine() which calls updateClocks() which calls now() which can call for
@@ -143,9 +146,6 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
             gpsd_client.print (F("?WATCH={\"enable\":true,\"json\":true};?POLL;\n"));
 
             // read lines, give to lookf, done when it's happy or no more or time out
-            #define MAXGLL 2000                 // max line length
-            StackMalloc line_mem(MAXGLL);
-            char *line = (char *) line_mem.getMem();
             for (size_t ll = 0;
                         !timesUp(&t0,GPSD_TO) && ll < MAXGLL && !look_ok && getChar(gpsd_client,&line[ll]);
                         /* none */ ) {
@@ -166,7 +166,7 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
         // report problems
         if (!look_ok) {
             if (got_something)
-                Serial.println (F("GPSD: unexpected response"));
+                Serial.printf (_FX("GPSD: unexpected response: %s\n"), line);
             else if (connect_ok)
                 Serial.println (F("GPSD: connected but no response"));
             else
@@ -196,4 +196,34 @@ time_t getGPSDUTC(const char **server)
 bool getGPSDLatLong(LatLong *llp)
 {
         return (getGPSDSomething (lookforLatLong, llp));
+}
+
+/* occasionaly refresh DE from GPSD if enabled and we moved a little.
+ */
+void updateGPSDLoc()
+{
+        // out fast if not configured
+        if (!useGPSDLoc())
+            return;
+
+        // not crazy often
+        static uint32_t to_t;
+        if (!timesUp (&to_t, 60000))
+            return;
+
+        // get loc
+        LatLong ll;
+        if (!getGPSDLatLong(&ll))
+            return;
+
+        // find approx distance from current de in miles, ignoring lng wrap
+        const float mpd = M_PIF*ERAD_M/180;             // miles per degree
+        float lat_chg = mpd * fabs (de_ll.lat_d - ll.lat_d);
+        float lng_chg = mpd * fabs (de_ll.lng_d - ll.lng_d) * cosf (de_ll.lat);;
+        float dist2 = lat_chg*lat_chg + lng_chg*lng_chg;
+
+        // engage if large enough, consider 6 char grid is 5'x2.5' or about 6x3 mi at equator
+        #define _MIN_STEP 1                             // miles
+        if (dist2 > _MIN_STEP*_MIN_STEP)
+            newDE (ll, NULL);
 }

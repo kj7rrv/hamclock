@@ -2,6 +2,7 @@
  */
 
 
+
 #ifndef _HAMCLOCK_H
 #define _HAMCLOCK_H
 
@@ -403,6 +404,8 @@ typedef enum {
     BRB_SHOW_PHOT,                      // brightness and phot controls
     BRB_SHOW_BR,                        // just brightness control
     BRB_SHOW_SWSTATS,                   // space weather stats
+    BRB_SHOW_BME76,                     // sensor I2C 76
+    BRB_SHOW_BME77,                     // sensor I2C 77
     BRB_N,                              // count
 } BRB_MODE;
 
@@ -434,10 +437,11 @@ extern const char *init_locip;          // init DE from given IP
 
 // ESP mechanism to save lots of RAM by storing what appear to be RAM strings in FLASH
 #if defined (_IS_ESP8266)
-#define _FX(x)  _FX_helper (F(x))
-extern const char *_FX_helper(const __FlashStringHelper *flash_string);
+#define _FX(x)  _FX_helper (PSTR(x))
+extern const char *_FX_helper(const char *flash_string);
 #else
-#define _FX(x)  x
+#define _FX(x)          x
+#define _FX_helper(x)   x
 #endif
 
 #define RSS_BG_COLOR    RGB565(0,40,80) // RSS banner background color
@@ -474,13 +478,15 @@ typedef struct {
     char city[32];
     float temperature_c;
     float humidity_percent;
+    float pressure_hPa;                 // sea level
     float wind_speed_mps;
     char wind_dir_name[4];
     char clouds[32];
     char conditions[32];
     char attribution[32];
+    int8_t pressure_chg;                // < = > 0
 } WXInfo;
-#define N_WXINFO_FIELDS 8
+#define N_WXINFO_FIELDS 10
 
 
 
@@ -514,8 +520,8 @@ extern bool overRSS (const SCoord &s);
 extern bool overRSS (const SBox &b);
 extern bool checkCallsignTouchFG (SCoord &b);
 extern bool checkCallsignTouchBG (SCoord &b);
-extern void newDE (LatLong &ll, const char *grid);
-extern void newDX (LatLong &ll, const char *grid, const char *override_prefix);
+extern void newDE (LatLong &ll, const char grid[MAID_CHARLEN]);
+extern void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *override_prefix);
 extern void drawDXPath(void);
 extern void getTextBounds (const char str[], uint16_t *wp, uint16_t *hp);
 extern uint16_t getTextWidth (const char str[]);
@@ -534,6 +540,7 @@ extern void setOnAir (bool on);
 extern void drawCallsign (bool all);
 extern void logState (void);
 extern const char *hc_version;
+extern void printStacktrace(const char *fmt, ...);
 
 
 
@@ -609,7 +616,6 @@ extern bool setDisplayOnOffTimes (int dow, uint16_t on, uint16_t off, int &idle)
 extern bool getDisplayOnOffTimes (int dow, uint16_t &on, uint16_t &off);
 extern bool getDisplayInfo (uint16_t &percent, uint16_t &idle_min, uint16_t &idle_left_sec);
 extern void setFullBrightness(void);
-extern void doNCDXFTouch (const SCoord &s);
 extern bool brControlOk(void);
 extern bool brOnOffOk(void);
 extern bool found_phot;
@@ -653,7 +659,7 @@ extern time_t nowWO(void);
 extern void updateClocks(bool all);
 extern bool clockTimeOk(void);
 extern void changeTime (time_t t);
-extern bool checkClockTouch (SCoord &s, TouchType tt);
+extern bool checkClockTouch (SCoord &s);
 extern bool TZMenu (TZInfo &tzi, const LatLong &ll);
 extern void enableSyncProvider(void);
 extern void drawDESunRiseSetInfo(void);
@@ -815,32 +821,44 @@ extern bool overViewBtn (const SCoord &s, uint16_t border);
  *
  */
 
+// pack ESP into words to save almost 2 kB
+
+#define BMEPACK_T(t)            (round((t)*50))
+#define BMEPACK_hPa(p)          (round((p)*10))
+#define BMEPACK_inHg(p)         (round((p)*100))
+#define BMEPACK_H(h)            (round((h)*100))
+#define BMEUNPACK_T(t)          ((t)/50.0F)
+#define BMEUNPACK_P(p)          (useMetricUnits() ? ((p)/10.0F) : ((p)/100.0F))
+#define BMEUNPACK_H(h)          ((h)/100.0F)
 
 // measurement queues
 #define N_BME_READINGS          100     // n measurements stored for each sensor
 typedef struct {
-    float t[N_BME_READINGS];            // circular queue of temperature values as per useMetricUnits()
-    float p[N_BME_READINGS];            // circular queue of pressure values as per useMetricUnits()
-    float h[N_BME_READINGS];            // circular queue of humidity values
     time_t u[N_BME_READINGS];           // circular queue of UNIX sensor read times, 0 if no data
+    int16_t t[N_BME_READINGS];          // circular queue of temperature values as per useMetricUnits()
+    int16_t p[N_BME_READINGS];          // circular queue of pressure values as per useMetricUnits()
+    int16_t h[N_BME_READINGS];          // circular queue of humidity values
     uint8_t q_head;                     // index of next q entries to use
     uint8_t i2c;                        // i2c addr
 } BMEData;
 
-enum {
+typedef enum {
     BME_76,                             // index for sensor at 0x76
     BME_77,                             // index for sensor at 0x77
     MAX_N_BME                           // max sensors connected
-}; 
+} BMEIndex; 
 
 extern void initBME280 (void);
 extern void readBME280 (void);
+extern void drawBMEStats (void);
 extern void drawBME280Panes(void);
 extern void drawOneBME280Pane (const SBox &box, PlotChoice ch);
-extern bool newBME280data (PlotChoice ch);
-extern const BMEData *getBMEData (int i, bool fresh_read);
+extern bool newBME280data (void);
+extern const BMEData *getBMEData (BMEIndex i, bool fresh_read);
 extern int getNBMEConnected (void);
 extern float dewPoint (float T, float RH);
+extern void doBMETouch (const SCoord &s);
+extern void updateBMEStats(void);
 
 
 
@@ -863,6 +881,7 @@ extern void setSatObserver (float lat, float lng);
 extern void drawSatPointsOnRow (uint16_t r);
 extern void drawSatNameOnRow(uint16_t y);
 extern void drawOneTimeDX(void);
+extern void drawOneTimeDE(void);
 extern bool dx_info_for_sat;
 extern bool setSatFromName (const char *new_name);
 extern bool setSatFromTLE (const char *name, const char *t1, const char *t2);
@@ -872,8 +891,7 @@ extern bool getSatAzElNow (char *name, float *azp, float *elp, float *rangep, fl
 extern bool isNewPass(void);
 extern bool isSatMoon(void);
 extern const char **getAllSatNames(void);
-extern int nextSatRSEvents (time_t **rises, time_t **sets);
-extern void showNextSatEvents (void);
+extern int nextSatRSEvents (time_t **rises, float **raz, time_t **sets, float **saz);
 extern void drawDXSatMenu(const SCoord &s);
 
 #define SAT_NOAZ        (-999)  // error flag
@@ -911,6 +929,7 @@ extern bool getGimbalState (bool &vis_now, bool &has_el, bool &tracking, float &
 
 extern bool getGPSDLatLong(LatLong *llp);
 extern time_t getGPSDUTC(const char **server);
+extern void updateGPSDLoc(void);
 
 
 
@@ -935,14 +954,15 @@ extern const char *getDXClusterHost(void);
 extern int getDXClusterPort(void);
 extern bool useMetricUnits(void);
 extern bool useGeoIP(void);
-extern bool useGPSD(void);
+extern bool useGPSDTime(void);
+extern bool useGPSDLoc(void);
 extern bool mapDXClusterSpots(void);
 extern bool plotSpotCallsigns(void);
 extern bool rotateScreen(void);
 extern float getBMETempCorr(int i);
 extern float getBMEPresCorr(int i);
-extern bool setBMETempCorr(int i, float delta);
-extern bool setBMEPresCorr(int i, float delta);
+extern bool setBMETempCorr(BMEIndex i, float delta);
+extern bool setBMEPresCorr(BMEIndex i, float delta);
 extern const char *getGPSDHost(void);
 extern bool useLocalNTPHost(void);
 extern bool GPIOOk(void);
@@ -966,7 +986,12 @@ extern uint16_t getGridColor(void);
 extern int16_t getCenterLng(void);
 extern void setCenterLng(int16_t);
 extern DateFormat getDateFormat(void);
+extern bool getRigctld (char host[], int *portp);
 extern bool getRotctld (char host[], int *portp);
+extern bool getFlrig (char host[], int *portp);
+extern const char *getDXClusterLogin(void);
+extern bool getDOY(void);
+
 
 
 
@@ -1118,10 +1143,20 @@ extern const uint16_t moon_image[HC_MOON_W*HC_MOON_H] PROGMEM;
  *
  */
 
+#define NCDXF_B_NFIELDS         4       // n fields in NCDXF_b
+#define NCDXF_B_MAXLEN          10      // max field length
+
 extern void updateBeacons (bool erase_too, bool immediate, bool force);
 extern void updateBeaconScreenLocations(void);
 extern bool overAnyBeacon (const SCoord &s);
-extern void drawBeaconBox();
+extern void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS]);
+extern void drawBeaconKey(void);
+extern void doNCDXFBoxTouch (const SCoord &s);
+extern void drawNCDXFBox(void);
+extern void drawNCDXFStats (const char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
+                          const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
+                          const uint16_t colors[NCDXF_B_NFIELDS]);
+
 
 
 
@@ -1210,7 +1245,7 @@ typedef enum {
     NV_MAPSTYLE,                // base name of map background images
     NV_USEDXCLUSTER,            // whether to attempt using a DX cluster
 
-    NV_USEGPSD,                 // whether to attempt using gpsd for time and location
+    NV_USEGPSD,                 // bit 1: use gpsd for time, bit 2: use for location
     NV_LOGUSAGE,                // whether to phone home with clock settings
     NV_MAPSPOTS,                // DX map spots: 0=none; 1=just prefix; 2=full call
     NV_WIFI_PASSWD,             // WIFI password
@@ -1245,11 +1280,21 @@ typedef enum {
     NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if off
     NV_BC_UTCTIMELINE,          // band conditions timeline labeled in UTC else DE
     NV_RSS_INTERVAL,            // RSS update interval, seconds
+
     NV_DATEMDY,                 // 0 = MDY 1 = see NV_DATEDMYYMD
     NV_DATEDMYYMD,              // 0 = DMY 1 = YMD
     NV_ROTUSE,                  // whether to use rotctld
     NV_ROTHOST,                 // rotctld tcp host
     NV_ROTPORT,                 // rotctld tcp port
+
+    NV_RIGUSE,                  // whether to use rigctld
+    NV_RIGHOST,                 // rigctld tcp host
+    NV_RIGPORT,                 // rigctld tcp port
+    NV_DXLOGIN,                 // DX cluster login
+    NV_FLRIGUSE,                // whether to use flrig
+
+    NV_FLRIGHOST,               // flrig tcp host
+    NV_FLRIGPORT,               // flrig tcp port
 
     NV_N
 } NV_Name;
@@ -1268,6 +1313,9 @@ typedef enum {
 #define NV_DE_GRID_LEN          MAID_CHARLEN
 #define NV_DX_GRID_LEN          MAID_CHARLEN
 #define NV_ROTHOST_LEN          18
+#define NV_RIGHOST_LEN          18
+#define NV_FLRIGHOST_LEN        18
+#define NV_DXLOGIN_LEN          12
 
 
 // accessor functions
@@ -1358,7 +1406,7 @@ extern void logPaneRotSet (PlotPane pp, PlotChoice ch);
 extern void showRotatingBorder (bool soon, PlotPane pp);
 extern void initPlotPanes(void);
 extern void savePlotOps(void);
-extern bool drawHTTPBMP (const char *url, const SBox &box, uint16_t color);
+extern bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color);
 extern bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap);
 
 
@@ -1512,7 +1560,7 @@ extern void checkStopwatchTouch(TouchType tt);
 extern bool runStopwatch(void);
 extern void drawMainPageStopwatch (bool force);
 extern bool setSWEngineState (SWEngineState nsws, uint32_t ms);
-extern SWEngineState getSWEngineState (uint32_t &ms_left);
+extern SWEngineState getSWEngineState (uint32_t *sw_timer, uint32_t *cd_period);
 extern SWDisplayState getSWDisplayState (void);
 extern void getAlarmState (AlarmState &as, uint16_t &hr, uint16_t &mn);
 extern void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn);
@@ -1577,6 +1625,8 @@ extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint
 extern void sendUserAgent (WiFiClient &client);
 extern bool wifiOk(void);
 extern void httpGET (WiFiClient &client, const char *server, const char *page);
+extern void httpHCGET (WiFiClient &client, const char *server, const char *hc_page);
+extern void httpHCPGET (WiFiClient &client, const char *server, const char *hc_page_progmem);
 extern bool httpSkipHeader (WiFiClient &client);
 extern bool httpSkipHeader (WiFiClient &client, uint32_t *lastmodp);
 extern void FWIFIPR (WiFiClient &client, const __FlashStringHelper *str);

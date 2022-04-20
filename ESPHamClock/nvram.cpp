@@ -114,6 +114,13 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_ROTUSE
     NV_ROTHOST_LEN,             // NV_ROTHOST
     2,                          // NV_ROTPORT
+    1,                          // NV_RIGUSE
+    NV_RIGHOST_LEN,             // NV_RIGHOST
+    2,                          // NV_RIGPORT
+    NV_DXLOGIN_LEN,             // NV_DXLOGIN
+    1,                          // NV_FLRIGUSE
+    NV_FLRIGHOST_LEN,           // NV_FLRIGHOST
+    2,                          // NV_FLRIGPORT
 };
 
 
@@ -141,7 +148,7 @@ static void initEEPROM()
     for (uint8_t i = 0; i < n; i++)
         eesize += nv_sizes[i] + 1;      // +1 for cookie
     if (eesize > FLASH_SECTOR_SIZE) {
-        Serial.printf ("EEPROM too large: %u > %u\n", eesize, FLASH_SECTOR_SIZE);
+        Serial.printf (_FX("EEPROM too large: %u > %u\n"), eesize, FLASH_SECTOR_SIZE);
         while(1);       // timeout
     }
     EEPROM.begin(eesize);      
@@ -153,17 +160,17 @@ static void initEEPROM()
     for (size_t i = 0; i < n; i++) {
         const uint8_t sz = nv_sizes[i];
         uint16_t start = NV_BASE+len;
-        Serial.printf ("%3d %3d %3d %02X: ", i, len, sz, EEPROM.read(start));
+        Serial.printf (_FX("%3d %3d %3d %02X: "), i, len, sz, EEPROM.read(start));
         start += 1;                     // skip cookie
         switch (sz) {
         case 1: {
             uint8_t i1 = EEPROM.read(start);
-            Serial.printf ("%11d = 0x%02X\n", i1, i1);
+            Serial.printf (_FX("%11d = 0x%02X\n"), i1, i1);
             }
             break;
         case 2: {
             uint16_t i2 = EEPROM.read(start) + 256*EEPROM.read(start+1);
-            Serial.printf ("%11d = 0x%04X\n", i2, i2);
+            Serial.printf (_FX("%11d = 0x%04X\n"), i2, i2);
             }
             break;
         case 4: {
@@ -171,7 +178,7 @@ static void initEEPROM()
                             + (1UL<<16)*EEPROM.read(start+2) + (1UL<<24)*EEPROM.read(start+3);
             float f4;
             memcpy (&f4, &i4, 4);
-            Serial.printf ("%11d = 0x%08X = %g\n", i4, i4, f4);
+            Serial.printf (_FX("%11d = 0x%08X = %g\n"), i4, i4, f4);
             }
             break;
         default:
@@ -229,7 +236,7 @@ static void nvramWriteBytes (NV_Name e, const uint8_t data[], uint8_t xbytes)
     for (uint8_t i = 0; i < e_len; i++)
         EEPROM.write (e_addr++, *data++);
     if (!EEPROM.commit())
-        Serial.println(F("EEPROM.commit failed"));
+        Serial.println(_FX("EEPROM.commit failed"));
     // Serial.printf ("Read back cookie: 0x%02X\n", EEPROM.read(e_addr - e_len -1));
 }
 

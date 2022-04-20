@@ -213,7 +213,7 @@ void updateBeaconScreenLocations()
     }
 }
 
-/* return whether the given screen coord is over any visible symbol or call box
+/* return whether the given screen coord is over any visible map symbol or call sign box
  */
 bool overAnyBeacon (const SCoord &s)
 {
@@ -230,78 +230,183 @@ bool overAnyBeacon (const SCoord &s)
     return (false);
 }
 
-/* draw the beacon control box
+/* draw the beacon key in NCDXF_b.
  */
-void drawBeaconBox()
+void drawBeaconKey()
 {
-    static const char label[] = "NCDXF";
-
-    // erase 
-    tft.fillRect (NCDXF_b.x, NCDXF_b.y, NCDXF_b.w, NCDXF_b.h, RA8875_BLACK);
-
     // tiny font
     selectFontStyle (BOLD_FONT, FAST_FONT);
 
-    if (brb_mode == BRB_SHOW_BEACONS) {
+    // draw title
+    tft.setCursor (NCDXF_b.x+13, NCDXF_b.y+2);
+    tft.setTextColor (RA8875_WHITE);
+    tft.print ("NCDXF");
 
-        // draw label
-        tft.setCursor (NCDXF_b.x+13, NCDXF_b.y+2);
-        tft.setTextColor (RA8875_WHITE);
-        tft.print (label);
+    // draw each key
 
-        // draw key
-        SCoord s;
-        s.x = NCDXF_b.x + BEACONR+1;
-        s.y = NCDXF_b.y + 16 + BEACONR;
-        uint8_t dy = (NCDXF_b.h-16)/(BCOL_N-1);         // silent color not drawn
-        uint16_t c;
-        
-        c = BCOL_14;
-        drawBeaconSymbol (s, c);
-        tft.setTextColor (c);
-        tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("14.10"));
+    SCoord s;
+    s.x = NCDXF_b.x + BEACONR+1;
+    s.y = NCDXF_b.y + 16 + BEACONR;
+    uint8_t dy = (NCDXF_b.h-16)/(BCOL_N-1);         // silent color not drawn
+    uint16_t c;
+    
+    c = BCOL_14;
+    drawBeaconSymbol (s, c);
+    tft.setTextColor (c);
+    tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
+    tft.print (F("14.10"));
 
-        s.y += dy;
-        c = BCOL_18;
-        drawBeaconSymbol (s, c);
-        tft.setTextColor (c);
-        tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("18.11"));
+    s.y += dy;
+    c = BCOL_18;
+    drawBeaconSymbol (s, c);
+    tft.setTextColor (c);
+    tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
+    tft.print (F("18.11"));
 
-        s.y += dy;
-        c = BCOL_21;
-        drawBeaconSymbol (s, c);
-        tft.setTextColor (c);
-        tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("21.15"));
+    s.y += dy;
+    c = BCOL_21;
+    drawBeaconSymbol (s, c);
+    tft.setTextColor (c);
+    tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
+    tft.print (F("21.15"));
 
-        s.y += dy;
-        c = BCOL_24;
-        drawBeaconSymbol (s, c);
-        tft.setTextColor (c);
-        tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("24.93"));
+    s.y += dy;
+    c = BCOL_24;
+    drawBeaconSymbol (s, c);
+    tft.setTextColor (c);
+    tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
+    tft.print (F("24.93"));
 
-        s.y += dy;
-        c = BCOL_28;
-        drawBeaconSymbol (s, c);
-        tft.setTextColor (c);
-        tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
-        tft.print (F("28.20"));
+    s.y += dy;
+    c = BCOL_28;
+    drawBeaconSymbol (s, c);
+    tft.setTextColor (c);
+    tft.setCursor (s.x+BEACONR, s.y-BEACONR/2);
+    tft.print (F("28.20"));
+}
 
-    } else if (brb_mode == BRB_SHOW_SWSTATS) {
+/* draw any of the various contents in NCDXF_b depending on brb_mode.
+ */
+void drawNCDXFBox()
+{
+    // erase
+    tft.fillRect (NCDXF_b.x, NCDXF_b.y, NCDXF_b.w, NCDXF_b.h, RA8875_BLACK);
+
+    // draw appropriate content
+    switch ((BRB_MODE)brb_mode) {
+
+    case BRB_SHOW_BEACONS:
+
+        drawBeaconKey();
+        break;
+
+    case BRB_SHOW_SWSTATS:
 
         drawSpaceStats();
+        break;
 
-    } else {
+    case BRB_SHOW_BME76:        // fallthru
+    case BRB_SHOW_BME77:
 
-        // display brightness state
+        drawBMEStats();
+        break;
+
+    case BRB_SHOW_ONOFF:        // fallthru
+    case BRB_SHOW_PHOT:         // fallthru
+    case BRB_SHOW_BR:
+
         drawBrightness();
+        break;
+
+    case BRB_N:
+        
+        // lint
+        break;
     }
 
     // border -- avoid base line
     tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, GRAY);
     tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x, NCDXF_b.y+NCDXF_b.h-1, GRAY);
     tft.drawLine (NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y+NCDXF_b.h-1, GRAY);
+}
+
+/* common template to draw space weather or BME stats in NCDXF_b.
+ */
+void drawNCDXFStats (const char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
+                   const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
+                   const uint16_t colors[NCDXF_B_NFIELDS])
+{
+    // prep layout
+    uint16_t y = NCDXF_b.y + 2;
+    const int rect_dy = -23;
+    const int rect_h = 26;
+
+    // show each item
+    for (int i = 0; i < NCDXF_B_NFIELDS; i++) {
+
+        selectFontStyle (LIGHT_FONT, FAST_FONT);
+        tft.setTextColor (RA8875_WHITE);
+        tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(titles[i]))/2, y);
+        tft.print (titles[i]);
+
+        y += 31;
+
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        tft.setTextColor (colors[i]);
+        tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
+        tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(values[i]))/2, y);
+        tft.print (values[i]);
+
+        y += 5;
+    }
+}
+
+/* common template to respond to a touch in NCDXF_b showing a table of stats.
+ */
+void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS])
+{
+    // decide which row
+    int r = NCDXF_B_NFIELDS*(s.y - NCDXF_b.y)/NCDXF_b.h;
+    if (r < 0 || r >= NCDXF_B_NFIELDS)
+        fatalError(_FX("Bogus doNCDXFStatsTouch r %d"), r);       // never returns
+                
+    // decide which PLOT_CH 
+    PlotChoice pc = pcs[r];
+                    
+    // done if the chosen pane is already on display
+    if (findPaneChoiceNow (pc) != PANE_NONE)
+        return; 
+            
+    // not on display, choose a pane to use
+    PlotPane pp = PANE_NONE;
+            
+    // start by looking for a pane with the new stat already in its rotation set (we know it's not visible)
+    for (int i = PANE_1; i < PANE_N; i++) {
+        if (plot_rotset[i] & (1<<pc)) {
+            pp = (PlotPane)i;
+            break;
+        } 
+    }
+            
+    // else look for a pane with no related stats anywhere in its rotation set
+    if (pp == PANE_NONE) {
+        uint32_t pcs_mask = 0;
+        for (int i = 0; i < NCDXF_B_NFIELDS; i++)
+            pcs_mask |= (1 << pcs[i]);
+        for (int i = PANE_1; i < PANE_N; i++) {
+            if ((plot_rotset[i] & pcs_mask) == 0) {
+                pp = (PlotPane)i;
+                break;
+            }
+        }
+    }
+
+    // else just pick the pane next to the stats summary
+    if (pp == PANE_NONE)
+        pp = PANE_3;
+
+    // install as only choice
+    (void) setPlotChoice (pp, pc);
+    plot_rotset[pp] = 1 << pc;
+    savePlotOps();
 }

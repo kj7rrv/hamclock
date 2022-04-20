@@ -29,7 +29,7 @@
 #elif defined(__has_include)
   #if defined(_IS_FREEBSD) && __has_include(<libgpio.h>) && __has_include("/dev/gpioc0")
     #define _GPIO_FREEBSD
-    #elif defined(_IS_LINUX) && (__has_include(<bcm_host.h>) || __has_include(<pigpio.h>) || __has_include(<wiringPi.h>) )
+  #elif defined(_IS_LINUX) && (__has_include(<bcm_host.h>) || __has_include(<pigpio.h>) || __has_include(<wiringPi.h>) )
     #define _GPIO_LINUX
   #endif
 #endif
@@ -70,6 +70,7 @@
 #define	pgm_read_word(a)	(*(a))
 #define	pgm_read_dword(a)	(*(a))
 #define	pgm_read_float(a)	(*(a))
+#define	pgm_read_ptr(a)	        (*(a))
 
 extern uint32_t millis(void);
 extern long random(int max);

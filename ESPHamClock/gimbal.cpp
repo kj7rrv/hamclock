@@ -17,6 +17,8 @@
  *
  * To be on the safe side, all motion is stopped unless the Gimbal plot pane is visible. If decide later to
  * leave it run note earthsat.cpp turns off tracking any time a new sat might be selected.
+ *
+ *
  */
 
 #include "HamClock.h"
@@ -32,15 +34,15 @@ int gimbal_trace_level = 1;
 // GUI configuration
 #define CHAR_H          25                              // large character height
 #define TITLE_Y         (box.y+PLOTBOX_H/5-2)           // title y coord, match VOCAP
-#define VALU_INDENT     40                              // az or el value indent
-#define STATE_INDENT    98                              // az or el state indent
+#define VALU_INDENT     55                              // az or el value indent
+#define STATE_INDENT    120                             // az or el state indent
 #define LDIRBOX_SZ      10                              // large direction control box size
 #define SDIRBOX_SZ      8                               // small direction control box size
 #define DIRBOX_GAP      4                               // gap between control box pairs
 #define AUTO_Y          (box.y+PLOTBOX_H-CHAR_H-15)     // auto button y coord
-#define ARROW_COLOR     RA8875_CYAN                     // color for directional arrow controls
+#define ARROW_COLOR     RGB565(255,125,0)               // color for directional arrow controls
 #define UPOVER_COLOR    RA8875_RED                      // upover symbol color
-#define UPDATE_MS       950                             // command update interval, ms
+#define UPDATE_MS       1005                            // command update interval, ms
 #define AZSTEP          5                               // small az manual step size
 #define AZSTEP2         20                              // large az manual step size
 #define ELSTEP          5                               // small el manual step size
@@ -102,7 +104,7 @@ static int16_t pgaz_target, pgel_target;                // previous GUI az and e
 static int16_t pgaz_now, pgel_now;                      // previous GUI az and el now, degrees
 static AzState pgaz_state;                              // previous GUI az run state
 static ElState pgel_state;                              // previous GUI el run state
-static char title[14];                                  // title from model
+static char title[20];                                  // title from model
 static WiFiClient hamlib_client;                        // connection to hamlib
 
 static void initGimbalGUI(const SBox &box);
@@ -121,187 +123,167 @@ static bool connectionOk()
     return (hamlib_client);
 }
 
-/* insure disconnected from hamlib
+/* given a hamlib response and keyword, find pointer within rsp to value that follows.
+ * return whether so found
  */
-void closeGimbal()
+static bool findHamlibRspKey (const char rsp[], const char key[], char **key_ptr)
 {
-    if (connectionOk()) {
-        Serial.print (_FX("GBL: disconnected\n"));
-        hamlib_client.stop();
+    const char *key_str = strstr (rsp, key);
+    if (key_str) {
+        const char *colon = strchr (key_str, ':');
+        if (colon) {
+            *key_ptr = (char*)colon+1;
+            while (isspace(**key_ptr))
+                (*key_ptr)++;
+            return (true);
+        }
     }
+    return (false);
 }
 
-/* send cmd to hamlib, optionally search response for key:value pair.
- * cmd shall always start with +\ but not end with \n, we add that here.
- * if key:
- *   search response for key and fill val if found with return true, else false with reason in val.
- * if !key:
- *   return true if connection ok and response ended with RPRT 0, else false with reason in val.
+/* given hamlib response and keyword of a numeric value, return its value.
+ * return whether successful.
  */
-static bool askHamlib (const char *cmd, const char *key, char val[], size_t max_val)
+static bool findHamlibRspValue (const char rsp[], const char key[], float *value_ptr)
 {
-    GIMBAL_TRACE (2, ("GBL: ask '%s'\n", cmd));
+    char *kp;
+    if (findHamlibRspKey (rsp, key, &kp)) {
+        *value_ptr = atof (kp);
+        return (true);
+    }
+    return (false);
+}
 
-    // insure cmd starts with +\ and does not end with \n
-    if (strncmp (cmd, "+\\", 2) != 0 || cmd[strlen(cmd)-1] == '\n')
+/* send cmd to hamlib, pass back complete reply in rsp.
+ * return true if all, else fill rsp with error message and return false.
+ * N.B. cmd must begin with +\ and end with \n.
+ */
+static bool askHamlib (const char *cmd, char rsp[], size_t rsp_len)
+{
+    // insure cmd starts with +\ and ends with \n
+    int cmd_l = strlen (cmd);
+    if (strncmp (cmd, "+\\", 2) != 0 || cmd[cmd_l-1] != '\n')
         fatalError (_FX("Bug! malformed askHamlib cmd: '%s'"), cmd);
+
+    GIMBAL_TRACE (2, (_FX("GBL: ask %s"), cmd));       // includes \n
 
     // insure connected
     if (!connectionOk()) {
-        snprintf (val, max_val, _FX("No connection"));
+        snprintf (rsp, rsp_len, _FX("No connection"));
         return (false);
     }
 
-    // send cmd with nl -- avoid separate packet just for nl
-    char cmd_nl[strlen(cmd)+2]; // + 1 for \n, +1 for \0
-    snprintf (cmd_nl, sizeof(cmd_nl), "%s\n", cmd);
-    hamlib_client.print(cmd_nl);
+    // send
+    hamlib_client.print(cmd);
 
-    // read until find RPRT or time out, looking for key along the way
-    bool found_key = false;
+    // collect reply into rsp until find RPRT, fill rsp or time out
+    size_t rsp_n = 0;
     bool found_RPRT = false;
-    const int line_len = 300;
-    StackMalloc line_mem(line_len);
-    char *line = line_mem.getMem();
     int RPRT = -1;
-    while (!found_RPRT && getTCPLine (hamlib_client, line, line_len, NULL)) {
-        GIMBAL_TRACE (2, ("GBL: reply '%s'\n", line));
-        if (strncmp (line, "RPRT", 4) == 0) {
-            RPRT = atoi (line+4);
+    uint16_t ll;
+    while (!found_RPRT && rsp_n < rsp_len && getTCPLine (hamlib_client, rsp+rsp_n, rsp_len-rsp_n, &ll)) {
+        GIMBAL_TRACE (2, (_FX("GBL: reply %s\n"), rsp+rsp_n));
+        if (sscanf (rsp+rsp_n, "RPRT %d", &RPRT) == 1)
             found_RPRT = true;
-        }
-        if (key) {
-            char *colon = strchr (line, ':');
-            if (colon && strncmp (line, key, colon-line-1) == 0) {
-                strncpy (val, colon+1, max_val);
-                val[max_val-1] = '\0';                          // insure EOS
-                found_key = true;
-            }
-        }
+        rsp_n += ll;
     }
 
     // ok?
-    if (found_RPRT && RPRT != 0) {
-        if (key)
-            snprintf (val, max_val, _FX("%s:%s hamlib err %d"), cmd, key, RPRT);
-        else
-            snprintf (val, max_val, _FX("%s HL err %d"), cmd, RPRT);
-        return (false);
-    }
-    if (key) {
-        if (found_key)
-            return (true);
-        snprintf (val, max_val, _FX("%s info not found"), key);
-        return (false);
-    }
-    return (true);
+    if (found_RPRT && RPRT == 0)
+        return (true);
+    if (found_RPRT)
+        snprintf (rsp, rsp_len, _FX("Hamlib err: %.*s: %d"), cmd_l-1, cmd, RPRT);       // discard \n
+    else
+        snprintf (rsp, rsp_len, _FX("Hamlib err: no RPRT from %.*s"), cmd_l-1, cmd);
+    return (false);
 }
 
 
-/* get az position and attempt to get status if possible.
+/* get az and el position and attempt to ascertain status if possible.
  * log and report critical errors in box
  */
-static bool getAz(const SBox &box)
+static bool getAzEl(const SBox &box)
 {
-    char buf[50];
+    char rsp[100];
 
-    // query az
-    if (!askHamlib (_FX("+\\get_pos"), "Azimuth", buf, sizeof(buf))) {
-        plotMessage (box, RA8875_RED, buf);
+    // query position
+    if (!askHamlib (_FX("+\\get_pos\n"), rsp, sizeof(rsp))) {
+        plotMessage (box, RA8875_RED, rsp);
         wdDelay (ERR_DWELL);
         initGimbalGUI (box);
         return (false);
     }
-    float az = atof (buf);
 
-    // divine state from change before changing az_now
-    if (az < az_min + AZ_DEADBAND)
+    // crack
+    float new_az, new_el;
+    if (!findHamlibRspValue (rsp, "Azimuth", &new_az) || !findHamlibRspValue (rsp, "Elevation", &new_el)) {
+        Serial.printf (_FX("GBL: no az or el from get_pos: %s\n"), rsp);
+        plotMessage (box, RA8875_RED, _FX("unexpected get_pos response"));
+        wdDelay (ERR_DWELL);
+        initGimbalGUI (box);
+        return (false);
+    }
+
+    // divine az state from change before changing az_now
+    if (new_az < az_min + AZ_DEADBAND)
         az_state = AZS_CCWLIMIT;
-    else if (az > az_max - AZ_DEADBAND)
+    else if (new_az > az_max - AZ_DEADBAND)
         az_state = AZS_CWLIMIT;
-    else if (az < az_now)
+    else if (new_az < az_now)
         az_state = AZS_CCWROT;
-    else if (az > az_now)
+    else if (new_az > az_now)
         az_state = AZS_CWROT;
     else
-        az_state = AZS_STOPPED;
+        az_state = AZS_INPOS;
 
     // now save
-    az_now = az;
+    az_now = new_az;
+
+    // el too if configured
+    if (el_state != ELS_NONE) {
+
+        // divine el state from change before changing el_now
+        if (new_el < el_min + EL_DEADBAND)
+            el_state = ELS_DOWNLIMIT;
+        else if (new_el > el_max - EL_DEADBAND)
+            el_state = ELS_UPLIMIT;
+        else if (new_el < el_now)
+            el_state = ELS_DOWNROT;
+        else if (new_el > el_now)
+            el_state = ELS_UPROT;
+        else
+            el_state = ELS_INPOS;
+
+        // now save
+        el_now = new_el;
+    }
 
     // ok enough
     return (true);
 }
 
-/* get el position and attempt to get status if possible.
- * el is optional so only complain if we somehow know we really have an el axis.
- * log and report critical errors in box
+/* get extra Az and EL info if possible, not fatal if can't.
+ * TODO: we use Max Elevation == 0 to mean not supported, any better way?
  */
-static bool getEl(const SBox &box)
+static void getAzElAux()
 {
-    if (el_state == ELS_NONE)
-        return (false);
+    StackMalloc rsp_mem(2000);
+    char *rsp = rsp_mem.getMem();
 
-    char buf[50];
+    if (!askHamlib (_FX("+\\dump_caps\n"), rsp, rsp_mem.getSize()))
+        return;
 
-    // query el
-    if (!askHamlib (_FX("+\\get_pos"), "Elevation", buf, sizeof(buf))) {
-        plotMessage (box, RA8875_RED, buf);
-        wdDelay (ERR_DWELL);
-        initGimbalGUI (box);
-        return (false);
-    }
-    float el = atof (buf);
+    (void) findHamlibRspValue (rsp, "Min Azimuth", &az_min);
+    (void) findHamlibRspValue (rsp, "Max Azimuth", &az_max);
+    (void) findHamlibRspValue (rsp, "Min Elevation", &el_min);
+    (void) findHamlibRspValue (rsp, "Max Elevation", &el_max);
 
-    // divine state from change before changing el_now
-    if (el < el_min + EL_DEADBAND)
-        el_state = ELS_DOWNLIMIT;
-    else if (el > el_max - EL_DEADBAND)
-        el_state = ELS_UPLIMIT;
-    else if (el < el_now)
-        el_state = ELS_DOWNROT;
-    else if (el > el_now)
-        el_state = ELS_UPROT;
+    if (el_max == 0)
+        el_state = ELS_NONE;
     else
         el_state = ELS_STOPPED;
 
-    // now save
-    el_now = el;
-
-    // ok enough
-    return (true);
-}
-
-/* get extra AZ info if possible, not fatal if can't.
- */
-static void getAzAux()
-{
-    char buf[50];
-
-    if (askHamlib (_FX("+\\dump_caps"), "Min Azimuth", buf, sizeof(buf)))
-        az_min = atof (buf);
-    if (askHamlib (_FX("+\\dump_caps"), "Max Azimuth", buf, sizeof(buf)))
-        az_max = atof (buf);
-    Serial.printf (_FX("GBL: AZ min %g max %g\n"), az_min, az_max);
-}
-
-/* get extra EL info if possible, not fatal if can't.
- * TODO: we use Max Elevation == to mean not supported, any better way?
- */
-static void getElAux()
-{
-    char buf[50];
-
-    if (askHamlib (_FX("+\\dump_caps"), "Min Elevation", buf, sizeof(buf)))
-        el_min = atof (buf);
-    if (askHamlib (_FX("+\\dump_caps"), "Max Elevation", buf, sizeof(buf))) {
-        el_max = atof (buf);
-        if (el_max == 0)
-            el_state = ELS_NONE;
-        else
-            el_state = ELS_STOPPED;
-    }
-    Serial.printf (_FX("GBL: EL min %g max %g\n"), el_min, el_max);
+    Serial.printf (_FX("GBL: Az %g .. %g EL %g .. %g\n"), az_min, az_max, el_min, el_max);
 }
 
 /* send target az and el
@@ -311,8 +293,8 @@ static bool setAzEl()
     char cmd[50];
     char rsp[50];
 
-    snprintf (cmd, sizeof(cmd), _FX("+\\set_pos %g %g"), az_target, el_target);
-    if (!askHamlib (cmd, _FX("set_pos"), rsp, sizeof(rsp))) {
+    snprintf (cmd, sizeof(cmd), _FX("+\\set_pos %g %g\n"), az_target, el_target);
+    if (!askHamlib (cmd, rsp, sizeof(rsp))) {
         Serial.printf ("GBL: %s\n", rsp);
         return (false);
     }
@@ -327,13 +309,13 @@ static bool setAzEl()
  */
 static bool connectHamlib (const SBox &box)
 {
-    char buf[100];
+    char buf[50];
 
     // success if already connected
     if (connectionOk())
         return (true);
 
-    GIMBAL_TRACE (1, ("GBL: starting connection attempt\n"));
+    GIMBAL_TRACE (1, (_FX("GBL: starting connection attempt\n")));
 
     // pointless going further if no wifi
     if (!wifiOk()) {
@@ -360,16 +342,15 @@ static bool connectHamlib (const SBox &box)
     }
 
     // get model if possible
-    if (!askHamlib (_FX("+\\get_info"), "Info", buf, sizeof(buf)))
+    if (!askHamlib (_FX("+\\get_info\n"), buf, sizeof(buf)))
         strcpy (buf, "Unknown");
-    snprintf (title, sizeof(title), "%.*s", (int)(sizeof(title)-1), buf);
+    char *name;
+    if (!findHamlibRspKey (buf, "Info", &name)) 
+        name = (char*) "Unknown";
+    snprintf (title, sizeof(title), "%.*s", (int)(sizeof(title)-1), name);
 
     // init target to current position
-    if (!getAz(box)) {
-        hamlib_client.stop();
-        return (false);
-    }
-    if (el_state != ELS_NONE && !getEl(box)) {
+    if (!getAzEl(box)) {
         hamlib_client.stop();
         return (false);
     }
@@ -377,8 +358,10 @@ static bool connectHamlib (const SBox &box)
     el_target = el_now;
 
     // get auxillary info if possible
-    getAzAux();
-    getElAux();
+    getAzElAux();
+
+    // stop
+    stopGimbalNow();
 
     // ok
     return (true);
@@ -462,7 +445,7 @@ static void drawStopButton (bool stop)
  * N.B. we assume initGimbalGUI() has already been called.
  */
 static void drawAxisInfo (const SBox &box, float target_value, float value_now, SBox &lbox, SBox &rbox,
-uint16_t y0, const char *state_str, uint16_t state_color)
+    uint16_t y0, uint16_t state_color)
 {
     // erase from indent to end of box
     tft.fillRect (box.x+VALU_INDENT, y0, box.w-VALU_INDENT-1, CHAR_H+1, RA8875_BLACK);
@@ -475,18 +458,34 @@ uint16_t y0, const char *state_str, uint16_t state_color)
     tft.setCursor (box.x+VALU_INDENT, y0+CHAR_H);
     tft.print(buf);
 
-    // show state
-    tft.setTextColor (state_color);
-    tft.setCursor (box.x + STATE_INDENT, y0+CHAR_H);
-    tft.print(state_str);
+    // show state diagram
+    const uint16_t s_r = CHAR_H/2;
+    uint16_t s_x = box.x + STATE_INDENT + s_r;
+    if (y0 == AZ_Y) {
+        uint16_t s_y = y0 + CHAR_H/2 + 2;
+        tft.drawCircle (s_x, s_y, s_r, GRAY);
+        uint16_t l_dx = s_r*sinf(deg2rad(value_now));
+        uint16_t l_dy = s_r*cosf(deg2rad(value_now));
+        tft.drawLine (s_x, s_y, s_x+l_dx, s_y-l_dy, 1, state_color);
+    } else if (y0 == EL_Y) {
+        uint16_t s_y = y0 + 3*CHAR_H/4;
+        tft.drawCircle (s_x, s_y, s_r, GRAY);
+        tft.drawLine (s_x-s_r, s_y, s_x+s_r, s_y, GRAY);
+        tft.fillRect (s_x-s_r, s_y+1, 2*s_r+1, s_r, RA8875_BLACK);
+        uint16_t l_dx = s_r*cosf(deg2rad(value_now));
+        uint16_t l_dy = s_r*sinf(deg2rad(value_now));
+        tft.drawLine (s_x, s_y, s_x+l_dx, s_y-l_dy, 1, state_color);
+    }
 
     // show target value between control boxes
     uint16_t x_l = lbox.x + lbox.w + 1;
-    tft.fillRect (x_l, lbox.y, rbox.x - x_l, lbox.h, RA8875_BLACK);
+    uint16_t gap = rbox.x - x_l;
+    tft.fillRect (x_l, lbox.y, gap, lbox.h, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
-    snprintf (buf, sizeof(buf), _FX("%4.0f"), target_value);
-    tft.setCursor (x_l + 7, lbox.y+1);
+    snprintf (buf, sizeof(buf), _FX("%.0f"), target_value);
+    uint16_t b_w = getTextWidth(buf);
+    tft.setCursor (x_l + (gap-b_w)/2, lbox.y+1);
     tft.print (buf);
 }
 
@@ -494,111 +493,126 @@ uint16_t y0, const char *state_str, uint16_t state_color)
  */
 static void drawUpOver()
 {
-    uint16_t r = elup2_b.h - 3;          // too tall and it hits the tracking button
-    uint16_t x_c = elup2_b.x + 30;
+    uint16_t r = elup2_b.h - 3;
+    uint16_t x_c = elup2_b.x + 25;
     uint16_t y_c = elup2_b.y + elup2_b.h - 2;
 
     if (el_target > 90 || el_now > 90) {
         tft.drawCircle (x_c, y_c, r, UPOVER_COLOR);
-        tft.drawLine (x_c+r, y_c+1, x_c+5*r/4, y_c-r/2, UPOVER_COLOR);
-        tft.drawLine (x_c+r, y_c+1, x_c+r/2, y_c-r/2, UPOVER_COLOR);
+        tft.drawLine (x_c-r, y_c+1, x_c-11*r/8, y_c-r/2, UPOVER_COLOR);
+        tft.drawLine (x_c-r, y_c+1, x_c-r/2, y_c-r/2, UPOVER_COLOR);
         tft.fillRect (x_c-r-2, y_c+1, 2*r+4, r, RA8875_BLACK);
     } else {
         tft.fillRect (x_c-r-2, y_c-r-2, 9*r/4+4, r+4, RA8875_BLACK);
     }
 }
 
-/* draw current state of gimbal in box, avoid needless redraws by comparing with previous values.
+/* return whether az target changed much since previous call
+ */
+static bool azTargetChanged()
+{
+    bool chg = roundf(az_target) != pgaz_target;
+    pgaz_target = roundf(az_target);
+    return (chg);
+}
+
+/* return whether az target changed much since previous call
+ */
+static bool elTargetChanged()
+{
+    bool chg = roundf(el_target) != pgel_target;
+    pgel_target = roundf(el_target);
+    return (chg);
+}
+
+/* return whether az now changed much since previous call
+ */
+static bool azNowChanged()
+{
+    bool chg = az_state != pgaz_state || roundf(az_now) != pgaz_now;
+    pgaz_state = az_state;
+    pgaz_now = roundf(az_now);
+    return (chg);
+}
+
+/* return whether az now changed much since previous call
+ */
+static bool elNowChanged()
+{
+    bool chg = el_state != pgel_state || roundf(el_now)!= pgel_now;
+    pgel_state = el_state;
+    pgel_now = roundf(el_now);
+    return (chg);
+}
+
+/* draw current state of gimbal in box.
  * N.B. we assume initGimbalGUI() has already been called.
  */
 static void updateGUI(const SBox &box)
 {
     // find az state description
     uint16_t color = 0;
-    const char *str = NULL;
     switch (az_state) {
     case AZS_STOPPED:
         color = BRGRAY;
-        str = "Idle";
         break;
     case AZS_CWROT:
-        color = RA8875_YELLOW;
-        str = " CW";
+        color = DYELLOW;
         break;
     case AZS_CCWROT:
-        color = RA8875_YELLOW;
-        str = "CCW";
+        color = DYELLOW;
         break;
     case AZS_CCWLIMIT:
         color = RA8875_RED;
-        str = "Min";
         break;
     case AZS_CWLIMIT:
         color = RA8875_RED;
-        str = "Max";
         break;
     case AZS_INPOS:
         color = RA8875_GREEN;
-        str = " Ok";
         break;
     case AZS_UNKNOWN:
         color = RA8875_RED;
-        str = "???";
         break;
     case AZS_NONE:
         return;
     }
 
-    // draw if changed enough
-    if (az_state != pgaz_state || roundf(az_target) != pgaz_target || roundf(az_now) != pgaz_now) {
-        drawAxisInfo (box, az_target, az_now, azccw_b, azcw_b, AZ_Y, str, color);
-        pgaz_state = az_state;
-        pgaz_target = roundf(az_target);
-        pgaz_now = roundf(az_now);
-    }
+    // draw
+    if (azNowChanged() || azTargetChanged())
+        drawAxisInfo (box, az_target, az_now, azccw_b, azcw_b, AZ_Y, color);
 
     // show el state if gimbal
     if (el_state != ELS_NONE) {
         switch (el_state) {
         case ELS_STOPPED:
             color = BRGRAY;
-            str = "Idle";
             break;
         case ELS_UPROT:
-            color = RA8875_YELLOW;
-            str = " UP";         // avoid p descender
+            color = DYELLOW;
             break;
         case ELS_DOWNROT:
-            color = RA8875_YELLOW;
-            str = "Down";
+            color = DYELLOW;
             break;
         case ELS_DOWNLIMIT:
             color = RA8875_RED;
-            str = "Min";
             break;
         case ELS_UPLIMIT:
             color = RA8875_RED;
-            str = "Max";
             break;
         case ELS_INPOS:
             color = RA8875_GREEN;
-            str = " Ok";
             break;
         case ELS_UNKNOWN:
             color = RA8875_RED;
-            str = "???";
             break;
         case ELS_NONE:
             break;
         }
 
-        // draw if changed enough
-        if (el_state != pgel_state || roundf(el_target) != pgel_target || roundf(el_now)!= pgel_now) {
-            drawAxisInfo (box, el_target, el_now, eldown_b, elup_b, EL_Y, str, color);
-            pgel_state = el_state;
-            pgel_target = roundf(el_target);
-            pgel_now = roundf(el_now);
-        }
+        // draw
+        if (elNowChanged() || elTargetChanged())
+            drawAxisInfo (box, el_target, el_now, eldown_b, elup_b, EL_Y, color);
     }
 
     // button
@@ -618,27 +632,19 @@ static void drawArrow (const SBox &b, ArrowDir d)
 
     switch (d) {
     case AR_LEFT:
-        tft.drawLine (x_r, b.y, b.x, y_c, ARROW_COLOR);
-        tft.drawLine (b.x, y_c, x_r, y_b, ARROW_COLOR);
-        tft.drawLine (x_r, y_b, x_r, b.y, ARROW_COLOR);
+        tft.drawTriangle (b.x, y_c,   x_r, b.y,   x_r, y_b, ARROW_COLOR);
         break;
 
     case AR_DOWN:
-        tft.drawLine (b.x, b.y, x_r, b.y, ARROW_COLOR);
-        tft.drawLine (b.x, b.y, x_c, y_b, ARROW_COLOR);
-        tft.drawLine (x_c, y_b, x_r, b.y, ARROW_COLOR);
+        tft.drawTriangle (b.x, b.y,   x_r, b.y,   x_c, y_b, ARROW_COLOR);
         break;
 
     case AR_UP:
-        tft.drawLine (b.x, y_b, x_c, b.y, ARROW_COLOR);
-        tft.drawLine (x_c, b.y, x_r, y_b, ARROW_COLOR);
-        tft.drawLine (b.x, y_b, x_r, y_b, ARROW_COLOR);
+        tft.drawTriangle (x_c, b.y,   b.x, y_b,   x_r, y_b, ARROW_COLOR);
         break;
 
     case AR_RIGHT:
-        tft.drawLine (b.x, b.y, x_r, y_c, ARROW_COLOR);
-        tft.drawLine (b.x, y_b, x_r, y_c, ARROW_COLOR);
-        tft.drawLine (b.x, b.y, b.x, y_b, ARROW_COLOR);
+        tft.drawTriangle (b.x, b.y,   x_r, y_c,   b.x, y_b, ARROW_COLOR);
         break;
     }
 }
@@ -701,7 +707,7 @@ static void initGimbalGUI(const SBox &box)
     const uint16_t az_y_center = AZ_Y + CHAR_H + LDIRBOX_SZ/2 + 5;
 
     // az arrow centers on a line
-    azccw_b.x = box.x + box.w/5;
+    azccw_b.x = box.x + box.w/3;
     azccw_b.y = az_y_center - SDIRBOX_SZ/2;
     azccw_b.w = SDIRBOX_SZ;
     azccw_b.h = SDIRBOX_SZ;
@@ -711,7 +717,7 @@ static void initGimbalGUI(const SBox &box)
     azccw2_b.w = LDIRBOX_SZ;
     azccw2_b.h = LDIRBOX_SZ;
 
-    azcw_b.x = box.x + box.w/2 + 10;
+    azcw_b.x = box.x + 2*box.w/3 - SDIRBOX_SZ;
     azcw_b.y = azccw_b.y;
     azcw_b.w = SDIRBOX_SZ;
     azcw_b.h = SDIRBOX_SZ;
@@ -754,17 +760,25 @@ static void initGimbalGUI(const SBox &box)
     auto_b.w = 3*box.w/8;
     auto_b.h = 15;
 
-    // draw title
+    // draw title, try to break at space if necessary to fit
     tft.setTextColor(RA8875_WHITE);
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     uint16_t tw = getTextWidth (title);
+    while (tw > box.w - 6) {
+        char *space = strrchr(title, ' ');
+        if (space)
+            *space = '\0';
+        else
+            title[strlen(title)-1] = '\0';
+        tw = getTextWidth (title);
+    }
     tft.setCursor (box.x+(box.w-tw)/2, TITLE_Y);
     tft.print(title);
 
     // label az for sure
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor(BRGRAY);
-    tft.setCursor (box.x+10, AZ_Y+CHAR_H);
+    tft.setCursor (box.x+15, AZ_Y+CHAR_H);
     tft.print(F("Az"));
 
     // az controls
@@ -776,7 +790,7 @@ static void initGimbalGUI(const SBox &box)
     // el labels and controls only if gimbal
     if (el_state != ELS_NONE) {
         tft.setTextColor(BRGRAY);
-        tft.setCursor (box.x+10, EL_Y+CHAR_H);
+        tft.setCursor (box.x+15, EL_Y+CHAR_H);
         tft.print(F("El"));
 
         drawArrow (elup_b, AR_UP);
@@ -805,13 +819,26 @@ void stopGimbalNow()
 {
     if (connectionOk()) {
         char buf[100];
-        if (!askHamlib (_FX("+\\stop"), "stop", buf, sizeof(buf)))
+        if (!askHamlib (_FX("+\\stop\n"), buf, sizeof(buf)))
             Serial.printf ("GBL: %s\n", buf);
     }
+
+    az_target = az_now;
+    el_target = el_now;
 
     auto_track = false;
     sat_upover = false;
     user_stop = true;
+}
+
+/* insure disconnected from hamlib
+ */
+void closeGimbal()
+{
+    if (connectionOk()) {
+        Serial.print (_FX("GBL: disconnected\n"));
+        hamlib_client.stop();
+    }
 }
 
 /* return whether we are built to handle a rotator; not whether one is actually connected now.
@@ -838,7 +865,7 @@ void updateGimbal (const SBox &box)
     }
 
     // get current positions
-    if (!getAz(box) || (el_state != ELS_NONE && !getEl(box))) {
+    if (!getAzEl(box)) {
         closeGimbal();
         return;
     }
@@ -927,11 +954,11 @@ void updateGimbal (const SBox &box)
             az_target = rad2deg(bear);
         }
 
-    } // else just move to location commanded from GUI
+    } // else move to location commanded from GUI
 
-    // move unless stopped, show GUI if ok
-    if (user_stop || setAzEl())
-        updateGUI(box);
+    if (!user_stop && (azTargetChanged() || elTargetChanged()))
+        setAzEl();
+    updateGUI(box);
 }
 
 /* handle a touch in our pane.
@@ -967,6 +994,7 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
             stopGimbalNow();
         } else {
             Serial.println (F("GBL: stop off"));
+            setAzEl();  // "unstop"
         }
     } else if (inBox (s, auto_b)) {
         auto_track = !auto_track;
@@ -976,6 +1004,7 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
             if (user_stop)
                 user_stop = false;
             initUpOver();
+            setAzEl();  // "unstop"
         } else {
             // always Stop when turning off Auto
             Serial.println (F("GBL: track off"));

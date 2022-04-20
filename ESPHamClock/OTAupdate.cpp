@@ -8,7 +8,7 @@
 #include "HamClock.h"
 
 // server path to script that returns the newest version available
-static const char v_page[] = "/ham/HamClock/version.pl";
+static const char v_page[] PROGMEM = "/version.pl";
 
 
 #define ASK_TO          60000U                          // ask timeout, millis()
@@ -77,7 +77,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
         resetWatchdog();
 
         // query page
-        httpGET (v_client, svr_host, v_page);
+        httpHCPGET (v_client, svr_host, v_page);
 
         // skip header
         if (!httpSkipHeader (v_client)) {
@@ -97,7 +97,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
         float new_v = atof(line);
         bool this_rc = strstr (hc_version, "rc");
         bool new_rc = strstr (line, "rc");
-        // Serial.printf ("V %g >? %g\n", new_v, this_v);
+        // Serial.printf (_FX("V %g >? %g\n"), new_v, this_v);
         if ((!this_rc && !new_rc && new_v > this_v) || (this_rc && (new_rc || new_v >= this_v))) {
             found_newer = true;
             strncpy (new_ver, line, new_verl);
@@ -156,7 +156,7 @@ bool askOTAupdate(char *new_ver)
         resetWatchdog();
 
         // query page
-        httpGET (v_client, svr_host, v_page);
+        httpHCPGET (v_client, svr_host, v_page);
 
         // skip header
         if (!httpSkipHeader (v_client)) {
@@ -175,8 +175,11 @@ bool askOTAupdate(char *new_ver)
             tft.setCursor (INDENT, liney);
             (void) maxStringW (line, tft.width()-2*INDENT);
             tft.print(line);
-            if ((liney += LH) >= tft.height()-10)
+            if ((liney += LH) >= tft.height()-LH-10) {
+                tft.setCursor (INDENT, liney);
+                tft.print(F("more ... for a complete list see clearskyinstitute.com/ham/HamClock"));
                 break;
+            }
         }
     }
   out:
