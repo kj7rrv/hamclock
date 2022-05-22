@@ -176,7 +176,8 @@ class Adafruit_RA8875 {
 	// real/app display size
 	int SCALESZ;
 
-        // get next keyboard character
+        // put and get next keyboard character
+        void putChar (char c);
         char getChar(void);
 
         // get current mouse position

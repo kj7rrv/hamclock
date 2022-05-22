@@ -26,21 +26,30 @@ class WiFi WiFi;
 /* run shell cmd and return the first line of response.
  * return whether ok
  */
-static bool getCommand (const char cmd[], char line[], size_t line_len)
+static bool getCommand (bool verbose, const char cmd[], char line[], size_t line_len)
 {
         // Serial.printf ("getCommand: %s\n", cmd);
 
 	line[0] = '\0';
+        if (verbose)
+            printf ("** cmd=%s\n", cmd);
 	FILE *pp = popen (cmd, "r");
 	if (!pp)
 	    return (false);
 	bool ok = fgets (line, line_len, pp) != NULL;
+        int eof_or_err = !ok && (feof(pp) || ferror(pp));
 	int wstatus = pclose (pp);
-        // printf ("cmd= '%s':\n  ok= %d wstatus=%d line= '%s'\n", cmd, ok, wstatus, line);
-        if (ok && WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0 && strlen(line) > 1) {
+        int exited = WIFEXITED(wstatus);
+        int exstatus = WEXITSTATUS(wstatus);
+        if (ok && exited && exstatus == 0 && strlen(line) > 1) {
             line[strlen(line)-1] = '\0';        // rm \n
+            if (verbose)
+                printf ("** back=%s\n", line);
             return (true);
         }
+        if (!verbose)
+            printf ("** cmd=%s\n", cmd);
+        printf ("** err=%d exited=%d exstatus=%d\n", eof_or_err, exited, exstatus);
 	return (false);
 }
 
@@ -210,11 +219,11 @@ IPAddress WiFi::subnetMask(void)
             return (a);
 
         strcpy (cmd, "[ -x /sbin/ip ] && /sbin/ip address show | awk '/inet / && !/127.0.0.1/{print $2}'");
-	if (getCommand (cmd, back, sizeof(back)) && crackCIDR (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackCIDR (back, a))
             return (a);
 
 	strcpy (cmd, "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/ netmask / && !/127.0.0.1/{print $4}'");
-	if (getCommand (cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
 	// works on a line of the form inet 192.168.7.11 netmask 0xffffff00 broadcast 192.168.7.255
@@ -222,7 +231,7 @@ IPAddress WiFi::subnetMask(void)
             "| grep -v '127.0.0.1' "
             "| awk '/netmask *0x/{printf \"%d.%d.%d.%d\\n\", $4/(2^24), ($4/(2^15))%256, ($4/2^8)%256, $4%256}'"
             "| head -1");
-	if (getCommand (cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         // default 0
@@ -239,11 +248,11 @@ IPAddress WiFi::gatewayIP(void)
             return (a);
 
         strcpy (cmd,  "[ -x /sbin/ip ] && /sbin/ip route show default | awk '/default via/{print $3}'");
-	if (getCommand (cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         strcpy (cmd,  "netstat -rn | awk '(/^0.0.0.0/ || /^default/) && !/::/{print $2}'");
-	if (getCommand (cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         // default 0
@@ -260,7 +269,7 @@ IPAddress WiFi::dnsIP(void)
             return (a);
 
 	strcpy (cmd, "awk '/nameserver/{print $2}' /etc/resolv.conf | head -1");
-	if (getCommand (cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         // default 0
@@ -296,7 +305,7 @@ int WiFi::RSSI(void)
             "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I";
         char ret[2048];
 
-        if (getCommand (cmd, ret, sizeof(ret))) {
+        if (getCommand (false, cmd, ret, sizeof(ret))) {
             int apple_rssi;
             char *rssi_kw = strstr (ret, "agrCtlRSSI: ");
             if (rssi_kw && sscanf (rssi_kw+11, "%d", &apple_rssi) == 1 && apple_rssi != 0)
@@ -354,14 +363,14 @@ std::string WiFi::macAddress(void)
                 "`/sbin/ip route show default 0.0.0.0/0 | perl -n -e '/default.* dev (\\S+) / and print $1'`"
                 "| perl -n -e '/ether ([a-fA-F0-9:]+)/ and print \"$1\\n\"'",
             "[ -x /sbin/ifconfig -a -x /sbin/route ] && /sbin/ifconfig "
-                "`/sbin/route -n get 8.8.8.8 | awk '/interface/{print $2}'` | awk '/ether/{print $2}'",
+                "`/sbin/route -n | awk '/UG/{print $8}'` | awk '/ether/{print $2}'",
             "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/ether/{print $2}' | head -1",
             "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/HWaddr/{print $5}' | head -1",
         };
         const int n_cmds = sizeof(cmds)/sizeof(cmds[0]);
 
         for (int i = 0; i < n_cmds; i++) {
-            if (getCommand (cmds[i], line, sizeof(line))) {
+            if (getCommand (true, cmds[i], line, sizeof(line))) {
                 // insure 5 :
                 unsigned int m1, m2, m3, m4, m5, m6;
                 if (sscanf (line, "%x:%x:%x:%x:%x:%x", &m1, &m2, &m3, &m4, &m5, &m6) == 6)

@@ -27,13 +27,14 @@
 #include "WiFiServer.h"
 
 // set for more info
-static bool _trace_server = true;
+static bool _trace_server = false;
 
 WiFiServer::WiFiServer(int newport)
 {
 	port = newport;
 	socket = -1;
-        if (_trace_server) printf ("WiFiSvr: new instance on port %d\n", port);
+        if (_trace_server)
+            printf ("WiFiSvr: new instance on port %d\n", port);
 }
 
 /* N.B. Arduino version returns void and no ynot
@@ -93,7 +94,8 @@ bool WiFiServer::begin(char ynot[])
         signal (SIGPIPE, SIG_IGN);
 
         /* ok */
-        if (_trace_server) printf ("WiFiSvr: new server socket %d\n", sfd);
+        if (_trace_server)
+            printf ("WiFiSvr: new server socket %d\n", sfd);
         socket = sfd;
         return (true);
 }
@@ -107,7 +109,8 @@ WiFiClient WiFiServer::available()
             struct sockaddr_in cli_socket;
             socklen_t cli_len = sizeof(cli_socket);
             cli_fd = ::accept (socket, (struct sockaddr *)&cli_socket, &cli_len);
-            if (cli_fd >= 0 && _trace_server) printf ("WiFiSvr: new server client fd %d\n", cli_fd);
+            if (cli_fd >= 0 && _trace_server)
+                printf ("WiFiSvr: new server client fd %d\n", cli_fd);
         }
 
 	// return as a client
@@ -118,7 +121,8 @@ WiFiClient WiFiServer::available()
 void WiFiServer::stop()
 {
         if (socket >= 0) {
-            if (_trace_server) printf ("WiFiSvr: closing socket %d\n", socket);
+            if (_trace_server)
+                printf ("WiFiSvr: closing socket %d\n", socket);
             close (socket);
             socket = -1;
         }

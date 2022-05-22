@@ -27,6 +27,23 @@ typedef enum {
  */
 #if defined(_SUPPORT_GPIO) && defined(_IS_UNIX)
 
+/* return all IO lines to benign state
+ */
+void SWresetIO()
+{
+    if (!GPIOOk())
+        return;
+    GPIO& gpio = GPIO::getGPIO();
+    if (!gpio.isReady())
+        return;
+    gpio.setAsInput (SW_RED_GPIO);
+    gpio.setAsInput (SW_GRN_GPIO);
+    gpio.setAsInput (SW_COUNTDOWN_GPIO);
+    gpio.setAsInput (SW_ALARMOUT_GPIO);
+    gpio.setAsInput (SW_ALARMOFF_GPIO);
+
+}
+
 /* set the LEDs to indicate the given countdown range
  */
 static void setLEDState (SWCDState cds)
@@ -182,6 +199,7 @@ static void setAlarmPin (bool set) { (void) set; }
 #define SW_CDP_X        ALM_EX                  // countdown period display box x
 #define SW_CDP_W        ALM_W                   // countdown period display box width
 #define SW_CD_WARNDT    60000                   // countdown warning time, ms
+#define SW_AGEDT        30000                   // countdown aged period, ms
 
 // big analog clock params
 #define BAC_X0          400                     // x center
@@ -351,7 +369,7 @@ static void drawSWCDPeriod()
 static void drawColorScale()
 {
     // erase to remove tick marks
-    tft.fillRect (color_b.x, color_b.y, color_b.w, color_b.h, RA8875_BLACK);
+    fillSBox (color_b, RA8875_BLACK);
 
     // rainbow
     for (uint16_t dx = 0; dx < color_b.w; dx++) {
@@ -583,7 +601,7 @@ static void drawAlarmIndicator (bool label_too)
         if (alarm_state == ALMS_OFF) {
             if (label_too) {
                 // this is so web command set_alarm?off can actually erase the alarm box
-                tft.fillRect (bcalarm_b.x, bcalarm_b.y, bcalarm_b.w, bcalarm_b.h, RA8875_BLACK);
+                fillSBox (bcalarm_b, RA8875_BLACK);
             }
         } else if (alarm_state == ALMS_ARMED) {
             snprintf (buf, sizeof(buf), "A: %02d:%02d", a_hr, a_mn);
@@ -593,7 +611,7 @@ static void drawAlarmIndicator (bool label_too)
         }
 
         #if defined(_SHOW_ALL)
-            tft.drawRect (bcalarm_b.x, bcalarm_b.y, bcalarm_b.w, bcalarm_b.h, RA8875_WHITE);
+            drawSBox (bcalarm_b, RA8875_WHITE);
         #endif
     }
 }
@@ -689,7 +707,7 @@ static void drawCDTimeRemaining(bool force)
             // overwrite stopwatch icon
             selectFontStyle (LIGHT_FONT, FAST_FONT);
             uint16_t cdw = getTextWidth(buf);
-            tft.fillRect (stopwatch_b.x, stopwatch_b.y, stopwatch_b.w, stopwatch_b.h, RA8875_BLACK);
+            fillSBox (stopwatch_b, RA8875_BLACK);
             tft.setTextColor (color);
             tft.setCursor (stopwatch_b.x + (stopwatch_b.w-cdw)/2, stopwatch_b.y+stopwatch_b.h/4);
             tft.print (buf);
@@ -818,7 +836,7 @@ static void drawBCDate (int hr, int dy, int wd, int mo)
     }
 
     #if defined(_SHOW_ALL)
-        tft.drawRect (bcdate_b.x, bcdate_b.y, bcdate_b.w, bcdate_b.h, RA8875_WHITE);
+        drawSBox (bcdate_b, RA8875_WHITE);
     #endif
 }
 
@@ -835,7 +853,7 @@ static bool drawBCWx(void)
         plotMessage (bcwx_b, RA8875_RED, ynot);
 
     // undo border
-    tft.drawRect (bcwx_b.x, bcwx_b.y, bcwx_b.w, bcwx_b.h, RA8875_BLACK);
+    drawSBox (bcwx_b, RA8875_BLACK);
 
     return (ok);
 }
@@ -1097,7 +1115,7 @@ static void drawDigitalBigClock (bool all)
         drawBCSpaceWx(all);
 
     #if defined(_SHOW_ALL)
-        tft.drawRect (bccd_b.x, bccd_b.y, bccd_b.w, bccd_b.h, RA8875_WHITE);
+        drawSBox (bccd_b, RA8875_WHITE);
     #endif
 }
 
@@ -1405,7 +1423,7 @@ static void drawAnalogBigClock (bool all)
 
 
     #if defined(_SHOW_ALL)
-        tft.drawRect (bccd_b.x, bccd_b.y, bccd_b.w, bccd_b.h, RA8875_WHITE);
+        drawSBox (bccd_b, RA8875_WHITE);
     #endif
 
     // update DE or space weather if desired and all or new
@@ -1468,10 +1486,10 @@ static void drawSWState()
         drawAlarmIndicator  (true);
 
         #if defined(_SHOW_ALL)
-            tft.drawRect (alarm_up_b.x, alarm_up_b.y, alarm_up_b.w, alarm_up_b.h, RA8875_WHITE);
-            tft.drawRect (alarm_dw_b.x, alarm_dw_b.y, alarm_dw_b.w, alarm_dw_b.h, RA8875_WHITE);
-            tft.drawRect (cdtime_up_b.x, cdtime_up_b.y, cdtime_up_b.w, cdtime_up_b.h, RA8875_WHITE);
-            tft.drawRect (cdtime_dw_b.x, cdtime_dw_b.y, cdtime_dw_b.w, cdtime_dw_b.h, RA8875_WHITE);
+            drawSBox (alarm_up_b, RA8875_WHITE);
+            drawSBox (alarm_dw_b, RA8875_WHITE);
+            drawSBox (cdtime_up_b, RA8875_WHITE);
+            drawSBox (cdtime_dw_b, RA8875_WHITE);
         #endif
 
         break;
@@ -1673,6 +1691,7 @@ static void runBCMenu (const SCoord &s)
     SBox menu_b;
     menu_b.x = s.x;
     menu_b.y = s.y;
+    menu_b.w = 0;               // shrink to fit
     // w/h are set dynamically by runMenu()
 
     // run, do nothing more if cancelled
@@ -2017,9 +2036,9 @@ void drawMainPageStopwatch (bool force)
         // draw icon
 
         // erase
-        tft.fillRect (stopwatch_b.x, stopwatch_b.y, stopwatch_b.w, stopwatch_b.h, RA8875_BLACK);
+        fillSBox (stopwatch_b, RA8875_BLACK);
         #if defined(_SHOW_ALL)
-            tft.drawRect (stopwatch_b.x, stopwatch_b.y, stopwatch_b.w, stopwatch_b.h, RA8875_WHITE);
+            drawSBox (stopwatch_b, RA8875_WHITE);
         #endif
 
         // body radius and step for stems
@@ -2103,6 +2122,11 @@ bool runStopwatch()
     // always honor countdown switch regardless of display state
     if (countdownPinIsTrue())
         setSWEngineState (SWE_COUNTDOWN, countdown_period);
+
+    // check for aged countdown runout
+    if (sws_engine == SWE_COUNTDOWN && getCountdownLeft() == 0
+                                && millis()-start_t > countdown_period + SW_AGEDT)
+        setSWEngineState (SWE_RESET, 0);
 
     // always check alarm clock regardless of display state
     if (alarm_state == ALMS_ARMED && checkAlarm()) {

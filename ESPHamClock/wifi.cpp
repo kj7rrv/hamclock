@@ -141,7 +141,7 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 
 
 // web site retry interval, secs
-#define WIFI_RETRY      5
+#define WIFI_RETRY      10
 
 // pane auto rotation period in seconds -- most are the same but wx is longer
 #define ROTATION_INTERVAL       30
@@ -523,7 +523,7 @@ void initSys()
                 }
 
                 // cancel scan if tapped and found at least one good
-                if (best_ntp && (skip_skip || (readCalTouch(s) != TT_NONE && inBox (s, skip_b)))) {
+                if (best_ntp && (skip_skip || (readCalTouchWS(s) != TT_NONE && inBox (s, skip_b)))) {
                     drawStringInBox (_FX("Skip"), skip_b, true, RA8875_WHITE);
                     Serial.printf (_FX("NTP search cancelled with %s\n"), best_ntp->server);
                     skipped_here = true;
@@ -575,7 +575,7 @@ void initSys()
         drainTouch();
         for (uint8_t ds_left = TO_DS; !skip_skip && ds_left > 0; --ds_left) {
             SCoord s;
-            if (readCalTouch(s) != TT_NONE && inBox(s, skip_b)) {
+            if (readCalTouchWS(s) != TT_NONE && inBox(s, skip_b)) {
                 drawStringInBox (_FX("Skip"), skip_b, true, RA8875_WHITE);
                 break;
             }
@@ -1101,7 +1101,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     power_b.y = b.y + 13*b.h/14;
     power_b.w = b.w/5;
     power_b.h = b.h/12;
-    // tft.drawRect (power_b.x, power_b.y, power_b.w, power_b.h, RA8875_WHITE);
+    // drawSBox (power_b, RA8875_WHITE);
 
     // timeline strip
     SBox tl_b;
@@ -1109,7 +1109,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     tl_b.y = b.y + 12*b.h/14;
     tl_b.w = b.w - 2;
     tl_b.h = b.h/12;
-    // tft.drawRect (tl_b.x, tl_b.y, tl_b.w, tl_b.h, RA8875_WHITE);
+    // drawSBox (tl_b, RA8875_WHITE);
 
     if (inBox (s, power_b)) {
 
@@ -1125,7 +1125,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         SBox menu_b;
         menu_b.x = b.x + 5;
         menu_b.y = b.y + b.h/2;
-        // w/h are set dynamically by runMenu()
+        menu_b.w = 0;           // shrink to fit
 
         // run menu, find selection
         SBox ok_b;
@@ -1305,7 +1305,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         break;
 
     case PLOT_CH_DXCLUSTER:
-        if (!useDXCluster())
+        if (!useDXCluster() || pp == PANE_1)    // cluster not allowed on pane 1 to avoid disconnect for wx
             return (false);
         plot_ch[pp] = PLOT_CH_DXCLUSTER;
         next_dxcluster = 0;
@@ -1695,7 +1695,7 @@ void updateWiFi(void)
     }
 
     // check for server commands
-    checkWebServer();
+    checkWebServer(false);
 }
 
 
@@ -1718,7 +1718,7 @@ time_t getNTPUTC(const char **server)
     // create udp endpoint
     WiFiUDP ntp_udp;
     resetWatchdog();
-    if (!ntp_udp.begin(1234)) {                                 // any local port
+    if (!ntp_udp.begin(1000+random(50000))) {                   // any local port
         Serial.println (F("NTP: UDP startup failed"));
         return (0);
     }
@@ -1874,13 +1874,22 @@ void sendUserAgent (WiFiClient &client)
 
     if (logUsageOk()) {
 
-        // encode full-screen with fb0
-        int use_fb0 = 0;
+        // display mode: 0=X11 1=fb0 2=X11full 3=X11+live 4=X11full+live 5=noX
+        int dpy_mode = 0;
         #if defined(_USE_FB0)
-            use_fb0 = 1;
+            dpy_mode = 1;
         #else
-            if (getX11FullScreen())
-                use_fb0 = 2;
+            bool fs = getX11FullScreen();
+            bool live = last_live + 3600 > time(NULL);
+            if (live)
+                dpy_mode = fs ? 4 : 3;
+            else if (fs)
+                dpy_mode = 2;
+        #endif
+        #if defined(_IS_UNIX)
+            extern int noX11;
+            if (noX11)
+                dpy_mode = 5;
         #endif
 
         // encode stopwatch if on else whether azm_on
@@ -1950,7 +1959,7 @@ void sendUserAgent (WiFiClient &client)
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb_mode, dx_info_for_sat, rss_code, useMetricUnits(),
             getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
-            desrss, dxsrss, BUILD_W, use_fb0,
+            desrss, dxsrss, BUILD_W, dpy_mode,
             // new for LV5:
             (int)as, getCenterLng(), getDOY(), names_on, getDemoMode(), (int)getSWEngineState(NULL,NULL), 
             (int)getBigClockBits(), utcOffset(), gpsd, rss_interval, (int)getDateFormat(), rr_score);
@@ -2099,7 +2108,6 @@ static bool updateXRay(const SBox &box)
     float *sxray = (float *) sxray_mem.getMem();        // short wavelength values
     float *x = (float *) x_mem.getMem();                // x coords of plot
 
-    Serial.println(xray_page);
     bool ok = retrieveXRay (lxray, sxray, x);
     if (ok) {
 
@@ -2720,7 +2728,7 @@ static bool updateRSS ()
     char *line = line_mem.getMem();
 
     // prepare background to show life before possibly lengthy net update
-    tft.fillRect (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.w, rss_bnr_b.h, RSS_BG_COLOR);
+    fillSBox (rss_bnr_b, RSS_BG_COLOR);
     tft.drawLine (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.x+rss_bnr_b.w, rss_bnr_b.y, GRAY);
 
     // fill rss_titles[] from network if empty and wanted

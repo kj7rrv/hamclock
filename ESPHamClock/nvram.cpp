@@ -121,6 +121,13 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_FLRIGUSE
     NV_FLRIGHOST_LEN,           // NV_FLRIGHOST
     2,                          // NV_FLRIGPORT
+    NV_DXCLCMD_LEN,             // NV_DXCMD0
+    NV_DXCLCMD_LEN,             // NV_DXCMD1
+    NV_DXCLCMD_LEN,             // NV_DXCMD2
+    NV_DXCLCMD_LEN,             // NV_DXCMD3
+    1,                          // NV_DXCMDUSED
+    2,                          // NV_GT10MHZ_COL
+    2,                          // NV_LT10MHZ_COL
 };
 
 
@@ -142,17 +149,14 @@ static void initEEPROM()
         return;
     before = true;
 
-    // count total space used
-    const uint8_t n = NARRAY(nv_sizes);
-    uint16_t eesize = NV_BASE;
-    for (uint8_t i = 0; i < n; i++)
-        eesize += nv_sizes[i] + 1;      // +1 for cookie
-    if (eesize > FLASH_SECTOR_SIZE) {
-        Serial.printf (_FX("EEPROM too large: %u > %u\n"), eesize, FLASH_SECTOR_SIZE);
+    uint16_t ee_used, ee_size;
+    reportEESize (ee_used, ee_size);
+    if (ee_used > ee_size) {
+        Serial.printf (_FX("EEPROM too large: %u > %u\n"), ee_used, ee_size);
         while(1);       // timeout
     }
-    EEPROM.begin(eesize);      
-    Serial.printf (_FX("EEPROM size %u + %u = %u\n"), NV_BASE, eesize-NV_BASE, eesize);
+    EEPROM.begin(ee_used);      
+    Serial.printf (_FX("EEPROM size %u + %u = %u, max %u\n"), NV_BASE, ee_used-NV_BASE, ee_used, ee_size);
 
 // #define _SHOW_EEPROM
 #if defined(_SHOW_EEPROM)
@@ -274,6 +278,14 @@ static bool nvramReadBytes (NV_Name e, uint8_t *buf, uint8_t xbytes)
  *
  *******************************************************************/
 
+void reportEESize (uint16_t &ee_used, uint16_t &ee_size)
+{
+    ee_used = NV_BASE;
+    const unsigned n = NARRAY(nv_sizes);
+    for (unsigned i = 0; i < n; i++)
+        ee_used += nv_sizes[i] + 1;      // +1 for cookie
+    ee_size = FLASH_SECTOR_SIZE;
+}
 
 /* write the given float value to the given NV_name
  */

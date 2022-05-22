@@ -184,9 +184,14 @@ PlotChoice askPaneChoice (PlotPane pp)
     MenuItem *mitems = NULL;
     int n_mitems = 0;
     for (int i = 0; i < PLOT_CH_N; i++) {
-        // use if not used elsewhere and available or already assigned to this pane
         PlotChoice ch = (PlotChoice) i;
         PlotPane pp_ch = findPaneForChoice (ch);
+
+        // do not allow cluster on pane 1 to avoid disconnect each time DX/DE wx
+        if (pp == PANE_1 && ch == PLOT_CH_DXCLUSTER)
+            continue;
+
+        // otherwise use if not used elsewhere and available or already assigned to this pane
         if ( (pp_ch == PANE_NONE && plotChoiceIsAvailable(ch)) || pp_ch == pp || ASKP_SHOWALL) {
             // set up next menu item
             mitems = (MenuItem *) realloc (mitems, (n_mitems+1)*sizeof(MenuItem));
@@ -202,8 +207,8 @@ PlotChoice askPaneChoice (PlotPane pp)
     // nice sort by label
     qsort (mitems, n_mitems, sizeof(MenuItem), menuChoiceQS);
 
-    // run the menu in copy of plot box so its height is not changed
-    SBox box = plot_b[pp];       // copy, not reference, because runMenu will shrink wrap
+    // run
+    SBox box = plot_b[pp];       // copy
     SBox ok_b;
     MenuInfo menu = {box, ok_b, true, false, 2, n_mitems, mitems};
     bool menu_ok = runMenu (menu);
@@ -231,9 +236,9 @@ PlotChoice askPaneChoice (PlotPane pp)
         }
 
         // enforce cluster on its own
-        if ((new_rotset & (1<<PLOT_CH_DXCLUSTER)) && ((new_rotset & ~(1<<PLOT_CH_DXCLUSTER)) != 0)) {
+        if ((new_rotset & (1<<PLOT_CH_DXCLUSTER)) && (new_rotset & ~(1<<PLOT_CH_DXCLUSTER))) {
 
-            plotMessage (box, RA8875_RED, _FX("DX Cluster may not be mixed with other choices"));
+            plotMessage (box, RA8875_RED, _FX("DX Cluster may not be combined with other choices"));
             wdDelay(5000);
 
         } else {
@@ -396,14 +401,17 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
     case PLOT_CH_DXCLUSTER:
         if (checkDXClusterTouch (s, box))
             return (true);
+        in_top = true;
         break;
     case PLOT_CH_BC:
         if (checkBCTouch (s, box))
             return (true);
+        in_top = true;
         break;
     case PLOT_CH_GIMBAL:
         if (checkGimbalTouch (s, box))
             return (true);
+        in_top = true;
         break;
     case PLOT_CH_COUNTDOWN:
         if (!in_top) {
@@ -495,12 +503,17 @@ void initPlotPanes()
     NVReadUInt32 (NV_PANE2ROTSET, &plot_rotset[PANE_2]);
     NVReadUInt32 (NV_PANE3ROTSET, &plot_rotset[PANE_3]);
 
-    // rm any choice not available
+    // rm any choice not available, including dx cluster in pane 1
     for (int i = 0; i < PANE_N; i++) {
         for (int j = 0; j < PLOT_CH_N; j++) {
-            if ((plot_rotset[i] & (1 << j)) && !plotChoiceIsAvailable ((PlotChoice)j)) {
-                plot_rotset[i] &= ~(1 << j);
-                Serial.printf (_FX("PANE: Removing %s from pane %d: not available\n"), plot_names[j], i+1);
+            if (plot_rotset[i] & (1 << j)) {
+                if (i == PANE_1 && j == PLOT_CH_DXCLUSTER) {
+                    plot_rotset[i] &= ~(1 << j);
+                    Serial.printf (_FX("PANE: Removing %s from pane %d: not allowed\n"), plot_names[j], i+1);
+                } else if (!plotChoiceIsAvailable ((PlotChoice)j)) {
+                    plot_rotset[i] &= ~(1 << j);
+                    Serial.printf (_FX("PANE: Removing %s from pane %d: not available\n"), plot_names[j],i+1);
+                }
             }
         }
     }
@@ -572,7 +585,7 @@ void savePlotOps()
 void showRotatingBorder (bool soon, PlotPane pp)
 {
     uint16_t c = (next_rotationT[pp] - now() > PLOT_ROT_WARNING) || soon ? RA8875_WHITE : GRAY;
-    tft.drawRect (plot_b[pp].x, plot_b[pp].y, plot_b[pp].w, plot_b[pp].h, c);
+    drawSBox (plot_b[pp], c);
 
 }
 

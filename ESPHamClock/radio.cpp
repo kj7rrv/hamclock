@@ -291,6 +291,17 @@ void setRadioSpot (float kHz)
 #include <time.h>
 #include "GPIO.h"
 
+/* return our gpio pins to quiescent state
+ */
+void radioResetIO()
+{
+    if (!GPIOOk())
+        return;
+    GPIO& gpio = GPIO::getGPIO();
+    if (!gpio.isReady())
+        return;
+    gpio.setAsInput(Elecraft_GPIO);
+}
 
 /* send one bit @ getKX3Baud(), bit time multiplied by correction factor.
  * N.B. they want mark/sense inverted

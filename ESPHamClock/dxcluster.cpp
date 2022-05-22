@@ -116,25 +116,39 @@
 // setup 
 #define TITLE_COLOR     RA8875_GREEN
 #define LISTING_COLOR   RA8875_WHITE
-#define CLUSTER_TIMEOUT 30000           // send line feed if idle this long, millis
-#define MAX_AGE         300000          // max age to restore spot in list, millis
-#define TITLE_Y0        27              // title dy, match VOACAP title position
-#define HOSTNM_Y0       32              // host name y down from box top
-#define LISTING_Y0      47              // first spot y down from box top
-#define LISTING_DY      16              // listing row separation
-#define FONT_H          7               // listing font height
-#define FONT_W          6               // listing font width
-#define DWELL_MS        5000            // period to show non-fatal message, ms
-#define LISTING_N       ((PLOTBOX_H - LISTING_Y0)/LISTING_DY)       // max n list rows
+#define CLUSTER_TIMEOUT 30000                   // send line feed if idle this long, millis
+#define MAX_AGE         300000                  // max age to restore spot in list, millis
+#define TITLE_Y0        27                      // title dy, match VOACAP title position
+#define HOSTNM_Y0       32                      // host name y down from box top
+#define LISTING_Y0      47                      // first spot y down from box top
+#define LISTING_DY      16                      // listing row separation
+#define FONT_H          7                       // listing font height
+#define FONT_W          6                       // listing font width
+#define DWELL_MS        5000                    // period to show non-fatal message, ms
+#define N_VISSPOTS      ((PLOTBOX_H - LISTING_Y0)/LISTING_DY)       // number of visible spots
+#define SCR_DX          (PLOTBOX_W-15)          // scroll control center dx within box
+#define SCRUP_DY        9                       // up " dy down "
+#define SCRDW_DY        23                      // down " dy down "
+#define SCR_R           5                       // " radius
+#define SCR_COLOR       RA8875_GREEN            // " color
 
 // connection info
-static WiFiClient dx_client;            // persistent TCP connection while displayed ...
-static WiFiUDP wsjtx_server;            // or persistent UDP "connection" to WSJT-X client program
-static uint32_t last_action;            // time of most recent spot or user activity, millis()
+static WiFiClient dx_client;                    // persistent TCP connection while displayed ...
+static WiFiUDP wsjtx_server;                    // or persistent UDP "connection" to WSJT-X client program
+static uint32_t last_action;                    // time of most recent spot or user activity, millis()
 
 // spots
-static DXClusterSpot spots[LISTING_N];
-static uint8_t n_spots;                 // n spots already displayed
+#if defined(_IS_ESP)
+#define N_MORESP          5                     // use less precious ESP mem
+#else
+#define N_MORESP          10                    // n more than N_VISSPOTS spots
+#endif
+#define N_SPOTS         (N_VISSPOTS+N_MORESP)   // total number of spots retained
+static DXClusterSpot *spots;                    // N_SPOTS spots, oldest first, malloced first call
+static uint8_t n_spots;                         // n spots[] in use, newest at n_spots-1
+static uint8_t top_vis;                         // spots[] index showing at top of pane
+
+
 
 // type
 typedef enum {
@@ -147,6 +161,92 @@ static DXClusterType cl_type;
 
 
 
+/* given a spot[] index, draw in box if visible depending on top_vis
+ */
+static void drawSpotOnList (const SBox &box, int spot_i)
+{
+        int vis_row = spot_i - top_vis;
+        if (vis_row < 0 || vis_row >= N_VISSPOTS)
+            return;
+
+        DXClusterSpot &spot = spots[spot_i];
+        char line[50];
+
+        selectFontStyle (LIGHT_FONT, FAST_FONT);
+        tft.setTextColor(LISTING_COLOR);
+
+        uint16_t x = box.x+4;
+        uint16_t y = box.y + LISTING_Y0 + vis_row*LISTING_DY;
+        tft.fillRect (x, y, box.w-5, LISTING_DY-1, RA8875_BLACK);
+        tft.setCursor (x, y);
+
+        // pretty freq, fixed 8 chars
+        const char *f_fmt = spot.kHz < 1e6F ? "%8.1f" : "%8.0f";
+        (void) sprintf (line, f_fmt, spot.kHz);
+
+        // add remaining fields
+        snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs);
+        tft.print (line);
+}
+
+
+/* draw, else erase, the up scroll control;
+ */
+static void drawScrollUp (const SBox &box, bool draw)
+{
+        uint16_t x0 = box.x + SCR_DX;
+        uint16_t y0 = box.y + SCRUP_DY - SCR_R;
+        uint16_t x1 = box.x + SCR_DX - SCR_R;
+        uint16_t y1 = box.y + SCRUP_DY + SCR_R;
+        uint16_t x2 = box.x + SCR_DX + SCR_R;
+        uint16_t y2 = box.y + SCRUP_DY + SCR_R;
+
+        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? SCR_COLOR : RA8875_BLACK);
+}
+
+/* draw, else erase, the down scroll control.
+ */
+static void drawScrollDown (const SBox &box, bool draw)
+{
+        uint16_t x0 = box.x + SCR_DX - SCR_R;
+        uint16_t y0 = box.y + SCRDW_DY - SCR_R;
+        uint16_t x1 = box.x + SCR_DX + SCR_R;
+        uint16_t y1 = box.y + SCRDW_DY - SCR_R;
+        uint16_t x2 = box.x + SCR_DX;
+        uint16_t y2 = box.y + SCRDW_DY + SCR_R;
+
+        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? SCR_COLOR : RA8875_BLACK);
+}
+
+/* draw all currently visible spots then update scroll markers
+ */
+static void drawAllVisSpots (const SBox &box)
+{
+        for (int i = top_vis; i < n_spots; i++)
+            drawSpotOnList (box, i);
+
+        drawScrollUp (box, top_vis > 0);
+        drawScrollDown (box, top_vis < n_spots-N_VISSPOTS);
+}
+
+
+/* shift the visible list to show one older spot, if any
+ */
+static void scrollUp (const SBox &box)
+{
+        if (top_vis > 0)
+            top_vis -= 1;
+        drawAllVisSpots (box);
+}
+
+/* shift the visible list to show one newer spot, if any
+ */
+static void scrollDown (const SBox &box)
+{
+        if (top_vis < n_spots-N_VISSPOTS)
+            top_vis += 1;
+        drawAllVisSpots (box);
+}
 
 /* convert any upper case letter in str to lower case IN PLACE
  */
@@ -174,6 +274,8 @@ static void dxcLog (const char *fmt, ...)
 
         // print with boilerplate and w/o bell
         Serial.print (F("DXC: "));
+        if (strncmp (msg, _FX("DX de "), 6) != 0)
+            Serial.print (F("   "));
         for (char *mp = msg; *mp != '\0'; mp++)
             if (*mp != '\a')
                 Serial.print (*mp);
@@ -199,9 +301,11 @@ static bool lookForDXClusterPrompt()
         char line[120];
         uint16_t ll;
 
-        while (getTCPLine (dx_client, line, sizeof(line), &ll))
+        while (getTCPLine (dx_client, line, sizeof(line), &ll)) {
+            dxcLog (line);
             if (isSpiderPrompt (line, ll))
                 return (true);
+        }
 
         dxcLog (_FX("Can not find prompt"));
         return (false);
@@ -267,7 +371,7 @@ static void findLLFromDEHeadingDist (float heading, float miles, LatLong &ll)
         normalizeLL (ll);
 }
 
-/* given a call sign return its lat/long by querying dx_client.
+/* given a call sign find its lat/long by querying dx_client.
  * technique depends on cl_type.
  * return whether successful.
  */
@@ -303,7 +407,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
         } else {
 
-            fatalError (_FX("Bug! cluster cl_type= %d\n"), cl_type);
+            fatalError (_FX("Bug! no LL from cluster cl_type= %d\n"), cl_type);
             return (false);
         }
 
@@ -331,33 +435,12 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
  */
 static void engageRow (DXClusterSpot &s)
 {
-        // get ll 
+        setRadioSpot(s.kHz);
+
         LatLong ll;
-
-        if (cl_type == CT_DXSPIDER || cl_type == CT_ARCLUSTER) {
-
-            // get LL from cluster
-            if (!getDXClusterSpotLL (s.call, ll))
-                return;
-
-        } else if (cl_type == CT_WSJTX) {
-
-            // get LL from grid
-            LatLong ll;
-            char maid[MAID_CHARLEN];
-            if (!maidenhead2ll (ll, s.grid)) {
-                dxcLog (_FX("bogus grid %s for %s\n"), maid, s.call);
-                return;
-            }
-        } else {
-
-            fatalError (_FX("Bug! cluster cl_type= %d\n"), cl_type);
-            return;
-        }
-
-        // do it -- HB9CEY wants his KX3 to change ASAP
-        setRadioSpot(s.freq);
-        newDX (ll, NULL, s.call);
+        ll.lat_d = rad2deg(s.dx_lat);
+        ll.lng_d = rad2deg(s.dx_lng);
+        newDX (ll, NULL, s.dx_call);       // normalizes
 }
 
 static void setDXClusterSpotMapPosition (DXClusterSpot &s)
@@ -366,125 +449,122 @@ static void setDXClusterSpotMapPosition (DXClusterSpot &s)
         char *tag;
 
         if (plotSpotCallsigns())
-            tag = s.call;
+            tag = s.dx_call;
         else {
-            call2Prefix (s.call, prefix);
+            call2Prefix (s.dx_call, prefix);
             tag = prefix;
         }
 
         SCoord center;
-        ll2s (s.ll, center, 0);
+        LatLong ll;
+        ll.lat = s.dx_lat;
+        ll.lat_d = rad2deg(ll.lat);
+        ll.lng = s.dx_lng;
+        ll.lng_d = rad2deg(ll.lng);
+        ll2s (ll, center, 0);
         setMapTagBox (tag, center, 0, s.map_b);
 }
 
-static void drawSpotOnMap (DXClusterSpot &cs)
+/* given a spot, return an associated color.
+ */
+static uint16_t getDXSpotColor (const DXClusterSpot &spot)
+{
+        if (spot.kHz < 10000)
+            return (getLT10MHzColor());
+        else
+            return (getGT10MHzColor());
+}
+
+static void drawSpotOnMap (DXClusterSpot &spot)
 {
         if (mapDXClusterSpots()) {
-            // first decide whether spot is even over the map
+
+            // draw short path from de to dx if enabled
+            if (getDXSpotPaths()) {
+                LatLong from_ll, to_ll;
+                from_ll.lat = spot.de_lat;
+                from_ll.lat_d = rad2deg(from_ll.lat);
+                from_ll.lng = spot.de_lng;
+                from_ll.lng_d = rad2deg(from_ll.lng);
+                to_ll.lat = spot.dx_lat;
+                to_ll.lat_d = rad2deg(to_ll.lat);
+                to_ll.lng = spot.dx_lng;
+                to_ll.lng_d = rad2deg(to_ll.lng);
+                float sdelatx = sinf(from_ll.lat);
+                float cdelatx = cosf(from_ll.lat);
+                float dist, bear;
+                propPath (false, from_ll, sdelatx, cdelatx, to_ll, &dist, &bear);
+                for (float p = 0; p < dist; p += deg2rad(.1)) {
+                    float ca, B;
+                    SCoord s;
+                    solveSphere (bear, p, sdelatx, cdelatx, &ca, &B);
+                    ll2s (asinf(ca), fmodf(from_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
+                    if (overMap(s))
+                        tft.drawPixel (s.x, s.y, getDXSpotColor(spot));
+                }
+            }
+
+            // label, if over map
             SCoord s;
-            s.x = cs.map_b.x + cs.map_b.w/2;
-            s.y = cs.map_b.y + cs.map_b.h/2;
+            s.x = spot.map_b.x + spot.map_b.w/2;
+            s.y = spot.map_b.y + spot.map_b.h/2;
             if (overMap(s)) {
                 // proceed
                 if (plotSpotCallsigns()) {
-                    drawMapTag (cs.call, cs.map_b);
+                    drawMapTag (spot.dx_call, spot.map_b);
                 } else {
                     char prefix[MAX_PREF_LEN];
-                    call2Prefix (cs.call, prefix);
-                    drawMapTag (prefix, cs.map_b);
+                    call2Prefix (spot.dx_call, prefix);
+                    drawMapTag (prefix, spot.map_b);
                 }
             }
         }
 }
 
-/* draw a spot at the given row in the given box.
- */
-static void drawSpotOnList (const SBox &box, uint8_t row)
-{
-        DXClusterSpot *sp = &spots[row];
-        char line[50];
-
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor(LISTING_COLOR);
-
-        uint16_t x = box.x+4;
-        uint16_t y = box.y + LISTING_Y0 + row*LISTING_DY;
-        tft.fillRect (x, y, box.w-5, LISTING_DY-1, RA8875_BLACK);
-        tft.setCursor (x, y);
-
-        // pretty freq, fixed 8 chars
-        const char *f_fmt = sp->freq < 1e6 ? "%8.1f" : "%8.0f";
-        (void) sprintf (line, f_fmt, sp->freq);
-
-        // add remaining fields
-        snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, sp->call, sp->utcs);
-        tft.print (line);
-}
-
 /* add a new spot both on map and in list, scrolling list if already full.
- * use grid to get ll if set, else look up call to set both.
- * return false if same spot again or some error.
+ * return whether ok
  */
-static bool addDXClusterSpot (const SBox &box, float kHz, const char call[], const char *grid, uint16_t ut)
+static bool addDXClusterSpot (const SBox &box, DXClusterSpot &new_spot)
 {
-        // skip if same station on same freq as previous
-        if (n_spots > 0) {
-            DXClusterSpot &spot = spots[n_spots-1];
-            if (fabsf(kHz-spot.freq) < 0.1F && strcmp (call, spot.call) == 0)
+        // skip if looks to be same as any previous
+        for (int i = 0; i < n_spots; i++) {
+            DXClusterSpot &spot = spots[i];
+            if (fabsf(new_spot.kHz-spot.kHz) < 0.1F && strcmp (new_spot.dx_call, spot.dx_call) == 0)
                 return (false);
         }
 
-        // find next available row, scrolling if necessary
-        if (n_spots == LISTING_N) {
-            // scroll up, discarding top (first) entry
-            for (uint8_t i = 0; i < LISTING_N-1; i++) {
+        // printf ("******************** n top %2d %2d   %-15s", n_spots, top_vis, new_spot.dx_call);
+
+        // add to spots[], discarding oldest if full
+        if (n_spots == N_SPOTS) {
+            // copy up to make room at bottom
+            for (int i = 0; i < N_SPOTS-1; i++)
                 spots[i] = spots[i+1];
-                drawSpotOnList (box, i);
-            }
-            n_spots = LISTING_N-1;
-        }
-        DXClusterSpot &spot = spots[n_spots];
+            n_spots = N_SPOTS - 1;
 
-        // store the easy info
-        spot.freq = kHz;
-        memcpy (spot.call, call, MAX_SPOTCALL_LEN-1);      // preserve existing EOS
-        spot.utcs = ut;
-
-        // find ll and grid some way
-        char errmsg[50] = "";
-        bool ok = false;
-        if (grid) {
-            // save grid then use it to get ll
-            strcpy (spot.grid, grid);
-            ok = maidenhead2ll (spot.ll, spot.grid);
-            if (ok)
-                dxcLog (_FX("%s %s lat= %g lng= %g\n"),
-                                        spot.call, spot.grid, spot.ll.lat_d, spot.ll.lng_d);
-            else
-                snprintf (errmsg, sizeof(errmsg), _FX("%s bad grid: %s"), call, grid);
-        } else {
-            // get ll from cluster, then grid from ll
-            ok = getDXClusterSpotLL (call, spot.ll);
-            if (ok)
-                ll2maidenhead (spot.grid, spot.ll);
-            else
-                snprintf (errmsg, sizeof(errmsg), _FX("%s ll lookup failed"), call);
+            // move list top up so visible set remains the same unless at the bottom
+            if (top_vis > 0 && top_vis != n_spots - N_VISSPOTS)
+                top_vis -= 1;
         }
 
-        // abandon if trouble
-        if (!ok) {
-            dxcLog (errmsg);
-            return (false);
-        }
+        // if at the bottom, move top down so new spot becomes visible after appending
+        if (top_vis == n_spots - N_VISSPOTS)
+            top_vis += 1;
 
+        // append
+        DXClusterSpot &list_spot = spots[n_spots++];
+        list_spot = new_spot;
 
-        // draw
-        drawSpotOnList (box, n_spots);
-        setDXClusterSpotMapPosition (spot);
-        drawSpotOnMap (spot);
+        // printf (" -> %2d %2d\n", n_spots, top_vis);
+
+        // update visible list
+        drawAllVisSpots(box);
+
+        // show on map
+        setDXClusterSpotMapPosition (list_spot);
+        drawSpotOnMap (list_spot);
 
         // ok
-        n_spots++;
         return (true);
 }
 
@@ -593,44 +673,57 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
         // dxcLog (_FX("Parsing status"));
 
         // crack remaining fields down to grid
-        uint64_t dial_freq = wsjtx_quint64 (bpp);           // capture Hz
-        (void) wsjtx_utf8 (bpp);                            // skip over mode
-        char *dx_call = wsjtx_utf8 (bpp);                   // capture call
-        (void) wsjtx_utf8 (bpp);                            // skip over report
-        (void) wsjtx_utf8 (bpp);                            // skip over Tx mode
-        (void) wsjtx_bool (bpp);                            // skip over Tx enabled flag
-        (void) wsjtx_bool (bpp);                            // skip over transmitting flag
-        (void) wsjtx_bool (bpp);                            // skip over decoding flag
-        (void) wsjtx_quint32 (bpp);                         // skip over Rx DF -- not always correct
-        (void) wsjtx_quint32 (bpp);                         // skip over Tx DF
-        (void) wsjtx_utf8 (bpp);                            // skip over DE call
-        (void) wsjtx_utf8 (bpp);                            // skip over DE grid
-        char *dx_grid = wsjtx_utf8 (bpp);                   // capture grid
+        uint32_t hz = wsjtx_quint64 (bpp);                      // capture freq
+        (void) wsjtx_utf8 (bpp);                                // skip over mode
+        char *dx_call = wsjtx_utf8 (bpp);                       // capture DX call 
+        (void) wsjtx_utf8 (bpp);                                // skip over report
+        (void) wsjtx_utf8 (bpp);                                // skip over Tx mode
+        (void) wsjtx_bool (bpp);                                // skip over Tx enabled flag
+        (void) wsjtx_bool (bpp);                                // skip over transmitting flag
+        (void) wsjtx_bool (bpp);                                // skip over decoding flag
+        (void) wsjtx_quint32 (bpp);                             // skip over Rx DF -- not always correct
+        (void) wsjtx_quint32 (bpp);                             // skip over Tx DF
+        (void) wsjtx_utf8 (bpp);                                // skip DE call
+        char *de_grid = wsjtx_utf8 (bpp);                       // capture DE grid
+        char *dx_grid = wsjtx_utf8 (bpp);                       // capture DX grid
 
-        // dxcLog (_FX("dial freq %lu\n"), dial_freq);
-        // dxcLog (_FX("dx call %s\n"), dx_call);
-        // dxcLog (_FX("dx grid %s\n"), dx_grid);
+        // dxcLog (_FX("WSJT: %g %s %s %s %s\n"), freq, de_call, de_grid, dx_call, de_grid);
 
         // ignore if frequency is clearly bogus (which I have seen)
-        if (dial_freq == 0)
+        if (hz == 0)
             return;
 
-        // get ll from grid valid
+        // start filling in a new spot
+        DXClusterSpot new_spot;
+        memset (&new_spot, 0, sizeof(new_spot));
+        new_spot.kHz = hz*1e-3F;
+        strncpy (new_spot.dx_call, dx_call, sizeof(new_spot.dx_call)-1);        // preserve EOS
+
+        // get each ll from grid valid
         LatLong ll;
-        if (!maidenhead2ll (ll, dx_grid)) {
-            // dxcLog (_FX("%s invalid grid: %s\n"), dx_call, dx_grid);
+        if (!maidenhead2ll (ll, de_grid)) {
+            // dxcLog (_FX("%s invalid DE grid: %s\n"), de_call, de_grid);
             return;
         }
+        new_spot.de_lat = ll.lat;
+        new_spot.de_lng = ll.lng;
+
+        if (!maidenhead2ll (ll, dx_grid)) {
+            // dxcLog (_FX("%s invalid DX grid: %s\n"), dx_call, dx_grid);
+            return;
+        }
+        new_spot.dx_lat = ll.lat;
+        new_spot.dx_lng = ll.lng;
 
         // prep current UT time
         int hr = hour();
         int mn = minute();
-        uint16_t ut = hr*100 + mn;
+        new_spot.utcs = hr*100 + mn;
 
-        // add to list with actual frequency and set if new
-        if (addDXClusterSpot (box, dial_freq*1e-3, dx_call, dx_grid, ut)) {                  // Hz to kHz
+        // add to list and engage if ok
+        if (addDXClusterSpot (box, new_spot)) {
             // dxcLog (_FX("WSJT-X %s @ %s\n"), dx_call, dx_grid);
-            engageRow (spots[n_spots-1]);
+            engageRow (spots[n_spots-1]);                       // new spot always last
         }
 
         // printFreeHeap(F("wsjtxParseStatusMsg"));
@@ -642,7 +735,7 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 static void showDXClusterErr (const SBox &box, const char *msg)
 {
         // erase box
-        tft.fillRect (box.x, box.y, box.w, box.h, RA8875_BLACK);
+        fillSBox (box, RA8875_BLACK);
 
         // show title and message
         selectFontStyle (LIGHT_FONT, FAST_FONT);
@@ -673,7 +766,7 @@ static void prefillDXList(const SBox &box)
         char line[150];
 
         // ask for recent entries
-        snprintf (line, sizeof(line), _FX("show/dx %d"), LISTING_N);
+        snprintf (line, sizeof(line), _FX("show/dx %d"), N_VISSPOTS);
         dxcLog (line);
         dx_client.println (line);
         updateClocks(false);
@@ -686,7 +779,7 @@ static void prefillDXList(const SBox &box)
             char call[20];
             uint16_t ut;
         } ShowSpot;
-        StackMalloc ss_mem(LISTING_N * sizeof(ShowSpot));
+        StackMalloc ss_mem(N_VISSPOTS * sizeof(ShowSpot));
         ShowSpot *ss = (ShowSpot *) ss_mem.getMem();
         int n_ss = 0;
         uint16_t ll;
@@ -694,7 +787,7 @@ static void prefillDXList(const SBox &box)
             // dxcLog (line);
             int ut;
             if (sscanf (line, _FX("%f %20s %*s %d"), &ss[n_ss].kHz, ss[n_ss].call, &ut) == 3
-                                                                && n_ss < LISTING_N) {
+                                                                && n_ss < N_VISSPOTS) {
                 dxcLog (line);
                 ss[n_ss++].ut = ut;
             }
@@ -774,23 +867,36 @@ static bool connectDXCluster (const SBox &box)
                     return (false);
                 }
 
+                // send our location
                 if (!sendDXClusterDELLGrid()) {
-                    showDXClusterErr (box, _FX("Failed sending DE grid"));
+                    showDXClusterErr (box, _FX("Error sending DE grid"));
                     return (false);
                 }
 
-                // not here
+                // send not here
                 snprintf (buf, buf_mem.getSize(), _FX("set/nohere"));
                 dx_client.println(buf);
                 dxcLog (buf);
                 if (!lookForDXClusterPrompt()) {
-                    showDXClusterErr (box, _FX("Failed sending set/nohere"));
+                    showDXClusterErr (box, _FX("Error from set/nohere"));
                     return (false);
                 }
 
-
-
-                // prefill list with old or new, depending on _USE_SHOWDX
+                // send user commands
+                const char *dx_cmds[N_DXCLCMDS];
+                bool dx_on[N_DXCLCMDS];
+                getDXClCommands (dx_cmds, dx_on);
+                for (int i = 0; i < N_DXCLCMDS; i++) {
+                    if (dx_on[i] && strlen(dx_cmds[i]) > 0) {
+                        dx_client.println(dx_cmds[i]);
+                        dxcLog (dx_cmds[i]);
+                        if (!lookForDXClusterPrompt()) {
+                            snprintf (buf, buf_mem.getSize(), _FX("Error from %s"), dx_cmds[i]);
+                            showDXClusterErr (box, buf);
+                            return (false);
+                        }
+                    }
+                }
 
               #if defined(_USE_SHOWDX)
 
@@ -801,10 +907,10 @@ static bool connectDXCluster (const SBox &box)
 
                 // restore known spots if not too old else reset list
                 if (millis() - last_action < MAX_AGE) {
-                    for (uint8_t i = 0; i < n_spots; i++)
-                        drawSpotOnList (box, i);
+                    drawAllVisSpots(box);
                 } else {
                     n_spots = 0;
+                    top_vis = 0;
                 }
 
               #endif // _USE_SHOWDX
@@ -933,6 +1039,10 @@ static bool initDXCluster(const SBox &box)
         if (!useDXCluster())
             return (true);              // feign success to avoid retries
 
+        // get storage if first call
+        if (!spots)
+            spots = (DXClusterSpot *) calloc (N_SPOTS, sizeof(DXClusterSpot));
+
         // prep
         prepPlotBox (box);
 
@@ -966,6 +1076,38 @@ static bool initDXCluster(const SBox &box)
 }
 
 
+/* parse the given line into a new spot record.
+ * return whether successful
+ */
+static bool crackSpiderSpot (char line[], DXClusterSpot &new_spot)
+{
+        // fresh
+        memset (&new_spot, 0, sizeof(new_spot));
+
+        char de_call[MAX_SPOTCALL_LEN];
+        if (sscanf (line, _FX("DX de %11[^ :]: %f %11s"), de_call, &new_spot.kHz, new_spot.dx_call) != 3) {
+            dxcLog ("unknown format: %s", line);
+            return (false);
+        }
+
+        // looks good so far, reach over and extract time also
+        new_spot.utcs = atoi(&line[70]) % 2400;
+
+        // find locations
+        LatLong ll;
+        if (!getDXClusterSpotLL (de_call, ll))
+            return (false);
+        new_spot.de_lat = ll.lat;
+        new_spot.de_lng = ll.lng;
+        if (!getDXClusterSpotLL (new_spot.dx_call, ll))
+            return (false);
+        new_spot.dx_lat = ll.lat;
+        new_spot.dx_lng = ll.lng;
+
+        // ok!
+        return (true);
+}
+
 /* called frequently to drain and process cluster connection, open if not already running.
  * return whether connection is ok.
  */
@@ -981,28 +1123,22 @@ bool updateDXCluster(const SBox &box)
 
             // this works for both types of cluster
 
-            // roll any new spots into list
+            // roll all pending new spots into list
             char line[120];
-            char call[20];
-            float kHz;
             while (dx_client.available() && getTCPLine (dx_client, line, sizeof(line), NULL)) {
                 // DX de KD0AA:     18100.0  JR1FYS       FT8 LOUD in FL!                2156Z EL98
+                dxcLog (line);
 
                 // look alive
                 updateClocks(false);
                 resetWatchdog();
 
                 // crack
-                if (sscanf (line, _FX("DX de %*s %f %20s"), &kHz, call) == 2) {
-                    dxcLog (line);
-
-                    // looks like a spot, extract time also
-                    char *utp = &line[70];
-                    uint16_t ut = atoi(utp) % 2400;
-
+                DXClusterSpot new_spot;
+                if (crackSpiderSpot (line, new_spot)) {
                     // note and display
                     last_action = millis();
-                    (void) addDXClusterSpot (box, kHz, call, NULL, ut);
+                    (void) addDXClusterSpot (box, new_spot);
                 }
             }
 
@@ -1079,16 +1215,27 @@ void closeDXCluster()
         }
 }
 
-/* try to set DX from the touched spot.
- * return true if looks like user is interacting with the cluster, false if wants to change pane.
+/* determine and engage a dx cluster touch.
+ * return true if looks like user is interacting with the cluster pane, false if wants to change pane.
+ * N.B. we assume s is within box
  */
 bool checkDXClusterTouch (const SCoord &s, const SBox &box)
 {
-        // ours at all?
-        if (!inBox (s, box))
-            return (false);
+        // scroll control? N.B. use a wide region to reduce false menus
+        if (s.x >= box.x + box.w/2) { 
+            if (s.y >= box.y + SCRUP_DY - SCR_R && s.y <= box.y + SCRUP_DY + SCR_R) {
+                scrollUp (box);
+                return (true);
+            }
+            if (s.y >= box.y + SCRDW_DY - SCR_R && s.y <= box.y + SCRDW_DY + SCR_R) {
+                scrollDown (box);
+                return (true);
+            }
+            if (s.y < box.y + TITLE_Y0)
+                return (true);
+        }
 
-        // tapping title always leaves this pane
+        // tapping title always leaves this pane -- we've already tested for the scroll controls
         if (s.y < box.y + TITLE_Y0) {
             closeDXCluster();             // insure disconnected
             last_action = millis();       // in case op wants to come back soon
@@ -1096,9 +1243,11 @@ bool checkDXClusterTouch (const SCoord &s, const SBox &box)
         }
 
         // engage tapped row, if defined
-        int click_row = ((s.y+LISTING_DY/2-FONT_H/2-box.y-LISTING_Y0)/LISTING_DY);
-        if (click_row >= 0 && click_row < n_spots && spots[click_row].call[0] != '\0' && isDXClusterConnected())
-            engageRow (spots[click_row]);
+        int vis_row = ((s.y+LISTING_DY/2-FONT_H/2-box.y-LISTING_Y0)/LISTING_DY);
+        int spot_row = top_vis + vis_row;
+        if (spot_row >= 0 && spot_row < n_spots &&
+                                        spots[spot_row].dx_call[0] != '\0' && isDXClusterConnected())
+            engageRow (spots[spot_row]);
 
         // ours
         return (true);

@@ -126,17 +126,22 @@ uint16_t color, float y_min, float y_max, char *label_str)
         dy = maxy-miny;
 
         // erase -- don't use prepPlotBox because we prefer no border on these plots
-        tft.fillRect (box.x, box.y, box.w, box.h, RA8875_BLACK);
+        fillSBox (box, RA8875_BLACK);
 
         // y labels and tickmarks just to the left of the plot
         if (xray_plot) {
-            // mark exponents and customary X ray levels
+            // mark exponents and customary X ray levels, extend levels across in darker color
             uint16_t tx = box.x+2*FONTW+TICKLEN+5;
-            uint16_t steph = (box.h-BGAP-TGAP)/nyt;
+            uint16_t step_h = (box.h-BGAP-TGAP)/nyt;
+            uint8_t h, s, v, r, g, b;
+            rgbtohsv (&h, &s, &v, RGB565_R(color), RGB565_G(color), RGB565_B(color)); 
+            hsvtorgb (&r, &g, &b, h, s, v/5);
+            uint16_t bk_col = RGB565(r,g,b);
             for (int i = 0; i < nyt; i++) {
                 uint16_t ty = (uint16_t)(box.y + TGAP + (box.h-BGAP-TGAP)*(1 - (yticks[i]-miny)/dy) + 0.5F);
-                tft.drawLine (tx-TICKLEN, ty, tx, ty, color);
-                tft.setCursor (tx-FONTW-1, ty-steph+(steph-FONTH)/2-1);
+                tft.drawLine (tx-TICKLEN, ty, tx, ty, color);           // main tick
+                tft.drawLine (tx, ty, box.x+box.w-1, ty, bk_col);       // level line across
+                tft.setCursor (tx-FONTW-1, ty-step_h+(step_h-FONTH)/2-1);
                 switch ((int)yticks[i]) {
                 case -9: tft.setCursor (tx-TICKLEN-2*FONTW-1, ty-FONTH/2); tft.print(-9); break;
                 case -8: tft.print ('A'); break;
@@ -640,7 +645,7 @@ void plotMessage (const SBox &box, uint16_t color, const char *message)
 void prepPlotBox (const SBox &box)
 {
     // erase all
-    tft.fillRect (box.x, box.y, box.w, box.h, RA8875_BLACK);
+    fillSBox (box, RA8875_BLACK);
 
     // not bottom so it appears to connect with map top
     uint16_t rx = box.x+box.w-1;

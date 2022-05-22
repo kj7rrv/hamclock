@@ -98,6 +98,18 @@ void strncpySubChar (char to_str[], const char from_str[], char to_char, char fr
 
 static volatile int gpio_rate_hz;              // set my main thread, read by gpioThread
 
+/* return all IO pins to quiescent state
+ */
+void satResetIO()
+{
+    if (!GPIOOk())
+        return;
+    GPIO& gpio = GPIO::getGPIO();
+    if (!gpio.isReady())
+        return;
+    gpio.setAsInput (SATALARM_GPIO);
+}
+
 /* thread that repeatedly reads gpio_rate as a desired rate in Hz
  * and controls GPIO pin SATALARM_GPIO
  */
@@ -557,7 +569,7 @@ static void drawSatName()
 
     // draw
     tft.setTextColor (SAT_COLOR);
-    tft.fillRect (satname_b.x, satname_b.y, satname_b.w, satname_b.h, RA8875_BLACK);
+    fillSBox (satname_b, RA8875_BLACK);
     tft.setCursor (satname_b.x + (satname_b.w - bw)/2, satname_b.y+FONT_H - 2);
     tft.print (user_name);
 }
@@ -1932,7 +1944,7 @@ void drawDXSatMenu (const SCoord &s)
     SBox menu_b;
     menu_b.x = fminf (s.x, dx_info_b.x + dx_info_b.w - 100);
     menu_b.y = fminf (s.y, dx_info_b.y + dx_info_b.h - (_DXS_N+1)*14);
-    // w/h are set dynamically by runMenu()
+    menu_b.w = 0;                               // shrink to fit
 
     // run menu
     SBox ok_b;

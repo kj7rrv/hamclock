@@ -76,6 +76,10 @@
   #define _SUPPORT_PHOT
 #endif
 
+// dx cluster path plotting not on ESP
+#if !defined(_IS_ESP8266)
+    #define _SUPPORT_CLP
+#endif
 
 
 // full res app, map, moon and running man sizes
@@ -186,6 +190,11 @@ typedef struct {
 #define Elecraft_GPIO           14      // header 8
 #define SATALARM_GPIO           20      // header 38
 #define ONAIR_GPIO              21      // header 40
+
+
+extern void SWresetIO(void);
+extern void satResetIO(void);
+extern void radioResetIO(void);
 
 #endif
 
@@ -541,6 +550,9 @@ extern void drawCallsign (bool all);
 extern void logState (void);
 extern const char *hc_version;
 extern void printStacktrace(const char *fmt, ...);
+extern void fillSBox (const SBox &box, uint16_t color);
+extern void drawSBox (const SBox &box, uint16_t color);
+
 
 
 
@@ -708,12 +720,12 @@ extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, u
 
 #define MAX_SPOTCALL_LEN                12
 typedef struct {
-    char call[MAX_SPOTCALL_LEN];        // call
-    float freq;                         // kHz
-    char grid[MAID_CHARLEN];            // used only with WSJT-X
-    uint16_t utcs;                      // UTC spotted
-    LatLong ll;                         // lat, long
+    char dx_call[MAX_SPOTCALL_LEN];     // DX call
+    float dx_lat, dx_lng;               // dx location, rads +N +E
+    float de_lat, de_lng;               // de location, rads +N +E
+    float kHz;                          // freq
     SBox map_b;                         // map label
+    uint16_t utcs;                      // UTC spotted 100*hr+min
 } DXClusterSpot;
 
 extern bool updateDXCluster(const SBox &box);
@@ -799,7 +811,9 @@ extern bool s2ll (const SCoord &s, LatLong &ll);
 extern void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp);
 extern bool checkDistTouch (const SCoord &s);
 extern bool checkPathDirTouch (const SCoord &s);
-extern void propDEDXPath (bool long_path, LatLong &ll, float *distp, float *bearp);
+extern void propDEPath (bool long_path, const LatLong &to_ll, float *distp, float *bearp);
+extern void propPath (bool long_path, const LatLong &from_ll, float sflat, float cflat, const LatLong &to_ll,
+        float *distp, float *bearp);
 extern bool waiting4DXPath(void);
 extern void eraseSCircle (const SCircle &c);
 extern void drawRSSBox (void);
@@ -946,11 +960,15 @@ typedef enum {
     DF_YMD
 } DateFormat;
 
+#define N_DXCLCMDS              4               // n dx cluster commands
+
 extern void clockSetup(void);
 extern const char *getWiFiSSID(void);
 extern const char *getWiFiPW(void);
 extern const char *getCallsign(void);
 extern const char *getDXClusterHost(void);
+extern int getDXClusterPort(void);
+extern bool setDXCluster (char *host, const char *port_str, char ynot[]);
 extern int getDXClusterPort(void);
 extern bool useMetricUnits(void);
 extern bool useGeoIP(void);
@@ -983,6 +1001,8 @@ extern bool lngSpecIsValid (const char *lng_spec, float &lng);
 extern bool getDemoMode(void);
 extern void setDemoMode(bool on);
 extern uint16_t getGridColor(void);
+extern uint16_t getLT10MHzColor(void);
+extern uint16_t getGT10MHzColor(void);
 extern int16_t getCenterLng(void);
 extern void setCenterLng(int16_t);
 extern DateFormat getDateFormat(void);
@@ -991,6 +1011,9 @@ extern bool getRotctld (char host[], int *portp);
 extern bool getFlrig (char host[], int *portp);
 extern const char *getDXClusterLogin(void);
 extern bool getDOY(void);
+extern bool getDXSpotPaths(void);
+
+void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 
 
 
@@ -1247,7 +1270,7 @@ typedef enum {
 
     NV_USEGPSD,                 // bit 1: use gpsd for time, bit 2: use for location
     NV_LOGUSAGE,                // whether to phone home with clock settings
-    NV_MAPSPOTS,                // DX map spots: 0=none; 1=just prefix; 2=full call
+    NV_MAPSPOTS,                // DX spot annotations: 0=none; 1=just prefix; 2=full call; |= 4 path
     NV_WIFI_PASSWD,             // WIFI password
     NV_NTPSET,                  // whether to use NV_NTPHOST
 
@@ -1295,6 +1318,13 @@ typedef enum {
 
     NV_FLRIGHOST,               // flrig tcp host
     NV_FLRIGPORT,               // flrig tcp port
+    NV_DXCMD0,                  // dx cluster command 0
+    NV_DXCMD1,                  // dx cluster command 1
+    NV_DXCMD2,                  // dx cluster command 2
+    NV_DXCMD3,                  // dx cluster command 3
+    NV_DXCMDUSED,               // bitmask of dx cluster commands in use
+    NV_GT10MHZ_COL,             // dx path color for spots above 10 MHz as RGB 565
+    NV_LT10MHZ_COL,             // dx path color for spots below 10 MHz as RGB 565
 
     NV_N
 } NV_Name;
@@ -1316,6 +1346,8 @@ typedef enum {
 #define NV_RIGHOST_LEN          18
 #define NV_FLRIGHOST_LEN        18
 #define NV_DXLOGIN_LEN          12
+#define NV_DXCLCMD_LEN          35
+
 
 
 // accessor functions
@@ -1334,6 +1366,7 @@ extern bool NVReadInt16 (NV_Name e, int16_t *up);
 extern bool NVReadUInt8 (NV_Name e, uint8_t *up);
 extern bool NVReadString (NV_Name e, char *buf);
 
+extern void reportEESize (uint16_t &ee_used, uint16_t &ee_size);
 
 
 
@@ -1586,11 +1619,13 @@ extern int32_t getTZ (const LatLong &ll);
  *
  */
 
+extern char *trim (char *str);
 extern bool initWebServer(char ynot[]);
-extern void checkWebServer(void);
+extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
 extern void runNextDemoCommand(void);
+extern time_t last_live;
 
 
 
@@ -1655,7 +1690,9 @@ extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SP
  */
 
 
-#define MIN_WIFI_RSSI (-65)                     // minimum acceptable signal strength, dBm
+#define MIN_WIFI_RSSI (-75)                     // minimum acceptable signal strength, dBm
+// https://docs.espressif.com/projects/espressif-esp-faq/en/latest/software-framework/wifi.html#connect-how-do-wi-fi-modules-rank-signal-strength-levels-based-on-rssi-values
+
 extern int runWiFiMeter (bool warn, bool &ignore_on);
 extern bool readWiFiRSSI(int &rssi);
 extern bool wifiMeterIsUp();

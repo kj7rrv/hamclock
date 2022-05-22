@@ -26,6 +26,7 @@
 #define NP_TIMEOUT      MENU_TO         // cancel if idle this long, ms
 #define NP_TXCOLOR      RA8875_WHITE    // text color
 #define NP_ULCOLOR      RA8875_GREEN    // cursor color
+#define NP_ERCOLOR      RA8875_RED      // error color
 
 
 // handy conversions between graphics coords and row number 0 .. NP_NBOXR-1
@@ -97,12 +98,15 @@ static void veraseNPField (const SBox &b, const NPField &f)
     tft.fillRect (f.x, ROW2FY(b,f.r)-1, NPF_MAXLEN*NP_FONTW, NP_FONTH+2, RA8875_BLACK);
 }
 
-/* erase and delete the given field
+/* post an error message at the given field and mark as empty
  */
-static void eraseNPField (const SBox &b, NPField &f)
+static void errNPField (const SBox &b, NPField &f)
 {
     veraseNPField (b, f);
     f.str[0] = 0;
+    tft.setTextColor(NP_ERCOLOR);
+    tft.setCursor (f.x, ROW2FY(b,f.r));
+    tft.print ("Err");
 }
 
 /* draw the given field fresh
@@ -159,7 +163,7 @@ static void updateNPGrid (const SBox &b, NPField f[NPF_N])
         strcpy (f[NPF_GRID].str, maid);
         drawNPField (b, f[NPF_GRID]);
     } else {
-        eraseNPField (b, f[NPF_GRID]);
+        errNPField (b, f[NPF_GRID]);
     }
 }
 
@@ -174,8 +178,8 @@ static void updateNPLL (const SBox &b, NPField f[NPF_N])
         drawNPField (b, f[NPF_LAT]);
         drawNPField (b, f[NPF_LNG]);
     } else {
-        eraseNPField (b, f[NPF_LAT]);
-        eraseNPField (b, f[NPF_LNG]);
+        errNPField (b, f[NPF_LAT]);
+        errNPField (b, f[NPF_LNG]);
     }
 }
 
@@ -248,8 +252,8 @@ static void initNPDialog (const SBox &box, NPField f[NPF_N], const LatLong &ll, 
     tft.setTextColor (NP_TXCOLOR);
 
     // box
-    tft.fillRect (box.x, box.y, box.w, box.h, RA8875_BLACK);
-    tft.drawRect (box.x, box.y, box.w, box.h, NP_TXCOLOR);
+    fillSBox (box, RA8875_BLACK);
+    drawSBox (box, NP_TXCOLOR);
 
     // set lat and long fields
     setNPLL (f, ll);

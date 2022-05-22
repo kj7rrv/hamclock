@@ -21,6 +21,9 @@ static float max_cpu_usage = MAX_CPU_USAGE;
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
 
+// see Adafruit_RA8875.cpp
+extern int noX11;
+
 
 // how we were made
 #if defined(_USE_FB0)
@@ -94,7 +97,7 @@ static void mvLog (const char *from, const char *to)
 }
 
 
-/* roll log files and change stdout to fresh file in our_dir
+/* roll log files and divert stdout and stderr to fresh file in our_dir
  */
 static void stdout2File()
 {
@@ -107,18 +110,18 @@ static void stdout2File()
         std::string new_log = our_dir + "diagnostic-log.txt";
         const char *new_log_fn = new_log.c_str();
         int logfd = open (new_log_fn, O_WRONLY|O_CREAT, 0664);
-        close (1);      // insure disconnect from previous log file
-        if (logfd < 0 || ::dup2(logfd, 1) < 0) {
+        if (logfd < 0 || ::dup2(logfd, 1) < 0 || ::dup2(logfd, 2) < 0) {
             fprintf (stderr, "%s: %s\n", new_log_fn, strerror(errno));
             exit(1);
         }
         (void) !fchown (logfd, getuid(), getgid());
 
-        // just need fd 1
+        // original fd no longer needed
         close (logfd);
 
         // note
-        printf ("log file is %s\n", new_log_fn);
+        printf ("stdout log file is %s\n", new_log_fn);
+        fprintf (stderr, "stderr log file is %s\n", new_log_fn);
 }
 
 /* return default working directory
@@ -192,6 +195,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default %.0f\n", MAX_CPU_USAGE*100);
         fprintf (stderr, " -w p : set web server port p instead of %d\n", svr_port);
+        fprintf (stderr, " -x   : run headless without X11 or FB0 -- run only the web server\n");
 
         exit(1);
 }
@@ -282,6 +286,9 @@ static void crackArgs (int ac, char *av[])
                         usage ("missing port number for -w");
                     svr_port = atoi(*++av);
                     ac--;
+                    break;
+                case 'x':
+                    noX11 = true;
                     break;
                 default:
                     usage ("unknown option: %c", *s);

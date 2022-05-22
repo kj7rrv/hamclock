@@ -235,7 +235,7 @@ static void drawPhotControl()
         // draw phot scale
         int16_t ph = (p.h-2-MARKER_H)*phot/PHOT_MAX + MARKER_H+1;
         tft.fillRect (p.x+1, p.y+1, p.w-1, p.h-1, RA8875_BLACK);    // leave border to avoid flicker
-        tft.drawRect (p.x, p.y, p.w, p.h, PHOT_COL);
+        drawSBox (p, PHOT_COL);
         tft.fillRect (p.x, p.y+p.h-ph, p.w, MARKER_H, PHOT_COL);
 
         // overlay phot limits, avoid top and bottom
@@ -279,7 +279,7 @@ static void drawBrControl()
         // draw bpwm scale
         int16_t bh = (b.h-2-MARKER_H)*(bpwm-user_off)/(user_on - user_off) + MARKER_H+1;
         tft.fillRect (b.x+1, b.y+1, b.w-2, b.h-2, RA8875_BLACK);    // leave border to avoid flicker
-        tft.drawRect (b.x, b.y, b.w, b.h, BPWM_COL);
+        drawSBox (b, BPWM_COL);
         tft.fillRect (b.x, b.y+b.h-bh, b.w, MARKER_H, BPWM_COL);
 
         if (brb_mode == BRB_SHOW_PHOT) {
@@ -760,12 +760,12 @@ void setupBrightness()
             NVWriteUInt16 (NV_PHOT_DIM, fast_phot_dim);
         }
 
-        // get display mode, insure legal regardless of previous setting if any
+        // get display mode, reset to something benign if no longer appropriate
         if (!NVReadUInt8 (NV_BRB_MODE, &brb_mode)
                         || (brb_mode == BRB_SHOW_ONOFF && !support_onoff)
                         || (brb_mode == BRB_SHOW_PHOT && (!support_phot || !found_phot))
                         || (brb_mode == BRB_SHOW_BR && (!support_dim || (support_phot && found_phot)))) {
-            Serial.printf (_FX("BR: Bogus initial brb_mode %d, resetting to %d\n"),brb_mode,BRB_SHOW_BEACONS);
+            Serial.printf (_FX("BR: Resetting bogus initial brb_mode %d to %d\n"), brb_mode,BRB_SHOW_SWSTATS);
             brb_mode = BRB_SHOW_SWSTATS;
             NVWriteUInt8 (NV_BRB_MODE, brb_mode);
         }
@@ -999,8 +999,7 @@ void doNCDXFBoxTouch (const SCoord &s)
         } else {
 
             // boxes
-            SBox menu_b = NCDXF_b;                      // copy, not ref, so can be tweaked
-            menu_b.x += 3;
+            SBox menu_b = NCDXF_b;                      // copy
             menu_b.y += 20;
             SBox ok_b;
 

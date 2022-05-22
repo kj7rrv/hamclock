@@ -119,7 +119,7 @@ static void drawMaidenhead(NV_Name nv, SBox &b, uint16_t color)
     getNVMaidenhead (nv, maid);
     maid[4] = 0;
 
-    tft.fillRect (b.x, b.y, b.w, b.h, RA8875_BLACK);
+    fillSBox (b, RA8875_BLACK);
 
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor (color);
@@ -132,7 +132,7 @@ static void drawMaidenhead(NV_Name nv, SBox &b, uint16_t color)
 void drawDEInfo()
 {
     // init info block
-    tft.fillRect (de_info_b.x, de_info_b.y, de_info_b.w, de_info_b.h, RA8875_BLACK);
+    fillSBox (de_info_b, RA8875_BLACK);
     uint16_t vspace = de_info_b.h/DE_INFO_ROWS;
 
     // draw desired contents
@@ -502,7 +502,7 @@ static void drawMouseLoc()
 
     // show distance and bearing to cursor location
     float dist, bearing;
-    propDEDXPath (show_lp, ll, &dist, &bearing);
+    propDEPath (show_lp, ll, &dist, &bearing);
     dist *= ERAD_M;                             // angle to miles
     bearing *= 180/M_PIF;                       // rad -> degrees
     if (show_km)
@@ -605,7 +605,7 @@ void eraseRSSBox ()
 
     // erase entire banner if azm mode because redrawing the map will miss the corners
     if (azm_on)
-        tft.fillRect (rss_bnr_b.x, rss_bnr_b.y, rss_bnr_b.w, rss_bnr_b.h, RA8875_BLACK);
+        fillSBox (rss_bnr_b, RA8875_BLACK);
 
     // restore map and sat path
     for (uint16_t y = rss_bnr_b.y; y < rss_bnr_b.y+rss_bnr_b.h; y++) {
@@ -709,7 +709,7 @@ void drawMapMenu()
     SBox menu_b;
     menu_b.x = view_btn_b.x;                    // left edge matches view button
     menu_b.y = view_btn_b.y+view_btn_b.h;       // top just below view button
-    // w/h are set dynamically by runMenu()
+    menu_b.w = 0;                               // shrink to fit
 
     // run menu
     SBox ok_b;
@@ -828,7 +828,7 @@ void initEarthMap()
     resetWatchdog();
 
     // completely erase map
-    tft.fillRect (map_b.x, map_b.y, map_b.w, map_b.h, RA8875_BLACK);
+    fillSBox (map_b, RA8875_BLACK);
 
     // add funky star field if azm
     if (azm_on)
@@ -1411,7 +1411,7 @@ void drawDXInfo ()
 
     // compute dist and bearing in desired units
     float dist, bearing;
-    propDEDXPath (show_lp, dx_ll, &dist, &bearing);
+    propDEPath (show_lp, dx_ll, &dist, &bearing);
     dist *= ERAD_M;                             // angle to miles
     bearing *= 180/M_PIF;                       // rad -> degrees
     if (show_km)
@@ -1453,7 +1453,7 @@ void drawDXInfo ()
     // sun rise/set or prefix
     if (dxsrss == DXSRSS_PREFIX) {
         char prefix[MAX_PREF_LEN+1];
-        tft.fillRect (dxsrss_b.x, dxsrss_b.y, dxsrss_b.w, dxsrss_b.h, RA8875_BLACK);
+        fillSBox (dxsrss_b, RA8875_BLACK);
         if (getDXPrefix (prefix)) {
             tft.setTextColor(DX_COLOR);
             selectFontStyle (LIGHT_FONT, SMALL_FONT);

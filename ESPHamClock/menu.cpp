@@ -81,7 +81,7 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
     free ((void*)no__copy);
 
     // show bounding box for debug
-    // tft.drawRect (box.x, box.y, box.w, box.h, RA8875_RED);
+    // drawSBox (box, RA8875_RED);
 
     // now if just changing indicator
     if (!draw_label)
@@ -133,8 +133,9 @@ static void menuItemsAllOff (MenuInfo &menu, SBox *boxes, int ii)
  * caller passes a box we use for ok so they can use it later with menuRedrawOk if needed.
  * return true if op clicked ok else false for all other cases.
  * N.B. menu.menu_b.x/y are required but may be adjusted to prevent edge spill.
- * N.B. incomig menu.menu_b.w/h are ignored, we set here by shrink wrapping to fit around menu items.
- *   then erase before returning.
+ * N.B. incomig menu.menu_b.w is only grown to fit; thus calling with 0 will shrink wrap.
+ * N.B. incomig menu.menu_b.h is ignored, we always shrink wrap h.
+ * N.B. menu box is erased before returning.
  */
 bool runMenu (MenuInfo &menu)
 {
@@ -142,24 +143,24 @@ bool runMenu (MenuInfo &menu)
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (MENU_FGC);
 
-    // find number of non-ignore items and longest based on longest label
+    // find number of non-ignore items and expand menu_b.w to fit longest label
     int n_activerows = 0;
-    menu.menu_b.w = 0;
+    int widest = 0;
     for (int i = 0; i < menu.n_items; i++) {
         MenuItem &mi = menu.items[i];
         if (mi.type != MENU_IGNORE) {
             // check extent
             uint16_t iw = mi.label ? getTextWidth(mi.label) + mi.indent + MENU_IS + MENU_IS/2 : 0;
-            if (iw > menu.menu_b.w)
-                menu.menu_b.w = iw;
-
-            // another non-ignore item
+            if (iw > widest)
+                widest = iw;
+            // found another non-ignore item
             n_activerows++;
         }
     }
 
     // width is duplicated for each column plus add a bit of right margin
-    menu.menu_b.w = menu.menu_b.w * menu.n_cols + MENU_RM;
+    if (menu.menu_b.w < widest * menu.n_cols + MENU_RM)
+        menu.menu_b.w = widest * menu.n_cols + MENU_RM;
 
     // number of rows in each column
     int n_rowspercol = (n_activerows + menu.n_cols - 1)/menu.n_cols;
@@ -186,9 +187,9 @@ bool runMenu (MenuInfo &menu)
     }
 
     // reposition box if needed to avoid spillage
-    if (menu.menu_b.x + menu.menu_b.w >= tft.width())
+    if (menu.menu_b.x + menu.menu_b.w > tft.width())
         menu.menu_b.x = tft.width() - menu.menu_b.w - 2;
-    if (menu.menu_b.y + menu.menu_b.h >= tft.height())
+    if (menu.menu_b.y + menu.menu_b.h > tft.height())
         menu.menu_b.y = tft.height() - menu.menu_b.h - 2;
 
     // now we can set button positions within the menu box
@@ -205,17 +206,17 @@ bool runMenu (MenuInfo &menu)
     }
 
     // ready! prepare new menu box
-    tft.fillRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, MENU_BGC);
-    tft.drawRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, MENU_FGC);
+    fillSBox (menu.menu_b, MENU_BGC);
+    drawSBox (menu.menu_b, MENU_FGC);
 
     // display buttons
-    tft.fillRect (menu.ok_b.x, menu.ok_b.y, menu.ok_b.w, menu.ok_b.h, MENU_BGC);
-    tft.drawRect (menu.ok_b.x, menu.ok_b.y, menu.ok_b.w, menu.ok_b.h, MENU_FGC);
+    fillSBox (menu.ok_b, MENU_BGC);
+    drawSBox (menu.ok_b, MENU_FGC);
     tft.setCursor (menu.ok_b.x+MENU_BDX, menu.ok_b.y+MENU_BDY);
     tft.print (ok_label);
     if (!menu.no_cancel) {
-        tft.fillRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_BGC);
-        tft.drawRect (cancel_b.x, cancel_b.y, cancel_b.w, cancel_b.h, MENU_FGC);
+        fillSBox (cancel_b, MENU_BGC);
+        drawSBox (cancel_b, MENU_FGC);
         tft.setCursor (cancel_b.x+MENU_BDX, cancel_b.y+MENU_BDY);
         tft.print (cancel_label);
     }
@@ -326,7 +327,7 @@ bool runMenu (MenuInfo &menu)
     drainTouch();
 
     // erase in prep for caller to restore covered content
-    tft.fillRect (menu.menu_b.x, menu.menu_b.y, menu.menu_b.w, menu.menu_b.h, RA8875_BLACK);
+    fillSBox (menu.menu_b, RA8875_BLACK);
 
     return (ok);
 }
@@ -340,18 +341,18 @@ void menuRedrawOk (SBox &ok_b, MenuOkState oks)
     switch (oks) {
     case MENU_OK_OK:
         tft.setTextColor (MENU_FGC);
-        tft.fillRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_BGC);
-        tft.drawRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_FGC);
+        fillSBox (ok_b, MENU_BGC);
+        drawSBox (ok_b, MENU_FGC);
         break;
     case MENU_OK_BUSY:
         tft.setTextColor (MENU_BGC);
-        tft.fillRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_BSYC);
-        tft.drawRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_FGC);
+        fillSBox (ok_b, MENU_BSYC);
+        drawSBox (ok_b, MENU_FGC);
         break;
     case MENU_OK_ERR:
         tft.setTextColor (MENU_BGC);
-        tft.fillRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_ERRC);
-        tft.drawRect (ok_b.x, ok_b.y, ok_b.w, ok_b.h, MENU_FGC);
+        fillSBox (ok_b, MENU_ERRC);
+        drawSBox (ok_b, MENU_FGC);
         break;
     }
 

@@ -18,7 +18,8 @@ WiFiClient::WiFiClient()
 
 WiFiClient::WiFiClient(int fd)
 {
-	if (fd >= 0 && _trace_client) printf ("WiFiCl: new WiFiClient inheriting socket %d\n", fd);
+	if (fd >= 0 && _trace_client)
+            printf ("WiFiCl: new WiFiClient inheriting socket %d\n", fd);
 	socket = fd;
 	n_peek = 0;
         next_peek = 0;
@@ -28,7 +29,8 @@ WiFiClient::WiFiClient(int fd)
 WiFiClient::operator bool()
 {
         bool is_active = socket != -1;
-        if (_trace_client && is_active) printf ("WiFiCl: socket %d is active\n", socket);
+        if (_trace_client && is_active)
+            printf ("WiFiCl: socket %d is active\n", socket);
 	return (is_active);
 }
 
@@ -133,7 +135,8 @@ bool WiFiClient::connect(const char *host, int port)
         signal (SIGPIPE, SIG_IGN);
 
         /* ok */
-        printf ("WiFiCl: new %s:%d socket %d\n", host, port, sockfd);
+        if (_trace_client)
+            printf ("WiFiCl: new %s:%d socket %d\n", host, port, sockfd);
         freeaddrinfo (aip);
 	socket = sockfd;
 	n_peek = 0;
@@ -159,7 +162,8 @@ void WiFiClient::setNoDelay(bool on)
 void WiFiClient::stop()
 {
 	if (socket >= 0) {
-            printf ("WiFiCl: socket %d is now closed\n", socket);
+            if (_trace_client)
+                printf ("WiFiCl: socket %d is now closed\n", socket);
 	    shutdown (socket, SHUT_RDWR);
 	    close (socket);
 	    socket = -1;
@@ -206,9 +210,10 @@ int WiFiClient::available()
             next_peek = 0;
 	    return (1);
 	} else {
-            if (n == 0)
-                printf ("WiFiCl: socket %d read EOF\n", socket);
-            else
+            if (n == 0) {
+                if (_trace_client)
+                    printf ("WiFiCl: socket %d read EOF\n", socket);
+            } else
                 printf ("WiFiCl: socket %d read err: %s\n", socket, strerror(errno));
 	    stop();
 	    return (0);

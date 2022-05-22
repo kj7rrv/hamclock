@@ -1107,7 +1107,7 @@ void eraseMapScale ()
 
     // erase entire scale if azm mode because redrawing the map will miss the center and corners
     if (azm_on)
-        tft.fillRect (db.x, db.y, db.w, db.h, RA8875_BLACK);
+        fillSBox (db, RA8875_BLACK);
 
     // restore map
     for (uint16_t y = db.y; y < db.y+db.h; y++) {

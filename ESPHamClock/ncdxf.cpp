@@ -39,7 +39,7 @@ typedef struct {
  */
 static NCDXFBeacon blist[NBEACONS] = {
     {  41,  -74, "4U1UN",  {0,0}, 0, {0,0,0,0}},
-    {  80,  -86, "VE8AT",  {0,0}, 0, {0,0,0,0}},
+    {  68, -133, "VE8AT",  {0,0}, 0, {0,0,0,0}},
     {  37, -122, "W6WX",   {0,0}, 0, {0,0,0,0}},
     {  21, -156, "KH6RS",  {0,0}, 0, {0,0,0,0}},
     { -41,  176, "ZL6B",   {0,0}, 0, {0,0,0,0}},
@@ -290,7 +290,7 @@ void drawBeaconKey()
 void drawNCDXFBox()
 {
     // erase
-    tft.fillRect (NCDXF_b.x, NCDXF_b.y, NCDXF_b.w, NCDXF_b.h, RA8875_BLACK);
+    fillSBox (NCDXF_b, RA8875_BLACK);
 
     // draw appropriate content
     switch ((BRB_MODE)brb_mode) {

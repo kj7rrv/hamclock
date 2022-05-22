@@ -471,8 +471,8 @@ static void drawMPPopup (const time_t t, const SBox &popup_b)
         getLunarCir (t, dx_ll, dx_ac);
 
         // prep popup rectangle
-        tft.fillRect (popup_b.x, popup_b.y, popup_b.w, popup_b.h, RA8875_BLACK);
-        tft.drawRect (popup_b.x, popup_b.y, popup_b.w, popup_b.h, RA8875_WHITE);
+        fillSBox (popup_b, RA8875_BLACK);
+        drawSBox (popup_b, RA8875_WHITE);
 
         // draw column headings
         tft.setTextColor (RA8875_WHITE);
@@ -512,7 +512,7 @@ void drawMoonElPlot()
         time_t t0 = nowWO();
 
         // erase
-        tft.fillRect (map_b.x, map_b.y, map_b.w, map_b.h, RA8875_BLACK);
+        fillSBox (map_b, RA8875_BLACK);
 
         // draw boilerplate
         drawMPSetup (t0);
@@ -563,7 +563,7 @@ void drawMoonElPlot()
 
             // always erase previous popup, if any, by redrawing plot contents
             if (prev_popup_t_start > 0) {
-                tft.fillRect (prev_popup_b.x,prev_popup_b.y,prev_popup_b.w,prev_popup_b.h,RA8875_BLACK);
+                fillSBox (prev_popup_b, RA8875_BLACK);
                 drawMPSetup (t0);
                 drawMPElPlot (t0, t_start, t_end);
                 prev_popup_t_start = 0;

@@ -8,7 +8,7 @@
 .PHONY: clean clobber help
 
 # build flags common to all options and architectures
-CXXFLAGS = -IArduinoLib -I. -g -O2 -Wall -DARDUINO=100 -pthread
+CXXFLAGS = -IArduinoLib -I. -g -O2 -Wall -DARDUINO=100 -pthread -std=c++0x
 LDXXFLAGS = -LArduinoLib -g -pthread
 LIBS = -lpthread -larduino
 CXX = g++
@@ -46,8 +46,10 @@ OBJS = \
 	dxcluster.o \
 	earthmap.o \
 	earthsat.o \
+        favicon.o \
 	gimbal.o \
 	gpsd.o \
+        live-html.o \
 	maidenhead.o \
         mapmanage.o \
         menu.o \

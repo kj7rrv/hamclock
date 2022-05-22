@@ -39,6 +39,9 @@
 
 #include "Adafruit_RA8875.h"
 
+// for -x command line arg
+int noX11;
+
 
 #ifdef _USE_FB0
 
@@ -163,6 +166,70 @@ void Adafruit_RA8875::setEarthPix (char *day_pixels, char *night_pixels)
 bool Adafruit_RA8875::begin (int not_used)
 {
         (void)not_used;
+
+        if (noX11) {
+
+            // minimal environment to support fbThread
+
+            fb_si.xres = FB_XRES;
+            fb_si.yres = FB_YRES;
+            SCALESZ = FB_XRES / APP_WIDTH;
+            FB_CURSOR_SZ = FB_CURSOR_W*SCALESZ;
+            FB_X0 = 0;
+            FB_Y0 = 0;
+            fb_nbytes = FB_XRES * FB_YRES * BYTESPFBPIX;
+
+            // get memory for canvas where the drawing methods update their pixels
+            fb_canvas = (fbpix_t *) malloc (fb_nbytes);
+            if (!fb_canvas) {
+                printf ("Can not malloc(%d) for canvas\n", fb_nbytes);
+                exit(1);
+            }
+            memset (fb_canvas, 0, fb_nbytes);       // black
+
+            // get memory for the staging area used to find dirty pixels
+            fb_stage = (fbpix_t *) malloc (fb_nbytes);
+            if (!fb_stage) {
+                printf ("Can not malloc(%d) for stage\n", fb_nbytes);
+                exit(1);
+            }
+            memset (fb_stage, 1, fb_nbytes);        // unlikely color
+
+            // prep for mouse and keyboard info
+            if (pthread_mutex_init (&mouse_lock, NULL)) {
+                printf ("mouse_lock: %s\n", strerror(errno));
+                exit(1);
+            }
+            mouse_downs = mouse_ups = 0;
+            if (pthread_mutex_init (&kb_lock, NULL)) {
+                printf ("kb_lock: %s\n", strerror(errno));
+                exit(1);
+            }
+            kb_cqhead = kb_cqtail = 0;
+
+            // set up a reentrantable lock for fb
+            pthread_mutexattr_t fb_attr;
+            pthread_mutexattr_init (&fb_attr);
+            pthread_mutexattr_settype (&fb_attr, PTHREAD_MUTEX_RECURSIVE);
+            if (pthread_mutex_init (&fb_lock, &fb_attr)) {
+                printf ("fb_lock: %s\n", strerror(errno));
+                exit(1);
+            }
+
+            // start with default font
+            current_font = &Courier_Prime_Sans6pt7b;
+
+            // start X11 thread
+            pthread_t tid;
+            int e = pthread_create (&tid, NULL, fbThreadHelper, this);
+            if (e) {
+                printf ("fbThreadhelper: %s\n", strerror(e));
+                exit(1);
+            }
+
+            // everything is ready
+            return (true);
+        }
 
 #ifdef _USE_X11
 
@@ -1451,12 +1518,23 @@ char Adafruit_RA8875::getChar()
     char c = 0;
     pthread_mutex_lock (&kb_lock);
         if (kb_cqhead != kb_cqtail) {
-            c = kb_cq[kb_cqhead++];
-            if (kb_cqhead == sizeof(kb_cq))
+            c = kb_cq[kb_cqhead];
+            if (++kb_cqhead == sizeof(kb_cq))
                 kb_cqhead = 0;
         }
     pthread_mutex_unlock (&kb_lock);
     return (c);
+}
+
+/* insert a character into the kb queue
+ */
+void Adafruit_RA8875::putChar (char c)
+{
+    pthread_mutex_lock (&kb_lock);
+        kb_cq[kb_cqtail] = c;
+        if (++kb_cqtail == sizeof(kb_cq))
+            kb_cqtail = 0;
+    pthread_mutex_unlock (&kb_lock);
 }
 
 
@@ -1533,7 +1611,7 @@ void Adafruit_RA8875::drawCanvas()
             }
         }
 
-        if (any_change) {
+        if (any_change && !noX11) {
 
             // update bounding box (inclusive of both edges)
             int nx = bb_x1-bb_x0+1;
@@ -1569,6 +1647,34 @@ void Adafruit_RA8875::X11OptionsEngageNow (bool fs)
 // _USE_X11
 void Adafruit_RA8875::fbThread ()
 {
+        const int refresh_us = 50000;           // refresh period, usecs
+
+        if (noX11) {
+
+            // just copy canvas to stage as required
+
+            for(;;) {
+
+                // all set
+                ready = true;
+
+                if (options_engage)
+                    options_engage = false;
+
+                // show any changes
+                pthread_mutex_lock (&fb_lock);
+                    if (fb_dirty || pr_draw) {
+                        drawCanvas();
+                        fb_dirty = false;
+                        pr_draw = false;
+                    }
+                pthread_mutex_unlock (&fb_lock);
+
+                // let scene build a while before next update
+                usleep (refresh_us);
+            }
+        }
+
         // application and transparent cursors
         Cursor app_cursor, off_cursor;
 
@@ -1716,8 +1822,8 @@ void Adafruit_RA8875::fbThread ()
                         char buf[10];
                         if (XLookupString ((XKeyEvent*)&event, buf, sizeof(buf), NULL, NULL) > 0) {
                             pthread_mutex_lock (&kb_lock);
-                                kb_cq[kb_cqtail++] = buf[0];
-                                if (kb_cqtail == sizeof(kb_cq))
+                                kb_cq[kb_cqtail] = buf[0];
+                                if (++kb_cqtail == sizeof(kb_cq))
                                     kb_cqtail = 0;
                             pthread_mutex_unlock (&kb_lock);
                         }
@@ -1819,7 +1925,7 @@ void Adafruit_RA8875::fbThread ()
             }
 
             // let scene build a while before next update
-            usleep (50000);
+            usleep (refresh_us);
 
         }
 
@@ -1829,9 +1935,14 @@ void Adafruit_RA8875::fbThread ()
 // _USE_X11
 void Adafruit_RA8875::getScreenSize (int *w, int *h)
 {
-        int snum = DefaultScreen(display);
-        *w = DisplayWidth(display, snum);
-        *h = DisplayHeight(display, snum);
+        if (noX11) {
+            *w = fb_si.xres;
+            *h = fb_si.yres;
+        } else {
+            int snum = DefaultScreen(display);
+            *w = DisplayWidth(display, snum);
+            *h = DisplayHeight(display, snum);
+        }
 }
 
 #endif	// _USE_X11

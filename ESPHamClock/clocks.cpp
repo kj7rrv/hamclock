@@ -123,8 +123,8 @@ static void drawRiseSet(time_t t0, time_t trise, time_t tset, SBox &b, uint8_t s
 {
     resetWatchdog();
 
-    tft.fillRect (b.x, b.y, b.w, b.h, RA8875_BLACK);
-    //tft.drawRect (b.x, b.y, b.w, b.h, RA8875_WHITE);
+    fillSBox (b, RA8875_BLACK);
+    //drawSBox (b.x, b.y, b.w, b.h, RA8875_WHITE);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
 
     if (trise == 0) {
@@ -884,6 +884,7 @@ bool checkClockTouch (SCoord &s)
 
         // run, do nothing if cancelled
         SBox menu_b = clock_b;
+        menu_b.w = 0;   // shrink to fit
         menu_b.x += 20;
         SBox ok_b;
         MenuInfo menu = {menu_b, ok_b, false, false, 1, _CT_N, mitems};
@@ -1027,7 +1028,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
     SBox menu_b;
     menu_b.x = tzi.box.x - 20;
     menu_b.y = tzi.box.y + tzi.box.h+2;
-    // w/h are set dynamically by runMenu()
+    menu_b.w = 0;       // shrink to fit
 
     // run
     SBox ok_b;
@@ -1035,7 +1036,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
     bool menu_ok = runMenu (menu);
 
     // erase our box regardless
-    tft.fillRect (menu_b.x, menu_b.y, menu_b.w, menu_b.h, RA8875_BLACK);
+    fillSBox (menu_b, RA8875_BLACK);
 
     // done if cancelled
     if (!menu_ok)
@@ -1064,8 +1065,8 @@ void drawTZ (const TZInfo &tzi)
     getTextBounds (buf, &w, &h);
 
     // box
-    tft.fillRect (tzi.box.x, tzi.box.y, tzi.box.w, tzi.box.h, RA8875_BLACK);
-    tft.drawRect (tzi.box.x, tzi.box.y, tzi.box.w, tzi.box.h, tzi.color);
+    fillSBox (tzi.box, RA8875_BLACK);
+    drawSBox (tzi.box, tzi.color);
     tft.setTextColor (tzi.color);
     tft.setCursor (tzi.box.x+(tzi.box.w-w)/2, tzi.box.y+(tzi.box.h-h)/2);
     tft.print (buf);

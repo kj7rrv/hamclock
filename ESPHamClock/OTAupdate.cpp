@@ -55,6 +55,7 @@ static void onProgressCB (int sofar, int total)
 {
     tft.drawRect (pbar_x0, pbar_y0-PBAR_H, PBAR_W, PBAR_H, RA8875_WHITE);
     tft.fillRect (pbar_x0, pbar_y0-PBAR_H, sofar*PBAR_W/total, PBAR_H, RA8875_WHITE);
+    checkWebServer (true);
 }
 
 #endif

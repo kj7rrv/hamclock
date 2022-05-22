@@ -157,26 +157,33 @@ static void unsetDXPrefixOverride (void);
 static void shutdown(void);
 
 
-/* on unix, be sure we restore screen brightness if dieing from receipt of signal
+/* on unix, try to restore screen and turn off all LEDs if we die unexpectedly from a signal
  */
 #if defined(_IS_UNIX)
-static void onSig (int signo)
+
+static void defaultState()
 {
-    // try to save a message without calling printf
-    // see https://wiki.sei.cmu.edu/confluence/display/c/SIG30-C.+Call+only+asynchronous-safe+functions+within+signal+handlers
-
-    static const char msg[] = "Good bye from signal ";
-    char sigstr[3];
-    sigstr[0] = (signo/10)+'0';
-    sigstr[1] = (signo%10)+'0';
-    sigstr[2] = '\n';
-    (void) !write (1, msg, sizeof(msg)-1);
-    (void) !write (1, sigstr, 3);
-
     // try to insure screen is back on -- har!
     setFullBrightness();
 
-    exit(0);
+    #if defined(_SUPPORT_GPIO) 
+        // return all IO pins to inputs
+        SWresetIO();
+        satResetIO();
+        radioResetIO();
+    #endif
+}
+
+static void onSig (int signo)
+{
+    char buf[100];
+
+    snprintf (buf, sizeof(buf), "Goodbye from signal %d\n", signo);
+    (void) !write (1, buf, strlen(buf));
+
+    defaultState();
+
+    exit(1);
 }
 #endif // _IS_UNIX
 
@@ -290,7 +297,7 @@ void setup()
 
 // #define _GFX_TEXTSZ
 #if defined(_GFX_TEXTSZ)
-    // just used to compare posix text port with Adafruit GRX 
+    // just used to compare our text port with Adafruit GFX 
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     char str[] = "scattered clouds";
     int sum = 0;
@@ -310,6 +317,13 @@ void setup()
 
     // enable touch screen system
     tft.touchEnable(true);
+
+#if defined(_IS_UNIX)
+    // support live even in setup
+    char wsynot[100];
+    if (!initWebServer(wsynot))
+        Serial.printf ("Can not start web server: %s\n", wsynot);
+#endif
 
     // get info from user at full brighness, then commence with user's desired brightness
     clockSetup();
@@ -1173,15 +1187,16 @@ static void eraseDXPath()
     setDXPathInvalid();
 }
 
-/* find long- else short-path angular distance and east-of-north bearing from DE to ll, both in radians
- * in range 0..2pi.
+/* find long- or short-path angular distance and east-of-north bearing from_ll to_ll given helper
+ * values for sin and cos of from lat. all values in radians in range 0..2pi.
  */
-void propDEDXPath (bool long_path, LatLong &ll, float *distp, float *bearp)
+void propPath (bool long_path, const LatLong &from_ll, float sflat, float cflat, const LatLong &to_ll,
+float *distp, float *bearp)
 {
     // cdist will be cos of short-path anglar separation in radians, so acos is 0..pi
-    // *bearp will be short-path from DE to ll east-to-north in radians, -pi..pi
+    // *bearp will be short-path from to ll east-to-north in radians, -pi..pi
     float cdist;
-    solveSphere (ll.lng-de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &cdist, bearp);
+    solveSphere (to_ll.lng-from_ll.lng, M_PI_2F-to_ll.lat, sflat, cflat, &cdist, bearp);
 
     if (long_path) {
         *distp = 2*M_PIF - acosf(cdist);              // long path can be anywhere 0..2pi
@@ -1190,6 +1205,13 @@ void propDEDXPath (bool long_path, LatLong &ll, float *distp, float *bearp)
         *distp = acosf(cdist);                        // short part always 0..pi
         *bearp = fmodf (*bearp + 2*M_PIF, 2*M_PIF);   // shift -pi..pi to 0..2pi
     }
+}
+
+/* handy shortcut path for starting from DE
+ */
+void propDEPath (bool long_path, const LatLong &to_ll, float *distp, float *bearp)
+{
+    return (propPath (long_path, de_ll, sdelat, cdelat, to_ll, distp, bearp));
 }
 
 /* draw great circle through DE and DX.
@@ -1201,13 +1223,12 @@ void drawDXPath ()
 
     // find short-path bearing and distance from DE to DX
     float dist, bear;
-    propDEDXPath (false, dx_ll, &dist, &bear);
+    propDEPath (false, dx_ll, &dist, &bear);
 
     // start with max nnumber of points, then reduce
     gpath = (SCoord *) realloc (gpath, MAX_GPATH * sizeof(SCoord));
     if (!gpath) {
-        Serial.println (F("Failed to malloc gpath"));
-        reboot();
+        fatalError (_FX("Failed to malloc gpath"));
     }
 
     // walk great circle path from DE through DX, storing each point
@@ -1237,8 +1258,7 @@ void drawDXPath ()
     // Serial.printf (_FX("n_gpath %u -> %u\n"), MAX_GPATH, n_gpath);
     gpath = (SCoord *) realloc (gpath, n_gpath * sizeof(SCoord));
     if (!gpath) {
-        Serial.println (F("Failed to realloc gpath"));
-        reboot();
+        fatalError(_FX("Failed to realloc gpath"));
     }
 
     // printFreeHeap (F("drawDXPath"));
@@ -1263,12 +1283,16 @@ bool waiting4DXPath()
 
 void drawDXMarker (bool force)
 {
-    // draw if force or overmap and not showing sat or DX WX
-    if (force || ((!dx_info_for_sat || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE) && overMap(dx_c.s))) {
+    // draw if force or overmap and not showing sat or DXWX or VOACAP
+    if (force ||
+                ((!dx_info_for_sat
+                    || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE
+                    || findPaneChoiceNow(PLOT_CH_BC) != PANE_NONE)
+                && overMap(dx_c.s))
+            ) {
         tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
         tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
         tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
-
     }
 }
 
@@ -1334,6 +1358,15 @@ bool checkOnAir()
 #endif // _SUPPORT_GPIO && _IS_UNIX
 }
 
+// handy
+void fillSBox (const SBox &box, uint16_t color)
+{
+    tft.fillRect (box.x, box.y, box.w, box.h, color);
+}
+void drawSBox (const SBox &box, uint16_t color)
+{
+    tft.drawRect (box.x, box.y, box.w, box.h, color);
+}
 
 /* draw callsign using cs_info.
  * draw everything if all, else just fg text.
@@ -1346,7 +1379,7 @@ void drawCallsign (bool all)
         if (cs_info.bg_rainbow)
             drawRainbow (cs_info.box);
         else
-            tft.fillRect (cs_info.box.x, cs_info.box.y, cs_info.box.w, cs_info.box.h, cs_info.bg_color);
+            fillSBox (cs_info.box, cs_info.bg_color);
     }
 
     // make copy in order to replace each 0 with del which is modified to be a slashed-0
@@ -1775,7 +1808,7 @@ static void toggleLockScreen()
  */
 void drawScreenLock()
 {
-    tft.fillRect (lkscrn_b.x, lkscrn_b.y, lkscrn_b.w, lkscrn_b.h, RA8875_BLACK);
+    fillSBox (lkscrn_b, RA8875_BLACK);
 
     if (getDemoMode()) {
 
@@ -1819,7 +1852,7 @@ static void drawDEFormatMenu()
     SBox menu_b;
     menu_b.x = de_info_b.x + 4;
     menu_b.y = de_info_b.y;
-    // w/h are set dynamically by runMenu()
+    menu_b.w = 0;       // shrink to fit
 
     // run menu
     SBox ok_b;
@@ -1969,7 +2002,7 @@ void setMapTagBox (const char *tag, const SCoord &s, uint16_t r, SBox &box)
 void drawMapTag (const char *tag, SBox &box)
 {
     // draw
-    tft.fillRect (box.x, box.y, box.w, box.h, RA8875_BLACK);
+    fillSBox (box, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setCursor (box.x+2, box.y);
     tft.setTextColor (RA8875_WHITE);
@@ -2049,7 +2082,7 @@ void resetWatchdog()
     yield();
 }
 
-/* like delay() but breaks into small chunks so we can call resetWatchdog()
+/* like delay() but breaks into small chunks so we can call resetWatchdog() and update live web
  */
 void wdDelay(int ms)
 {
@@ -2058,6 +2091,7 @@ void wdDelay(int ms)
     int dt;
     while ((dt = millis() - t0) < ms) {
         resetWatchdog();
+        checkWebServer(true);
         if (dt < WD_DELAY_DT)
             delay (dt);
         else
@@ -2164,8 +2198,8 @@ static void shutdown(void)
         {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW},
         #if defined(_IS_UNIX)
             {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA},
-            {"Reboot",                  {x0, (uint16_t)(y+3*h), w, h}, RA8875_RED},
-            {"Shutdown",                {x0, (uint16_t)(y+4*h), w, h}, RGB565(255,125,0)},
+            {"Reboot host",             {x0, (uint16_t)(y+3*h), w, h}, RA8875_RED},
+            {"Shutdown host",           {x0, (uint16_t)(y+4*h), w, h}, RGB565(255,125,0)},
         #endif // _IS_UNIX
     };
 
@@ -2217,8 +2251,8 @@ static void shutdown(void)
  #if defined(_IS_UNIX)
     case _SDC_EXIT:
         Serial.print (_FX("Exiting\n"));
-        setFullBrightness();
         eraseScreen();
+        defaultState();
         wdDelay(200);
         exit(0);
     case _SDC_REBOOT:
@@ -2231,7 +2265,7 @@ static void shutdown(void)
         drawStringInBox ("Shutting down...", sdc[4].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Shutting down\n"));
-        (void) !system ("sudo halt");
+        (void) !system ("sudo poweroff || sudo halt");
         for(;;);
  #endif // _IS_UNIX
     default:
@@ -2246,7 +2280,9 @@ static void shutdown(void)
  */
 void reboot()
 {
-    setFullBrightness();
+    #if defined(_IS_UNIX)
+        defaultState();
+    #endif
     ESP.restart();
     for(;;);
 }

@@ -405,11 +405,11 @@ static void drawTrackButton(bool force, const char *msg)
 
     // prepare button
     if (auto_track) {
-        tft.fillRect (auto_b.x, auto_b.y, auto_b.w, auto_b.h, RA8875_WHITE);
+        fillSBox (auto_b, RA8875_WHITE);
         tft.setTextColor (RA8875_BLACK);
     } else {
-        tft.fillRect (auto_b.x, auto_b.y, auto_b.w, auto_b.h, RA8875_BLACK);
-        tft.drawRect (auto_b.x, auto_b.y, auto_b.w, auto_b.h, RA8875_WHITE);
+        fillSBox (auto_b, RA8875_BLACK);
+        drawSBox (auto_b, RA8875_WHITE);
         tft.setTextColor (msg ? RA8875_RED : RA8875_WHITE);
     }
 
@@ -430,11 +430,11 @@ static void drawStopButton (bool stop)
 {
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     if (stop) {
-        tft.fillRect (stop_b.x, stop_b.y, stop_b.w, stop_b.h, RA8875_WHITE);
+        fillSBox (stop_b, RA8875_WHITE);
         tft.setTextColor (RA8875_BLACK);
     } else {
-        tft.fillRect (stop_b.x, stop_b.y, stop_b.w, stop_b.h, RA8875_BLACK);
-        tft.drawRect (stop_b.x, stop_b.y, stop_b.w, stop_b.h, RA8875_WHITE);
+        fillSBox (stop_b, RA8875_BLACK);
+        drawSBox (stop_b, RA8875_WHITE);
         tft.setTextColor (RA8875_WHITE);
     }
     tft.setCursor (stop_b.x+7, stop_b.y+3);
@@ -950,7 +950,7 @@ void updateGimbal (const SBox &box)
 
             // no sat or no el so point at DX, time does not matter
             float dist, bear;
-            propDEDXPath (false, dx_ll, &dist, &bear);
+            propDEPath (false, dx_ll, &dist, &bear);
             az_target = rad2deg(bear);
         }
 

@@ -232,6 +232,9 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
         char getChar(void) {
             return (0);
         }
+        void putChar (char c) {
+            (void)(c);
+        }
         int SCALESZ = 1;
 	void drawSubPixel(int16_t x, int16_t y, uint16_t color) {
             drawPixel(x, y, color);
