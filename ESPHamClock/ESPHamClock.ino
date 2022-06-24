@@ -213,8 +213,7 @@ void setup()
     do {
         wdDelay(500);
     } while (!Serial);
-    Serial.print(F("\nHamClock version "));
-    Serial.println (hc_version);
+    Serial.printf("\nHamClock version %s platform %s\n", hc_version, platform);
 
     // record whether our FLASH CRC is correct -- takes about half a second
     flash_crc_ok = ESP.checkFlashCRC();
@@ -2344,11 +2343,7 @@ void fatalError (const char *fmt, ...)
 
         // draw box and wait for click
         SBox x_b = {350, 400, 100, 50};
-    #if defined(_IS_UNIX)
-        const char x_msg[] = "Exit";
-    #else
         const char x_msg[] = "Restart";
-    #endif
         drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
         drainTouch();
         SCoord s;
@@ -2359,12 +2354,8 @@ void fatalError (const char *fmt, ...)
         wdDelay(100);
     }
 
-    // outta here
-    #if defined(_IS_UNIX)
-        exit(1);
-    #else
-        reboot();
-    #endif
+    // bye bye
+    reboot();
 }
 
 

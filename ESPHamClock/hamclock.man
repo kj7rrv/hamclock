@@ -1,0 +1,102 @@
+.TH hamclock 1
+.na
+.nh
+
+.SH NAME
+hamclock \- a kiosk-style application showing information useful to the amateur radio operator
+
+.SH SYNOPSIS
+hamclock [options]
+
+.SH DESCRIPTION
+HamClock displays information for the amateur radio operator including:
+.RS 5
+.IP \(bu
+setting your location, known as DE, and a second location, known as DX, in several ways
+.IP \(bu
+the current time in UTC and local times at DE and DX, respectively
+.IP \(bu
+several current and recent space weather indices
+.IP \(bu
+satellite tracking and pass predictions
+.IP \(bu
+VOACAP propagation modeling point-to-point and global MUF
+.IP \(bu
+short and long path beam headings and distance from DE to DX
+.IP \(bu
+Mercator and Azimuthal map projections centered on DE
+.IP \(bu
+Lunar position data and EME planning tool
+.IP \(bu
+NCDXF beacon schedule
+.IP \(bu
+Big Clock, stopwatch and station ID count-down timer
+.IP \(bu
+rig and rotator control using flrig or hamlib
+.IP \(bu
+list and plot DX Spider cluster spots
+.IP \(bu
+read and display local weather data from one or two connected BME280 I2C sensors
+.RE
+
+.SH OPTIONS
+The following list of options is current as of this writing.
+To see all options, run hamclock with any illegal option such as -help.
+.RS 5
+.TP 10
+-a l
+set gimbal trace level to l
+.TP
+-b h
+set backend host to h instead of clearskyinstitute.com
+.TP
+-d d
+set working directory to d instead of $HOME/.hamclock/
+.TP
+-f o
+set display full screen initially to "on" or "off"
+.TP
+-g
+init DE using geolocation with current public IP; requires -k
+.TP
+-i i
+init DE using geolocation with IP i; requires -k
+.TP
+-k
+don't offer Setup or wait for Skips
+.TP
+-l l
+set Mercator center longitude to l degrees, +E; requires -k
+.TP
+-m
+enable demo mode
+.TP
+-o
+write diagnostic log to stdout instead of in working dir
+.TP
+-t p
+throttle max cpu to p percent; default 80
+.TP
+-w p
+set web server port p instead of 8080
+.TP
+-x
+run headless without X11 or FB0 -- run only the web server
+.RE
+
+
+.SH HISTORY
+HamClock was introduced in QST October 2017. 
+At that time it only worked on a standalone hardware configuration consisting of an Espressif ESP8266
+microcontroller and 800x480 LCD touch display. 
+In 2020 it was ported to the Raspberry Pi platform or any other UNIX-like operating system
+running the X11 Window display system.
+In 2022 it was ported again to be a web server that can be displayed and controlled
+using any browser, with no need for X11.
+All configurations continue to be supported.
+
+.SH AUTHOR
+Elwood Downey, ecdowney@clearskyinstitute.com
+
+.SH SEE ALSO
+HamClock has an extensive support page at https://clearskyinstitute.com/ham/HamClock

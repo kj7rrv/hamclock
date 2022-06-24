@@ -185,12 +185,12 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, "Options:\n");
         fprintf (stderr, " -a l : set gimbal trace level\n");
         fprintf (stderr, " -b h : set backend host to h instead of %s\n", svr_host);
-        fprintf (stderr, " -d d : set working dir d instead of %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -f o : display full screen initially \"on\" or \"off\"\n");
-        fprintf (stderr, " -g   : init DE using geolocation with our IP; requires -k\n");
+        fprintf (stderr, " -d d : set working directory to d instead of %s\n", defaultAppDir().c_str());
+        fprintf (stderr, " -f o : set display full screen initially to \"on\" or \"off\"\n");
+        fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
         fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
         fprintf (stderr, " -k   : don't offer Setup or wait for Skips\n");
-        fprintf (stderr, " -l l : set mercator center lng to l degs; requires -k\n");
+        fprintf (stderr, " -l l : set Mercator center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default %.0f\n", MAX_CPU_USAGE*100);

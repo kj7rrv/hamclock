@@ -203,7 +203,7 @@ static StringPrompt string_pr[N_SPR] = {
     {0, {100, R2Y(1),180, PR_H}, {280, R2Y(1), 110, PR_H}, "Enter DE Lat:", NULL, 0, 0},       // shadowed
     {0, {390, R2Y(1), 70, PR_H}, {480, R2Y(1), 110, PR_H}, "Lng:", NULL, 0, 0},                // shadowed
     {0, {450, R2Y(2), 60, PR_H}, {510, R2Y(2), 290, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
-    {0, {110, R2Y(4), 65, PR_H}, {180, R2Y(4), 480, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
+    {0, {100, R2Y(4), 65, PR_H}, {180, R2Y(4), 480, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
     {0, {670, R2Y(4),110, PR_H}, { 10, R2Y(5), 789, PR_H}, "Password:", wifipw, NV_WIFI_PW_LEN, 0},
 
     // "page 2" -- index 1
@@ -310,7 +310,7 @@ static BoolPrompt bool_pr[N_BPR] = {
     {0, {100, R2Y(2), 180, PR_H}, {280, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes"},
     {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes"},
     {0, {100, R2Y(3), 180, PR_H}, {280, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes"},
-    {0, {10,  R2Y(4),  70, PR_H}, {110, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL},
+    {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL},
 
     // "page 2" -- index 1
 

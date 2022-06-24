@@ -37,7 +37,7 @@ bool WiFiUDP::begin(int port)
 	    return (false);
 	}
 
-        printf ("new UDP socket %d\n", sockfd);
+        printf ("new UDP socket %d port %d\n", sockfd, port);
 
 	return (true);
 }

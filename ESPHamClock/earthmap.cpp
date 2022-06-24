@@ -466,13 +466,15 @@ static void drawMouseLoc()
     // erase data area if going to show new data or clean up for azm not over hemispheres
     static bool was_overmap;
     if (overmap || (azm_on && was_overmap))
-        tft.fillRect (tx, ty, view_btn_b.w, 62, RA8875_BLACK);
+        tft.fillRect (tx, ty, view_btn_b.w, line_dy*7, RA8875_BLACK);
     was_overmap = overmap;
 
     // that's it if mouse is not over map
     if (!overmap)
         return;
 
+    // indent to roughly center remaining items
+    tx += 10;
 
     // show closest city, if any
     if (city) {
@@ -484,20 +486,20 @@ static void drawMouseLoc()
     }
 
     // show lat/long
-    tft.setCursor (tx+1, ty+1);
+    tft.setCursor (tx, ty+1);
     tft.printf ("%5.1f%c", fabsf(ll.lat_d), ll.lat_d < 0 ? 'S' : 'N');
-    tft.setCursor (tx+1, ty+=line_dy);
+    tft.setCursor (tx, ty+=line_dy);
     tft.printf ("%5.1f%c", fabsf(ll.lng_d), ll.lng_d < 0 ? 'W' : 'E');
 
     // show maid
     char maid[MAID_CHARLEN];
     ll2maidenhead (maid, ll);
-    tft.setCursor (tx+13, ty+=line_dy);
+    tft.setCursor (tx+12, ty+=line_dy);
     tft.printf ("%.4s", maid);
 
     // show local time
     time_t lt = nowWO() + getTZ(ll);
-    tft.setCursor (tx+7, ty+=line_dy);
+    tft.setCursor (tx+6, ty+=line_dy);
     tft.printf ("%02d:%02d", hour(lt), minute(lt));
 
     // show distance and bearing to cursor location
@@ -507,9 +509,9 @@ static void drawMouseLoc()
     bearing *= 180/M_PIF;                       // rad -> degrees
     if (show_km)
         dist *= 1.609344F;                      // mi - > km
-    tft.setCursor (tx+1, ty+=line_dy);
+    tft.setCursor (tx, ty+=line_dy);
     tft.printf (_FX("%s %3.0f"), show_lp ? "LP" : "SP", bearing);
-    tft.setCursor (tx+1, ty+=line_dy);
+    tft.setCursor (tx, ty+=line_dy);
     if (dist <= 999)
         tft.printf (_FX("%s %3.0f"), show_km ? "km" : "mi", dist);
     else if (dist <= 9900)
@@ -520,7 +522,7 @@ static void drawMouseLoc()
     // prefix
     char prefix[MAX_PREF_LEN+1];
     if (nearestPrefix (city ? city_ll : ll, prefix)) {
-        tft.setCursor (tx+1, ty+=line_dy);
+        tft.setCursor (tx, ty+=line_dy);
         tft.printf ("%6s", prefix);
     }
 }

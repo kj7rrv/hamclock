@@ -431,9 +431,9 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
     // try all possibilities because they might be on other panes.
     case PLOT_CH_TEMPERATURE:
         if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_PRESSURE)
-                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)
-                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)) {
+            if (setPlotChoice (pp, PLOT_CH_HUMIDITY)
+                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)
+                            || setPlotChoice (pp, PLOT_CH_PRESSURE)) {
                 plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
                 savePlotOps();
                 return (true);
@@ -442,9 +442,9 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         break;
     case PLOT_CH_PRESSURE:
         if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_HUMIDITY)
-                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)
-                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)) {
+            if (setPlotChoice (pp, PLOT_CH_TEMPERATURE)
+                            || setPlotChoice (pp, PLOT_CH_HUMIDITY)
+                            || setPlotChoice (pp, PLOT_CH_DEWPOINT)) {
                 plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
                 savePlotOps();
                 return (true);
@@ -454,8 +454,8 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
     case PLOT_CH_HUMIDITY:
         if (!in_top) {
             if (setPlotChoice (pp, PLOT_CH_DEWPOINT)
-                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)
-                            || setPlotChoice (pp, PLOT_CH_PRESSURE)) {
+                            || setPlotChoice (pp, PLOT_CH_PRESSURE)
+                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)) {
                 plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
                 savePlotOps();
                 return (true);
@@ -464,8 +464,8 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         break;
     case PLOT_CH_DEWPOINT:
         if (!in_top) {
-            if (setPlotChoice (pp, PLOT_CH_TEMPERATURE)
-                            || setPlotChoice (pp, PLOT_CH_PRESSURE)
+            if (setPlotChoice (pp, PLOT_CH_PRESSURE)
+                            || setPlotChoice (pp, PLOT_CH_TEMPERATURE)
                             || setPlotChoice (pp, PLOT_CH_HUMIDITY)) {
                 plot_rotset[pp] = (1 << plot_ch[pp]);   // no auto rotation
                 savePlotOps();

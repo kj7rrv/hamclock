@@ -919,6 +919,22 @@ extern void drawDXSatMenu(const SCoord &s);
 
 /*********************************************************************************************
  *
+ * favicon.cpp
+ *
+ */
+
+#if defined(_IS_UNIX)
+
+extern void writeFavicon (WiFiClient &client);
+
+#endif // _IS_UNIX
+
+
+
+
+
+/*********************************************************************************************
+ *
  * gimbal.cpp
  *
  */

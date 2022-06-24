@@ -162,18 +162,6 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
         }
 
         // non-standard
-        bool getMouse (uint16_t *x, uint16_t *y)
-        {
-            #if defined (_IS_ESP8266)
-                (void)x;
-                (void)y;
-                return (false);
-            #else
-                return (Adafruit_RA8875::getMouse(x,y));
-            #endif
-        }
-
-        // non-standard
         void fillPolygon (const SCoord poly[], int n_poly, uint16_t color)
         {
             if (n_poly < 1)

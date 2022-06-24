@@ -19,39 +19,63 @@ char live_html[] =  R"(
 
     <script>
 
-        const UPDATE_MS = 800;          // update interval a little faster than 1 Hz display, ms
-        const verbose = 1;              // > 0  for more verbose; errors are always logged
-        const regn_color = "red";       // region marker color if verbose > 1
-        var prev_regnhdr;               // for erasing if verbose > 1
-        var scale = 1;                  // size factor -- set for real when get first whole image
-        var to_id;                      // timer id
+        // config
+        const UPDATE_MS = 1000;         // update interval
+        const HOST_OVHD = 100;          // msec of host overhead: 2x 50 ms fb_stage cycle time
+        const APP_W = 800;              // app coord system width
+        const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
+
+        // state
+        var drawing_verbose = 0;        // > 0 for more info about drwaing
+        var event_verbose = 0;          // > 0 for more info about keyboard or mouse activity
+        var prev_regnhdr;               // for erasing if drawing_verbose > 1
+        var scale = 0;                  // size factor -- set for real when get first whole image
+        var upd_tid;                    // update pacing timer id
+        var msec_corr;                  // msecs we should add to send to arrive at server at best time
+        var update_sent = 0;            // Date.now when last Update request was sent
+        var update_pending = false;     // set while waiting for update
+        var cvs, ctx;                   // handy
+
+
 
         // called one time after page has loaded
         function onLoad() {
 
+            console.log ("* onLoad");
+
             // handy access to canvas and drawing context
-            var cvs = document.getElementById('hamclock-cvs');
-            var ctx = cvs.getContext('2d', { alpha: false });   // faster w/o alpha
+            cvs = document.getElementById('hamclock-cvs');
+            ctx = cvs.getContext('2d', { alpha: false });   // faster w/o alpha
 
-
-            // request one full screen image then schedule incremental update if ok else another full.
+            // request one full screen image then schedule incremental update if ok else reload page.
             // also use the image info to set overall size and scaling.
             function getFullImage() {
-                getRequest ('get_live.png', 'blob')
+
+                update_pending = true;
+                update_sent = Date.now();
+                sendGetRequest ('get_live.png', 'blob')
                 .then (function (response) {
                     drawFullImage (response);
                     runSoon (getUpdate, 1);
                 })
                 .catch (function (err) {
                     console.log(err);
-                    runSoon (getFullImage, 0);
+                    reloadThisPage();
+                })
+                .finally (function() {
+                    if (drawing_verbose)
+                        console.log ("  getFullImage took " + (Date.now() - update_sent) + " ms");
+                    update_pending = false;
                 });
             }
 
 
-            // request one incremental update then schedule another if repeat
+            // request one incremental update then schedule another if repeat else a full update
             function getUpdate (repeat) {
-                getRequest ('get_live.update', 'arraybuffer')
+
+                update_pending = true;
+                update_sent = Date.now();
+                sendGetRequest ('get_live.bin', 'arraybuffer')
                 .then (function (response) {
                     drawUpdate (response);
                     if (repeat)
@@ -60,45 +84,36 @@ char live_html[] =  R"(
                 .catch (function (err) {
                     console.log(err);
                     runSoon (getFullImage, 0);
+                })
+                .finally (function() {
+                    if (drawing_verbose)
+                        console.log ("  getUpdate took " + (Date.now() - update_sent) + " ms");
+                    update_pending = false;
                 });
             }
 
-
-            // return a promise for the given url as the given type, passing response to resolve
-            function getRequest (url, type) {
-                return new Promise(function (resolve, reject) {
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('GET', url);
-                    xhr.responseType = type;
-                    xhr.addEventListener ('load', function () {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            resolve(xhr.response);
-                        } else {
-                            reject (url + ": " + xhr.status + " " + xhr.statusText);
-                        }
-                    });
-                    xhr.addEventListener ('error', function () {
-                        reject (url + ": " + xhr.status + " " + xhr.statusText);
-                    });
-                    xhr.send();
-                });
-            }
-
-            // run func with arg after UPDATE_MS.
-            // N.B. insure no more than one of these are queued
+            // schedule func(arg) soon
             function runSoon (func, arg) {
-                if (verbose > 1)
-                    console.log ("set timer for " + func.name);
-                clearTimeout(to_id);
-                to_id = setTimeout (func, UPDATE_MS, arg);
+
+                // insure no nested requests
+                clearTimeout(upd_tid);
+
+                // compute delay sending so message arrives at server HOST_OVHD after start of second
+                const msec_wait = (msec_corr - (Date.now() - update_sent) + 10000) % 1000;  // msec 0 .. 999
+
+                // register callback
+                upd_tid = setTimeout (func, msec_wait, arg);
+                if (drawing_verbose)
+                    console.log ("  set timer for " + func.name + " in " + msec_wait + " ms to correct " + msec_corr);
             }
 
 
             // init canvas size and configure to stay centered
             function initCanvas (w,h) {
-                if (verbose)
-                    console.log ("canvas " + w + " x " + h);
-                scale = w/800;
+
+                if (drawing_verbose)
+                    console.log ("canvas is " + w + " x " + h);
+                scale = w/APP_W;
                 cvs.width = w;
                 cvs.height = h;
                 cvs.style.width = w + "px";
@@ -112,7 +127,8 @@ char live_html[] =  R"(
 
             // display the given full png blob
             function drawFullImage (png_blob) {
-                if (verbose)
+
+                if (drawing_verbose)
                     console.log ("drawFullImage " + png_blob.size);
                 createImageBitmap (png_blob)
                 .then(function(ibm) {
@@ -126,143 +142,202 @@ char live_html[] =  R"(
 
             // display the given arraybuffer update
             function drawUpdate (ab) {
-                // extract header preamble
-                var aba = new Uint8Array(ab);
-                const regn_w = aba[0];
-                const regn_h = aba[1];
-                const n_regn = (aba[2] << 8) | aba[3];
 
-                if (verbose > 1) {
+                // extract 4-byte header preamble
+                let aba = new Uint8Array(ab);
+                const blok_w = aba[0];                          // block width, pixels
+                const blok_h = aba[1];                          // block width, pixels
+                msec_corr = 10*aba[2];                          // send time correction, ms
+                const n_regn = (aba[3] << 8) | aba[4];          // n regns, MSB LSB
+
+                if (drawing_verbose > 1) {
                     // erase, or at least unmark, previous marked regions
                     if (prev_regnhdr) {
                         ctx.strokeStyle = "black";
                         ctx.beginPath();
-                        for (var i = 0; i < n_regn; i++) {
-                            const cvs_x = prev_regnhdr[4+2*i] * regn_w;
-                            const cvs_y = prev_regnhdr[5+2*i] * regn_h;
-                            ctx.rect (cvs_x, cvs_y, regn_w, regn_h);
+                        for (let i = 0; i < prev_regnhdr.length; i++) {
+                            const cvs_x = prev_regnhdr[5+3*i] * blok_w;
+                            const cvs_y = prev_regnhdr[6+3*i] * blok_h;
+                            const cvs_w = prev_regnhdr[7+3*i] * blok_w;
+                            ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
                         }
                         ctx.stroke();
                     }
-                    // copy for next time
-                    prev_regnhdr = aba.slice(0,4+2*n_regn);
+                    // save for next time
+                    prev_regnhdr = aba.slice(0,5+3*n_regn);
                 }
 
-                // walk down remainder of header to get locations of region images
+                // walk down remainder of header and draw each region
                 if (n_regn > 0) {
-                    // extract remainder as one image containing one column of n_regn little images
-                    var pngb = new Blob([aba.slice(4+2*n_regn)], {type:"image/png"});
+                    // remainder is one image blok_h hi of n_regns contiguous regions each variable width
+                    let pngb = new Blob([aba.slice(5+3*n_regn)], {type:"image/png"});
                     createImageBitmap (pngb)
                     .then(function(ibm) {
-                        // render each region. image is in column stripes so coalesce rows to reduce draws
-                        const regn_x = 0;
-                        var regn_y = 0;
-                        var cvs_co_x = aba[4] * regn_w;
-                        var cvs_co_y = aba[5] * regn_h;
-                        var co_h = regn_h;
-                        var n_draw = 0;
-                        for (var i = 1; i < n_regn; i++) {
-                            const cvs_x = aba[4+2*i] * regn_w;
-                            const cvs_y = aba[5+2*i] * regn_h;
-                            if (cvs_x == cvs_co_x && cvs_y == cvs_co_y + co_h) {
-                                // extend this column
-                                co_h += regn_h;
-                            } else {
-                                // draw region
-                                ctx.drawImage (ibm, regn_x, regn_y, regn_w, co_h,
-                                                   cvs_co_x, cvs_co_y, regn_w, co_h);
-                                n_draw++;
-                                // start next column
-                                cvs_co_x = cvs_x;
-                                cvs_co_y = cvs_y;
-                                regn_y += co_h;
-                                co_h = regn_h;
-                            }
+                        // render each region.
+                        let regn_x = 0;                         // walk region x along pngb
+                        let n_draw = 0;                         // count n drawn regions just for stat
+                        for (let i = 0; i < n_regn; i++) {
+                            const cvs_x = aba[5+3*i] * blok_w;  // ul corner x in canvas pixels
+                            const cvs_y = aba[6+3*i] * blok_h;  // ul corner y in canvas pixels
+                            const n_long = aba[7+3*i];          // n regions long
+                            const cvs_w = n_long * blok_w;      // total region width in canvas pixels
+                            ctx.drawImage (ibm, regn_x, 0, cvs_w, blok_h, cvs_x, cvs_y, cvs_w, blok_h);
 
-                            if (verbose > 1) {
+                            if (drawing_verbose > 1) {
                                 // mark updated regions
-                                ctx.strokeStyle = regn_color;
+                                if (drawing_verbose > 2)
+                                    console.log (regn_x + " : " + cvs_x + "," + cvs_y + " "
+                                                        + cvs_w + "x" + blok_h);
+                                ctx.strokeStyle = "red";
                                 ctx.beginPath();
-                                ctx.rect (cvs_x, cvs_y, regn_w, regn_h);
+                                ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
                                 ctx.stroke();
                             }
+
+                            regn_x += cvs_w;                    // next region
+                            n_draw += n_long;
                         }
-
-                        // always leaves one more undrawn column
-                        ctx.drawImage (ibm, regn_x, regn_y, regn_w, co_h,
-                                               cvs_co_x, cvs_co_y, regn_w, co_h);
-                        n_draw++;
-
-                        if (verbose)
-                            console.log ("getUpdate " + aba.byteLength + ": draw " + n_draw + "/" + n_regn
-                                                + " " + regn_w + "x" + regn_h);
+                        if (drawing_verbose)
+                            console.log ("  drawUpdate " + aba.byteLength + "B " +
+                                        n_regn + "/" + n_draw + " of " + blok_w + " x " + blok_h);
 
                     }).
                     catch(function(err) {
                         console.log("update promise err: ", err);
-                        setTimeout(getFullImage, UPDATE_MS, 1);
+                        runSoon (getFullImage, 0);
                     });
                 }
 
             }
 
-            // connect onClick to send click to hamclock
-            cvs.addEventListener('click', function(event) {
-                // extract canvas coords and whether metakey was pressed
-                var rect = cvs.getBoundingClientRect();
-                var x = Math.round((event.clientX - rect.left)/scale);
-                var y = Math.round((event.clientY - rect.top)/scale);
-                var hold = event.metaKey;
-                var get = 'set_touch?x=' + x + '&y=' + y + (hold ? '&hold=1' : '&hold=0');
-                if (verbose)
-                    console.log (get);
+            // given a mouse event return coords with respect to canvas scaled to application.
+            // returns undefined if scaling factor is not yet known.
+            function getAppCoords (event) {
 
-                // send set_touch event
-                var xhr = new XMLHttpRequest();
-                xhr.responseType = 'text';
-                xhr.addEventListener ('load', function() {
-                    if (verbose)
-                        console.log(get + " back: " + xhr.responseText);
-                    // one-time update for immediate visual feedback
+                if (scale) {
+                    const rect = cvs.getBoundingClientRect();
+                    const x = Math.round((event.clientX - rect.left)/scale);
+                    const y = Math.round((event.clientY - rect.top)/scale);
+                    return ({x, y});
+                }
+            }
+
+
+            // send the given user event, then start update if successful for immediate feedback
+            function sendUserEvent (get) {
+
+                if (event_verbose)
+                    console.log ('sending ' + get);
+                sendGetRequest (get, 'text')
+                .then (function(response) {
                     getUpdate(0);
+                })
+                .catch (function (err) {
+                    console.log(err);
                 });
-                xhr.open('GET', get);
-                xhr.send(null);
+            }
+
+
+            // connect onClick to send set_touch to hamclock
+            cvs.addEventListener ('click', function(event) {
+
+                // extract coords and whether metakey was pressed
+                const m = getAppCoords (event);
+                if (!m) {
+                    console.log("onclick: don't know scale yet");
+                    return;
+                }
+                let hold = event.metaKey;
+
+                // compose and send
+                let get = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
+                sendUserEvent (get);
             });
 
-            // connect keydown to send character to hamclock
+
+            // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
             window.addEventListener('keydown', function(event) {
 
-                // get char; space causes 'char= ' which doesn't parse so we invent Space name
-                var k = event.key;
+                // get char name
+                let k = event.key;
+
+                // a real space would create 'char= ' which doesn't parse so we invent Space name
                 if (k === ' ')
                     k = 'Space';
-                var get = 'set_char?char=' + k; // can also be things like Tab, Enter, Backspace
-                if (verbose)
-                    console.log (get);
 
-                // send set_char event
-                var xhr = new XMLHttpRequest();
-                xhr.responseType = 'text';
-                xhr.addEventListener ('load', function() {
-                    if (verbose)
-                        console.log(get + " back: " + xhr.responseText);
-                    // one-time update for immediate visual feedback
-                    getUpdate(0);
-                });
-                xhr.open('GET', get);
-                xhr.send(null);
+                // ignore if modied
+                if (event.metaKey || event.ctrlKey || event.altKey) {
+                    if (event_verbose)
+                        console.log('ignoring modified ' + k);
+                    return;
+                }
+
+                // accept only certain non-alphanumeric keys
+                if (k.length > 1 && !nonan_chars.find (e => { if (e == k) return true; })) {
+                    if (event_verbose)
+                        console.log('ignoring ' + k);
+                    return;
+                }
 
                 // don't let browser see tab
                 if (k === "Tab") {
-                    if (verbose)
-                        console.log ("stop tab");
+                    if (event_verbose)
+                        console.log ("stopping tab");
                     event.preventDefault();
                 }
 
+                // compose and send
+                let get = 'set_char?char=' + k;
+                sendUserEvent (get);
             });
 
-            // get first image, repeats from then on
+
+            // reload this page as last resort, probably because server process restarted
+            function reloadThisPage() {
+
+                console.log ('* reloading');
+                setTimeout (function() {
+                    try {
+                        window.location.reload(true);
+                    } catch(err) {
+                        console.log('* reload err: ' + err);
+                    }
+                }, 1000);
+            }
+
+
+
+            // return a Promise for the given url of the given type, passing response to resolve
+            function sendGetRequest (url, type) {
+
+                return new Promise(function (resolve, reject) {
+                    if (drawing_verbose)
+                        console.log ('sendGetRequest ' + url);
+                    let xhr = new XMLHttpRequest();
+                    xhr.open('GET', url);
+                    xhr.responseType = type;
+                    xhr.addEventListener ('load', function () {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            if (drawing_verbose) {
+                                if (type == 'text')
+                                    console.log("  " + url + " reply: " + xhr.responseText);
+                                else
+                                    console.log("  " + url + " back ok");
+                            }
+                            resolve(xhr.response);
+                        } else {
+                            reject (url + ": " + xhr.status + " " + xhr.statusText);
+                        }
+                    });
+                    xhr.addEventListener ('error', function () {
+                        reject (url + ": " + xhr.status + " " + xhr.statusText);
+                    });
+                    xhr.send();
+                });
+            }
+
+
+            // all set. start things off with the full image, repeats from then on with updates forever.
             getFullImage();
 
         }

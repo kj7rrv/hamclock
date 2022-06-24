@@ -71,13 +71,18 @@ typedef uint16_t fbpix_t;
 #define BITSPFBPIX      16
 #define RGB16TOFBPIX(x) x
 #define FBPIXTORGB16(x) x
+#define FBPIXTORGB32(x) RGB1632(x)
 #else
 typedef uint32_t fbpix_t;
 #define BYTESPFBPIX     4
 #define BITSPFBPIX      32
 #define RGB16TOFBPIX(x) RGB1632(x)
 #define FBPIXTORGB16(x) RGB3216(x)
+#define FBPIXTORGB32(x) x
 #endif
+
+// basic background refresh interval, usecs
+#define REFRESH_US      50000
 
 class Adafruit_RA8875 {
 
@@ -180,8 +185,9 @@ class Adafruit_RA8875 {
         void putChar (char c);
         char getChar(void);
 
-        // get current mouse position
+        // set and get current mouse position
         bool getMouse (uint16_t *x, uint16_t *y);
+        void setMouse (int x, int y);
 
         void setEarthPix (char *day_pixels, char *night_pixels);
 
@@ -193,6 +199,9 @@ class Adafruit_RA8875 {
 
         // use to learn whether display is ready
         bool displayReady(void);
+
+        // very fast pixel access
+        bool getRawPix(uint8_t *rgb24, int bytes);
 
     protected:
 
@@ -326,6 +335,7 @@ class Adafruit_RA8875 {
 	const GFXfont *current_font;
 	int FB_X0;
 	int FB_Y0;
+
 
 	// big earth mmap'd maps
         uint16_t (*DEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];

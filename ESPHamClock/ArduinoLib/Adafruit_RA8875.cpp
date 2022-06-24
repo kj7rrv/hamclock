@@ -670,6 +670,23 @@ uint16_t Adafruit_RA8875::readData(void)
 	}
 }
 
+/* return pixels as packed RGB bytes
+ */
+bool Adafruit_RA8875::getRawPix(uint8_t *rgb24, int npix)
+{
+        if (npix != FB_XRES * FB_YRES) {
+            printf ("getRawPix: %d != %d\n", npix, FB_XRES * FB_YRES);
+            return (false);
+        }
+        for (int i = 0; i < npix; i++) {
+            uint32_t p32 = FBPIXTORGB32(fb_stage[i]);
+            *rgb24++ = p32 >> 16;
+            *rgb24++ = p32 >> 8;
+            *rgb24++ = p32;
+        }
+        return (true);
+}
+
 void Adafruit_RA8875::setFont (const GFXfont *f)
 {
 	if (f)
@@ -843,6 +860,23 @@ bool Adafruit_RA8875::getMouse (uint16_t *x, uint16_t *y)
 
         return (ok);
 }
+
+/* set mouse location programmatically in app coords
+ */
+void Adafruit_RA8875::setMouse (int x, int y)
+{
+        if (x >= 0 && x < APP_WIDTH && y >= 0 && y < APP_HEIGHT) {
+
+            pthread_mutex_lock(&mouse_lock);
+
+                mouse_x = x*SCALESZ + FB_X0;
+                mouse_y = y*SCALESZ + FB_Y0;
+                gettimeofday (&mouse_tv, NULL);
+
+            pthread_mutex_unlock(&mouse_lock);
+        }
+}
+
 
 void Adafruit_RA8875::drawPixel(int16_t x, int16_t y, uint16_t color16)
 {
@@ -1647,8 +1681,6 @@ void Adafruit_RA8875::X11OptionsEngageNow (bool fs)
 // _USE_X11
 void Adafruit_RA8875::fbThread ()
 {
-        const int refresh_us = 50000;           // refresh period, usecs
-
         if (noX11) {
 
             // just copy canvas to stage as required
@@ -1657,6 +1689,11 @@ void Adafruit_RA8875::fbThread ()
 
                 // all set
                 ready = true;
+
+                // get mouse idle time
+                struct timeval tv;
+                gettimeofday (&tv, NULL);
+                mouse_idle = (tv.tv_sec - mouse_tv.tv_sec)*1000 + (tv.tv_usec - mouse_tv.tv_usec)/1000;
 
                 if (options_engage)
                     options_engage = false;
@@ -1671,7 +1708,7 @@ void Adafruit_RA8875::fbThread ()
                 pthread_mutex_unlock (&fb_lock);
 
                 // let scene build a while before next update
-                usleep (refresh_us);
+                usleep (REFRESH_US);
             }
         }
 
@@ -1925,7 +1962,7 @@ void Adafruit_RA8875::fbThread ()
             }
 
             // let scene build a while before next update
-            usleep (refresh_us);
+            usleep (REFRESH_US);
 
         }
 

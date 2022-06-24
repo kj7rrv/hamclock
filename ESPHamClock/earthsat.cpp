@@ -657,7 +657,7 @@ static void drawSatNow()
 /* draw event label and time t in the dx_info box unless t < 0 then just show title.
  * t is in days: if > 1 hour show HhM else M:S
  */
-static void drawSatTime (const char *label, uint16_t color, float t)
+static void drawSatTime (bool force, const char *label, uint16_t color, float t)
 {
     if (!sat)
         return;
@@ -679,7 +679,7 @@ static void drawSatTime (const char *label, uint16_t color, float t)
     uint16_t l_w = getTextWidth(label) + 2;     // right end can be slightly chopped
 
     // note whether label has changed
-    bool new_label = strncmp (label, prev_label, sizeof(prev_label)) != 0;
+    bool new_label = force || strncmp (label, prev_label, sizeof(prev_label)) != 0;
     if (new_label)
         memcpy (prev_label, label, sizeof(prev_label));
 
@@ -1147,7 +1147,7 @@ static bool satEpochOk(time_t t)
 
 /* show pass time and process key rise/set alarms
  */
-static void drawSatRSEvents()
+static void drawSatRSEvents(bool force)
 {
     if (!sat)
         return;
@@ -1159,11 +1159,11 @@ static void drawSatRSEvents()
     if (sat_rs.rise_time < sat_rs.set_time) {
         if (t_now < sat_rs.rise_time) {
             // pass lies ahead
-            drawSatTime ("Rise in", SAT_COLOR, days_to_rise);
+            drawSatTime (force, "Rise in", SAT_COLOR, days_to_rise);
             risetAlarm(days_to_rise < ALARM_DT ? RISING_RATE : -1);
         } else if (t_now < sat_rs.set_time) {
             // pass in progress
-            drawSatTime ("Set in", SAT_COLOR, days_to_set);
+            drawSatTime (force, "Set in", SAT_COLOR, days_to_set);
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
@@ -1174,7 +1174,7 @@ static void drawSatRSEvents()
     } else {
         if (t_now < sat_rs.set_time) {
             // pass in progress
-            drawSatTime ("Set in", SAT_COLOR, days_to_set);
+            drawSatTime (force, "Set in", SAT_COLOR, days_to_set);
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
@@ -1271,16 +1271,16 @@ void updateSatPass()
 
     // check edge cases
     if (!sat_rs.ever_up) {
-        drawSatTime (_FX("No rise"), SAT_COLOR, -1);
+        drawSatTime (true, _FX("No rise"), SAT_COLOR, -1);
         return;
     }
     if (!sat_rs.ever_down) {
-        drawSatTime (_FX("No set"), SAT_COLOR, -1);
+        drawSatTime (true, _FX("No set"), SAT_COLOR, -1);
         return;
     }
 
     // show rise/set
-    drawSatRSEvents();
+    drawSatRSEvents(false);
 }
 
 /* compute satellite geocentric path into sat_path[] and footprint into sat_foot[].
@@ -1520,6 +1520,7 @@ void displaySatInfo()
     findNextPass(sat_name, nowWO(), sat_rs);
     drawSatName();
     drawNextPass();
+    drawSatRSEvents(true);
 }
 
 /* present list of satellites and let user select up to one, preselecting last known if any.
@@ -1784,7 +1785,6 @@ static void showNextSatEvents ()
     #define _SNS_HHMM_W   130                   // width of HH:MM@az columns
     #define _SNS_ROWH     34                    // row height
     #define _SNS_TIMEOUT  30000                 // ms
-    #define _SNS_HILITE   RGB565(0,50,0)        // highlight color
 
     // init scan coords
     uint16_t x = _SNS_LR_B;
@@ -1796,10 +1796,10 @@ static void showNextSatEvents ()
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor (DE_COLOR);
     tft.setCursor (x, y); tft.print (F("Day"));
-    tft.setCursor (x+_SNS_DAY_W, y); tft.print (F("Rise @Az"));
-    tft.setCursor (x+_SNS_DAY_W+_SNS_HHMM_W, y); tft.print (F("Set @Az"));
-    tft.setCursor (x+_SNS_DAY_W+2*_SNS_HHMM_W, y); tft.print (F("Up"));
-        tft.setTextColor (RA8875_RED); tft.print (F("  >10 Mins      "));
+    tft.setCursor (x+_SNS_DAY_W, y); tft.print (F("Rise    @Az"));
+    tft.setCursor (x+_SNS_DAY_W+_SNS_HHMM_W, y); tft.print (F("Set      @Az"));
+    tft.setCursor (x+_SNS_DAY_W+2*_SNS_HHMM_W, y); tft.print (F(" Up"));
+    tft.setTextColor (RA8875_RED); tft.print (F(" >10 Mins      "));
     tft.setTextColor (DE_COLOR);
     tft.print (user_name);
 
@@ -1834,15 +1834,6 @@ static void showNextSatEvents ()
 
     } else {
 
-
-        // a little visual organization aid
-        for (int i = 0; i < (tft.height()-y)/_SNS_ROWH; i++) {
-            if ((i & 1) == 0)
-                tft.fillRect (0, y + i*_SNS_ROWH + 8, tft.width(), _SNS_ROWH, _SNS_HILITE);
-        }
-        tft.fillRect (0, y-_SNS_ROWH+7, tft.width()-1, 3, _SNS_HILITE);
-        tft.fillRect (tft.width()/2-1, y-_SNS_ROWH+8,
-                            3, _SNS_ROWH*((tft.height()-(y-_SNS_ROWH+8))/_SNS_ROWH), _SNS_HILITE);
 
         // draw table
         for (int i = 0; i < n_times; i++) {
@@ -1980,7 +1971,6 @@ void drawDXSatMenu (const SCoord &s)
     } else {
         // cancelled, just restore sat info
         displaySatInfo();
-        drawSatRSEvents();
     }
 
 }

@@ -68,8 +68,7 @@ void EEPROM::begin (int s)
         // check lock
         if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0)
             fatalError ("Another instance of HamClock has been detected.\n"
-                        "Only one at a time is allowed or use the -d argument to give each\n"
-                        "a separate working directory.");
+                        "Only one at a time is allowed or use -d and -w to make each unique.\n");
 
         // malloc memory, init as zeros
         n_data_array = s;

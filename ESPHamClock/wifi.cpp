@@ -568,7 +568,7 @@ void initSys()
 
     // offer time to peruse unless alreay opted to skip
     if (!skipped_here) {
-        #define     TO_DS 100                               // timeout delay, decaseconds
+        #define     TO_DS 50                                // timeout delay, decaseconds
         drawStringInBox (_FX("Skip"), skip_b, false, RA8875_WHITE);
         uint8_t s_left = TO_DS/10;                          // seconds remaining
         uint32_t t0 = millis();
