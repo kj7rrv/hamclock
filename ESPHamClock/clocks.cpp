@@ -4,8 +4,21 @@
 
 #include "HamClock.h"
 
+// format flags
 uint8_t de_time_fmt;                            // one of DETIME_*
 uint8_t desrss, dxsrss;                         // show actual de/dx sun rise/set else time to
+
+// menu names for each AuxTimeFormat -- must be in same order!
+AuxTimeFormat auxtime;
+const char *auxtime_names[AUXT_N] = {
+    "Date",
+    "Day of Year",
+    "Julian Date",
+    "Modified JD",
+    "Sidereal",
+    "Solar",
+    "UNIX seconds"
+};
 
 // time update interval, seconds
 #define TIME_INTERVAL   (30*60)                 // normal resync interval when working ok, seconds
@@ -24,15 +37,27 @@ static int32_t utc_offset;                      // nowWO() offset from UTC, secs
 
 // display 
 #define UTC_W           14                      // UTC button width in upper right corner of clock_b
-#define UTC_H           (hms_h-1)               // UTC button height in upper right corner of clock_b
+#define UTC_H           (HMS_H-1)               // UTC button height in upper right corner of clock_b
 #define QUESTION_W      28                      // Question mark width
-#define hms_h           (5*clock_b.h/8-7)       // HMS height
+#define HMS_H           (clock_b.h-6)           // main HMS character height
 #define FFONT_W         6                       // fixed font width
 #define FFONT_H         8                       // fixed font height
 #define HMS_C           RA8875_WHITE            // HMS color
-#define MDY_C           RA8875_WHITE            // MDY color
+#define AUX_C           RA8875_WHITE            // auxtime color
 
-/* the UTC "button" in clock_b depending on whether utc_offset is 0.
+// handy time parts
+typedef struct {
+    time_t t;
+    int sc;
+    int hr;
+    int mn;
+    int wd;
+    int mo;
+    int dy;
+    int yr;
+} TimeParts;
+
+/* draw the UTC "button" in clock_b depending on whether utc_offset is 0.
  * if offset is not 0 show red/black depending on even/odd second
  */
 static void drawUTCButton()
@@ -146,18 +171,18 @@ static void drawRiseSet(time_t t0, time_t trise, time_t tset, SBox &b, uint8_t s
             // draw actual rise set times
 
             if (night_now) {
-                tft.setCursor (b.x+8, b.y+8);
-                tft.print (F("R @ "));
+                tft.setCursor (b.x, b.y+8);
+                tft.print (F("R at "));
                 prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs));
-                tft.setCursor (b.x+8, b.y+b.h/2+4);
-                tft.print (F("S @ "));
+                tft.setCursor (b.x, b.y+b.h/2+4);
+                tft.print (F("S at "));
                 prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs));
             } else {
-                tft.setCursor (b.x+8, b.y+8);
-                tft.print (F("S @ "));
+                tft.setCursor (b.x, b.y+8);
+                tft.print (F("S at "));
                 prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs));
-                tft.setCursor (b.x+8, b.y+b.h/2+4);
-                tft.print (F("R @ "));
+                tft.setCursor (b.x, b.y+b.h/2+4);
+                tft.print (F("R at "));
                 prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs));
             }
 
@@ -369,6 +394,293 @@ static void drawDigitalClock (time_t delocal_t)
     tft.print (buf);
 }
 
+/* offer a menu to change the aux time format
+ * N.B. caller must restore original content
+ */
+static void runAuxTimeMenu()
+{
+    #define _AM_INDENT 4
+    MenuItem mitems[AUXT_N] = {
+        {MENU_1OFN, auxtime == AUXT_DATE, 1, _AM_INDENT, auxtime_names[AUXT_DATE]},
+        {MENU_1OFN, auxtime == AUXT_DOY, 1, _AM_INDENT, auxtime_names[AUXT_DOY]},
+        {MENU_1OFN, auxtime == AUXT_JD, 1, _AM_INDENT, auxtime_names[AUXT_JD]},
+        {MENU_1OFN, auxtime == AUXT_MJD, 1, _AM_INDENT, auxtime_names[AUXT_MJD]},
+        {MENU_1OFN, auxtime == AUXT_SIDEREAL, 1, _AM_INDENT, auxtime_names[AUXT_SIDEREAL]},
+        {MENU_1OFN, auxtime == AUXT_SOLAR, 1, _AM_INDENT, auxtime_names[AUXT_SOLAR]},
+        {MENU_1OFN, auxtime == AUXT_UNIX, 1, _AM_INDENT, auxtime_names[AUXT_UNIX]},
+    };
+
+    SBox menu_b = auxtime_b;
+    menu_b.w = 0;   // shrink to fit
+    menu_b.x += 20;
+    SBox ok_b;
+    MenuInfo menu = {menu_b, ok_b, false, false, 1, AUXT_N, mitems};
+    if (runMenu(menu)) {
+        // update auxtime;
+        for (int i = 0; i < AUXT_N; i++) {
+            if (mitems[i].set) {
+                auxtime = (AuxTimeFormat)i;
+                NVWriteUInt8(NV_AUX_TIME, (uint8_t)auxtime);
+                break;
+            }
+        }
+    }
+}
+
+/* given UTC + user offset draw auxtime_b depending on auxtime setting.
+ * we are called every second so do the minimum required.
+ */
+static void drawAuxTime (bool all, const TimeParts &tp)
+{
+    // mostly common prep
+    #define _UCHW       12                                              // approx char width
+    #define _UCCD       8                                               // descent
+    static int prev_day;                                                // note new day for many options
+    int day = tp.t / (3600*24);
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor(AUX_C);
+    uint16_t y = auxtime_b.y + auxtime_b.h - _UCCD;
+    char buf[32];
+
+    if (auxtime == AUXT_DATE) {
+
+        if (all || day != prev_day) {
+
+            fillSBox (auxtime_b, RA8875_BLACK);
+
+            // N.B. dayShortStr() and monthShortStr() share the same static pointer
+
+            if (getDateFormat() == DF_DMY) {
+
+                // Weekday, date month year
+
+                int l = sprintf (buf, "%s, ", dayShortStr(tp.wd));
+                sprintf (buf+l, "%2d %s %d", tp.dy, monthShortStr(tp.mo), tp.yr);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else if (getDateFormat() == DF_MDY) {
+
+                // Weekday month date, year
+
+                int l = sprintf (buf, "%s  ", dayShortStr(tp.wd));
+                sprintf (buf+l, "%s %2d, %d", monthShortStr(tp.mo), tp.dy, tp.yr);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else if (getDateFormat() == DF_YMD) {
+
+                // Weekday, year month date
+
+                int l = sprintf (buf, "%s,  ", dayShortStr(tp.wd));
+                sprintf (buf+l, "%d %s %2d", tp.yr, monthShortStr(tp.mo), tp.dy);
+                uint16_t bw = getTextWidth (buf);
+                int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
+                if (x < 0)
+                    x = 0;
+                tft.setCursor(x, y);
+                tft.print(buf);
+
+            } else {
+
+                fatalError (_FX("Bug! bad format: %d"), (int)getDateFormat());
+
+            }
+
+            prev_day = day;
+        }
+
+
+    } else if (auxtime == AUXT_DOY) {
+
+
+        if (all || day != prev_day) {
+
+            fillSBox (auxtime_b, RA8875_BLACK);
+
+            // Weekday DOY <doy> year
+
+            // find day of year
+            tmElements_t tm;
+            breakTime (tp.t, tm);
+            tm.Second = tm.Minute = tm.Hour = 0;
+            tm.Month = tm.Day = 1;
+            time_t year0 = makeTime (tm);
+            int doy = (tp.t - year0) / (24*3600) + 1;
+
+            sprintf (buf, "%s DOY %d  %d", dayShortStr(tp.wd), doy, tp.yr);
+            uint16_t bw = getTextWidth (buf);
+            int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
+            if (x < 0)
+                x = 0;
+            tft.setCursor(x, y);
+            tft.print(buf);
+
+            prev_day = day;
+        }
+
+    } else if (auxtime == AUXT_JD || auxtime == AUXT_MJD) {
+
+        static long prev_whole;                                         // previous whole value
+        static uint16_t prev_xdp;                                       // x coord of decimal point
+        #define _JDNFRAC   5                                            // n fractional digits
+
+        // find value
+        double d = tp.t / 86400.0 + 2440587.5;                          // JD
+        if (auxtime == AUXT_MJD)
+            d -= 2400000.5;                                             // MJD
+
+        // draw
+        const long whole = floor(d);
+        if (all || whole != prev_whole || prev_xdp == 0) {
+            // draw complete value up to decimal point
+            fillSBox (auxtime_b, RA8875_BLACK);
+            long val = whole;
+            int millions = val / 1000000L;
+            val -= millions * 1000000L;                                 // now thousands
+            int thousands = val / 1000;
+            val -= thousands * 1000;                                    // now units
+            int units = val;
+            if (millions)
+                sprintf (buf, "JD %d,%03d,%03d", millions, thousands, units);
+            else
+                sprintf (buf, "MJD %d,%03d", thousands, units);
+            uint16_t bw = getTextWidth (buf);
+            int16_t x = auxtime_b.x + (auxtime_b.w-bw-(_JDNFRAC+1)*_UCHW)/2;
+            tft.setCursor(x, y);
+            tft.print(buf);
+            prev_xdp = tft.getCursorX();
+        } else {
+            // just draw the fraction
+            tft.fillRect (prev_xdp, auxtime_b.y, (_JDNFRAC+1)*_UCHW, auxtime_b.h, RA8875_BLACK);
+            tft.setCursor(prev_xdp, y);
+        }
+        sprintf (buf, "%.*f", _JDNFRAC, d - whole);
+        tft.print (buf+1);                                              // skip the leading 0
+
+        // persist
+        prev_whole = whole;
+
+    } else if (auxtime == AUXT_SIDEREAL) {
+
+        static int prev_wholemn;                                        // previous whole minutes
+        static uint16_t prev_xcolon;                                    // x coord of 2nd colon
+
+        // find lst at DE
+        double lst;                                                     // hours
+        double astro_mjd = tp.t/86400.0 + 2440587.5 - 2415020.0;        // just for now_lst()
+        now_lst (astro_mjd, de_ll.lng, &lst);
+        int wholemn = floor(lst*60);
+
+        // break out
+        int lst_hr = lst;
+        lst = (lst - lst_hr)*60;                                        // now mins
+        int lst_mn = lst;
+        lst = (lst - lst_mn)*60;                                        // now secs
+        int lst_sc = lst;
+
+        if (all || wholemn != prev_wholemn || prev_xcolon == 0) {
+            // draw complete value but note location of 2nd colon
+            sprintf (buf, "LST  %02d:%02d:", lst_hr, lst_mn);
+            uint16_t bw = getTextWidth (buf);
+            int16_t x = auxtime_b.x + (auxtime_b.w-bw-2*_UCHW)/2;       // center including secs
+            tft.setCursor(x, y);
+            fillSBox (auxtime_b, RA8875_BLACK);
+            tft.print(buf);
+            prev_xcolon = tft.getCursorX();
+        } else {
+            // just redraw seconds
+            tft.fillRect (prev_xcolon, auxtime_b.y, 2*_UCHW, auxtime_b.h, RA8875_BLACK);
+            tft.setCursor(prev_xcolon, y);
+        }
+        sprintf (buf, "%02d", lst_sc);
+        tft.print (buf);
+
+        // persist
+        prev_wholemn = wholemn;
+
+    } else if (auxtime == AUXT_SOLAR) {
+
+        static int prev_wholemn;                                        // previous whole minutes
+        static uint16_t prev_xcolon;                                    // x coord of 2nd colon
+
+        // find solar time at DE in hours -- requires fresh solar gha each second
+        AstroCir cir;
+        getSolarCir (tp.t, de_ll, cir);
+        float solar = fmodf (12 + (de_ll.lng_d + rad2deg(cir.gha))/15 + 48, 24);
+        int wholemn = floorf(solar*60);
+
+        // break out
+        int solar_hr = solar;
+        solar = (solar - solar_hr)*60;                                  // now mins
+        int solar_mn = solar;
+        solar = (solar - solar_mn)*60;                                  // now secs
+        int solar_sc = solar;
+
+        // draw time
+        if (all || wholemn != prev_wholemn || prev_xcolon == 0) {
+            // draw complete value but note location of 2nd colon
+            sprintf (buf, "Solar  %02d:%02d:", solar_hr, solar_mn);
+            uint16_t bw = getTextWidth (buf);
+            int16_t x = auxtime_b.x + (auxtime_b.w-bw-2*_UCHW)/2;       // center including secs
+            tft.setCursor(x, y);
+            fillSBox (auxtime_b, RA8875_BLACK);
+            tft.print(buf);
+            prev_xcolon = tft.getCursorX();
+        } else {
+            // just redraw seconds
+            tft.fillRect (prev_xcolon, auxtime_b.y, 2*_UCHW, auxtime_b.h, RA8875_BLACK);
+            tft.setCursor(prev_xcolon, y);
+        }
+        sprintf (buf, "%02d", solar_sc);
+        tft.print (buf);
+
+        // persist
+        prev_wholemn = wholemn;
+
+    } else if (auxtime == AUXT_UNIX) {
+
+        static time_t prev_t;                                           // previous time drawn
+        static uint16_t prev_xend;                                      // x coord of last digit
+
+        // draw time
+        if (all || tp.t/10 != prev_t/10 || prev_xend == 0) {
+            // draw complete time but note location of last digit
+            fillSBox (auxtime_b, RA8875_BLACK);
+            time_t t0 = tp.t;
+            int billions = tp.t/1000000000UL;
+            t0 -= billions * 1000000000UL;                              // now millions
+            int millions = t0/1000000UL;
+            t0 -= millions * 1000000UL;                                 // now thousands
+            int thousands = t0/1000;
+            t0 -= thousands*1000;                                       // now units
+            int tens = t0/10;
+            sprintf (buf, "Unix %d,%03d,%03d,%02d", billions, millions, thousands, tens);
+            uint16_t bw = getTextWidth (buf);
+            int16_t x = auxtime_b.x + (auxtime_b.w-bw-_UCHW)/2;         // center including units
+            tft.setCursor(x, y);
+            tft.print(buf);
+            prev_xend = tft.getCursorX();
+        } else {
+            // just draw last digit
+            tft.fillRect (prev_xend, auxtime_b.y, _UCHW, auxtime_b.h, RA8875_BLACK);
+            tft.setCursor(prev_xend, y);
+        }
+        tft.print ((int)(tp.t % 10));
+
+        // persist
+        prev_t = tp.t;
+    }
+}
+
 /* draw a calendar in de_info_b below time
  */
 void drawCalendar(bool force)
@@ -455,6 +767,15 @@ void initTime()
     utc_offset = 0;
     NVReadInt32 (NV_UTC_OFFSET, &utc_offset);
 
+    // get desired aux time format
+    uint8_t at;
+    if (!NVReadUInt8(NV_AUX_TIME, &at)) {
+        at = AUXT_DATE;
+        NVWriteUInt8(NV_AUX_TIME, at);
+    }
+    auxtime = (AuxTimeFormat)at;
+    Serial.printf ("auxtime format %s\n", auxtime_names[auxtime]);
+
     // start using time source
     enableSyncProvider();
 }
@@ -535,18 +856,19 @@ void updateClocks(bool all)
         return;
 
     // get Clock's UTC time now, get out fast if still same second
-    time_t t = nowWO();
-    int sc = second(t);
-    if (sc == prev_sc && !all)
+    TimeParts tp;
+    tp.t = nowWO();
+    tp.sc = second(tp.t);
+    if (tp.sc == prev_sc && !all)
         return;
 
-    // pull apart the time
-    int hr = hour(t);
-    int mn = minute(t);
-    int wd = weekday(t);
-    int mo = month(t);
-    int dy = day(t);
-    int yr = year(t);
+    // pull apart rest of the time
+    tp.hr = hour(tp.t);
+    tp.mn = minute(tp.t);
+    tp.wd = weekday(tp.t);
+    tp.mo = month(tp.t);
+    tp.dy = day(tp.t);
+    tp.yr = year(tp.t);
 
     // set to update other times as well
     bool draw_other_times = false;
@@ -554,14 +876,14 @@ void updateClocks(bool all)
     resetWatchdog();
 
     // always draw seconds because we know it has changed
-    if (all || (sc/10) != (prev_sc/10)) {
+    if (all || (tp.sc/10) != (prev_sc/10)) {
 
         // Change in tens digit of seconds process normally W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3;          // right 1/3 for seconds
         selectFontStyle (BOLD_FONT, SMALL_FONT);
-        sprintf (buf, "%02d", sc);                      // includes ones digit
-        tft.fillRect(sx, clock_b.y, 30, hms_h/2+4, RA8875_BLACK);  // dont erase ? if present
-        tft.setCursor(sx, clock_b.y+hms_h-19);
+        sprintf (buf, "%02d", tp.sc);                   // includes ones digit
+        tft.fillRect(sx, clock_b.y, 30, HMS_H/2+4, RA8875_BLACK);  // dont erase ? if present
+        tft.setCursor(sx, clock_b.y+HMS_H-19);
         tft.setTextColor(HMS_C);
         tft.print(buf);
 
@@ -570,9 +892,9 @@ void updateClocks(bool all)
         // Change only in units digit of seconds - process only that digit  W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3+15;       // right 1/3 for seconds (15 by experiment) W2ROW
         selectFontStyle (BOLD_FONT, SMALL_FONT);        // W2ROW
-        sprintf (buf, "%01d", sc%10);                   // W2ROW
-        tft.fillRect(sx, clock_b.y, 15, hms_h/2+4, RA8875_BLACK);  // dont erase ? W2ROW
-        tft.setCursor(sx, clock_b.y+hms_h-19);          // W2ROW
+        sprintf (buf, "%01d", tp.sc%10);                // W2ROW
+        tft.fillRect(sx, clock_b.y, 15, HMS_H/2+4, RA8875_BLACK);  // dont erase ? W2ROW
+        tft.setCursor(sx, clock_b.y+HMS_H-19);          // W2ROW
         tft.setTextColor(HMS_C);                        // W2ROW
         tft.print(buf);                                 // W2ROW
       
@@ -582,11 +904,11 @@ void updateClocks(bool all)
     if (clockTimeOk()) {
         if (time_was_bad) {
 
-            // just came back, show and update state
+            // just came back on, show and update state
             drawUTCButton();
-            tft.fillRect(clock_b.x+2*clock_b.w/3+34, clock_b.y, 25, hms_h+4, RA8875_BLACK);
+            tft.fillRect(clock_b.x+2*clock_b.w/3+34, clock_b.y, 25, HMS_H+4, RA8875_BLACK); // erase ?
             Serial.printf (_FX("Time ok Z = %04d-%02d-%02d %02d:%02d:%02d %+d s\n"),
-                                yr, mo, dy, hr, mn, sc, -utc_offset);
+                                tp.yr, tp.mo, tp.dy, tp.hr, tp.mn, tp.sc, -utc_offset);
 
             time_was_bad = false;
         }
@@ -597,7 +919,7 @@ void updateClocks(bool all)
             drawUTCButton();
             selectFontStyle (BOLD_FONT, LARGE_FONT);
             tft.setTextColor(HMS_C);
-            tft.setCursor(clock_b.x+clock_b.w-UTC_W-QUESTION_W, clock_b.y+hms_h);
+            tft.setCursor(clock_b.x+clock_b.w-UTC_W-QUESTION_W, clock_b.y+HMS_H);
             tft.print('?');
 
             time_was_bad = true;
@@ -605,25 +927,25 @@ void updateClocks(bool all)
     }
 
     // persist
-    prev_sc = sc;
+    prev_sc = tp.sc;
 
     // draw H:M if either changes
-    if (all || mn != prev_mn || hr != prev_hr) {
+    if (all || tp.mn != prev_mn || tp.hr != prev_hr) {
 
         resetWatchdog();
 
         // draw H:M roughly right-justified in left 2/3
         selectFontStyle (BOLD_FONT, LARGE_FONT);
-        sprintf (buf, "%02d:%02d", hr, mn);
+        sprintf (buf, "%02d:%02d", tp.hr, tp.mn);
         uint16_t w = 135;
         int16_t x = clock_b.x+2*clock_b.w/3-w;
-        tft.fillRect (x, clock_b.y, w, hms_h+2, RA8875_BLACK);
-        tft.setCursor(x, clock_b.y+hms_h);
+        tft.fillRect (x, clock_b.y, w, HMS_H+2, RA8875_BLACK);
+        tft.setCursor(x, clock_b.y+HMS_H);
         tft.setTextColor(HMS_C);
         tft.print(buf);
 
         // update BC time marker if new hour and up
-        if (prev_hr != hr) {
+        if (prev_hr != tp.hr) {
             PlotPane bc_pane = findPaneChoiceNow(PLOT_CH_BC);
             if (bc_pane != PANE_NONE)
                 plotBandConditions (plot_b[bc_pane], 0, NULL, NULL);
@@ -633,101 +955,26 @@ void updateClocks(bool all)
         draw_other_times = true;
 
         // persist
-        prev_mn = mn;
-        prev_hr = hr;
+        prev_mn = tp.mn;
+        prev_hr = tp.hr;
     }
 
     // draw date if new day
-    if (all || dy != prev_dy || wd != prev_wd || mo != prev_mo || yr != prev_yr) {
+    if (all || tp.dy != prev_dy || tp.wd != prev_wd || tp.mo != prev_mo || tp.yr != prev_yr) {
 
         resetWatchdog();
-
-        // clear
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
-        tft.fillRect(clock_b.x, clock_b.y+hms_h+5, clock_b.w-UTC_W, clock_b.h-hms_h-4, RA8875_BLACK);
-        uint16_t y = clock_b.y + clock_b.h - 8; // descent
-        tft.setTextColor(MDY_C);
-
-        // print in desired format
-        if (getDOY()) {
-
-            // Weekday DOY <doy> year
-
-            // find day of year
-            tmElements_t tm;
-            breakTime (t, tm);
-            tm.Second = tm.Minute = tm.Hour = 0;
-            tm.Month = tm.Day = 1;
-            time_t year0 = makeTime (tm);
-            int doy = (t - year0) / (24*3600) + 1;
-
-            sprintf (buf, "%s DOY %d  %d", dayShortStr(wd), doy, yr);
-            uint16_t bw = getTextWidth (buf);
-            int16_t x = clock_b.x + (clock_b.w-UTC_W-bw)/2;
-            if (x < 0)
-                x = 0;
-            tft.setCursor(x, y);
-            tft.print(buf);
-
-        } else {
-
-            // N.B. dayShortStr() and monthShortStr() share the same static pointer
-
-            if (getDateFormat() == DF_DMY) {
-
-                // Weekday, date month year
-
-                int l = sprintf (buf, "%s, ", dayShortStr(wd));
-                sprintf (buf+l, "%2d %s %d", dy, monthShortStr(mo), yr);
-                uint16_t bw = getTextWidth (buf);
-                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
-                if (x < 0)
-                    x = 0;
-                tft.setCursor(x, y);
-                tft.print(buf);
-
-            } else if (getDateFormat() == DF_MDY) {
-
-                // Weekday month date, year
-
-                int l = sprintf (buf, "%s  ", dayShortStr(wd));
-                sprintf (buf+l, "%s %2d, %d", monthShortStr(mo), dy, yr);
-                uint16_t bw = getTextWidth (buf);
-                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
-                if (x < 0)
-                    x = 0;
-                tft.setCursor(x, y);
-                tft.print(buf);
-
-            } else if (getDateFormat() == DF_YMD) {
-
-                // Weekday, year month date
-
-                int l = sprintf (buf, "%s,  ", dayShortStr(wd));
-                sprintf (buf+l, "%d %s %2d", yr, monthShortStr(mo), dy);
-                uint16_t bw = getTextWidth (buf);
-                int16_t x = clock_b.x + (clock_b.w-bw-25)/2;
-                if (x < 0)
-                    x = 0;
-                tft.setCursor(x, y);
-                tft.print(buf);
-
-            } else {
-
-                fatalError (_FX("Bug! bad format: %d"), (int)getDateFormat());
-
-            }
-        }
 
         // update other info
         draw_other_times = true;
 
         // persist
-        prev_yr = yr;
-        prev_mo = mo;
-        prev_dy = dy;
-        prev_wd = wd;
+        prev_yr = tp.yr;
+        prev_mo = tp.mo;
+        prev_dy = tp.dy;
+        prev_wd = tp.wd;
     }
+
+    drawAuxTime (all, tp);
 
     if (draw_other_times) {
 
@@ -739,7 +986,7 @@ void updateClocks(bool all)
             break;
         case DETIME_ANALOG:     // fallthru
         case DETIME_ANALOG_DTTM:
-            drawAnalogClock (t + de_tz.tz_secs);
+            drawAnalogClock (tp.t + de_tz.tz_secs);
             break;
         case DETIME_INFO:
             drawDECalTime(false);
@@ -747,7 +994,7 @@ void updateClocks(bool all)
             break;
         case DETIME_DIGITAL_12: // fallthru
         case DETIME_DIGITAL_24: // fallthru
-            drawDigitalClock (t + de_tz.tz_secs);
+            drawDigitalClock (tp.t + de_tz.tz_secs);
             break;
         default:
             fatalError (_FX("Bug! unknown de fmt %d"), de_time_fmt);
@@ -764,7 +1011,7 @@ void updateClocks(bool all)
     // flash plot panes that are rotating
     for (int i = 0; i < PANE_N; i++) {
         if (paneIsRotating((PlotPane)i)) {
-            showRotatingBorder ((sc&1) == 1, (PlotPane)i);
+            showRotatingBorder ((tp.sc&1) == 1, (PlotPane)i);
         }
     }
 
@@ -804,169 +1051,186 @@ void drawDXSunRiseSetInfo()
 
 }
 
-/* return whether touch event at s was in clock_b OTHER THAN lkscrn_b and stopwatch_b which have already
- *   been checked.
- * if so, offer menu to change time then update utc_offset and possibly restart maps if large change.
+/* return whether touch event at s is in clock_b (OTHER THAN lkscrn_b and stopwatch_b which have already
+ *   been checked) or auxtime_b.
+ * if so, offer menus to change time or aux format.
  * N.B. we expect caller to call updateClocks if we return true.
  */
 bool checkClockTouch (SCoord &s)
 {
-    // ignore if not in clock box or in stopwatch_b or lkscrn_b
-    if (!inBox (s, clock_b) || inBox (s, lkscrn_b) || inBox (s, stopwatch_b))
-        return (false);
+    bool ours = false;
 
-    // find touch position within clock_b
-    uint16_t dx = s.x - clock_b.x;
-    uint16_t dy = s.y - clock_b.y;
+    if (inBox (s, auxtime_b)) {
 
-    // get time state now
-    uint32_t real_utc = now();
-    uint32_t user_utc = real_utc + utc_offset;          // don't use nowWO
-    int32_t off0 = utc_offset;
+        runAuxTimeMenu();
 
-    // check a few special cases but mostly we put up a menu to allow editing time
+        // we never change the time still need to claim the touch and restore under menu
+        ours = true;
 
-    if (dx >= clock_b.w-UTC_W && dy <= UTC_H) {
+    } else if (inBox (s, clock_b) && !inBox (s, lkscrn_b) && !inBox (s, stopwatch_b)) {
 
-        // tapped UTC "button": return to UTC if not already
+        // tapped here
+        ours = true;
 
-        if (utc_offset != 0 || !clockTimeOk()) {
-            utc_offset = 0;
-            setSyncProvider (getTime);
-        }
+        // find touch position within clock_b
+        uint16_t dx = s.x - clock_b.x;
+        uint16_t dy = s.y - clock_b.y;
 
-    } else if (dx < 7*clock_b.w/8) {
+        // get time state now
+        uint32_t real_utc = now();
+        uint32_t user_utc = real_utc + utc_offset;          // don't use nowWO
+        int32_t off0 = utc_offset;
 
-        // show and engage menu of time change choices
+        // check a few special cases but mostly we put up a menu to allow editing time
 
-        // list of menu choices. N.B. must be in same order as mitems[]
-        enum {     
-            _CT_TITLE,
-            _CT_DIRLBL,
-                _CT_DIR_FRW,
-                _CT_DIR_BKW,
-            _CT_MODLBL,
-                _CT_MOD_1MIN,
-                _CT_MOD_10MINS,
-                _CT_MOD_1HOUR,
-                _CT_MOD_2HOURS,
-                _CT_MOD_1DAY,
-                _CT_MOD_1WEEK,
-                _CT_MOD_1MON,
-                _CT_MOD_1YEAR,
+        if (dx >= clock_b.w-UTC_W && dy <= UTC_H) {
+
+            // tapped UTC "button": return to UTC if not already
+
+            if (utc_offset != 0 || !clockTimeOk()) {
+                utc_offset = 0;
+                setSyncProvider (getTime);
+            }
+
+        } else if (dx < 7*clock_b.w/8) {
+
+            // show and engage menu of time change choices
+
+            // list of menu choices. N.B. must be in same order as mitems[]
+            enum {     
+                _CT_TITLE,
+                _CT_DIRLBL,
+                    _CT_DIR_FRW,
+                    _CT_DIR_BKW,
+                _CT_MODLBL,
+                    _CT_MOD_1MIN,
+                    _CT_MOD_10MINS,
+                    _CT_MOD_1HOUR,
+                    _CT_MOD_2HOURS,
+                    _CT_MOD_1DAY,
+                    _CT_MOD_1WEEK,
+                    _CT_MOD_1MON,
+                    _CT_MOD_1YEAR,
                 _CT_MOD_0SECS,
-            _CT_N
-        };
-        #define _CT_INDENT1 5
-        #define _CT_INDENT2 10
+                _CT_N
+            };
+            #define _CT_INDENT1 5
+            #define _CT_INDENT2 10
 
-        // preset to previous settings
-        static uint8_t prev_dir = _CT_DIR_FRW;
-        static uint8_t prev_mod = _CT_MOD_1HOUR;
+            // preset to previous settings
+            static uint8_t prev_dir = _CT_DIR_FRW;
+            static uint8_t prev_mod = _CT_MOD_1HOUR;
 
-        // menu
-        MenuItem mitems[_CT_N] = {
-            { MENU_LABEL, false, 0, _CT_INDENT1, " Change Time"},
-            { MENU_LABEL, false, 0, _CT_INDENT1, "Direction:"},
-                { MENU_1OFN, prev_dir == _CT_DIR_FRW, 1, _CT_INDENT2, "Forward"},
-                { MENU_1OFN, prev_dir == _CT_DIR_BKW, 1, _CT_INDENT2, "Backward"},
-            { MENU_LABEL, false, 2, _CT_INDENT1, "Amount:"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1MIN, 3, _CT_INDENT2, "1 minute"},
-                { MENU_1OFN, prev_mod == _CT_MOD_10MINS, 3, _CT_INDENT2, "10 minutes"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1HOUR, 3, _CT_INDENT2, "1 hour"},
-                { MENU_1OFN, prev_mod == _CT_MOD_2HOURS, 3, _CT_INDENT2, "2 hours"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1DAY, 3, _CT_INDENT2, "1 day"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1WEEK, 3, _CT_INDENT2, "1 week"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1MON, 3, _CT_INDENT2, "1 month"},
-                { MENU_1OFN, prev_mod == _CT_MOD_1YEAR, 3, _CT_INDENT2, "1 year"},
-                { MENU_1OFN, prev_mod == _CT_MOD_0SECS, 3, _CT_INDENT2, "Zero seconds"},
-        };
+            // menu
+            MenuItem mitems[_CT_N] = {
+                { MENU_LABEL, false, 0, _CT_INDENT1, " Change Time"},
+                { MENU_LABEL, false, 0, _CT_INDENT1, "Direction:"},
+                    { MENU_1OFN, prev_dir == _CT_DIR_FRW, 1, _CT_INDENT2, "Forward"},
+                    { MENU_1OFN, prev_dir == _CT_DIR_BKW, 1, _CT_INDENT2, "Backward"},
+                { MENU_LABEL, false, 2, _CT_INDENT1, "Amount:"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1MIN, 3, _CT_INDENT2, "1 minute"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_10MINS, 3, _CT_INDENT2, "10 minutes"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1HOUR, 3, _CT_INDENT2, "1 hour"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_2HOURS, 3, _CT_INDENT2, "2 hours"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1DAY, 3, _CT_INDENT2, "1 day"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1WEEK, 3, _CT_INDENT2, "1 week"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1MON, 3, _CT_INDENT2, "1 month"},
+                    { MENU_01OFN, prev_mod == _CT_MOD_1YEAR, 3, _CT_INDENT2, "1 year"},
+                { MENU_TOGGLE, false, 4, _CT_INDENT1, "Zero seconds"},
+            };
 
-        // run, do nothing if cancelled
-        SBox menu_b = clock_b;
-        menu_b.w = 0;   // shrink to fit
-        menu_b.x += 20;
-        SBox ok_b;
-        MenuInfo menu = {menu_b, ok_b, false, false, 1, _CT_N, mitems};
-        if (runMenu(menu)) {
+            // run, do nothing if cancelled
+            SBox menu_b = clock_b;
+            menu_b.w = 0;   // shrink to fit
+            menu_b.x += 20;
+            SBox ok_b;
+            MenuInfo menu = {menu_b, ok_b, false, false, 1, _CT_N, mitems};
+            if (runMenu(menu)) {
 
-            // find change direction
-            int sign = mitems[_CT_DIR_FRW].set ? 1 : -1;
-            prev_dir = sign > 0 ? _CT_DIR_FRW : _CT_DIR_BKW;
+                // find change direction
+                int sign = mitems[_CT_DIR_FRW].set ? 1 : -1;
+                prev_dir = sign > 0 ? _CT_DIR_FRW : _CT_DIR_BKW;
 
-            // update utc_offset according to desired change
-            if (mitems[_CT_MOD_1MIN].set) {
-                utc_offset += 60 * sign;
-                prev_mod = _CT_MOD_1MIN;
-            } else if (mitems[_CT_MOD_10MINS].set) {
-                utc_offset += 600 * sign;
-                prev_mod = _CT_MOD_10MINS;
-            } else if (mitems[_CT_MOD_1HOUR].set) {
-                utc_offset += 3600 * sign;
-                prev_mod = _CT_MOD_1HOUR;
-            } else if (mitems[_CT_MOD_2HOURS].set) {
-                utc_offset += 2*3600 * sign;
-                prev_mod = _CT_MOD_2HOURS;
-            } else if (mitems[_CT_MOD_1DAY].set) {
-                utc_offset += SECSPERDAY * sign;
-                prev_mod = _CT_MOD_1DAY;
-            } else if (mitems[_CT_MOD_1WEEK].set) {
-                utc_offset += 7*SECSPERDAY * sign;
-                prev_mod = _CT_MOD_1WEEK;
-            } else if (mitems[_CT_MOD_1MON].set) {
-                tmElements_t tm;
-                breakTime (user_utc, tm);
-                if (sign > 0) {
-                    if (++tm.Month > 12) {
-                        tm.Month = 1;
-                        tm.Year += 1;
+                // update utc_offset according to desired change
+                if (mitems[_CT_MOD_1MIN].set) {
+                    utc_offset += 60 * sign;
+                    prev_mod = _CT_MOD_1MIN;
+                } else if (mitems[_CT_MOD_10MINS].set) {
+                    utc_offset += 600 * sign;
+                    prev_mod = _CT_MOD_10MINS;
+                } else if (mitems[_CT_MOD_1HOUR].set) {
+                    utc_offset += 3600 * sign;
+                    prev_mod = _CT_MOD_1HOUR;
+                } else if (mitems[_CT_MOD_2HOURS].set) {
+                    utc_offset += 2*3600 * sign;
+                    prev_mod = _CT_MOD_2HOURS;
+                } else if (mitems[_CT_MOD_1DAY].set) {
+                    utc_offset += SECSPERDAY * sign;
+                    prev_mod = _CT_MOD_1DAY;
+                } else if (mitems[_CT_MOD_1WEEK].set) {
+                    utc_offset += 7*SECSPERDAY * sign;
+                    prev_mod = _CT_MOD_1WEEK;
+                } else if (mitems[_CT_MOD_1MON].set) {
+                    tmElements_t tm;
+                    breakTime (user_utc, tm);
+                    if (sign > 0) {
+                        if (++tm.Month > 12) {
+                            tm.Month = 1;
+                            tm.Year += 1;
+                        }
+                    } else {
+                        if (--tm.Month == 0) {
+                            tm.Month = 12;
+                            tm.Year -= 1;
+                        }
                     }
+                    utc_offset = makeTime(tm) - real_utc;
+                    prev_mod = _CT_MOD_1MON;
+                } else if (mitems[_CT_MOD_1YEAR].set) {
+                    tmElements_t tm;
+                    breakTime (user_utc, tm);
+                    tm.Year += sign;
+                    utc_offset = makeTime(tm) - real_utc;
+                    prev_mod = _CT_MOD_1YEAR;
                 } else {
-                    if (--tm.Month == 0) {
-                        tm.Month = 12;
-                        tm.Year -= 1;
-                    }
+                    prev_mod = _CT_TITLE;               // any otherwise unused value
                 }
-                utc_offset = makeTime(tm) - real_utc;
-                prev_mod = _CT_MOD_1MON;
-            } else if (mitems[_CT_MOD_1YEAR].set) {
-                tmElements_t tm;
-                breakTime (user_utc, tm);
-                tm.Year += sign;
-                utc_offset = makeTime(tm) - real_utc;
-                prev_mod = _CT_MOD_1YEAR;
-            } else if (mitems[_CT_MOD_0SECS].set) {
-                time_t ut = now();      // need fresh time because of time spent in menu
-                utc_offset = 60*((ut + utc_offset)/60) - ut;
-                prev_mod = _CT_MOD_0SECS;
-            } else {
-                fatalError (_FX("No clock menu set"));
+
+                // then zero seconds too if desired
+                if (mitems[_CT_MOD_0SECS].set) {
+                    time_t ut = now();      // need fresh time because of time spent in menu
+                    utc_offset = 60*((ut + utc_offset)/60) - ut;
+                }
             }
         }
+
+        // save new offset
+        NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
+
+        // show whether UTC now
+        drawUTCButton();
+
+        // restart systems if likely effected by time change
+        int dt = abs (utc_offset - off0);
+        if (dt > 5*60) {
+            initWiFiRetry();        // this will also update moon
+        } else {
+            updateMoonPane (false);
+        }
+        if (dt >= 30)
+            displaySatInfo();
+
     }
 
-    // save new offset
-    NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
-    logState();
-
-    // show whether UTC now
-    drawUTCButton();
-
-    // restart systems if likely effected by time change
-    int dt = abs (utc_offset - off0);
-    if (dt > 5*60) {
-        initWiFiRetry();        // this will also update moon
-    } else {
-        updateMoonPane (false);
+    if (ours) {
+        // restore under menu
+        drawOneTimeDE();
+        drawDEInfo();
+        // log changes
+        logState();
     }
-    if (dt >= 30)
-        displaySatInfo();
 
-    // menu probably clobbered this
-    drawOneTimeDE();
-    drawDEInfo();
-
-    return (true);
+    return (ours);
 }
 
 /* return DE today's weekday 1..7 == Sun..Sat

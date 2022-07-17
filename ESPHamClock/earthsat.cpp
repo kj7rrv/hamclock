@@ -1145,16 +1145,19 @@ static bool satEpochOk(time_t t)
 
 }
 
-/* show pass time and process key rise/set alarms
+/* show pass time and process key rise/set alarms.
+ * return whether set event just occurred.
  */
-static void drawSatRSEvents(bool force)
+static bool drawSatRSEvents(bool force)
 {
     if (!sat)
-        return;
+        return (false);
 
     DateTime t_now = userDateTime(nowWO());
     float days_to_rise = sat_rs.rise_time - t_now;
     float days_to_set = sat_rs.set_time - t_now;
+
+    bool set = false;
 
     if (sat_rs.rise_time < sat_rs.set_time) {
         if (t_now < sat_rs.rise_time) {
@@ -1167,8 +1170,8 @@ static void drawSatRSEvents(bool force)
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
-            // just set, time to find next pass
-            displaySatInfo();
+            // just set
+            set = true;
             risetAlarm(-1);
         }
     } else {
@@ -1178,11 +1181,13 @@ static void drawSatRSEvents(bool force)
             drawSatNow();
             risetAlarm(days_to_set < ALARM_DT ? SETTING_RATE : 0);
         } else {
-            // just set, time to find next pass
+            // just set
+            set = true;
             risetAlarm(-1);
-            displaySatInfo();
         }
     }
+
+    return (set);
 }
 
 /* set the satellite observing location
@@ -1280,7 +1285,10 @@ void updateSatPass()
     }
 
     // show rise/set
-    drawSatRSEvents(false);
+    if (drawSatRSEvents(false)) {
+        // next pass
+        displaySatInfo();
+    }
 }
 
 /* compute satellite geocentric path into sat_path[] and footprint into sat_foot[].
@@ -1520,7 +1528,7 @@ void displaySatInfo()
     findNextPass(sat_name, nowWO(), sat_rs);
     drawSatName();
     drawNextPass();
-    drawSatRSEvents(true);
+    (void) drawSatRSEvents(true);       // already checked rise/set
 }
 
 /* present list of satellites and let user select up to one, preselecting last known if any.

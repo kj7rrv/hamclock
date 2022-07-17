@@ -14,9 +14,11 @@ const char *svr_host = "clearskyinstitute.com";
 // default web server port
 int svr_port = SERVERPORT;
 
-// clock and stopwatch box
-SBox clock_b = { 0, 65, 230, 80};
+// clock, aux time and stopwatch boxes
+SBox clock_b = { 0, 65, 230, 49};
+SBox auxtime_b = { 0, 114, 205, 31};
 SBox stopwatch_b = {149, 93, 38, 22};
+SBox lkscrn_b = {216, 117, 13, 20};     // size must match HC_RUNNER_W/H base size
 
 // DE and DX map boxes
 SBox dx_info_b;                         // dx info location
@@ -89,8 +91,6 @@ static int rssi_avg;                            // running rssi mean
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
 SBox desrss_b, dxsrss_b;
 
-// screen lock or demo mode control -- size must match HC_RUNMAN_W/H base size
-SBox lkscrn_b = {216, 117, 13, 20};
 
 // WiFi touch control
 TouchType wifi_tt;
@@ -669,10 +669,6 @@ void initScreen()
     tft.drawLine (tft.width()-1, map_b.y-1, tft.width()-1, tft.height()-1, GRAY);       // right
     tft.drawLine (map_b.x-1, map_b.y-1, map_b.x-1, tft.height()-1, GRAY);               // left of map
     tft.drawLine (0, dx_info_b.y, map_b.x-1, dx_info_b.y, GRAY);                        // de/dx divider
-
-    // init each pane
-    for (int i = 0; i < PANE_N; i++)
-        setPlotChoice ((PlotPane)i, plot_ch[i]);
 
     // one-time info
     drawOneTimeDE();

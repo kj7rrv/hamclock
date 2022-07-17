@@ -1749,6 +1749,43 @@ static bool setWiFiAlarm (WiFiClient &client, char line[])
     return (true);
 }
 
+/* remote command to set the aux time format
+ */
+static bool setWiFiAuxTime (WiFiClient &client, char line[])
+{
+    // parse
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "format";
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // look for matching name
+    bool found = false;
+    if (wa.found[0]) {
+        for (int i = 0; i < AUXT_N; i++) {
+            if (strcmp (wa.value[0], auxtime_names[i]) == 0) {
+                auxtime = (AuxTimeFormat)i;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        strcpy (line, garbcmd);
+        return (false);
+    }
+
+    // good: engage
+    updateClocks(true);
+
+    // ack
+    startPlainText (client);
+    client.println (wa.value[0]);
+
+    return (true);
+}
+
 /* remote command to set display on or off
  */
 static bool setWiFiDisplayOnOff (WiFiClient &client, char line[])
@@ -2543,6 +2580,7 @@ static bool setWiFiTime (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "ISO";
     wa.name[wa.nargs++] = "unix";
     wa.name[wa.nargs++] = "Now";
+    wa.name[wa.nargs++] = "change";
 
     // parse
     if (!parseWebCommand (wa, line, line))
@@ -2550,7 +2588,11 @@ static bool setWiFiTime (WiFiClient &client, char line[])
 
 
     // crack
-    if (wa.found[2] && wa.value[2] == NULL) {
+    if (wa.found[3] && wa.value[3] != NULL) {
+
+        changeTime (nowWO() + atol(wa.value[3]));
+
+    } else if (wa.found[2] && wa.value[2] == NULL) {
 
         changeTime (0);
 
@@ -3036,10 +3078,10 @@ static bool getWiFiLiveUpdate (WiFiClient &client, char *errmsg)
         return (false);
     }
 
-    // find time correction so next message arrives just after worst-case refresh
+    // find time correction so next message arrives just after refresh with good margin
     struct timeval arrive_tv;
     gettimeofday (&arrive_tv, NULL);
-    int send_corr = (((2*REFRESH_US - arrive_tv.tv_usec)/10000) + 1000) % 100; // csecs 0 .. 99
+    int send_corr = (((4*REFRESH_US - arrive_tv.tv_usec)/10000) + 1000) % 100; // csecs 0 .. 99
 
     // note in use
     last_live = arrive_tv.tv_sec;
@@ -3200,7 +3242,7 @@ static bool getWiFiLiveUpdate (WiFiClient &client, char *errmsg)
         printf ("LIVE:   write hdr %d and png in %ld usec\n", (int)sizeof(hdr),
                         (tv1.tv_sec-tv0.tv_sec)*1000000 + (tv1.tv_usec-tv0.tv_usec));
         gettimeofday (&tv0, NULL);
-        printf ("LIVE:   message arrived %d msecs after whole sec\n", (int)(arrive_tv.tv_usec/1000));
+        printf ("LIVE:   message arrived %d msecs after %ld\n", (int)(arrive_tv.tv_usec/1000), (long)nowWO());
     }
 
     // save as most recent complete image for this client
@@ -3377,8 +3419,9 @@ static const CmdTble command_table[] PROGMEM = {
     { "get_sys.txt ",       getWiFiSys,            "get system stats" },
     { "get_time.txt ",      getWiFiTime,           "get current time" },
     { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
+    { "set_auxtime?",       setWiFiAuxTime,        "format=[one_from_menu]" },
     { "set_cluster?",       setWiFiCluster,        "host=xxx&port=yyy" },
-    { "set_defmt?",         setWiFiDEformat,       "fmt=[one from menu]&atin=RSAtAt|RSInAgo" },
+    { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
@@ -3390,6 +3433,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_sattle?",        setWiFiSatTLE,         "name=abc&t1=line1&t2=line2" },
     { "set_senscorr?",      setWiFiSensorCorr,     "sensor=76|77&dTemp=X&dPres=Y" },
     { "set_stopwatch?",     setWiFiStopwatch,      "reset|run|stop|lap|countdown=mins" },
+    { "set_time?",          setWiFiTime,           "change=delta_seconds" },
     { "set_time?",          setWiFiTime,           "ISO=YYYY-MM-DDTHH:MM:SS" },
     { "set_time?",          setWiFiTime,           "Now" },
     { "set_time?",          setWiFiTime,           "unix=secs_since_1970" },

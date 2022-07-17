@@ -214,36 +214,36 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
 
         // prepare the appropriate plot
         int16_t *q;
-        const char *ylabel;
+        char title[32];
         uint16_t color;
         switch (ch) {
         case PLOT_CH_TEMPERATURE:
             q = dp->t;
             if (useMetricUnits())
-                ylabel = _FX("Temperature, C");
+                snprintf (title, sizeof(title), _FX("I2C %x: Temperature, C"), bme_i2c[i]);
             else
-                ylabel = _FX("Temperature, F");
+                snprintf (title, sizeof(title), _FX("I2C %x: Temperature, F"), bme_i2c[i]);
             color = TEMP_COLOR;
             break;
         case PLOT_CH_PRESSURE:
             q = dp->p;
             if (useMetricUnits())
-                ylabel = _FX("Pressure, hPa");
+                snprintf (title, sizeof(title), _FX("I2C %x: Pressure, hPa"), bme_i2c[i]);
             else
-                ylabel = _FX("Pressure, inHg");
+                snprintf (title, sizeof(title), _FX("I2C %x: Pressure, inHg"), bme_i2c[i]);
             color = PRES_COLOR;
             break;
         case PLOT_CH_HUMIDITY:
             q = dp->h;
-            ylabel = _FX("Humidity, %");
+            snprintf (title, sizeof(title), _FX("I2C %x: Humidity, %%"), bme_i2c[i]);
             color = HUM_COLOR;
             break;
         case PLOT_CH_DEWPOINT:
             q = NULL;               // DP is derived, see below
             if (useMetricUnits())
-                ylabel = _FX("Dew point, C");
+                snprintf (title, sizeof(title), _FX("I2C %x: Dew point, C"), bme_i2c[i]);
             else
-                ylabel = _FX("Dew point, F");
+                snprintf (title, sizeof(title), _FX("I2C %x: Dew point, F"), bme_i2c[i]);
             color = DP_COLOR;
             break;
         default: 
@@ -288,25 +288,21 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
             }
         }
 
-        // prep appropriate plot box
+        // prep plot box
         SBox plbox = box;                                       // start assuming whole
-        char ylplusaddr[strlen(ylabel)+20];
         if (getNBMEConnected() > 1) {
             plbox.h /= 2;                                       // 2 sensors so plot must be half height
             if (i > 0)
                 plbox.y += plbox.h;                             // second sensor uses lower half
-            // add addr to ylabel if more than one sensor
-            snprintf (ylplusaddr, sizeof(ylplusaddr), _FX("I2C %x: %s"), bme_i2c[i], ylabel);
-            ylabel = ylplusaddr;
         }
 
         // plot in plbox, showing a bit more precision for imperial pressure
         if (ch == PLOT_CH_PRESSURE && !useMetricUnits()) {
             char buf[32];
             sprintf (buf, "%.2f", value_now);
-            plotXYstr (plbox, x, y, nxy, xlabel, ylabel, color, 0, 0, buf);
+            plotXYstr (plbox, x, y, nxy, xlabel, title, color, 0, 0, buf);
         } else {
-            plotXY (plbox, x, y, nxy, xlabel, ylabel, color, 0, 0, value_now);
+            plotXY (plbox, x, y, nxy, xlabel, title, color, 0, 0, value_now);
         }
     }
 }

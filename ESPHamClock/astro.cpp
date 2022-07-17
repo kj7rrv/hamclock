@@ -29,11 +29,16 @@ typedef struct {
 #define deg2rad(x)       ((x)*M_PI/180)
 #define rad2deg(x)       ((x)*180/M_PI)
 
+void now_lst (double mjd, double lng, double *lst);
+
 #else
 
 #include "HamClock.h"
 
-#endif
+#endif  // _UNIT_TEST
+
+
+
 
 #define hr2deg(x)        ((x)*15.)
 #define deg2hr(x)        ((x)/15.)
@@ -503,13 +508,6 @@ static void utc_gst (double mjd, double utc, double *gst)
 }
 
 
-static void now_lst (double mjd, double lng, double *lst)
-{
-        utc_gst (mjd_day(mjd), mjd_hr(mjd), lst);
-        *lst += rad2hr(lng);
-        range (lst, 24.0);
-}
-
 // return days since 1900 jan 0.5
 static double unix2mjd (long unix_time)
 {
@@ -791,7 +789,7 @@ static void solarCir (time_t t0, const LatLong &ll, AstroCir &cir)
 
         now_lst (mjd, ll.lng, &lst);
         ha = hr2rad(lst) - ra;
-        // printf ("Sun lng %g lst %g ra %g ha %g\n", ll.lng_d, hr2deg(lst), rad2deg(ra), rad2deg(ha));
+        // printf ("Sun @ %ld: lng %g lsn %g lst %g ra %g ha %g\n", nowWO(), ll.lng_d, rad2deg(lsn), hr2deg(lst), rad2deg(ra), rad2deg(ha));
         hadec_aa (ll.lat, ha, dec, &alt, &az);
         range (&az, 2*M_PI);
         cir.el = alt;
@@ -811,6 +809,16 @@ static void solarCir (time_t t0, const LatLong &ll, AstroCir &cir)
  *
  *******************************************************************************************/
 
+
+/* convert this module's notion of mjd to lst at the given longitude.
+ * N.B. call with ((unix_time/86400.0) + 2440587.5 - 2415020.0)
+ */
+void now_lst (double mjd, double lng, double *lst)
+{
+        utc_gst (mjd_day(mjd), mjd_hr(mjd), lst);
+        *lst += rad2hr(lng);
+        range (lst, 24.0);
+}
 
 void getLunarCir (time_t t0, const LatLong &ll, AstroCir &cir)
 {
@@ -922,6 +930,13 @@ int main (int ac, char *av[])
         setenv ("TZ", "", 1);                   // UTC
         tzset();
         time_t t0 = mktime (&tms);
+
+        double lst;
+        now_lst (unix2mjd (t0), ll.lng, &lst);
+        int lst_hr = lst;
+        int lst_mn = (lst - lst_hr)*60;
+        int lst_sc = ((lst - lst_hr)*60 - lst_mn)*60;
+        printf (" LST:   %9.6f %02d:%02d:%02d\n", lst, lst_hr, lst_mn, lst_sc);
 
         // find sun info
         getSolarCir (t0, ll, cir);

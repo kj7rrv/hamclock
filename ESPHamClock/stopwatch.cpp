@@ -248,10 +248,11 @@ static void setAlarmPin (bool set) { (void) set; }
 #define BDC_HMCW        (2*BDC_HMW/3)           // colon spacing
 #define BDC_HMH         (2*BDC_HMW)             // digit height
 #define BDC_HMY0        (BAC_WXY+BAC_WXH+20)    // top y
-#define BDC_HMLT        (BDC_HMW/5)             // line thickness
+#define BDC_HMLT        (BDC_HMW/6)             // line thickness
 #define BDC_HMGAP       (BDC_HMW/3)             // gap between adjacent digits
 #define BDC_HMX0        (400-(4*BDC_HMW+2*BDC_HMGAP+BDC_HMCW)/2)     // left x for hh:mm
 #define BDC_HMCR        (BDC_HMLT/2)            // colon radius
+#define BCD_SSZRED      3                       // reduce seconds size by this factor
 
 // contols common to both big clock styles
 #define BC_CDP_X        2                       // countdown period x
@@ -421,9 +422,9 @@ static void drawDigit (const SBox &b, int digit, uint16_t lt)
         break;
     case 3:
         tft.fillRect (b.x, b.y, w, t, sw_col);
-        tft.fillRect (b.x+w-t, b.y+t, t, h-2*t, sw_col);
-        tft.fillRect (b.x, b.y+ho2-to2, w-t, t, sw_col);
+        tft.fillRect (b.x+t, b.y+ho2-to2, w-t, t, sw_col);
         tft.fillRect (b.x, b.y+h-t, w, t, sw_col);
+        tft.fillRect (b.x+w-t, b.y+t, t, h-2*t, sw_col);
         break;
     case 4:
         tft.fillRect (b.x, b.y, t, ho2+to2, sw_col);
@@ -806,7 +807,7 @@ static void drawBCAwareness (bool force)
 /* refresh detailed date info in bcdate_b.
  * N.B. we never erase because Wednesday overlays clock
  */
-static void drawBCDate (int hr, int dy, int wd, int mo)
+static void drawBCDateInfo (int hr, int dy, int wd, int mo)
 {
     // day
     selectFontStyle (BOLD_FONT, LARGE_FONT);
@@ -824,12 +825,15 @@ static void drawBCDate (int hr, int dy, int wd, int mo)
 
     // AM/PM/UTC
     tft.setCursor (bcdate_b.x, bcdate_b.y + 125);
-    if (sws_display == SWD_BCANALOG || (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
+    if (sws_display == SWD_BCANALOG || (bc_bits & (SW_DB12HBIT|SW_LSTBIT|SW_UTCBIT)) == SW_DB12HBIT) {
         // AM/PM always for analog or 12 hour digital
         tft.print (hr < 12 ? "AM" : "PM");
     } else if (sws_display == SWD_BCDIGITAL && (bc_bits & SW_UTCBIT)) {
         // UTC
         tft.print ("UTC");
+    } else if (sws_display == SWD_BCDIGITAL && (bc_bits & SW_LSTBIT)) {
+        // LST
+        tft.print ("LST");
     } else if (sws_display == SWD_BCDIGITAL && !(bc_bits & SW_UTCBIT)) {
         // UTC + TZ
         tft.printf ("UTC%+g", de_tz.tz_secs/3600.0F);
@@ -842,7 +846,7 @@ static void drawBCDate (int hr, int dy, int wd, int mo)
 
 /* refresh DE weather in bcwx_b, return whether successful
  */
-static bool drawBCWx(void)
+static bool drawBCDEWxInfo(void)
 {
     WXInfo wi;
     char ynot[100];
@@ -861,7 +865,7 @@ static bool drawBCWx(void)
 /* draw space weather in upper right.
  * just numbers, plus prompts if all
  */
-static void drawBCSpaceWx(bool all)
+static void drawBCSpaceWxInfo(bool all)
 {
     // freshen, draw if new or all
     if (!checkSpaceStats(now()) && !all)
@@ -946,7 +950,7 @@ static void drawBCSpaceWx(bool all)
         tft.print ("Kp");
     }
 
-    printFreeHeap (F("drawBCSpaceWx"));
+    printFreeHeap (F("drawBCSpaceWxInfo"));
 }
 
 /* draw the digital Big Clock 
@@ -954,37 +958,54 @@ static void drawBCSpaceWx(bool all)
 static void drawDigitalBigClock (bool all)
 {
     // persist to avoid drawing the same digits again
-    static time_t prev_t0;                              // previous report time
-    static uint8_t prev_mnten, prev_mnunit;             // previous mins tens and unit
-    static uint8_t prev_scten;                          // previous seconds tens and unit
-    static uint8_t prev_hr, prev_mo, prev_dy;           // previous drawn date info
-    static bool prev_leadhr;                            // previous whether leading hours tens digit
+    static time_t prev_t0;                                      // previous report time
+    static uint8_t prev_mnten, prev_mnunit;                     // previous mins tens and unit
+    static uint8_t prev_scten;                                  // previous seconds tens and unit
+    static uint8_t prev_hr, prev_mo, prev_dy;                   // previous drawn date info
+    static bool prev_leadhr;                                    // previous whether leading hours tens digit
 
     // get time now, including any user offset
     time_t t0 = nowWO();
-
-    // local unless utc
-    if (!(bc_bits & SW_UTCBIT))
-        t0 += de_tz.tz_secs;
 
     // done if same second unless all
     if (!all && t0 == prev_t0)
         return;
     prev_t0 = t0;
 
-    // crack open
-    int hr = hour(t0);
-    int mn = minute(t0);
-    int sc = second(t0);
-    int dy = day(t0);
-    int mo = month(t0);
+    // time components
+    int hr, mn, sc, mo, dy, wd;
+
+    // get utc, local or lst hr/mn/sc
+    if (bc_bits & SW_LSTBIT) {
+        double lst;                                             // hours
+        double astro_mjd = t0/86400.0 + 2440587.5 - 2415020.0;  // just for now_lst()
+        now_lst (astro_mjd, de_ll.lng, &lst);
+        hr = lst;
+        lst = (lst - hr)*60;                                    // now mins
+        mn = lst;
+        lst = (lst - mn)*60;                                    // now secs
+        sc = lst;
+        t0 += de_tz.tz_secs;                                    // now local
+    } else {
+        if (!(bc_bits & SW_UTCBIT))
+            t0 += de_tz.tz_secs;                                // now local
+        hr = hour(t0);
+        mn = minute(t0);
+        sc = second(t0);
+    }
+
+    // other components always from t0
+    mo = month(t0);
+    dy = day(t0);
+    wd = weekday(t0);
+
+    // decadal ranges to optimize drawing
     int hrten = hr/10;
     int hrunit = hr%10;
     int mnunit = mn%10;
 
     // handy
     bool want_secs = !(bc_bits & SW_NOSECBIT);
-    #define SECS_REDUCE        3               // reduce digits by this factor for seconds
 
     // initial box for drawDigit, walk right for each position
     SBox b;
@@ -995,7 +1016,7 @@ static void drawDigitalBigClock (bool all)
 
     // adjust x to center if no leading hour digit in 12 hour mode
     bool leadhr = true;
-    if ((bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT) {
+    if ((bc_bits & (SW_DB12HBIT|SW_UTCBIT|SW_LSTBIT)) == SW_DB12HBIT) {
         // 12 hours don't show leading 0
         int hr12 = hr%12;
         if (hr12 == 0)
@@ -1012,7 +1033,7 @@ static void drawDigitalBigClock (bool all)
 
     // also adjust x if showing seconds
     if (want_secs)
-        b.x -= (BDC_HMGAP + (2*BDC_HMW + BDC_HMGAP)/SECS_REDUCE)/2;     // see below
+        b.x -= (BDC_HMGAP + (2*BDC_HMW + BDC_HMGAP)/BCD_SSZRED)/2;     // see below
 
     // restart if changing whether we have a leading hour digit
     if (leadhr != prev_leadhr)
@@ -1024,7 +1045,7 @@ static void drawDigitalBigClock (bool all)
         eraseScreen();
         all = true;     // insure everything gets redrawn
         if (bc_bits & SW_BCDATEBIT)
-            drawBCDate (hr, dy, weekday(t0), mo);
+            drawBCDateInfo (hr, dy, wd, mo);
         prev_dy = dy;
         prev_mo = mo;
     }
@@ -1082,19 +1103,19 @@ static void drawDigitalBigClock (bool all)
 
         // seconds are shown reduced size
         b.x += BDC_HMGAP;
-        b.w /= SECS_REDUCE;
-        b.h /= SECS_REDUCE;
+        b.w /= BCD_SSZRED;
+        b.h /= BCD_SSZRED;
 
         // draw tens of seconds if changed
         uint8_t scten = sc/10;
         if (all || scten != prev_scten) {
-            drawDigit (b, scten, BDC_HMLT/SECS_REDUCE);
+            drawDigit (b, scten, BDC_HMLT/BCD_SSZRED);
             prev_scten = scten;
         }
-        b.x += b.w + BDC_HMGAP/SECS_REDUCE;
+        b.x += b.w + BDC_HMGAP/BCD_SSZRED;
 
         // unit seconds for sure
-        drawDigit (b, sc%10, BDC_HMLT/SECS_REDUCE);
+        drawDigit (b, sc%10, BDC_HMLT/BCD_SSZRED);
     }
 
     // update awareness
@@ -1108,11 +1129,11 @@ static void drawDigitalBigClock (bool all)
 
     // update DE weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
-        bc_wxdt = drawBCWx() ? BAC_WXGDT : BAC_WXFDT;
+        bc_wxdt = drawBCDEWxInfo() ? BAC_WXGDT : BAC_WXFDT;
 
     // update space weather if desired
     if (bc_bits & SW_BCSPWXBIT)
-        drawBCSpaceWx(all);
+        drawBCSpaceWxInfo(all);
 
     #if defined(_SHOW_ALL)
         drawSBox (bccd_b, RA8875_WHITE);
@@ -1281,7 +1302,7 @@ static void drawAnalogBigClock (bool all)
 
         // date
         if ((bc_bits & SW_BCDATEBIT)) {
-            drawBCDate (hr, dy, weekday(t0), mo);
+            drawBCDateInfo (hr, dy, weekday(t0), mo);
             prev_dy = dy;
             prev_mo = mo;
         }
@@ -1428,11 +1449,11 @@ static void drawAnalogBigClock (bool all)
 
     // update DE or space weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
-        bc_wxdt = drawBCWx() ? BAC_WXGDT : BAC_WXFDT;
+        bc_wxdt = drawBCDEWxInfo() ? BAC_WXGDT : BAC_WXFDT;
 
     // update space weather if desired
     if (bc_bits & SW_BCSPWXBIT)
-        drawBCSpaceWx(all);
+        drawBCSpaceWxInfo(all);
 }
 
 /* update stopwatch in any possible display state
@@ -1646,6 +1667,7 @@ static void runBCMenu (const SCoord &s)
                 MI_ANA_FIL,
             MI_FMT_DIG,
                 MI_DIG_UTC,
+                MI_DIG_LST,
                 MI_DIG_12H,
                 MI_DIG_24H,
         MI_ALL_TTL,
@@ -1673,8 +1695,10 @@ static void runBCMenu (const SCoord &s)
                 {MENU_TOGGLE, !!(bc_bits & SW_ANCOLHBIT), 2, TER_INDENT, "Color hands"},
             {MENU_1OFN, !!(bc_bits & SW_BCDIGBIT), 1, SEC_INDENT, "Digital"},
                 {MENU_1OFN, !!(bc_bits & SW_UTCBIT), 3, TER_INDENT, "UTC"},
-                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == SW_DB12HBIT, 3, TER_INDENT, "DE 12 hour"},
-                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT)) == 0, 3, TER_INDENT, "DE 24 hour"},
+                {MENU_1OFN, !!(bc_bits & SW_LSTBIT), 3, TER_INDENT, "LST"},
+                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT|SW_LSTBIT)) == SW_DB12HBIT,
+                                3, TER_INDENT, "DE 12 hour"},
+                {MENU_1OFN, (bc_bits & (SW_DB12HBIT|SW_UTCBIT|SW_LSTBIT)) == 0, 3, TER_INDENT, "DE 24 hour"},
         {MENU_LABEL, false, 0, PRI_INDENT, "Also show:"},
             {MENU_TOGGLE, !(bc_bits & SW_NOSECBIT), 4, SEC_INDENT, "Seconds"},
             {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 5, SEC_INDENT, "Date info"},
@@ -1728,6 +1752,11 @@ static void runBCMenu (const SCoord &s)
         bc_bits |= SW_UTCBIT;
     else
         bc_bits &= ~SW_UTCBIT;
+
+    if (menu.items[MI_DIG_LST].set)
+        bc_bits |= SW_LSTBIT;
+    else
+        bc_bits &= ~SW_LSTBIT;
 
     if (menu.items[MI_DIG_12H].set)
         bc_bits |= SW_DB12HBIT;

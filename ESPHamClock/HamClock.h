@@ -272,6 +272,22 @@ class StackMalloc
 };
 
 
+/* time styles in auxtime_b
+ */
+typedef enum {
+    AUXT_DATE,                  // as per NV_DATEMDY and NV_DATEDMYYMD
+    AUXT_DOY,                   // day of year
+    AUXT_JD,                    // Julian date
+    AUXT_MJD,                   // modified Julian date
+    AUXT_SIDEREAL,              // local sidereal time
+    AUXT_SOLAR,                 // local solar time
+    AUXT_UNIX,                  // unix seconds
+    AUXT_N,                     // number of options
+} AuxTimeFormat;
+extern AuxTimeFormat auxtime;
+extern const char *auxtime_names[AUXT_N];
+
+
 /* plot choices and pane locations
  */
 
@@ -389,6 +405,7 @@ extern SBox NCDXF_b;                    // NCDXF box, and more
 extern SBox sensor_b;
 
 extern SBox clock_b;                    // main time
+extern SBox auxtime_b;                  // extra time 
 extern SCircle satpass_c;               // satellite pass horizon
 
 extern SBox rss_bnr_b;                  // rss banner button
@@ -600,6 +617,7 @@ typedef struct {
 
 extern AstroCir lunar_cir, solar_cir;
 
+extern void now_lst (double mjd, double lng, double *lst);
 extern void getLunarCir (time_t t0, const LatLong &ll, AstroCir &cir);
 extern void getSolarCir (time_t t0, const LatLong &ll, AstroCir &cir);
 extern void getSolarRS (const time_t t0, const LatLong &ll, time_t *riset, time_t *sett);
@@ -1026,7 +1044,6 @@ extern bool getRigctld (char host[], int *portp);
 extern bool getRotctld (char host[], int *portp);
 extern bool getFlrig (char host[], int *portp);
 extern const char *getDXClusterLogin(void);
-extern bool getDOY(void);
 extern bool getDXSpotPaths(void);
 
 void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
@@ -1315,7 +1332,7 @@ typedef enum {
     NV_PANE2ROTSET,             // PlotChoice bitmask of pane 2 rotation choices
 
     NV_PANE3ROTSET,             // PlotChoice bitmask of pane 3 rotation choices
-    NV_DOY_ON,                  // whether showing day of year instead of month day
+    NV_AUX_TIME,                // 0=date, DOY, JD, MJD, LST, UNIX
     NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if off
     NV_BC_UTCTIMELINE,          // band conditions timeline labeled in UTC else DE
     NV_RSS_INTERVAL,            // RSS update interval, seconds
@@ -1576,6 +1593,7 @@ typedef enum {
     SW_ANNUMBIT  =  (1<<7),                     // set if analog clock also shows hour numbers on face
     SW_BCSPWXBIT =  (1<<8),                     // showing bigclock space weather
     SW_ANCOLHBIT =  (1<<9),                     // color the analog hands
+    SW_LSTBIT    =  (1<<10),                    // set if Big Clock showing 24 hr local sidereal time 
 } SWBCBits;
 
 // state of stopwatch engine, _not_ what is being display

@@ -21,7 +21,6 @@ char live_html[] =  R"(
 
         // config
         const UPDATE_MS = 1000;         // update interval
-        const HOST_OVHD = 100;          // msec of host overhead: 2x 50 ms fb_stage cycle time
         const APP_W = 800;              // app coord system width
         const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
 
@@ -56,7 +55,7 @@ char live_html[] =  R"(
                 sendGetRequest ('get_live.png', 'blob')
                 .then (function (response) {
                     drawFullImage (response);
-                    runSoon (getUpdate, 1);
+                    runNextSecond (getUpdate, 1);
                 })
                 .catch (function (err) {
                     console.log(err);
@@ -79,32 +78,17 @@ char live_html[] =  R"(
                 .then (function (response) {
                     drawUpdate (response);
                     if (repeat)
-                        runSoon (getUpdate, 1);
+                        runNextSecond (getUpdate, 1);
                 })
                 .catch (function (err) {
                     console.log(err);
-                    runSoon (getFullImage, 0);
+                    runNextSecond (getFullImage, 0);
                 })
                 .finally (function() {
                     if (drawing_verbose)
                         console.log ("  getUpdate took " + (Date.now() - update_sent) + " ms");
                     update_pending = false;
                 });
-            }
-
-            // schedule func(arg) soon
-            function runSoon (func, arg) {
-
-                // insure no nested requests
-                clearTimeout(upd_tid);
-
-                // compute delay sending so message arrives at server HOST_OVHD after start of second
-                const msec_wait = (msec_corr - (Date.now() - update_sent) + 10000) % 1000;  // msec 0 .. 999
-
-                // register callback
-                upd_tid = setTimeout (func, msec_wait, arg);
-                if (drawing_verbose)
-                    console.log ("  set timer for " + func.name + " in " + msec_wait + " ms to correct " + msec_corr);
             }
 
 
@@ -204,10 +188,25 @@ char live_html[] =  R"(
                     }).
                     catch(function(err) {
                         console.log("update promise err: ", err);
-                        runSoon (getFullImage, 0);
+                        runNextSecond (getFullImage, 0);
                     });
                 }
 
+            }
+
+            // schedule func(arg) for next second
+            function runNextSecond (func, arg) {
+
+                // insure no nested requests
+                clearTimeout(upd_tid);
+
+                // compute delay sending so message arrives at server just after start of second
+                const msec_wait = (msec_corr - (Date.now() - update_sent) + 10000) % 1000;  // msec 0 .. 999
+
+                // register callback
+                upd_tid = setTimeout (func, msec_wait, arg);
+                if (drawing_verbose)
+                    console.log ("  set timer for " + func.name + " in " + msec_wait + " ms to correct " + msec_corr);
             }
 
             // given a mouse event return coords with respect to canvas scaled to application.

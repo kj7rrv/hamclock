@@ -292,7 +292,6 @@ typedef enum {
     DATEFMT_DMYYMD_BPR,
     UNITS_BPR,
     LOGUSAGE_BPR,
-    DATEDOY_BPR,
     DEMO_BPR,
     X11_FULLSCRN_BPR,
     FLIP_BPR,
@@ -355,12 +354,11 @@ static BoolPrompt bool_pr[N_BPR] = {
 
 
     {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Day-of-Year?", "No", "Yes"},
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
-    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
                                                                 // state box wide enough for "Won't fit"
 
-    {4, {10,  R2Y(6), 140, PR_H},  {150, R2Y(6),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
 
     // "page 6" -- index 5
 
@@ -743,7 +741,6 @@ static void nextTabFocus()
         { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
         { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[LOGUSAGE_BPR] },
-        { NULL, &bool_pr[DATEDOY_BPR] },
         { NULL, &bool_pr[DEMO_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
@@ -2120,13 +2117,6 @@ static void initSetup()
     }
     bool_pr[FLIP_BPR].state = (rot != 0);
 
-    uint8_t doy;
-    if (!NVReadUInt8 (NV_DOY_ON, &doy)) {
-        doy = 0;
-        NVWriteUInt8 (NV_DOY_ON, doy);
-    }
-    bool_pr[DATEDOY_BPR].state = (doy != 0);
-
     uint8_t met;
     if (!NVReadUInt8 (NV_METRIC_ON, &met)) {
         met = 0;
@@ -2730,7 +2720,6 @@ static void finishSettingUp()
     NVWriteString(NV_CALLSIGN, callsign);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
-    NVWriteUInt8 (NV_DOY_ON, bool_pr[DATEDOY_BPR].state);
     NVWriteUInt32 (NV_KX3BAUD, bool_pr[KX3ON_BPR].state ? (bool_pr[KX3BAUD_BPR].state ? 38400 : 4800) : 0);
     NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
     NVWriteFloat (NV_PRESCORR, pres_corr[BME_76]);
@@ -3312,13 +3301,6 @@ bool getFlrig (char host[NV_FLRIGHOST_LEN], int *portp)
 const char *getDXClusterLogin()
 {
     return (dxlogin[0] != '\0' ? dxlogin : callsign);
-}
-
-/* return whether date should be displayed as day-of-year
- */
-bool getDOY()
-{
-    return (bool_pr[DATEDOY_BPR].state);
 }
 
 /* return whether to draw dx paths

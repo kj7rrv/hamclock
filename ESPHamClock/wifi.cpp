@@ -1961,8 +1961,9 @@ void sendUserAgent (WiFiClient &client)
             getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, dpy_mode,
             // new for LV5:
-            (int)as, getCenterLng(), getDOY(), names_on, getDemoMode(), (int)getSWEngineState(NULL,NULL), 
-            (int)getBigClockBits(), utcOffset(), gpsd, rss_interval, (int)getDateFormat(), rr_score);
+            (int)as, getCenterLng(), (int)auxtime /* getDoy() before 2.80 */, names_on, getDemoMode(),
+            (int)getSWEngineState(NULL,NULL), (int)getBigClockBits(), utcOffset(), gpsd,
+            rss_interval, (int)getDateFormat(), rr_score);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
