@@ -12,7 +12,7 @@ SBox plot_b[PANE_N] = {
     {575, 0, PLOTBOX_W, PLOTBOX_H},
 };
 PlotChoice plot_ch[PANE_N];
-time_t next_rotationT[PANE_N];
+time_t plot_rotationT[PANE_N];
 uint32_t plot_rotset[PANE_N];
 const char *plot_names[PLOT_CH_N] = {
 
@@ -43,21 +43,10 @@ const char *plot_names[PLOT_CH_N] = {
     "DRAP",             // PLOT_CH_DRAP,
     "Countdown",        // PLOT_CH_COUNTDOWN,
     "STEREO_A",         // PLOT_CH_STEREO_A,
+#if defined(_SUPPORT_PSKREPORTER)
+    "Live_spots"        // PLOT_CH_PSK,
+#endif
 };
-
-/* return number of bits set in the given uint32_t
- * Brian Kernighan's bit counting algorithm
- */
-static int nBitsSet (uint32_t n)
-{
-    int count = 0;
-    while (n) {
-        n = n & (n -1); // clear least significant set bit
-        count++;
-    }
-    return (count);
-}
-
 
 /* retrieve the plot choice for the given pane from NV, if set
  */
@@ -148,6 +137,9 @@ bool plotChoiceIsAvailable (PlotChoice ch)
     case PLOT_CH_SOLWIND:       // fallthru
     case PLOT_CH_DRAP:          // fallthru
     case PLOT_CH_STEREO_A:      // fallthru
+#if defined(_SUPPORT_PSKREPORTER)
+    case PLOT_CH_PSK:           // fallthru
+#endif
         return (true);
         break;
 
@@ -168,6 +160,16 @@ void logPaneRotSet (PlotPane pp, PlotChoice ch)
     for (int i = 0; i < PLOT_CH_N; i++)
         if (plot_rotset[pp] & (1 << i))
             Serial.printf (_FX("    %c%s\n"), i == ch ? '*' : ' ', plot_names[i]);
+}
+
+/* log the BRB rotation set
+ */
+void logBRBRotSet()
+{
+    Serial.printf (_FX("BBB choices:\n"));
+    for (int i = 0; i < BRB_N; i++)
+        if (brb_rotset & (1 << i))
+            Serial.printf (_FX("    %c%s\n"), i == brb_mode ? '*' : ' ', brb_names[i]);
 }
 
 /* show a table of suitable plot choices in and for the given pane and allow user to choose one or more.
@@ -195,6 +197,8 @@ PlotChoice askPaneChoice (PlotPane pp)
         if ( (pp_ch == PANE_NONE && plotChoiceIsAvailable(ch)) || pp_ch == pp || ASKP_SHOWALL) {
             // set up next menu item
             mitems = (MenuItem *) realloc (mitems, (n_mitems+1)*sizeof(MenuItem));
+            if (!mitems)
+                fatalError ("pane alloc: %d", n_mitems); // no _FX if alloc failing
             MenuItem &mi = mitems[n_mitems++];
             mi.type = MENU_AL1OFN;
             mi.set = (plot_rotset[pp] & (1 << ch)) ? true : false;
@@ -290,7 +294,7 @@ PlotPane findPaneChoiceNow (PlotChoice ch)
     return (PANE_NONE);
 }
 
-/* return which pane _could show_ the given choice, else PANE_NONE
+/* return which pane has the given choice in its rotation set _even if not currently visible_, else PANE_NONE
  */
 PlotPane findPaneForChoice (PlotChoice ch)
 {
@@ -319,10 +323,8 @@ PlotPane findPaneForChoice (PlotChoice ch)
 PlotChoice getNextRotationChoice (PlotPane pp, PlotChoice pc)
 {
     // search starting after given selection
-    for (int i = 1; i <= PLOT_CH_N; i++) {
+    for (unsigned i = 1; i <= 8*sizeof(plot_rotset[pp]); i++) {
         int pc_test = ((int)pc + i) % PLOT_CH_N;
-
-        // done if in selection set
         if (plot_rotset[pp] & (1 << pc_test))
             return ((PlotChoice)pc_test);
     }
@@ -355,13 +357,6 @@ PlotChoice getAnyAvailableChoice()
     return (PLOT_CH_FLUX);
 }
 
-/* return whether pane pp is currently rotating among more than one choice
- */
-bool paneIsRotating (PlotPane pp)
-{
-    return (nBitsSet(plot_rotset[pp]) > 1);
-}
-
 /* remove any PLOT_CH_COUNTDOWN from rotset if stopwatch engine not SWE_COUNTDOWN,
  * and if it is currently visible replace with an alternative.
  */
@@ -388,7 +383,7 @@ void insureCountdownPaneSensible()
  */
 bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
 {
-    // out fast if not ours
+    // for sure not ours if not even in this box
     SBox &box = plot_b[pp];
     if (!inBox (s, box))
         return (false);
@@ -426,6 +421,13 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
             return(true);
         }
         break;
+#if defined (_SUPPORT_PSKREPORTER)
+    case PLOT_CH_PSK:
+        if (checkPSKTouch (s, box))
+            return (true);
+        in_top = true;
+        break;
+#endif
 
     // tapping a BME below top rotates just among other BME and disables auto rotate.
     // try all possibilities because they might be on other panes.
@@ -580,12 +582,25 @@ void savePlotOps()
     logState();
 }
 
-/* draw a plot border nearly ready to change or not
+/* flash plot borders nearly ready to change, and include NCDXF_b also.
  */
-void showRotatingBorder (bool soon, PlotPane pp)
+void showRotatingBorder ()
 {
-    uint16_t c = (next_rotationT[pp] - now() > PLOT_ROT_WARNING) || soon ? RA8875_WHITE : GRAY;
-    drawSBox (plot_b[pp], c);
+    time_t t0 = now();
+
+    // check plot panes
+    for (int i = 0; i < PANE_N; i++) {
+        if (paneIsRotating(i)) {
+            uint16_t c = ((plot_rotationT[i] > t0 + PLOT_ROT_WARNING) || (t0&1) == 1) ? RA8875_WHITE : GRAY;
+            drawSBox (plot_b[i], c);
+        }
+    }
+
+    // check BRB
+    if (BRBIsRotating()) {
+        uint16_t c = ((brb_rotationT > t0 + PLOT_ROT_WARNING) || (t0&1) == 1) ? RA8875_WHITE : GRAY;
+        drawSBox (NCDXF_b, c);
+    }
 
 }
 

@@ -140,7 +140,6 @@ IPAddress WiFi::localIP(void)
             return (a);
 
         // create socket back to home base then get our IP from that
-        const char *host = "clearskyinstitute.com";
         const int port = 80;
 
 
@@ -154,9 +153,9 @@ IPAddress WiFi::localIP(void)
         sprintf (port_str, "%d", port);
         int error = 1;
         for (time_t start_t = time(NULL); error && time(NULL) < start_t + 10; ) {
-            error = ::getaddrinfo (host, port_str, &hints, &aip);
+            error = ::getaddrinfo (svr_host, port_str, &hints, &aip);
             if (error) {
-                printf ("getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
+                printf ("getaddrinfo(%s:%d): %s\n", svr_host, port, gai_strerror(error));
                 usleep (1000000);
                 aip = NULL;
             }
@@ -169,13 +168,13 @@ IPAddress WiFi::localIP(void)
         sockfd = ::socket (aip->ai_family, aip->ai_socktype, aip->ai_protocol);
         if (sockfd < 0) {
             freeaddrinfo (aip);
-            printf ("socket(%s:%d): %s\n", host, port, strerror(errno));
+            printf ("socket(%s:%d): %s\n", svr_host, port, strerror(errno));
             return (a);
         }
 
         // connect
         if (::connect (sockfd, aip->ai_addr, aip->ai_addrlen) < 0) {
-            printf ("connect(%s,%d): %s\n", host, port, strerror(errno));
+            printf ("connect(%s,%d): %s\n", svr_host, port, strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (a);
@@ -188,7 +187,7 @@ IPAddress WiFi::localIP(void)
         struct sockaddr_in sa;
         socklen_t sl = sizeof(sa);
         if (::getsockname (sockfd, (struct sockaddr *)&sa, &sl) < 0) {
-            printf ("getsockname(%s,%d): %s\n", host,port,strerror(errno));
+            printf ("getsockname(%s,%d): %s\n", svr_host, port, strerror(errno));
             close (sockfd);
             return (a);
         }

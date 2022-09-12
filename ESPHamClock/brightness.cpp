@@ -30,9 +30,21 @@
 
 #include "HamClock.h"
 
-// public state
 bool found_phot;                                // set if initial read > 1, else manual clock settings
+
+// NCDXF_b or "BRB" public state
 uint8_t brb_mode;                               // one of BRB_MODE
+uint8_t brb_rotset;                             // mask of current BRB_MODE
+time_t brb_rotationT;                           // time of next rotation
+const char *brb_names[BRB_N] = {                // N.B. must be in same order as BRB_MODE
+     "NCDXF",
+     "On/Off",
+     "PhotoR",
+     "Brite",
+     "SpcWx",
+     "BME@76",
+     "BME@77",
+};
 
 // configuration values
 #define BPWM_MAX        255                     // PWM for 100% brightness
@@ -115,16 +127,29 @@ static void setDisplayBrightness(bool log)
         } else if (support_onoff) {
             // control HDMI on or off
             // N.B. can't use system() because we need to retain suid root
-            const char *argv[] = {
+            const char *argv_vcg[] = {          // try vcgencmd
                 "vcgencmd", "display_power", bpwm > BPWM_MAX/2 ? "1" : "0", NULL
             };
-            if (fork() == 0)
-                execvp (argv[0], (char**)argv);
-            if (log) {
-                Serial.printf ("BR:");
-                for (unsigned i = 0; i < NARRAY(argv)-1; i++)
-                    Serial.printf (" %s", argv[i]);
-                Serial.printf ("\n");
+            const char *argv_sso[] = {          // try turning off system dimming
+                "xset", "dpms", "0", "0", "0", NULL
+            };
+            const char *argv_dpms[] = {         // try forcing dpms
+                "xset", "dpms", "force", bpwm > BPWM_MAX/2 ? "on" : "off", NULL
+            };
+            const char **argvs[] = {            // collect for easy use
+                argv_vcg, argv_sso, argv_dpms, NULL
+            };
+            for (const char ***av = argvs; *av != NULL; av++) {
+                const char **argv = *av;
+                if (log) {
+                    Serial.printf ("BR:");
+                    for (const char **ap = argv; *ap != NULL; ap++)
+                        Serial.printf (" %s", *ap);
+                    Serial.printf ("\n");
+                }
+                if (fork() == 0)
+                    execvp (argv[0], (char**)argv);
+                sleep (1);
             }
         }
 
@@ -576,7 +601,7 @@ static void engageDisplayBrightness(bool log)
 }
 
 
-#if defined(_IS_LINUX_RPI) || defined(_USE_FB0)
+#if !defined(_WEB_ONLY) && (defined(_IS_LINUX_RPI) || defined(_USE_FB0))
 
 /* return whether this is a linux RPi connected to a DSI display
  */
@@ -616,7 +641,7 @@ static bool isRPiDSI()
         return (dsi_path != NULL);
 }
 
-#endif // defined(_IS_LINUX_RPI) || defined(_USE_FB0)
+#endif
 
 
 /* return whether the display hardware brightness can be controlled.
@@ -624,7 +649,9 @@ static bool isRPiDSI()
  */
 bool brControlOk()
 {
-        #if defined(_IS_ESP8266)
+        #if defined(_WEB_ONLY)
+            support_dim = false;                                // never via web
+        #elif defined(_IS_ESP8266)
             support_dim = true;                                 // always works
         #elif defined(_USE_FB0)
             support_dim = isRPiDSI();                           // only if DSI
@@ -642,7 +669,9 @@ bool brControlOk()
  */
 bool brOnOffOk()
 {
-        #if defined(_IS_ESP8266)
+        #if defined(_WEB_ONLY)
+            support_onoff = false;                              // never via web
+        #elif defined(_IS_ESP8266)
             support_onoff = true;                               // always works
         #elif defined(_USE_FB0)
             support_onoff = true;                               // always works
@@ -761,14 +790,18 @@ void setupBrightness()
         }
 
         // get display mode, reset to something benign if no longer appropriate
-        if (!NVReadUInt8 (NV_BRB_MODE, &brb_mode)
-                        || (brb_mode == BRB_SHOW_ONOFF && !support_onoff)
-                        || (brb_mode == BRB_SHOW_PHOT && (!support_phot || !found_phot))
-                        || (brb_mode == BRB_SHOW_BR && (!support_dim || (support_phot && found_phot)))) {
-            Serial.printf (_FX("BR: Resetting bogus initial brb_mode %d to %d\n"), brb_mode,BRB_SHOW_SWSTATS);
+        if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset) 
+                    || (brb_rotset & (1<<brb_mode)) == 0
+                    || ((brb_rotset & (1 << BRB_SHOW_ONOFF)) && !support_onoff)
+                    || ((brb_rotset & (1 << BRB_SHOW_PHOT)) && (!support_phot || !found_phot))
+                    || ((brb_rotset & (1 << BRB_SHOW_BR)) && (!support_dim || (support_phot && found_phot)))){
+            Serial.printf (_FX("BR: Resetting initial brb_reset 0x%x to 0x%x\n"),
+                        brb_rotset, 1<<BRB_SHOW_SWSTATS);
             brb_mode = BRB_SHOW_SWSTATS;
-            NVWriteUInt8 (NV_BRB_MODE, brb_mode);
+            brb_rotset = 1 << BRB_SHOW_SWSTATS;
+            NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
         }
+        logBRBRotSet();
 }
 
 /* draw any of the brightness controls in NCDXF_b.
@@ -962,73 +995,78 @@ void doNCDXFBoxTouch (const SCoord &s)
 {
     if (s.y < NCDXF_b.y + NCDXF_b.h/10) {
 
-        // near the top so show menu of options, or toggle if only 2
+        // tapped near the top so show menu of options, or toggle if only 2
 
-        // list of each BRB to avoid knowing their values; N.B. must be in same order as mitems[]
+        // this list of each BRB is to avoid knowing their values, nice BUT must be in same order as mitems[]
         static uint8_t mi_brb_order[BRB_N] = {
             BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR,
             BRB_SHOW_BME76, BRB_SHOW_BME77
         };
 
+
         // build menu, depending on current configuration
         #define _MI_INDENT 2
         MenuItem mitems[BRB_N] = {
-             {MENU_1OFN, brb_mode == BRB_SHOW_BEACONS, 1, _MI_INDENT, "NCDXF"},     // always show
-             {MENU_1OFN, brb_mode == BRB_SHOW_SWSTATS, 1, _MI_INDENT, "SpcWx"},     // always show
-             {support_onoff ? MENU_1OFN : MENU_IGNORE,
-                        brb_mode == BRB_SHOW_ONOFF, 1, _MI_INDENT, "On/Off"},
-             {support_phot && found_phot ? MENU_1OFN : MENU_IGNORE,
-                        brb_mode == BRB_SHOW_PHOT, 1, _MI_INDENT, "PhotoR"},
-             {support_dim && !(support_phot && found_phot) ? MENU_1OFN : MENU_IGNORE,
-                        brb_mode == BRB_SHOW_BR, 1, _MI_INDENT, "Brite"},
-             {getBMEData(BME_76,false) != NULL ? MENU_1OFN : MENU_IGNORE,
-                        brb_mode == BRB_SHOW_BME76, 1, _MI_INDENT, "BME@76"},
-             {getBMEData(BME_77,false) != NULL ? MENU_1OFN : MENU_IGNORE,
-                        brb_mode == BRB_SHOW_BME77, 1, _MI_INDENT, "BME@77"},
+             {MENU_AL1OFN, (bool)(brb_rotset & (1 << BRB_SHOW_BEACONS)), 1, _MI_INDENT,
+                                brb_names[BRB_SHOW_BEACONS]},
+             {MENU_AL1OFN, (bool)(brb_rotset & (1 << BRB_SHOW_SWSTATS)), 1, _MI_INDENT,
+                                brb_names[BRB_SHOW_SWSTATS]},  // always
+             {support_onoff ? MENU_AL1OFN : MENU_IGNORE,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_ONOFF)), 1, _MI_INDENT, brb_names[BRB_SHOW_ONOFF]},
+             {support_phot && found_phot ? MENU_AL1OFN : MENU_IGNORE,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_PHOT)), 1, _MI_INDENT, brb_names[BRB_SHOW_PHOT]},
+             {support_dim && !(support_phot && found_phot) ? MENU_AL1OFN : MENU_IGNORE,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_BR)), 1, _MI_INDENT, brb_names[BRB_SHOW_BR]},
+             {getBMEData(BME_76,false) != NULL ? MENU_AL1OFN : MENU_IGNORE,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_BME76)), 1, _MI_INDENT, brb_names[BRB_SHOW_BME76]},
+             {getBMEData(BME_77,false) != NULL ? MENU_AL1OFN : MENU_IGNORE,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_BME77)), 1, _MI_INDENT, brb_names[BRB_SHOW_BME77]},
         };
 
-        // if just two options, toggle without using menu
-        int n_set = 0;
-        for (int i = 0; i < BRB_N; i++)
-            if (mitems[i].type != MENU_IGNORE)
-                n_set++;
-        if (n_set == 2) {
+        // boxes
+        SBox menu_b = NCDXF_b;                      // copy
+        menu_b.y += 20;
+        SBox ok_b;
 
-            brb_mode = (brb_mode == BRB_SHOW_BEACONS) ? BRB_SHOW_SWSTATS : BRB_SHOW_BEACONS;
+        // run menu
+        MenuInfo menu = {menu_b, ok_b, true, true, 1, BRB_N, mitems};   // no room for cancel
+        bool ok = runMenu(menu);
 
-        } else {
+        // engage new option unless canceled
+        if (ok) {
 
-            // boxes
-            SBox menu_b = NCDXF_b;                      // copy
-            menu_b.y += 20;
-            SBox ok_b;
+            // build new rotset
+            brb_rotset = 0;
+            for (int i = 0; i < BRB_N; i++)
+                if (mitems[i].set)
+                    brb_rotset |= (1 << mi_brb_order[i]);
 
-            // run menu
-            MenuInfo menu = {menu_b, ok_b, true, true, 1, BRB_N, mitems};
-            bool ok = runMenu(menu);
-
-            // engage new option unless canceled
-            if (ok) {
-
-                // find the set item
+            // if brb_mode is not in new set, just pick one
+            if ((brb_rotset & (1 << brb_mode)) == 0) {
                 for (int i = 0; i < BRB_N; i++) {
-                    if (mitems[i].set) {
-                        brb_mode = mi_brb_order[i];
+                    if (brb_rotset & (1 << i)) {
+                        brb_mode = i;
                         break;
                     }
                 }
-
-                // update on/off times if now used
-                if (brb_mode == BRB_SHOW_ONOFF)
-                    getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
             }
+
+            // make a note
+            logBRBRotSet();
+
+            // match beacons to new state
+            updateBeacons (true);
+
+            // update on/off times if now used
+            if (brb_mode == BRB_SHOW_ONOFF)
+                getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
         }
 
         // show new option, even if no change in order to erase menu
         drawNCDXFBox();
 
         // save
-        NVWriteUInt8 (NV_BRB_MODE, brb_mode);
+        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
         Serial.printf (_FX("BR: now mode %d\n"), brb_mode);
 
     } else {

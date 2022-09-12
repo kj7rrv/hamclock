@@ -75,3 +75,14 @@ void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t 
     else
         *h = 171 + 43 * (r - g) / (rgbMax - rgbMin);
 }
+
+/* handy function to get RGB565 pixel from h, s, v
+ */
+uint16_t HSV565 (uint8_t h, uint8_t s, uint8_t v) 
+{
+    uint8_t r, g, b;
+
+    hsvtorgb (&r, &g, &b, h, s, v);
+    return (RGB565(r,g,b));
+}
+

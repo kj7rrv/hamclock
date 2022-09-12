@@ -13,7 +13,6 @@ LDXXFLAGS = -LArduinoLib -g -pthread
 LIBS = -lpthread -larduino
 CXX = g++
 
-
 # macOS does not have X11 by default; this assumes XQuartz has been installed
 ifeq ($(shell uname -s), Darwin)
     CXXFLAGS += -I/opt/X11/include
@@ -21,9 +20,9 @@ ifeq ($(shell uname -s), Darwin)
 endif
 
 
-# FreeBSD needs libgpio
-ifeq ($(shell [ -r /usr/include/libgpio.h ]; echo $$?), 0)
-    LIBS += -lgpio
+# FreeBSD needs libgpio libexecinfo
+ifeq ($(shell uname -s), FreeBSD)
+    LIBS += -lgpio -lexecinfo
 endif
 
 
@@ -36,43 +35,46 @@ OBJS = \
 	Germano-Regular-16.o \
 	OTAupdate.o \
 	P13.o \
-        asknewpos.o \
+	asknewpos.o \
 	astro.o \
 	brightness.o \
 	calibrate.o \
 	clocks.o \
-        cities.o \
+	cities.o \
 	color.o \
 	dxcluster.o \
 	earthmap.o \
 	earthsat.o \
-        favicon.o \
+	favicon.o \
 	gimbal.o \
 	gpsd.o \
-        live-html.o \
+        kd3tree.o \
+	live-html.o \
 	maidenhead.o \
-        mapmanage.o \
-        menu.o \
-        moon_imgs.o \
-        moonpane.o \
+	mapmanage.o \
+	menu.o \
+	moon_imgs.o \
+	moonpane.o \
 	ncdxf.o \
 	nvram.o \
 	plot.o \
-        plotmgmnt.o \
+	plotmgmnt.o \
 	prefixes.o \
-        radio.o \
-        runner.o \
-        santa.o \
+	pskreporter.o \
+	radio.o \
+	runner.o \
+	santa.o \
 	selectFont.o \
 	setup.o \
 	sphere.o \
 	stopwatch.o \
 	touch.o \
 	tz.o \
-        webserver.o \
+	webserver.o \
 	wifi.o \
-        wifimeter.o \
-	wx.o
+	wifimeter.o \
+	wx.o \
+	zones.o
 
 help:
 	@printf "\nThe following targets are available (as appropriate for your system)\n\n"
@@ -80,6 +82,11 @@ help:
 	@printf "    hamclock-1600x960         X11 GUI desktop version, larger, AKA hamclock-big\n"
 	@printf "    hamclock-2400x1440        X11 GUI desktop version, larger yet\n"
 	@printf "    hamclock-3200x1920        X11 GUI desktop version, huge\n"
+	@printf "\n";
+	@printf "    hamclock-web-800x480      web server only (no display)\n"
+	@printf "    hamclock-web-1600x960     web server only (no display), larger\n"
+	@printf "    hamclock-web-2400x1440    web server only (no display), larger yet\n"
+	@printf "    hamclock-web-3200x1920    web server only (no display), huge\n"
 	@printf "\n";
 	@printf "    hamclock-fb0-800x480      RPi stand-alone /dev/fb0, AKA hamclock-fb0-small\n"
 	@printf "    hamclock-fb0-1600x960     RPi stand-alone /dev/fb0, larger, AKA hamclock-fb0\n"
@@ -131,6 +138,40 @@ hamclock-3200x1920: $(OBJS)
 	cd ArduinoLib && $(MAKE) libarduino.a "CXXFLAGS=$(CXXFLAGS)"
 	$(CXX) $(LDXXFLAGS) $(OBJS) -o $@ $(LIBS)
 	rm -f UNIXHamClock.o UNIXHamClock.cpp
+
+
+
+
+# web server versions
+
+
+hamclock-web-800x480: CXXFLAGS+=-D_WEB_ONLY
+hamclock-web-800x480: $(OBJS)
+	cd ArduinoLib && $(MAKE) libarduino.a "CXXFLAGS=$(CXXFLAGS)"
+	$(CXX) $(LDXXFLAGS) $(OBJS) -o $@ $(LIBS)
+	rm -f UNIXHamClock.o UNIXHamClock.cpp
+
+
+hamclock-web-1600x960: CXXFLAGS+=-D_WEB_ONLY -D_CLOCK_1600x960
+hamclock-web-1600x960: $(OBJS)
+	cd ArduinoLib && $(MAKE) libarduino.a "CXXFLAGS=$(CXXFLAGS)"
+	$(CXX) $(LDXXFLAGS) $(OBJS) -o $@ $(LIBS)
+	rm -f UNIXHamClock.o UNIXHamClock.cpp
+
+
+hamclock-web-2400x1440: CXXFLAGS+=-D_WEB_ONLY -D_CLOCK_2400x1440
+hamclock-web-2400x1440: $(OBJS)
+	cd ArduinoLib && $(MAKE) libarduino.a "CXXFLAGS=$(CXXFLAGS)"
+	$(CXX) $(LDXXFLAGS) $(OBJS) -o $@ $(LIBS)
+	rm -f UNIXHamClock.o UNIXHamClock.cpp
+
+
+hamclock-web-3200x1920: CXXFLAGS+=-D_WEB_ONLY -D_CLOCK_3200x1920
+hamclock-web-3200x1920: $(OBJS)
+	cd ArduinoLib && $(MAKE) libarduino.a "CXXFLAGS=$(CXXFLAGS)"
+	$(CXX) $(LDXXFLAGS) $(OBJS) -o $@ $(LIBS)
+	rm -f UNIXHamClock.o UNIXHamClock.cpp
+
 
 
 

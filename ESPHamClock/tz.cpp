@@ -33,7 +33,7 @@ typedef struct {
 
 /* timezone offset in units of 15 minutes +- UTC
  */
-static const signed char tzmap[180][360] PROGMEM = {
+static const signed char tzmap[179][360] PROGMEM = {    // -89..89  -180 .. 179
     { /*  -89 */
         /* -180 */   48,  48,  48,  48,  48,  48,  48,  48,  48,  48,
         /* -170 */   48,  48,  48,  48,  48,  48,  48,  48,  48,  48,
@@ -6844,9 +6844,9 @@ int32_t getTZ (const LatLong &ll)
 {
     // make absolutely certain of range
     int lat = ll.lat_d < -89 ? -89 : (ll.lat_d > 89 ? 89 : ll.lat_d);
-    int lng = fmod((ll.lng_d+180+3600),360);
+    int lng = fmodf((ll.lng_d+180+3600),360);
 #ifdef _MAIN_TEST
-    printf ("row %d col %d\n", lat+89, lng);
+    printf ("tzmap[%d][%d]\n", lat+89, lng);
 #endif // _MAIN_TEST
     return (900*((signed char)pgm_read_byte(&tzmap[lat+89][lng])));
 }
@@ -6867,6 +6867,7 @@ int main (int ac, char *av[])
 
         printf ("%g %g -> %g\n", ll.lat_d, ll.lng_d, getTZ(ll)/3600.0);
     }
+
     return (0);
 }
 

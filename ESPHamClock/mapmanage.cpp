@@ -66,7 +66,7 @@ static uint16_t day_cache_col, night_cache_col;         // which starting cols
 
 
 /* return day RGB565 pixel at the given location.
- * ESP version
+ * ESP only
  */
 bool getMapDayPixel (uint16_t row, uint16_t col, uint16_t *dayp)
 {
@@ -111,7 +111,7 @@ bool getMapDayPixel (uint16_t row, uint16_t col, uint16_t *dayp)
 
 
 /* return night RGB565 pixel at the given location.
- * ESP version
+ * ESP only
  */
 bool getMapNightPixel (uint16_t row, uint16_t col, uint16_t *nightp)
 {
@@ -155,7 +155,7 @@ bool getMapNightPixel (uint16_t row, uint16_t col, uint16_t *nightp)
 }
 
 /* invalidate pixel connection until proven good again
- * ESP version
+ * ESP only
  */
 static void invalidatePixels()
 {
@@ -171,7 +171,7 @@ static void invalidatePixels()
 
 /* prepare open day_file and night_file for pixel access.
  * if trouble close both and return false, else return true.
- * ESP version
+ * ESP only
  */
 static bool installFilePixels (const char *dfile, const char *nfile)
 {
@@ -195,6 +195,8 @@ static bool installFilePixels (const char *dfile, const char *nfile)
         // init row caches for getMapDay/NightPixel()
         day_row_cache = (uint8_t *) realloc (day_row_cache, BPERBMPPIX*N_CACHE_COLS);
         night_row_cache = (uint8_t *) realloc (night_row_cache, BPERBMPPIX*N_CACHE_COLS);
+        if (!day_row_cache || !night_row_cache)
+            fatalError ("pixel cache %p %p", day_row_cache, night_row_cache);   // no _FX if alloc failing
         day_cache_col = day_cache_row = ~0;     // mark as invalid
         night_cache_col = night_cache_row = ~0;
 
@@ -218,7 +220,7 @@ static int FSInfoTimeQsort (const void *p1, const void *p2)
 }
 
 /* ESP FLASH can only hold 4 map files, remove some if necessary to make room for specied number.
- * ESP version
+ * ESP only
  */
 static void cleanFLASH (const char *title, int need_files)
 {
@@ -302,7 +304,7 @@ static void cleanFLASH (const char *title, int n) {}
 
 
 /* invalidate pixel connection until proven good again
- * UNIX version
+ * UNIX only
  */
 static void invalidatePixels()
 {
@@ -322,7 +324,7 @@ static void invalidatePixels()
 
 /* prepare open day_file and night_file for pixel access.
  * return whether ok
- * UNIX version
+ * UNIX only
  */
 static bool installFilePixels (const char *dfile, const char *nfile)
 {
@@ -465,33 +467,6 @@ static int FSInfoNameQsort (const void *p1, const void *p2)
         return (strcmp (((FS_Info *)p1)->name, ((FS_Info *)p2)->name));
 }
 
-
-/* log and show message over map_b
- */
-static void mapMsg (uint32_t dwell_ms, const char *fmt, ...)
-{
-    // format msg
-    va_list ap;
-    va_start(ap, fmt);
-    char msg[200];
-    vsnprintf (msg, sizeof(msg), fmt, ap);
-    va_end(ap);
-
-    // log
-    Serial.println (msg);
-
-    // show over map
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (RA8875_WHITE);
-    size_t msg_l = getTextWidth(msg);
-    tft.fillRect (map_b.x + map_b.w/5, map_b.y+map_b.h/3, 3*map_b.w/5, 40, RA8875_BLACK);
-    tft.setCursor (map_b.x + (map_b.w-msg_l)/2, map_b.y+map_b.h/3+30);
-    tft.print(msg);
-    tft.drawPR();
-
-    // dwell
-    wdDelay(dwell_ms);
-}
 
 
 /* download the given file of expected size and load into LittleFS.
@@ -899,6 +874,8 @@ FS_Info *getConfigDirInfo (int *n_info, char **fs_name, uint64_t *fs_size, uint6
 
             // extend array
             fs_array = (FS_Info *) realloc (fs_array, (n_fs+1)*sizeof(FS_Info));
+            if (!fs_array)
+                fatalError ("alloc dir failed: %d", n_fs);     // no _FX if alloc failing
             FS_Info *fip = &fs_array[n_fs++];
 
             // store name
@@ -1105,8 +1082,8 @@ void eraseMapScale ()
     uint8_t rs = rss_on;
     rss_on = false;
 
-    // erase entire scale if azm mode because redrawing the map will miss the center and corners
-    if (azm_on)
+    // erase entire scale if azm mode because redrawing the map will miss some
+    if (map_proj != MAPP_MERCATOR)
         fillSBox (db, RA8875_BLACK);
 
     // restore map
@@ -1119,4 +1096,31 @@ void eraseMapScale ()
     // restore
     mapscale_b = db;
     rss_on = rs;
+}
+
+/* log and show message over map_b
+ */
+void mapMsg (uint32_t dwell_ms, const char *fmt, ...)
+{
+    // format msg
+    va_list ap;
+    va_start(ap, fmt);
+    char msg[200];
+    vsnprintf (msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    // log
+    Serial.println (msg);
+
+    // show over map
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    size_t msg_l = getTextWidth(msg);
+    tft.fillRect (map_b.x + map_b.w/5, map_b.y+map_b.h/3, 3*map_b.w/5, 40, RA8875_BLACK);
+    tft.setCursor (map_b.x + (map_b.w-msg_l)/2, map_b.y+map_b.h/3+30);
+    tft.print(msg);
+    tft.drawPR();
+
+    // dwell
+    wdDelay(dwell_ms);
 }

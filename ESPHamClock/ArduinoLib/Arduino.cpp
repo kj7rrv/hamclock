@@ -21,10 +21,6 @@ static float max_cpu_usage = MAX_CPU_USAGE;
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
 
-// see Adafruit_RA8875.cpp
-extern int noX11;
-
-
 // how we were made
 #if defined(_USE_FB0)
   #if defined(_CLOCK_1600x960)
@@ -45,6 +41,16 @@ extern int noX11;
       char our_make[] = "hamclock-3200x1920";
   #else
       char our_make[] = "hamclock-800x480";
+  #endif
+#elif defined(_WEB_ONLY)
+  #if defined(_CLOCK_1600x960)
+      char our_make[] = "hamclock-web-1600x960";
+  #elif defined(_CLOCK_2400x1440)
+      char our_make[] = "hamclock-web-2400x1440";
+  #elif defined(_CLOCK_3200x1920)
+      char our_make[] = "hamclock-web-3200x1920";
+  #else
+      char our_make[] = "hamclock-web-800x480";
   #endif
 #else
   #error Unknown build configuration
@@ -195,7 +201,6 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default %.0f\n", MAX_CPU_USAGE*100);
         fprintf (stderr, " -w p : set web server port p instead of %d\n", svr_port);
-        fprintf (stderr, " -x   : run headless without X11 or FB0 -- run only the web server\n");
 
         exit(1);
 }
@@ -288,7 +293,7 @@ static void crackArgs (int ac, char *av[])
                     ac--;
                     break;
                 case 'x':
-                    noX11 = true;
+                    usage ("-x is no longer supported -- replaced with web make targets");
                     break;
                 default:
                     usage ("unknown option: %c", *s);

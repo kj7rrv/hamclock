@@ -66,16 +66,26 @@ uint8_t rss_on;
 // whether to shade night or show place names
 uint8_t night_on, names_on;
 
-// Azimuthal-Mercator flag
-uint8_t azm_on;
-
 // grid styles
 uint8_t mapgrid_choice;
 const char *grid_styles[MAPGRID_N] = {
     "None",
     "Tropics",
     "Lat/Long",
-    "Maidenhead"
+    "Maidenhead",
+    "Azimuthal",
+#if defined(_SUPPORT_ZONES)
+    "CQ Zones",
+    "ITU Zones",
+#endif
+};
+
+// map projections
+uint8_t map_proj;
+const char *map_projnames[MAPP_N] = {
+    "Mercator",
+    "Azimuthal",
+    "Azim One"
 };
 
 // info to display in the call sign GUI location -- the real call sign is always getCallsign()
@@ -141,7 +151,7 @@ void setDXPathInvalid()
     n_gpath = 0;
 }
 
-// these are needed for a normal C++ compiler
+// these are needed for any normal C++ compiler, not that crazy Arduino IDE
 static void drawVersion(bool force);
 static void checkTouch(void);
 static void drawUptime(bool force);
@@ -157,10 +167,13 @@ static void unsetDXPrefixOverride (void);
 static void shutdown(void);
 
 
-/* on unix, try to restore screen and turn off all LEDs if we die unexpectedly from a signal
+
+/* UNIX-only recovery attempts
  */
 #if defined(_IS_UNIX)
 
+/* try to restore pi to somewhat normal config
+ */
 static void defaultState()
 {
     // try to insure screen is back on -- har!
@@ -174,23 +187,45 @@ static void defaultState()
     #endif
 }
 
-static void onSig (int signo)
+
+/* called on fatal signal. try to clean up a little.
+ * N.B. use only write(2)
+ */
+void onSig (int signo)
 {
     char buf[100];
 
-    snprintf (buf, sizeof(buf), "Goodbye from signal %d\n", signo);
-    (void) !write (1, buf, strlen(buf));
+    // ack
+    int npr = snprintf (buf, sizeof(buf), "Goodbye from signal %d\n", signo);
+    (void) !write (1, buf, npr);
 
+    // return to normal
     defaultState();
 
+    // gone
     exit(1);
 }
+
+/* connect onSig to several interesting signals
+ */
+static void connectOnSig()
+{
+    struct sigaction sa;
+    memset (&sa, 0, sizeof(sa));
+    sa.sa_handler = onSig;
+    sigaction (SIGILL, &sa, NULL);
+    sigaction (SIGKILL, &sa, NULL);
+    sigaction (SIGSEGV, &sa, NULL);
+    sigaction (SIGBUS, &sa, NULL);
+}
+
+
 #endif // _IS_UNIX
 
 
 
 
-// initial stack
+// initial stack location
 char *stack_start;
 
 // called once
@@ -252,12 +287,8 @@ void setup()
     initBrightness();
 
 #if defined(_IS_UNIX)
-    // connect signal handler
-    signal (SIGTERM, onSig);
-    signal (SIGILL, onSig);
-    signal (SIGKILL, onSig);
-    signal (SIGSEGV, onSig);
-    signal (SIGBUS, onSig);
+    // connect signal handler to most nasty signals
+    connectOnSig();
 #endif // _IS_UNIX
 
 
@@ -310,6 +341,16 @@ void setup()
     }
     Serial.printf ("Net %d\n", getTextWidth(str));
     Serial.printf ("Sum %d\n", sum);
+
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    tft.setCursor (10,100);
+    tft.print("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    tft.setCursor (10,120);
+    tft.print("abcdefghijklmnopqrstuvwxyz");
+    tft.setCursor (10,140);
+    tft.print(R"(0123456789 ~!@#$%^&*()_+{}|:"<>? `-=[]\;',./)");
+
     while(1)
         wdDelay(100);
 #endif // _GFX_TEXTSZ
@@ -324,7 +365,10 @@ void setup()
         Serial.printf ("Can not start web server: %s\n", wsynot);
 #endif
 
-    // get info from user at full brighness, then commence with user's desired brightness
+    // set up brb_rotset and brb_mode
+    initBRBRotset();
+
+    // run Setup at full brighness, then commence with user's desired brightness
     clockSetup();
     setupBrightness();
 
@@ -526,11 +570,16 @@ void setup()
         NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
     }
 
-    // set up az-merc state
-    NVReadUInt8 (NV_AZIMUTHAL_ON, &azm_on);
+    // set up map projection
+    NVReadUInt8 (NV_MAPPROJ, &map_proj);
 
     // get grid style state
-    NVReadUInt8 (NV_LLGRID, &mapgrid_choice);
+    NVReadUInt8 (NV_GRIDSTYLE, &mapgrid_choice);
+
+#if defined(_SUPPORT_PSKREPORTER)
+    // init psk reporter
+    initPSKState();
+#endif // _SUPPORT_PSKREPORTER
 
     // position the maiden label boxes
     maidlbltop_b.x = map_b.x;
@@ -566,7 +615,7 @@ void loop()
     if (runStopwatch())
         return;
 
-    // check on wifi and plots
+    // check on wifi including plots and NCDXF_b
     updateWiFi();
 
     // update clocks
@@ -574,9 +623,6 @@ void loop()
 
     // update sat pass (this is just the pass; the path is recomputed before each map sweep)
     updateSatPass();
-
-    // update NCFDX beacons, don't erase if holding path
-    updateBeacons(!waiting4DXPath(), false, false);
 
     // display more of earth map
     drawMoreEarth();
@@ -588,7 +634,6 @@ void loop()
     followBrightness();
     checkOnAir();
     readBME280();
-    updateBMEStats();
     runNextDemoCommand();
     updateGPSDLoc();
 
@@ -773,7 +818,7 @@ static void checkTouch()
         dx_info_for_sat = true;
         displaySatInfo();
         eraseDXPath();                  // declutter to emphasize sat track
-        drawAllSymbols(false);
+        drawAllSymbols(true);
     } else if (!overViewBtn(s, DX_R) && s2ll (s, ll)) {
         // new DE or DX.
         roundLL (ll);
@@ -945,7 +990,7 @@ void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
     drawDXPath ();
     gpath_time = millis();
     drawDXInfo ();
-    drawAllSymbols(false);
+    drawAllSymbols(true);
 
     // don't draw if prefix from cluster because it draws also
     if (!dx_prefix_use_override)
@@ -983,7 +1028,7 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     // sat path will change, stop gimbal and require op to start
     stopGimbalNow();
 
-    if (azm_on) {
+    if (map_proj != MAPP_MERCATOR) {
 
         // must start over because everything moves to keep new DE centered
 
@@ -1014,7 +1059,7 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
         // draw in new location and update info
         drawDEInfo();
         drawDXInfo();   // heading changes
-        drawAllSymbols(false);
+        drawAllSymbols(true);
         
         // update lunar info
         getLunarCir (nowWO(), de_ll, lunar_cir);
@@ -1033,6 +1078,9 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     sendDXClusterDELLGrid();
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
+#if defined(_SUPPORT_PSKREPORTER)
+    updatePSKReporter(true);
+#endif // _SUPPORT_PSKREPORTER
 
     // log
     char de_grid[MAID_CHARLEN];
@@ -1173,10 +1221,8 @@ static void eraseDXPath()
             drawMapCoord (prefix_b.x + dx, prefix_b.y + dy);
 
     // erase the great path
-    for (uint16_t i = 0; i < n_gpath; i++) {
-        drawMapCoord (gpath[i]);                        // draws x and x+1, y
-        drawMapCoord (gpath[i].x, gpath[i].y+1);        //        "       , y+1
-    }
+    for (uint16_t i = 0; i < n_gpath; i++)
+        drawMapCoord (gpath[i]);
 
     // mark no longer active
     setDXPathInvalid();
@@ -1222,39 +1268,29 @@ void drawDXPath ()
 
     // start with max nnumber of points, then reduce
     gpath = (SCoord *) realloc (gpath, MAX_GPATH * sizeof(SCoord));
-    if (!gpath) {
-        fatalError (_FX("Failed to malloc gpath"));
-    }
+    if (!gpath)
+        fatalError ("gpath %d", MAX_GPATH); // no _FX if alloc failing
 
     // walk great circle path from DE through DX, storing each point
     float ca, B;
     SCoord s;
     n_gpath = 0;
+    uint16_t short_col = getMapColor(SHORTPATH_CSPR);
+    uint16_t long_col = getMapColor(LONGPATH_CSPR);
     for (float b = 0; b < 2*M_PIF; b += 2*M_PIF/MAX_GPATH) {
         solveSphere (bear, b, sdelat, cdelat, &ca, &B);
         ll2s (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
-        if (overMap(s) && (n_gpath == 0 || memcmp (&s, &gpath[n_gpath-1], sizeof(SCoord)))) {
-            uint16_t c = b < dist ? getShortPathColor() : getLongPathColor();
+        if ((n_gpath == 0 || memcmp (&s, &gpath[n_gpath-1], sizeof(SCoord))) && overMap(s)) {
             gpath[n_gpath++] = s;
-
-            // beware drawing the fat pixel off the edge of earth because eraseDXPath won't erase it
-            LatLong ll;
-            tft.drawPixel (s.x, s.y, c);
-            if (s2ll(s.x+1, s.y, ll))
-                tft.drawPixel (s.x, s.y, c);
-            if (s2ll(s.x+1, s.y+1, ll))
-                tft.drawPixel (s.x, s.y, c);
-            if (s2ll(s.x, s.y+1, ll))
-                tft.drawPixel (s.x, s.y, c);
+            tft.drawPixel (s.x, s.y, b < dist ? short_col : long_col);
         }
     }
 
     // reduce to actual number of points used
     // Serial.printf (_FX("n_gpath %u -> %u\n"), MAX_GPATH, n_gpath);
     gpath = (SCoord *) realloc (gpath, n_gpath * sizeof(SCoord));
-    if (!gpath) {
-        fatalError(_FX("Failed to realloc gpath"));
-    }
+    if (!gpath && n_gpath > 0)
+        fatalError("realloc gpath: %d", n_gpath);
 
     // printFreeHeap (F("drawDXPath"));
 }
@@ -1269,7 +1305,7 @@ bool waiting4DXPath()
 
     if (timesUp (&gpath_time, DXPATH_LINGER)) {
         eraseDXPath();          // sets no longer valid
-        drawAllSymbols(false);
+        drawAllSymbols(true);
         return (false);
     }
 
@@ -1278,13 +1314,7 @@ bool waiting4DXPath()
 
 void drawDXMarker (bool force)
 {
-    // draw if force or overmap and not showing sat or DXWX or VOACAP
-    if (force ||
-                ((!dx_info_for_sat
-                    || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE
-                    || findPaneChoiceNow(PLOT_CH_BC) != PANE_NONE)
-                && overMap(dx_c.s))
-            ) {
+    if (force || showDXMarker()) {
         tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
         tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
         tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
@@ -1420,16 +1450,12 @@ void drawCallsign (bool all)
  */
 static void drawRainbow (SBox &box)
 {
-    uint8_t h, s = 255, v = 255;
-    uint8_t r, g, b;
     uint8_t x0 = random(box.w);
 
     tft.graphicsMode();
     for (uint16_t x = box.x; x < box.x+box.w; x++) {
-        h = 255*((x+x0-box.x)%box.w)/box.w;
-        hsvtorgb (&r, &g, &b, h, s, v);
-        uint16_t c = RGB565(r,g,b);
-        tft.fillRect (x, box.y, 1, box.h, c);
+        uint8_t h = 255*((x+x0-box.x)%box.w)/box.w;
+        tft.fillRect (x, box.y, 1, box.h, HSV565(h,255,255));
     }
 }
 
@@ -1628,11 +1654,12 @@ static void drawUptime(bool force)
 }
 
 
-/* return whether coordinate s is over the maidenhead key around the edges
+/* return whether coordinate s is over the maidenhead key around the edges.
+ * N.B. assumes key is only shown in mercator projection.
  */
 static bool overMaidKey (const SCoord &s)
 {
-    return (!azm_on && mapgrid_choice == MAPGRID_MAID       
+    return (map_proj == MAPP_MERCATOR && mapgrid_choice == MAPGRID_MAID       
                         && (inBox(s,maidlbltop_b) || inBox(s,maidlblright_b)) );
 }
 
@@ -1643,21 +1670,53 @@ static bool overMapScale (const SCoord &s)
     return (mapScaleIsUp() && inBox(s,mapscale_b));
 }
 
+/* return whether s is over the active portion of map, ie, depending on the current projection.
+ */
+static bool overActiveMap (const SCoord &s)
+{
+    if (map_proj == MAPP_AZIMUTHAL) {
+        int map_r = map_b.w/4;
+        int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
+        if (s.x < map_b.x + map_b.w/2) {
+            // left globe
+            int dx = (int)s.x - (int)(map_b.x + map_b.w/4);
+            return (dx*dx + dy*dy <= map_r*map_r);
+        } else {
+            // right globe
+            int dx = (int)s.x - (int)(map_b.x + 3*map_b.w/4);
+            return (dx*dx + dy*dy <= map_r*map_r);
+        }
+
+    } else if (map_proj == MAPP_AZIM1) {
+        // centered globe
+        int map_r = map_b.w/4;
+        int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
+        int dx = (int)s.x - (int)(map_b.x + map_b.w/2);
+        return (dx*dx + dy*dy <= map_r*map_r);
+
+    } else if (map_proj == MAPP_MERCATOR) {
+        return (inBox(s,map_b));
+    } else {
+        fatalError (_FX("Bug! overActiveMap bogus projection %d"), map_proj);
+        return (false);         // lint 
+    }
+}
+
 /* return whether coordinate s is over a usable map location
  */
 bool overMap (const SCoord &s)
 {
-    return (inBox(s, map_b) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overMapScale(s));
+    return (overActiveMap(s) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overMapScale(s));
 }
 
 /* return whether coordinate s is over any symbol
  */
 bool overAnySymbol (const SCoord &s)
 {
-    // only showing dx and deap if not showing sat or showing DX WX
-    bool show_dxap = !dx_info_for_sat || findPaneChoiceNow(PLOT_CH_DXWX) != PANE_NONE;
     return (inCircle(s, de_c)
-                || (show_dxap && (inCircle(s, dx_c) || inCircle(s, deap_c)))
+                || (showDEAPMarker() && inCircle(s, deap_c))
+                || (showDEMarker() && inCircle(s, de_c))
+                || (showDXMarker() && inCircle(s, dx_c))
                 || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
                 || overMapScale(s));
@@ -1667,7 +1726,7 @@ bool overAnySymbol (const SCoord &s)
 /* draw all symbols, order establishes layering priority
  * N.B. called by updateBeacons(): beware recursion
  */
-void drawAllSymbols(bool erase_too)
+void drawAllSymbols(bool beacons_too)
 {
     updateClocks(false);
     resetWatchdog();
@@ -1678,7 +1737,8 @@ void drawAllSymbols(bool erase_too)
         drawSun();
     if (overMap(moon_c.s))
         drawMoon();
-    updateBeacons(erase_too, true, false);
+    if (beacons_too)
+        updateBeacons(true);
     drawDEMarker(false);
     drawDXMarker(false);
     if (!overRSS(deap_c.s))
@@ -1939,13 +1999,16 @@ static void drawDXCursorPrefix()
 {
     char p[MAX_PREF_LEN+1];
     if (getDXPrefix(p)) {
-        setMapTagBox (p, dx_c.s, dx_c.r+5, prefix_b);
+        setMapTagBox (p, dx_c.s, dx_c.r+2, prefix_b);
         drawMapTag (p, prefix_b);
     }
 }
 
-/* set box to position a string with nominal center at s over the map taking care not to obscure
- * the given region nor go outside the map. r is encircling radius, if any.
+/* this function positions a box to contain short text beneath a symbol at location s with radius r.
+ * the preferred position is centered below, but it will be moved to avoid going off the map.
+ * N.B. s is assumed to be on the map already.
+ * N.B. r == 0 is a special case to mean center the text exactly at s, not beneath it.
+ * N.B. coordinate with drawMapTag()
  */
 void setMapTagBox (const char *tag, const SCoord &s, uint16_t r, SBox &box)
 {
@@ -1954,53 +2017,134 @@ void setMapTagBox (const char *tag, const SCoord &s, uint16_t r, SBox &box)
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     getTextBounds (tag, &cw, &ch);
 
-    // define initial position
-    box.x = s.x - cw/2-2;
-    box.y = s.y - ch/2 + r;
-    box.w = cw + 4;
-    box.h = ch + 1;
+    // set box size to text with a small margin
+    box.w = cw+2;
+    box.h = ch+2;
 
-    // insure entirely over map
-    SCoord rss_test;
-    rss_test.x = map_b.x + map_b.w/2U;
-    rss_test.y = box.y + box.h;
-    if (overRSS(rss_test) || box.y + box.h >= map_b.y + map_b.h) {
-        // move label on top of symbol if near bottom 
-        box.y = s.y - r - box.h - 2;
-    } else if (azm_on) {
-        // check bottom corners against hemisphere edge if in lower half, top half should be ok
-        uint16_t center_y = map_b.y + map_b.h/2;
-        if (s.y > center_y) {
-            uint32_t r2 = (uint32_t)map_b.h/2 * (uint32_t)map_b.w/4;
-            uint32_t dy = box.y + box.h - center_y;
-            uint16_t max_dx = sqrtf(r2 - dy*dy);
-            uint16_t center_x = map_b.x + ((s.x < map_b.x + map_b.w/2) ? map_b.w/4 : 3*map_b.w/4);
-            if (box.x < center_x - max_dx) {
-                box.x = s.x + r + 2;
+    // start at preferred location
+    box.x = s.x - box.w/2;
+    box.y = s.y + (r ? r : -box.h/2);           // center if r is 0
+
+    // check
+    if (map_proj == MAPP_MERCATOR) {
+
+        // check left-right
+        if (box.x < map_b.x) {
+            // too far left: shift to right inline with symbol
+            box.x = s.x + r;
+            box.y = s.y - box.h/2;
+        } else if (box.x + box.w >= map_b.x + map_b.w) {
+            // too far right: shift to left inline with symbol
+            box.x = s.x - r - box.w;
+            box.y = s.y - box.h/2;
+        }
+
+        // check too low
+        if (box.y + box.h >= map_b.y + map_b.h) {
+            // too low -- center above symbol
+            box.y = s.y - r - box.h;
+        }
+        // can't be too high because we assume s is over map and label is below
+
+    } else {
+
+        // find center and size of appropriate sphere
+        int sph_r = map_b.h/2;
+        int sph_y0 = map_b.y + map_b.h/2;
+        int sph_x0 = 0;
+        if (map_proj == MAPP_AZIMUTHAL)
+            sph_x0 = map_b.x + (s.x < map_b.x+map_b.w/2 ? map_b.w/4 : 3*map_b.w/4);
+        else if (map_proj == MAPP_AZIM1)
+            sph_x0 = map_b.x + map_b.w/2;
+        else
+            fatalError (_FX("Bogus map_proj %d in setMapTagBox()"), map_proj);
+
+        // find cardinal distances from sph center to each box edge
+        int l_dx = (int)(box.x) - sph_x0;
+        int r_dx = (int)(box.x + box.w) - sph_x0;
+        int t_dy = (int)(box.y) - sph_y0;
+        int b_dy = (int)(box.y + box.h) - sph_y0;
+
+        // find fraction of radii from sph center to each box corner compared to sph radius
+        float tl_rfrac = sqrtf (l_dx*l_dx + t_dy*t_dy) / sph_r;
+        float tr_rfrac = sqrtf (r_dx*r_dx + t_dy*t_dy) / sph_r;
+        float bl_rfrac = sqrtf (l_dx*l_dx + b_dy*b_dy) / sph_r;
+        float br_rfrac = sqrtf (r_dx*r_dx + b_dy*b_dy) / sph_r;
+
+        if (b_dy > 4*sph_r/5) {
+            // near bottom
+            if (br_rfrac > 1 || bl_rfrac > 1) {
+                // shift above
+                box.y = s.y - r - box.h;
+            }
+        } else if (b_dy > 0) {
+            // below center
+            if (br_rfrac > 1) {
+                // too far right -- shift left
+                box.x = s.x - r - box.w;
                 box.y = s.y - box.h/2;
-            } else if (box.x + box.w >= center_x + max_dx) {
-                box.x = s.x - r - box.w - 2;
+            } else if (bl_rfrac > 1) {
+                // too far left -- shift right
+                box.x = s.x + r;
                 box.y = s.y - box.h/2;
             }
+        } else if (b_dy > -4*sph_r/5) {
+            // above center
+            if (tr_rfrac > 1) {
+                // too far right -- shift left
+                box.x = s.x - r - box.w;
+                box.y = s.y - box.h/2;
+            } else if (tl_rfrac > 1) {
+                // too far left -- shift right
+                box.x = s.x + r;
+                box.y = s.y - box.h/2;
+            }
+        } else {
+            // near top
+            if (tr_rfrac > 1 || tl_rfrac > 1) {
+                // shift below -- was centered if r is 0
+                box.y = s.y + r;
+            }
         }
-    } else {
-        // check left and right edges
-        if (box.x < map_b.x)
-            box.x = map_b.x + 2;
-        else if (box.x + box.w >= map_b.x + map_b.w)
-            box.x = map_b.x + map_b.w - box.w - 2;
     }
 }
 
-/* draw a small string within the given box set by setMapTagBox
+/* draw a string within the given box set by setMapTagBox.
+ * actually this is no longer a box but text with a shifted background -- more moxy!
+ * still, knowing the box has been positioned well allows for this masking.
+ * N.B. coordinate with setMapTagBox()
  */
 void drawMapTag (const char *tag, SBox &box)
 {
-    // draw
-    fillSBox (box, RA8875_BLACK);
+    // small font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setCursor (box.x+2, box.y);
+
+    // text position
+    uint16_t x0 = box.x+1;
+    uint16_t y0 = box.y+1;
+
+    // draw background by shifting tag around
+    char bkg_str[10];
+    snprintf (bkg_str, sizeof(bkg_str), "%0*d", (int)strlen(tag), 0);
+    tft.setTextColor (RA8875_BLACK);
+    for (int16_t dx = -1; dx <= 1; dx++) {
+        for (int16_t dy = -1; dy <= 1; dy++) {
+            if (dx || dy) {
+                tft.setCursor (x0+dx, y0+dy);
+                tft.print(bkg_str);
+            }
+        }
+    }
+
+    // larger sizes use hi-res fonts which leave a few bit turds
+#if BUILD_W > 800
+    for (unsigned i = 0; i < strlen(tag); i++)
+        tft.fillRect (x0+i*6,y0,5,7,RA8875_BLACK);
+#endif
+
+    // draw text
     tft.setTextColor (RA8875_WHITE);
+    tft.setCursor (x0, y0);
     tft.print((char*)tag);
 }
 
@@ -2241,15 +2385,13 @@ static void shutdown(void)
     case _SDC_RESTART:
         Serial.print (_FX("Restarting\n"));
         eraseScreen();  // fast touch feedback
-        reboot();
+        doReboot();
         break;
  #if defined(_IS_UNIX)
     case _SDC_EXIT:
         Serial.print (_FX("Exiting\n"));
-        eraseScreen();
-        defaultState();
-        wdDelay(200);
-        exit(0);
+        doExit();
+        break;                  // ;-)
     case _SDC_REBOOT:
         drawStringInBox ("Rebooting...", sdc[3].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
@@ -2273,13 +2415,28 @@ static void shutdown(void)
 
 /* reboot
  */
-void reboot()
+void doReboot()
 {
     #if defined(_IS_UNIX)
         defaultState();
     #endif
     ESP.restart();
     for(;;);
+}
+
+/* do exit, as best we can
+ */
+void doExit()
+{
+    #if defined(_IS_ESP8266)
+        // all we can do
+        doReboot();
+    #else
+        eraseScreen();
+        defaultState();
+        wdDelay(200);
+        exit(0);
+    #endif
 }
 
 /* call to display one final message, never returns
@@ -2337,21 +2494,63 @@ void fatalError (const char *fmt, ...)
                 mp++;
         } while (strlen(mp) > 0 && y < 480-FE_LINEH);
 
-        // draw box and wait for click
-        SBox x_b = {350, 400, 100, 50};
-        const char x_msg[] = "Restart";
-        drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
-        drainTouch();
-        SCoord s;
-        while (readCalTouchWS (s) == TT_NONE || !inBox (s, x_b))
-            wdDelay(20);
+        #if defined(_IS_ESP8266)
 
-        drawStringInBox (x_msg, x_b, true, RA8875_WHITE);
-        wdDelay(100);
+            // draw box and wait for click
+            SBox r_b = {350, 400, 100, 50};
+            const char r_msg[] = "Restart";
+            drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
+            drainTouch();
+
+            for(;;) {
+
+                SCoord s;
+                while (readCalTouchWS (s) == TT_NONE)
+                    wdDelay(20);
+
+                if (inBox (s, r_b)) {
+                    drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
+                    Serial.print (_FX("Fatal error rebooting\n"));
+                    doReboot();
+                }
+            }
+
+        #else
+
+            // draw boxes and wait for click in either
+            SBox r_b = {250, 400, 100, 50};
+            SBox x_b = {450, 400, 100, 50};
+            const char r_msg[] = "Restart";
+            const char x_msg[] = "Exit";
+            drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
+            drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
+            drainTouch();
+
+            for(;;) {
+
+                SCoord s;
+                while (readCalTouchWS (s) == TT_NONE)
+                    wdDelay(20);
+
+                if (inBox (s, r_b)) {
+                    drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
+                    Serial.print (_FX("Fatal error rebooting\n"));
+                    doReboot();
+                }
+
+                if (inBox (s, x_b)) {
+                    drawStringInBox (x_msg, x_b, true, RA8875_WHITE);
+                    Serial.print (_FX("Fatal error exiting\n"));
+                    doExit();
+                }
+            }
+
+        #endif
+
     }
 
     // bye bye
-    reboot();
+    doExit();
 }
 
 
@@ -2409,40 +2608,4 @@ void printFreeHeap (const __FlashStringHelper *label)
         worst_heap = free_heap;
     if (stack_used > worst_stack)
         worst_stack = stack_used;
-}
-
-/* gnu stack trace
- */
-#if defined(__GNUC__) && defined(_IS_UNIX)
-#include <execinfo.h>
-// only works with -O0
-void printStacktrace(const char *fmt, ...)
-{
-    // header
-    va_list ap;
-    va_start(ap, fmt);
-    printf (_FX("************ "));
-    vprintf (fmt, ap);
-    printf ("\n");
-    va_end(ap);
-
-    // stack
-    void *array[10];
-    char **strings;
-    int size;
-    size = backtrace (array, 10);
-    strings = backtrace_symbols (array, size);
-    if (strings != NULL) {
-        printf (_FX("%d stack frames:\n"), size);
-        for (int i = 0; i < size; i++)
-            printf ("  %s\n", strings[i]);
-    }
-
-    // clean up
-    free (strings);
-#else
-void printStacktrace()
-{
-    Serial.println (F("No stack trace available"));
-#endif // (__GNUC__)
 }

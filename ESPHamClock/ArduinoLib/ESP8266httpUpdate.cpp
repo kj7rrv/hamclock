@@ -15,7 +15,7 @@ class ESPhttpUpdate ESPhttpUpdate;
 
 // approximate number of lines generated when running unzip and make, used for progress meter.
 #define N_UNZIP_LINES   90
-#define N_MAKE_LINES    72
+#define N_MAKE_LINES    75
 
 
 ESPhttpUpdate::ESPhttpUpdate()

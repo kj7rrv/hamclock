@@ -18,30 +18,19 @@
  */
 void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp)
 {
-        float cb = cosf(b), sb = sinf(b);
-        float sA, cA = cosf(A);
-        float x, y;
-        float ca;
-        float B;
+        float cb = cosf(b);
+        float sb = sinf(b);
+        float cA = cosf(A);
+        float ca = fminf (fmaxf (cb*cc + sb*sc*cA, -1), 1);
 
-        ca = cb*cc + sb*sc*cA;
-        if (ca >  1.0F) ca =  1.0F;
-        if (ca < -1.0F) ca = -1.0F;
         if (cap)
             *cap = ca;
 
-        if (!Bp)
-            return;
-
-        if (sc < 1e-7F)
-            B = cc < 0 ? A : M_PIF-A;
-        else {
-            sA = sinf(A);
-            y = sA*sb*sc;
-            x = cb - ca*cc;
-            B = y ? (x ? atan2f(y,x) : (y>0 ? M_PI_2F : -M_PI_2F)) : (x>=0 ? 0 : M_PIF);
+        if (Bp) {
+            float sA = sinf(A);
+            float y = sA*sb*sc;
+            float x = cb - ca*cc;
+            *Bp = atan2f (y,x);
         }
-
-        *Bp = B;
 }
 

@@ -42,7 +42,7 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_UTC_OFFSET
     1,                          // NV_PLOT_1
     1,                          // NV_PLOT_2
-    1,                          // NV_BRB_MODE
+    1,                          // NV_BRB_ROTSET
     1,                          // NV_PLOT_3
     1,                          // NV_RSS_ON
     2,                          // NV_BPWM_DIM
@@ -52,7 +52,7 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_LP
     1,                          // NV_METRIC_ON
     1,                          // NV_LKSCRN_ON
-    1,                          // NV_AZIMUTHAL_ON
+    1,                          // NV_MAPPROJ
     1,                          // NV_ROTATE_SCRN
     NV_WIFI_SSID_LEN,           // NV_WIFI_SSID
     NV_WIFI_PW_LEN_OLD,         // NV_WIFI_PASSWD_OLD
@@ -60,7 +60,7 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_SATNAME_LEN,             // NV_SATNAME
     1,                          // NV_DE_SRSS
     1,                          // NV_DX_SRSS
-    1,                          // NV_LLGRID
+    1,                          // NV_GRIDSTYLE
     2,                          // NV_DPYON
     2,                          // NV_DPYOFF
     NV_DXHOST_LEN,              // NV_DXHOST
@@ -126,8 +126,21 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_DXCLCMD_LEN,             // NV_DXCMD2
     NV_DXCLCMD_LEN,             // NV_DXCMD3
     1,                          // NV_DXCMDUSED
-    2,                          // NV_GT10MHZ_COL
-    2,                          // NV_LT10MHZ_COL
+    1,                          // NV_PSK_MODEBITS
+    4,                          // NV_PSK_BANDS
+    2,                          // NV_160M_COLOR
+    2,                          // NV_80M_COLOR
+    2,                          // NV_60M_COLOR
+    2,                          // NV_40M_COLOR
+    2,                          // NV_30M_COLOR
+    2,                          // NV_20M_COLOR
+    2,                          // NV_17M_COLOR
+    2,                          // NV_15M_COLOR
+    2,                          // NV_12M_COLOR
+    2,                          // NV_10M_COLOR
+    2,                          // NV_6M_COLOR
+    2,                          // NV_2M_COLOR
+
 };
 
 

@@ -147,6 +147,7 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 #define ROTATION_INTERVAL       30
 #define ROTATION_WX_INTERVAL    60
 
+
 // time of next attempts -- 0 will refresh immediately -- reset in initWiFiRetry()
 static time_t next_sflux;
 static time_t next_ssn;
@@ -172,6 +173,7 @@ static time_t next_bme280_d;
 static time_t next_swind;
 static time_t next_drap;
 static time_t next_stereo_a;
+static time_t next_psk;
 
 // persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
 static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update;
@@ -231,9 +233,9 @@ static time_t nextPaneRotationTime(PlotPane pp, PlotChoice pc)
     for (int i = 0; i < PANE_N*PANE_N; i++) {           // all permutations
         PlotPane ppi = (PlotPane) (i % PANE_N);
         if (ppi != pp && paneIsRotating((PlotPane)ppi)) {
-            if ((rot_time >= next_rotationT[ppi] && rot_time - next_rotationT[ppi] < interval)
-                  || (rot_time <= next_rotationT[ppi] && next_rotationT[ppi] - rot_time < interval))
-                rot_time = next_rotationT[ppi] + interval;
+            if ((rot_time >= plot_rotationT[ppi] && rot_time - plot_rotationT[ppi] < interval)
+                  || (rot_time <= plot_rotationT[ppi] && plot_rotationT[ppi] - rot_time < interval))
+                rot_time = plot_rotationT[ppi] + interval;
         }
     }
 
@@ -1008,6 +1010,11 @@ static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XR
         float raw_lxray = 0;
         while (xray_i < XRAY_NV && getTCPLine (xray_client, line, sizeof(line), &ll)) {
             // Serial.println(line);
+
+            // for some unknown reason this delay eliminates all xray short lists on ESP.
+            // it was discovered because the above print also eliminates them.
+            delay(10);
+
             if (line[0] == '2' && ll >= 56) {
 
                 // short
@@ -1186,6 +1193,75 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     return (true);
 }
 
+/* keep the NCDXF_b up to date.
+ * N.B. this is called often so do minimal work.
+ */
+static void checkBRB (time_t t)
+{
+    // routine update of NCFDX beacons
+    updateBeacons(false);
+
+    // see if it's time to rotate
+    if (BRBIsRotating() && t > brb_rotationT) {
+
+        // find next bit in rotset
+        for (unsigned i = 1; i < 8*sizeof(brb_rotset); i++) {
+            int mode_n = (brb_mode + i)%BRB_N;
+            if (brb_rotset & (1 << mode_n)) {
+
+                // set current mode and draw
+                brb_mode = mode_n;
+                drawNCDXFBox();
+
+                // sync rotation with next soonest pane, else set new
+                time_t next_rotT = 0;
+                for (int i = 0; i < PANE_N; i++) {
+                    if (paneIsRotating(i)) {
+                        if (!next_rotT || plot_rotationT[i] < next_rotT)
+                            next_rotT = plot_rotationT[i];
+                    }
+                }
+                brb_rotationT = next_rotT ? next_rotT : t + ROTATION_INTERVAL;
+
+                break;
+            }
+        }
+
+    } else {
+
+        // check if current mode needs an update
+
+        switch ((BRB_MODE)brb_mode) {
+        case BRB_SHOW_BEACONS:
+            // handled above
+            break;
+
+        case BRB_SHOW_ONOFF:
+            // nothing to update
+            break;
+
+        case BRB_SHOW_PHOT:     // fallthru
+        case BRB_SHOW_BR:
+            // these two are handled by followBrightness() in main loop
+            break;
+
+        case BRB_SHOW_SWSTATS:
+            if (checkSpaceStats(t))
+                drawSpaceStats();
+            break;
+
+        case BRB_SHOW_BME76:    // fallthru
+        case BRB_SHOW_BME77:
+            updateBMEStats();
+            break;
+
+        default:
+            fatalError (_FX("Bug! checkBRB() bad brb_mode: %d"), brb_mode);
+            break;
+        }
+    }
+}
+
 /* arrange to resume PANE_1 after dt millis
  */
 static void revertPlot1 (uint32_t dt)
@@ -1193,8 +1269,8 @@ static void revertPlot1 (uint32_t dt)
     time_t revert_t = now() + dt/1000;
 
     // don't rotate until after revert_t
-    if (paneIsRotating(PANE_1) && next_rotationT[PANE_1] < revert_t)
-        next_rotationT[PANE_1] = revert_t;
+    if (paneIsRotating(PANE_1) && plot_rotationT[PANE_1] < revert_t)
+        plot_rotationT[PANE_1] = revert_t;
 
     switch (plot_ch[PANE_1]) {
     case PLOT_CH_DXWX:
@@ -1270,6 +1346,13 @@ static void revertPlot1 (uint32_t dt)
     case PLOT_CH_STEREO_A:
         next_stereo_a = revert_t;
         break;
+
+#if defined(_SUPPORT_PSKREPORTER)
+    case PLOT_CH_PSK:
+        next_psk = revert_t;
+        break;
+#endif
+
     default:
         fatalError(_FX("Bug! revertPlot1() choice %d"), plot_ch[PANE_1]);
         break;
@@ -1428,8 +1511,15 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         next_stereo_a = 0;
         break;
 
+#if defined(_SUPPORT_PSKREPORTER)
+    case PLOT_CH_PSK:
+        plot_ch[pp] = ch;
+        next_psk = 0;
+        break;
+#endif
+
     default:
-        fatalError (_FX("setPlotChoice() PlotPane %d, PlotChoice %d"), (int)pp, (int)ch);
+        fatalError (_FX("Bug! setPlotChoice() PlotPane %d, PlotChoice %d"), (int)pp, (int)ch);
         break;
 
     }
@@ -1445,7 +1535,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
 
     // schedule next rotation if enabled
     if (paneIsRotating(pp))
-        next_rotationT[pp] = nextPaneRotationTime(pp, ch);
+        plot_rotationT[pp] = nextPaneRotationTime(pp, ch);
 
     // ok!
     return (true);
@@ -1470,7 +1560,7 @@ void updateWiFi(void)
         bool new_rot_ch = false;
 
         // rotate if this pane is rotating and it's time
-        if (paneIsRotating(pp) && t0 >= next_rotationT[i]) {
+        if (paneIsRotating(pp) && t0 >= plot_rotationT[i]) {
             setPlotChoice (pp, getNextRotationChoice(pp, plot_ch[pp]));
             new_rot_ch = true;
             ch = plot_ch[pp];
@@ -1669,6 +1759,15 @@ void updateWiFi(void)
             }
             break;
 
+    #if defined(_SUPPORT_PSKREPORTER)
+        case PLOT_CH_PSK:
+            if (t0 >= next_psk) { 
+                drawPSKPane();
+                next_psk = now() + ROTATION_INTERVAL;
+            }
+            break;
+    #endif
+
         default:
             fatalError (_FX("Bug! updateWiFi() bad choice: %d"), ch);
             break;
@@ -1676,15 +1775,19 @@ void updateWiFi(void)
 
         // show immediately this is as new rotating pane
         if (new_rot_ch)
-            showRotatingBorder (true, pp);
+            showRotatingBorder ();
     }
 
     // check if time to update map
     checkMap();
 
-    // freshen space stats if not updated already by pane and draw if any are new
-    if (checkSpaceStats(t0))
-        drawSpaceStats();
+    // freshen NCDXF_b
+    checkBRB(t0);
+
+#if defined(_SUPPORT_PSKREPORTER)
+    // freshen psk reporter list -- it has its own cadance management
+    updatePSKReporter(false);
+#endif
 
     // freshen RSS
     if (t0 >= next_rss) {
@@ -1842,14 +1945,18 @@ bool getChar (WiFiClient &client, char *cp)
     uint32_t t0 = millis();
     while (!client.available()) {
         if (!client.connected()) {
-            Serial.print (F("surprise getChar disconnect\n"));
+            Serial.print (F("getChar disconnect\n"));
             return (false);
         }
         if (timesUp(&t0,GET_TO)) {
-            Serial.print (F("surprise getChar timeout\n"));
+            Serial.print (F("getChar timeout\n"));
             return (false);
         }
-        wdDelay(10);
+
+        // N.B. do not call wdDelay -- it calls checkWebServer() most of whose handlers
+        // call back here via getTCPLine()
+        delay(10);
+        resetWatchdog();
     }
 
     // read, which has another way to indicate failure
@@ -1887,17 +1994,18 @@ void sendUserAgent (WiFiClient &client)
                 dpy_mode = 2;
         #endif
         #if defined(_IS_UNIX)
-            extern int noX11;
-            if (noX11)
+            #if defined(_WEB_ONLY)
                 dpy_mode = 5;
+            #endif
         #endif
 
-        // encode stopwatch if on else whether azm_on
+        // encode stopwatch if on else as per map_proj
         int main_page;
         switch (getSWDisplayState()) {
         default:
         case SWD_NONE:
-            main_page = azm_on ? 1: 0;
+            // pre V2.81: main_page = azm_on ? 1: 0;
+            main_page = map_proj == MAPP_AZIMUTHAL ? 1 : (map_proj == MAPP_MERCATOR ? 0 : 5);
             break;
         case SWD_MAIN:
             main_page = 2;
@@ -1946,6 +2054,11 @@ void sendUserAgent (WiFiClient &client)
         bool flrig = getFlrig (NULL, NULL);
         int rr_score = (gbl_on ? (has_el ? 2 : 1) : 0) | (rig_on ? 4 : 0) | (flrig ? 8 : 0);
 
+        // brb_mode plus 100 to indicate rotation code
+        int brb = brb_mode;
+        if (BRBIsRotating())
+            brb += 100;
+
         // GPSD
         int gpsd = 0;
         if (useGPSDTime())
@@ -1957,7 +2070,7 @@ void sendUserAgent (WiFiClient &client)
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
-            de_time_fmt, brb_mode, dx_info_for_sat, rss_code, useMetricUnits(),
+            de_time_fmt, brb, dx_info_for_sat, rss_code, useMetricUnits(),
             getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, dpy_mode,
             // new for LV5:
@@ -2965,6 +3078,7 @@ void initWiFiRetry()
     next_swind = 0;
     next_drap = 0;
     next_stereo_a = 0;
+    next_psk = 0;
 
     // map is in memory
     // next_map = 0;

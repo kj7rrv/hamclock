@@ -307,18 +307,21 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
     }
 }
 
-/* try to connect to sensors, reset brb_mode to something benign if no longer appropriate
+/* try to connect to sensors, reset brb_mode and brb_rotset to something benign if no longer appropriate
  */
 void initBME280()
 {
     connectSensors(true);
 
-    if (!NVReadUInt8 (NV_BRB_MODE, &brb_mode)
-                        || (brb_mode == BRB_SHOW_BME76 && !bme_data[BME_76])
-                        || (brb_mode == BRB_SHOW_BME77 && !bme_data[BME_77])) {
-        Serial.printf (_FX("BME: Resetting bogus initial brb_mode %d to %d\n"), brb_mode, BRB_SHOW_SWSTATS);
+    if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset)
+                        || (brb_rotset & (1<<brb_mode)) == 0
+                        || ((brb_rotset & (1 << BRB_SHOW_BME76)) && !bme_data[BME_76])
+                        || ((brb_rotset & (1 << BRB_SHOW_BME77)) && !bme_data[BME_77])) {
+        Serial.printf (_FX("BME: Resetting initial brb_rotset 0x%x to 0x%x\n"),
+                                brb_rotset, 1<<BRB_SHOW_SWSTATS);
         brb_mode = BRB_SHOW_SWSTATS;
-        NVWriteUInt8 (NV_BRB_MODE, brb_mode);
+        brb_rotset = 1 << BRB_SHOW_SWSTATS;
+        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
     }
 }
 

@@ -35,7 +35,6 @@
     #define _SUPPORT_FLIP
     #define _SUPPORT_KX3 
     #define _SUPPORT_ENVSENSOR
-    #define _SUPPORT_BR
     #define _SUPPORT_GPIO
 #endif // _SHOW_ALL
 
@@ -93,21 +92,31 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index from 0 return screen y
 
 // color selector constants
-#define CSEL_WXC        560                     // x coord of center of color wheel
-#define CSEL_WYC        120                     // y coord of center of color wheel
-#define CSEL_WR         80                      // radius of color wheel
-#define CSEL_DX         220                     // demo strip left x
+#define CSEL_SCX        435                     // all color control scales x coord
+#define CSEL_COL1X      2                       // tick boxes in column 1 x
+#define CSEL_COL2X      400                     // tick boxes in column 2 x
+#define CSEL_SCY        45                      // top scale y coord
+#define CSEL_SCW        256                     // scale width -- lt this causes roundoff at end
+#define CSEL_SCH        30                      // scale height
+#define CSEL_SCYG       15                      // scale y gap
+#define CSEL_VDX        20                      // gap dx to value number
+#define CSEL_SCM_C      RA8875_WHITE            // scale marker color
+#define CSEL_SCB_C      GRAY                    // scale slider border color
+#define CSEL_PDX        28                      // prompt dx from tick box x
+#define CSEL_PW         140                     // width
+#define CSEL_DDX        218                     // demo strip dx from tick box x
 #define CSEL_DW         150                     // demo strip width
 #define CSEL_DH         6                       // demo strip height
 #define CSEL_TBCOL      RA8875_RED              // tick box active color
 #define CSEL_TBSZ       20                      // tick box size
 
 // OnOff layout constants
-#define OO_Y0           290                     // top y -- stay below colors
+#define OO_Y0           150                     // top y
 #define OO_X0           50                      // left x
 #define OO_CI           50                      // OnOff label to first column indent
 #define OO_CW           90                      // weekday column width
-#define OO_RH           25                      // row height -- N.B. must be at least font height
+#define OO_RH           30                      // row height -- N.B. must be at least font height
+#define OO_TO           20                      // extra title offset on top of table
 #define OO_ASZ          10                      // arrow size
 #define OO_DHX(d)       (OO_X0+OO_CI+(d)*OO_CW) // day of week to hours x
 #define OO_CPLX(d)      (OO_DHX(d)+OO_ASZ)      // day of week to copy left x
@@ -120,7 +129,7 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define OO_TW           (OO_CI+OO_CW*DAYSPERWEEK)  // total width
 
 
-// colors
+// general colors
 #define TX_C            RA8875_WHITE            // text color
 #define BG_C            RA8875_BLACK            // overall background color
 #define KB_C            RGB565(80,80,255)       // key border color
@@ -245,7 +254,11 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 6" -- index 5
 
-    // color scale and on/off table
+    // color scale
+
+    // "page 7" -- index 6
+
+    // on/off table
 
 };
 
@@ -362,7 +375,12 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 6" -- index 5
 
-    // color scale and on/off table
+    // color scale
+
+    // "page 7" -- index 6
+
+    // on/off table
+
 
 };
 
@@ -374,9 +392,18 @@ typedef struct {
     BoolPrompt *bp;
 } Focus;
 
-// current focus and page
-#define N_PAGES         6
-#define COLOR_PAGE      5
+// whether to show on/off page
+#if defined(_SHOW_ALL)
+    #define HAVE_ONOFF()      1
+#else
+    #define HAVE_ONOFF()      (brControlOk() || brOnOffOk())
+#endif
+
+// current focus and page names
+#define ALLBOOLS_PAGE   4                       // 0-based counting
+#define COLOR_PAGE      5                       // 0-based counting
+#define ONOFF_PAGE      6                       // 0-based counting
+#define N_PAGES         (HAVE_ONOFF() ? 7 : 6)  // last page is on/off
 #define SPIDER_PAGE     1
 #define SPIDER_X        500
 #define SPIDER_Y        (R2Y(2) - PR_D)
@@ -394,54 +421,104 @@ typedef struct {
     SBox t_box;                                 // state tick box
     SBox d_box;                                 // demo patch box
     bool state;                                 // tick box on or off
-    uint16_t c;                                 // RGB565 color
+    uint16_t def_c;                             // default color -- NOT the current color
     NV_Name nv;                                 // nvram location
     const char *p_str;                          // prompt string
+    uint8_t r, g, b;                            // current color in full precision color
 } ColSelPrompt;
 
-// N.B. must match colsel_pr[] order
-typedef enum {
-    SATFOOT_CSPR,
-    SATPATH_CSPR,
-    SHORTPATH_CSPR,
-    LONGPATH_CSPR,
-    GRID_CSPR,
-#if defined(_SUPPORT_CLP)
-    DXCLLT10_CSPR,
-    DXCLGT10_CSPR,
-#endif
-    N_CSPR
-} CSIds;
 
-/* color selector prompts. N.B. must match CSIds order
+/* color selector prompts.
+ *   N.B. must match CSIds order
+ *   N.B. init assumes first is set
  */
 static ColSelPrompt colsel_pr[N_CSPR] = {
-    {{30, R2Y(0), 140, PR_H}, {2, R2Y(0)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(0)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, true, RA8875_RED, NV_SATFOOTCOLOR, "Sat footprint:"},
-    {{30, R2Y(1), 140, PR_H}, {2, R2Y(1)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(1)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, RGB565(128,0,0), NV_SATPATHCOLOR, "Sat path:"},
-    {{30, R2Y(2), 140, PR_H}, {2, R2Y(2)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(2)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, DE_COLOR, NV_SHORTPATHCOLOR, "Short prop path:"},
-    {{30, R2Y(3), 140, PR_H}, {2, R2Y(3)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(3)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, RA8875_WHITE, NV_LONGPATHCOLOR, "Long prop path:"},
-    {{30, R2Y(4), 140, PR_H}, {2, R2Y(4)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(4)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, RA8875_BLACK, NV_GRIDCOLOR, "Map Grid:"},
-#if defined(_SUPPORT_CLP)
-    {{30, R2Y(5), 140, PR_H}, {2, R2Y(5)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(5)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, RGB565(0,78,255), NV_GT10MHZ_COL, "Spot > 10 MHz:"},
-    {{30, R2Y(6), 140, PR_H}, {2, R2Y(6)+4, CSEL_TBSZ, CSEL_TBSZ}, {CSEL_DX, R2Y(6)+PR_H/2-CSEL_DH/2,
-                CSEL_DW, CSEL_DH}, false, RA8875_RED, NV_LT10MHZ_COL, "Spot < 10 MHz:"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(0), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(0)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(0)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            true, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(1), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(1)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(1)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(2), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(2)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(2)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, DE_COLOR, NV_SHORTPATHCOLOR, "Short prop path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(3), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(3)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(3)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(229,191,131), NV_LONGPATHCOLOR, "Long prop path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(4), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(4)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(4)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid"},
+#if defined(_SUPPORT_PSKREPORTER)
+    {{CSEL_COL1X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(6)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, GRAY, NV_160M_COLOR, "160 m path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(7)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(200,20,140), NV_80M_COLOR, "80 m path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(8)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(140,200,20), NV_60M_COLOR, "60 m path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(9)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(140,20,200), NV_40M_COLOR, "40 m path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(10)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(20,200,255), NV_30M_COLOR, "30 m path"},
+    {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
+            {CSEL_COL1X, R2Y(11)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RA8875_RED, NV_20M_COLOR, "20 m path"},   // match NCDXF
+
+    {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(6)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RA8875_GREEN, NV_17M_COLOR, "17 m path"},   // match NCDXF
+    {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(7)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(100,100,255), NV_15M_COLOR, "15 m path"},      // match NCDXF
+    {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(8)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RA8875_YELLOW, NV_12M_COLOR, "12 m path"},     // match NCDXF
+    {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(9)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RA8875_MAGENTA, NV_10M_COLOR, "10 m path"}, // match NCDXF
+    {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(10)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RGB565(20,140,200), NV_6M_COLOR, "6 m path"},
+    {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
+            {CSEL_COL2X, R2Y(11)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            false, RA8875_WHITE, NV_2M_COLOR, "2 m path"},
 #endif
 };
 
-// color selector wheel
-static SBox colorwheel_b  = {CSEL_WXC-CSEL_WR, CSEL_WYC-CSEL_WR, 2*CSEL_WR, 2*CSEL_WR};
+// overall color selector box, easier than 3 separate boxes, and current values
+static SBox csel_ctl_b = {CSEL_SCX, CSEL_SCY, CSEL_SCW, 3*CSEL_SCH + 3*CSEL_SCYG};
+
+// handy conversions between x and value 0..255.
+// only valid when dx ranges from 0 .. CSEL_SCW-1
+#define X2V(x)  (255*((x)-CSEL_SCX)/(CSEL_SCW-1))
+#define V2X(v)  (CSEL_SCX+(CSEL_SCW-1)*(v)/255)
 
 
 
 // virtual qwerty keyboard
 typedef struct {
-    char normal, shifted;                                  // normal and shifted char
+    char normal, shifted;                               // normal and shifted char
 } Key;
 static const Key qwerty[NQR][NQC] PROGMEM = {
     { {'`', '~'}, {'1', '!'}, {'2', '@'}, {'3', '#'}, {'4', '$'}, {'5', '%'}, {'6', '^'},
@@ -538,11 +615,11 @@ static bool boolIsRelevant (BoolPrompt *bp)
     }
 
     if (bp == &bool_pr[CLPATH_BPR]) {
-        #if defined(_SUPPORT_CLP)
-        // always false if no support
-        if (!bool_pr[CLUSTER_BPR].state)
+        #if defined(_SUPPORT_CLPATH)
+            // always false if no support
+            if (!bool_pr[CLUSTER_BPR].state)
         #endif
-            return (false);
+                return (false);
     }
 
     if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
@@ -656,13 +733,8 @@ static bool stringIsRelevant (StringPrompt *sp)
         #endif
     }
 
-    if (sp == &string_pr[BRMIN_SPR] || sp == &string_pr[BRMAX_SPR]) {
-        #if defined(_SUPPORT_BR)
-            return (true);
-        #else
-            return (brControlOk());
-        #endif
-    }
+    if (sp == &string_pr[BRMIN_SPR] || sp == &string_pr[BRMAX_SPR])
+        return (HAVE_ONOFF());
 
     return (true);
 }
@@ -788,14 +860,14 @@ static void setFocus (StringPrompt *sp, BoolPrompt *bp)
     cur_focus.bp = bp;
 }
 
-/* set focus to the first relevant prompt in the current page
+/* set focus to the first relevant prompt in the current page, if any
  */
 static void setInitialFocus()
 {
     StringPrompt *sp0 = NULL;
     BoolPrompt *bp0 = NULL;
 
-    for (uint8_t i = 0; i < N_SPR; i++) {
+    for (int i = 0; i < N_SPR; i++) {
         StringPrompt *sp = &string_pr[i];
         if (stringIsRelevant(sp)) {
             sp0 = sp;
@@ -804,7 +876,7 @@ static void setInitialFocus()
     }
 
     if (!sp0) {
-        for (uint8_t i = 0; i < N_BPR; i++) {
+        for (int i = 0; i < N_BPR; i++) {
             BoolPrompt *bp = &bool_pr[i];
             if (boolIsRelevant(bp)) {
                 bp0 = bp;
@@ -1042,11 +1114,11 @@ static void drawKeyboard()
     tft.fillRect (0, KB_Y0, tft.width(), tft.height()-KB_Y0-1, BG_C);
     tft.setTextColor (KF_C);
 
-    for (uint8_t r = 0; r < NQR; r++) {
+    for (int r = 0; r < NQR; r++) {
         resetWatchdog();
         uint16_t y = r * KB_CHAR_H + KB_Y0 + KB_CHAR_H;
         const Key *row = qwerty[r];
-        for (uint8_t c = 0; c < NQC; c++) {
+        for (int c = 0; c < NQC; c++) {
             const Key *kp = &row[c];
             char n = (char)pgm_read_byte(&kp->normal);
             if (n) {
@@ -1088,8 +1160,8 @@ static void noBlanks (char *s)
  */
 static bool s2char (SCoord &s, char *cp)
 {
-    // no KB on color page
-    if (cur_page == COLOR_PAGE)
+    // no KB on color page or onoff page
+    if (cur_page == COLOR_PAGE || cur_page == ONOFF_PAGE)
         return (false);
 
     // check main qwerty
@@ -1129,7 +1201,7 @@ static bool s2char (SCoord &s, char *cp)
  */
 static bool tappedStringPrompt (SCoord &s, StringPrompt **spp)
 {
-    for (uint8_t i = 0; i < N_SPR; i++) {
+    for (int i = 0; i < N_SPR; i++) {
         StringPrompt *sp = &string_pr[i];
         if (!stringIsRelevant(sp))
             continue;
@@ -1147,7 +1219,7 @@ static bool tappedStringPrompt (SCoord &s, StringPrompt **spp)
  */
 static bool tappedBool (SCoord &s, BoolPrompt **bpp)
 {
-    for (uint8_t i = 0; i < N_BPR; i++) {
+    for (int i = 0; i < N_BPR; i++) {
         BoolPrompt *bp = &bool_pr[i];
         if (!boolIsRelevant(bp))
             continue;
@@ -1161,42 +1233,120 @@ static bool tappedBool (SCoord &s, BoolPrompt **bpp)
 }
 
 
-/* convert an x,y value ostensibly within the color wheel box to a color.
- * return true and color if inside circle, else return false.
- */
-static bool getCSelBoxColor (uint16_t x, uint16_t y, uint16_t &color)
-{
-    int16_t dx = (int16_t)x - CSEL_WXC;
-    int16_t dy = (int16_t)y - CSEL_WYC;
-    uint16_t r2 = dx*dx + dy*dy;
-    if (r2 <= CSEL_WR*CSEL_WR) {
-        float theta = atan2f (dy, dx) + M_PIF;  // 0 .. 2pi CCW from +x
-        float r_frac = sqrtf(r2)/CSEL_WR;
-        uint8_t h = 255*theta/(2*M_PIF);
-        uint8_t v = r_frac <= 0.5 ? 255*sqrtf(2*r_frac) : 255;
-        uint8_t s = r_frac <= 0.5 ? 255 : 255*sqrtf(2*(1-r_frac));
-        uint8_t r, g, b;
-        hsvtorgb (&r, &g, &b, h, s, v);
-        color = RGB565 (r, g, b);
-        return (true);
-    }
 
-    return (false);
+
+/* update the color component based on s known to be within csel_ctl_b.
+ */
+static void getCSelBoxColor (const SCoord &s, uint8_t &r, uint8_t &g, uint8_t &b)
+{
+    // vetical offset into csel_ctl_b
+    uint16_t dy = s.y - CSEL_SCY;
+
+    // new color
+    uint16_t new_v = X2V(s.x);
+
+    // update one component to new color depending on y, leave the others unchanged
+    if (dy < CSEL_SCH+CSEL_SCYG/2) {
+        r = new_v;                             // tapped first row
+    } else if (dy < 2*CSEL_SCH+3*CSEL_SCYG/2) {
+        g = new_v;                             // tapped second row
+    } else {
+        b = new_v;                             // tapped third row
+    }
 }
 
 /* draw a color selector demo
  */
 static void drawCSelDemoSwatch (const ColSelPrompt &p)
 {
-    fillSBox (p.d_box, p.c);
+    uint16_t c = RGB565(p.r, p.g, p.b);
+    fillSBox (p.d_box, c);
 }
 
-/* draw a color selector prompt tick box
+
+/* draw a color selector prompt tick box, on or off depending on state.
  */
 static void drawCSelTickBox (const ColSelPrompt &p)
 {
     fillSBox (p.t_box, p.state ? CSEL_TBCOL : RA8875_BLACK);
     drawSBox (p.t_box, RA8875_WHITE);
+}
+
+/* erase any possible existing then draw a new marker to indicate the current slider position at x,y.
+ * beware sides.
+ */
+static void drawCSelCursor (uint16_t x, int16_t y)
+{
+    #define _CSEL_CR    2
+    #define _CSEL_CH    (2*_CSEL_CR)
+
+    tft.fillRect (CSEL_SCX, y, CSEL_SCW, _CSEL_CH, RA8875_BLACK);
+
+    if (x < CSEL_SCX+_CSEL_CR)
+        x = CSEL_SCX+_CSEL_CR;
+    else if (x > CSEL_SCX + CSEL_SCW-_CSEL_CR-1)
+        x = CSEL_SCX + CSEL_SCW-_CSEL_CR-1;
+    tft.fillRect (x-_CSEL_CR, y, 2*_CSEL_CR+1, _CSEL_CH, CSEL_SCM_C);
+}
+
+/* given ul corner draw the given color number
+ */
+static void drawCSelValue (uint16_t x, uint16_t y, uint16_t color)
+{
+    tft.fillRect (x, y, 50, CSEL_SCH, RA8875_BLACK);
+    tft.setTextColor (RA8875_WHITE);
+    tft.setCursor (x, y + CSEL_SCH - 4);
+    tft.print(color);
+}
+
+/* indicate the color used by the given selector
+ */
+static void drawCSelPromptColor (const ColSelPrompt &p)
+{
+    // draw the cursors
+    drawCSelCursor (V2X(p.r), CSEL_SCY+CSEL_SCH);
+    drawCSelCursor (V2X(p.g), CSEL_SCY+2*CSEL_SCH+CSEL_SCYG);
+    drawCSelCursor (V2X(p.b), CSEL_SCY+3*CSEL_SCH+2*CSEL_SCYG);
+
+    // draw the value boxes
+    drawCSelValue (CSEL_SCX+CSEL_SCW+CSEL_VDX, CSEL_SCY, p.r);
+    drawCSelValue (CSEL_SCX+CSEL_SCW+CSEL_VDX, CSEL_SCY+CSEL_SCH+CSEL_SCYG, p.g);
+    drawCSelValue (CSEL_SCX+CSEL_SCW+CSEL_VDX, CSEL_SCY+2*CSEL_SCH+2*CSEL_SCYG, p.b);
+}
+
+/* draw the one-time color selector GUI features
+ */
+static void drawCSelInitGUI()
+{
+    // draw color control sliders
+    fillSBox (csel_ctl_b, RA8875_BLACK);
+    const uint16_t y0 = CSEL_SCY;
+    const uint16_t y1 = CSEL_SCY+CSEL_SCH+CSEL_SCYG;
+    const uint16_t y2 = CSEL_SCY+2*CSEL_SCH+2*CSEL_SCYG;
+    for (int x = CSEL_SCX; x < CSEL_SCX+CSEL_SCW; x++) {
+        uint8_t new_v = X2V(x);
+        tft.drawLine (x, y0, x, y0+CSEL_SCH-1, 1, RGB565 (new_v, 0, 0));
+        tft.drawLine (x, y1, x, y1+CSEL_SCH-1, 1, RGB565 (0, new_v, 0));
+        tft.drawLine (x, y2, x, y2+CSEL_SCH-1, 1, RGB565 (0, 0, new_v));
+    }
+
+    // add borders
+    tft.drawRect (CSEL_SCX, CSEL_SCY, CSEL_SCW, CSEL_SCH, CSEL_SCB_C);
+    tft.drawRect (CSEL_SCX, CSEL_SCY+CSEL_SCH+CSEL_SCYG, CSEL_SCW, CSEL_SCH, CSEL_SCB_C);
+    tft.drawRect (CSEL_SCX, CSEL_SCY+2*CSEL_SCH+2*CSEL_SCYG, CSEL_SCW, CSEL_SCH, CSEL_SCB_C);
+
+    // draw prompts and set sliders from one that is set
+    resetWatchdog();
+    tft.setTextColor (PR_C);
+    for (int i = 0; i < N_CSPR; i++) {
+        ColSelPrompt &p = colsel_pr[i];
+        tft.setCursor (p.p_box.x, p.p_box.y+p.p_box.h-PR_D);
+        tft.printf ("%s:", p.p_str);
+        drawCSelTickBox (p);
+        drawCSelDemoSwatch (p);
+        if (p.state)
+            drawCSelPromptColor (p);
+    }
 }
 
 /* handle a possible touch event while on the color selection page.
@@ -1206,25 +1356,26 @@ static bool handleCSelTouch (SCoord &s)
 {
     bool ours = false;
 
-    if (inBox (s, colorwheel_b)) {
-        // set new color for current selection
-        for (uint8_t i = 0; i < N_CSPR; i++) {
-            ColSelPrompt &pi = colsel_pr[i];
-            if (pi.state) {
-                if (getCSelBoxColor(s.x, s.y, pi.c))
-                    drawCSelDemoSwatch (pi);
+    // check for setting a new color for the current selection
+    if (inBox (s, csel_ctl_b)) {
+        for (int i = 0; i < N_CSPR; i++) {
+            ColSelPrompt &p = colsel_pr[i];
+            if (p.state) {
+                getCSelBoxColor(s, p.r, p.g, p.b);
+                drawCSelPromptColor(p);
+                drawCSelDemoSwatch (p);
                 break;
             }
         }
         ours = true;
 
+    // else check for changing the current selection
     } else {
-        // check for changing focus
-        for (uint8_t i = 0; i < N_CSPR; i++) {
+        for (int i = 0; i < N_CSPR; i++) {
             ColSelPrompt &pi = colsel_pr[i];
             if (inBox (s, pi.t_box) && !pi.state) {
-                // clicked an off box, make it the only one on; ignore clicking an on box
-                for (uint8_t j = 0; j < N_CSPR; j++) {
+                // clicked an off box, make it the only one on (ignore clicking an on box)
+                for (int j = 0; j < N_CSPR; j++) {
                     ColSelPrompt &pj = colsel_pr[j];
                     if (pj.state) {
                         pj.state = false;
@@ -1233,6 +1384,7 @@ static bool handleCSelTouch (SCoord &s)
                 }
                 pi.state = true;
                 drawCSelTickBox (pi);
+                drawCSelPromptColor (pi);
                 ours = true;
                 break;
             }
@@ -1240,35 +1392,6 @@ static bool handleCSelTouch (SCoord &s)
     }
 
     return (ours);
-}
-
-/* draw the color controls
- */
-static void drawCSelPage()
-{
-    // draw prompts
-    resetWatchdog();
-    tft.setTextColor (PR_C);
-    for (uint8_t i = 0; i < N_CSPR; i++) {
-        ColSelPrompt &p = colsel_pr[i];
-        tft.setCursor (p.p_box.x, p.p_box.y+p.p_box.h-PR_D);
-        tft.print (p.p_str);
-        drawCSelTickBox (p);
-        drawCSelDemoSwatch (p);
-    }
-
-    // draw color wheel
-    for (int16_t y = CSEL_WYC-CSEL_WR; y < CSEL_WYC+CSEL_WR; y++) {
-        resetWatchdog();
-        for (int16_t x = CSEL_WXC-CSEL_WR; x < CSEL_WXC+CSEL_WR; x++) {
-            uint16_t c;
-            if (getCSelBoxColor (x, y, c))
-                tft.drawPixel (x, y, c);
-        }
-    }
-
-    resetWatchdog();
-
 }
 
 
@@ -1319,7 +1442,7 @@ static void drawOnOffControls()
 {
     // title
     const char *title = brControlOk() ? _FX("Daily Display On/Dim Times") : _FX("Daily Display On/Off Times");
-    tft.setCursor (OO_X0+(OO_TW-getTextWidth(title))/2, OO_Y0-OO_RH-6);
+    tft.setCursor (OO_X0+(OO_TW-getTextWidth(title))/2, OO_Y0-OO_RH-OO_TO);
     tft.setTextColor (PR_C);
     tft.print (title);
 
@@ -1371,10 +1494,8 @@ static void drawOnOffControls()
 static bool checkOnOffTouch (SCoord &s)
 {
 
-#ifndef _SHOW_ALL
-    if (!brOnOffOk())
+    if (!HAVE_ONOFF())
         return (false);
-#endif
 
     int dow = ((int)s.x - (OO_X0+OO_CI))/OO_CW;
     int row = ((int)s.y - (OO_Y0-OO_RH))/OO_RH;
@@ -1457,14 +1578,14 @@ static bool checkOnOffTouch (SCoord &s)
 static void drawCurrentPageFields()
 {
     // draw relevant string prompts on this page
-    for (uint8_t i = 0; i < N_SPR; i++) {
+    for (int i = 0; i < N_SPR; i++) {
         StringPrompt *sp = &string_pr[i];
         if (stringIsRelevant(sp))
             drawSPPromptValue(sp);
     }
 
     // draw relevant bool prompts on this page
-    for (uint8_t i = 0; i < N_BPR; i++) {
+    for (int i = 0; i < N_BPR; i++) {
         BoolPrompt *bp = &bool_pr[i];
         if (boolIsRelevant(bp))
             drawBPPromptState (bp);
@@ -1499,25 +1620,27 @@ static void changePage (int new_page)
 
     // draw new page with minimal erasing if possible
 
-    if (new_page == 4) {
+    if (new_page == ALLBOOLS_PAGE) {
         // new page is all bools, always a fresh start
         eraseScreen();
         drawPageButton();
         drawCurrentPageFields();
         drawDoneButton();
 
-    } else if (new_page == 5) {
-        // new page is color and on/off table, always a fresh start
+    } else if (new_page == ONOFF_PAGE) {
+        // new page is just the on/off table
         eraseScreen();
         drawPageButton();
-        drawCSelPage();
-        #if defined(_SHOW_ALL)
-            drawOnOffControls();
-        #else
-            if (brOnOffOk())
-                drawOnOffControls();
-        #endif
+        drawOnOffControls();
         drawDoneButton();
+
+    } else if (new_page == COLOR_PAGE) {
+        // new page is color, always a fresh start
+        eraseScreen();
+        drawPageButton();
+        drawCSelInitGUI();
+        drawDoneButton();
+        setInitialFocus ();
 
     } else {
         // new page is 0-3 which all use a keyboard
@@ -1725,7 +1848,7 @@ static bool validateStringPrompts()
                 changePage(bad_page);
 
             // flag each erroneous value
-            for (uint8_t i = 0; i < n_badsid; i++) {
+            for (int i = 0; i < n_badsid; i++) {
                 StringPrompt *sp = &string_pr[badsid[i]];
                 if (sp->page == cur_page) {
                     eraseSPValue (sp);
@@ -1739,7 +1862,7 @@ static bool validateStringPrompts()
             wdDelay(3000);
 
             // restore values
-            for (uint8_t i = 0; i < n_badsid; i++) {
+            for (int i = 0; i < n_badsid; i++) {
                 StringPrompt *sp = &string_pr[badsid[i]];
                 if (sp->page == cur_page) {
                     eraseSPValue (sp);
@@ -2036,12 +2159,17 @@ static void initSetup()
 
     // init colors
 
-    for (uint8_t i = 0; i < N_CSPR; i++) {
+    for (int i = 0; i < N_CSPR; i++) {
         ColSelPrompt &p = colsel_pr[i];
-        if (!NVReadUInt16 (p.nv, &p.c))
-            NVWriteUInt16 (p.nv, p.c);
+        uint16_t c;
+        if (!NVReadUInt16 (p.nv, &c)) {
+            c = p.def_c;
+            NVWriteUInt16 (p.nv, c);
+        }
+        p.r = RGB565_R(c);
+        p.g = RGB565_G(c);
+        p.b = RGB565_B(c);
     }
-
 
     // X11 flags, engage immediately if defined or sensible thing to do
     uint16_t x11flags;
@@ -2340,9 +2468,14 @@ static void runSetup()
 
         if (cur_page == COLOR_PAGE) {
 
-            if (handleCSelTouch(s) || checkOnOffTouch(s))
+            if (handleCSelTouch(s))
                 continue;
+        }
 
+        if (cur_page == ONOFF_PAGE) {
+
+            if (checkOnOffTouch(s))
+                continue;
         }
 
         // proceed with normal fields processing
@@ -2778,9 +2911,10 @@ static void finishSettingUp()
     tft.X11OptionsEngageNow(getX11FullScreen());
 
     // save colors
-    for (uint8_t i = 0; i < N_CSPR; i++) {
+    for (int i = 0; i < N_CSPR; i++) {
         ColSelPrompt &p = colsel_pr[i];
-        NVWriteUInt16 (p.nv, p.c);
+        uint16_t c = RGB565(p.r, p.g, p.b);
+        NVWriteUInt16 (p.nv, c);
     }
 
     // set DE tz and grid only if ll was edited and op is not using some other method to set location
@@ -3008,15 +3142,26 @@ bool useMetricUnits()
     return (bool_pr[UNITS_BPR].state);
 }
 
-/* return whether to map dx spots
+/* return whether to draw dx paths
  */
-bool mapDXClusterSpots()
+bool getDXSpotPaths()
+{
+#if defined(_SUPPORT_CLPATH)
+    return (bool_pr[CLPATH_BPR].state);
+#else
+    return (false);
+#endif
+}
+
+/* return whether to label dx spots
+ */
+bool labelDXClusterSpots()
 {
     return (bool_pr[CLLBL_BPR].state);
 }
 
-/* return whether to plot dx spots as whole callsigns, else just prefix.
- * N.B. only sensible if mapDXClusterSpots() is true
+/* return whether to label dx spots as whole callsigns, else just prefix.
+ * N.B. only sensible if labelDXClusterSpots() is true
  */
 bool plotSpotCallsigns()
 {
@@ -3155,63 +3300,6 @@ uint8_t getBrMin()
     return (bright_min);
 }
 
-/* return sat path color
- */
-uint16_t getSatPathColor()
-{
-    return (colsel_pr[SATPATH_CSPR].c);
-}
-
-/* return sat footprint color
- */
-uint16_t getSatFootColor()
-{
-    return (colsel_pr[SATFOOT_CSPR].c);
-}
-
-/* return short path color
- */
-uint16_t getShortPathColor()
-{
-    return (colsel_pr[SHORTPATH_CSPR].c);
-}
-
-/* return long path color
- */
-uint16_t getLongPathColor()
-{
-    return (colsel_pr[LONGPATH_CSPR].c);
-}
-
-/* return grid color
- */
-uint16_t getGridColor()
-{
-    return (colsel_pr[GRID_CSPR].c);
-}
-
-/* return dx cluster spot color > 10 MHz
- */
-uint16_t getGT10MHzColor()
-{
-#if defined(_SUPPORT_CLP)
-    return (colsel_pr[DXCLGT10_CSPR].c);
-#else
-    return(0);
-#endif
-}
-
-/* return dx cluster spot color < 10 MHz
- */
-uint16_t getLT10MHzColor()
-{
-#if defined(_SUPPORT_CLP)
-    return (colsel_pr[DXCLLT10_CSPR].c);
-#else
-    return(0);
-#endif
-}
-
 /* whether to engage full screen.
  */
 bool getX11FullScreen(void)
@@ -3303,13 +3391,6 @@ const char *getDXClusterLogin()
     return (dxlogin[0] != '\0' ? dxlogin : callsign);
 }
 
-/* return whether to draw dx paths
- */
-bool getDXSpotPaths()
-{
-    return (bool_pr[CLPATH_BPR].state);
-}
-
 /* return cluster commands and whether each is on or off.
  */
 void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS])
@@ -3344,3 +3425,51 @@ bool setDXCluster (char *host, const char *port_str, char ynot[])
     return(true);
 }
 
+/* return color for the given CSid
+ */
+uint16_t getMapColor (CSIds id)
+{
+    uint16_t c;
+    if (id >= 0 && id < N_CSPR) {
+        ColSelPrompt &p = colsel_pr[id];
+        c = RGB565(p.r, p.g, p.b);
+    } else
+        c = RA8875_BLACK;
+    return (c);
+}
+
+/* return name of the given CSid
+ */
+const char* getMapColorName (CSIds id)
+{
+    const char *n;
+    if (id >= 0 && id < N_CSPR)
+        n = colsel_pr[id].p_str;
+    else
+        n = "???";
+    return (n);
+}
+
+/* try to set the specified color, name may use '_' or ' '.
+ * return whether name is found.
+ * N.B. this only saves the new value, other subsystems must do their own query to utilize new values.
+ */
+bool setMapColor (const char *name, uint16_t rgb565)
+{
+    // name w/o _
+    char scrub_name[50];
+    strncpySubChar (scrub_name, name, ' ', '_', sizeof(scrub_name));
+
+    // look for match
+    for (int i = 0; i < N_CSPR; i++) {
+        ColSelPrompt &p = colsel_pr[i];
+        if (strcmp (scrub_name, p.p_str) == 0) {
+            NVWriteUInt16 (p.nv, rgb565);
+            p.r = RGB565_R(rgb565);
+            p.g = RGB565_G(rgb565);
+            p.b = RGB565_B(rgb565);
+            return (true);
+        }
+    }
+    return (false);
+}

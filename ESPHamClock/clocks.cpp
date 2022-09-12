@@ -1008,12 +1008,8 @@ void updateClocks(bool all)
         }
     }
 
-    // flash plot panes that are rotating
-    for (int i = 0; i < PANE_N; i++) {
-        if (paneIsRotating((PlotPane)i)) {
-            showRotatingBorder ((tp.sc&1) == 1, (PlotPane)i);
-        }
-    }
+    // flash panes or NCDXF if rotating
+    showRotatingBorder();
 
     // flash UTC if not current
     if (utc_offset != 0 || !clockTimeOk())

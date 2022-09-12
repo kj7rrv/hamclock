@@ -105,8 +105,8 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
         }
 
         // just log next few lines for debug
-        for (int i = 0; i < 2 && getTCPLine (v_client, line, sizeof(line), NULL); i++)
-            Serial.printf ("  %s\n", line);
+        // for (int i = 0; i < 2 && getTCPLine (v_client, line, sizeof(line), NULL); i++)
+            // Serial.printf ("  %s\n", line);
     }
 
 out:
@@ -152,7 +152,6 @@ bool askOTAupdate(char *new_ver)
     WiFiClient v_client;
     uint16_t liney = INFO_Y+LH;
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setCursor (INDENT, liney);
     if (wifiOk() && v_client.connect (svr_host, HTTPPORT)) {
         resetWatchdog();
 
@@ -178,7 +177,7 @@ bool askOTAupdate(char *new_ver)
             tft.print(line);
             if ((liney += LH) >= tft.height()-LH-10) {
                 tft.setCursor (INDENT, liney);
-                tft.print(F("more ... for a complete list see clearskyinstitute.com/ham/HamClock"));
+                tft.print(F("    for more information see clearskyinstitute.com/ham/HamClock"));
                 break;
             }
         }

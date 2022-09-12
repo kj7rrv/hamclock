@@ -1,99 +1,27 @@
 /* manage list of cities.
- * sparse 2d table contains largest city in each region.
  */
 
 #include "HamClock.h"
 
-// linux only
 
-#if defined(_IS_UNIX)
+#if defined(_SUPPORT_CITIES)
 
-// one city entry
-typedef struct {
-    const char *name;           // malloced name
-    float lat_d, lng_d;         // degs +N +E
-} City;
-
-// one row descriptor
-typedef struct {
-    City *cities;               // malloc array of City sorted by increasing lng
-    int n_cities;               // number of Cities
-} LatRow;
-
-// rows
-static int LAT_SIZ, LNG_SIZ;    // region size
-static LatRow *lat_rows;        // malloced list of 180/LAT_SIZ rows
 
 // name of server file containing cities
-static const char cities_fn[] PROGMEM = "/cities.txt";
+static const char cities_fn[] PROGMEM = "/cities2.txt"; // changed in 2.81
 
-/* return 2D separation between two locations in degrees squared.
- */
-static float separation2D (const LatLong &ll, const float lat_d, const float lng_d)
-{
-    float dlng = cosf(ll.lat) * (ll.lng_d - lng_d);
-    float dlat = ll.lat_d - lat_d;
-    return (dlng*dlng + dlat*dlat);
-}
+// malloced sorted kdtree
+static KD3Node *city_root;
 
-/* qsort-style function to compare a pair of pointers to City by lng
- */
-static int cityQS (const void *p1, const void *p2)
-{
-    float lng1 = ((City*)p1)->lng_d;
-    float lng2 = ((City*)p2)->lng_d;
 
-    if (lng1 < lng2)
-        return (-1);
-    if (lng1 > lng2)
-        return (1);
-    return (0);
-}
-
-/* find closest City in the given row within row size, if any.
- * N.B. row assumed to have at least one entry and be sorted by increasing lng
- */
-static City *closestCityInRow (const LatRow &lr, const LatLong &ll)
-{
-        // find closest longitude
-        int a = 0, b = lr.n_cities - 1;
-        while (b > a + 1) {
-            int m = (a + b)/2;
-            City &cm = lr.cities[m];
-            if (ll.lng_d < cm.lng_d)
-                b = m;
-            else
-                a = m;
-        }
-        int c_lng = (a != b && fabsf(lr.cities[a].lng_d - ll.lng_d) < fabsf(lr.cities[b].lng_d - ll.lng_d))
-                        ? a : b;
-
-        // check a few either side considering latitude
-        float c_dist = 1e10;
-        int c_i = c_lng;
-        for (int d_i = -1; d_i <= 1; d_i++) {
-            int c_di = c_lng + d_i;
-            if (c_di >= 0 && c_di < lr.n_cities) {
-                float m_dist = separation2D (ll, lr.cities[c_di].lat_d, lr.cities[c_di].lng_d); 
-                if (m_dist < c_dist) {
-                    c_dist = m_dist;
-                    c_i = c_di;
-                }
-            }
-        }
-
-        return (c_dist < LAT_SIZ ? &lr.cities[c_i] : NULL);
-}
-
-/* query for list of cities, fill regions.
+/* query for list of cities, create kdtree.
  * harmless if called more than once.
  * N.B. UNIX only.
  */
 void readCities()
 {
-
         // ignore if already done
-        if (lat_rows)
+        if (city_root)
             return;
 
         // connection
@@ -116,58 +44,58 @@ void readCities()
                 goto out;
             }
 
-            // first line is binning sizes
-            char line[100];
-            if (!getTCPLine (cities_client, line, sizeof(line), NULL)) {
-                Serial.print (F("Cities: no bin line\n"));
-                goto out;
-            }
-            if (sscanf (line, "%d %d", &LAT_SIZ, &LNG_SIZ) != 2) {
-                Serial.printf (_FX("Cities: bad bin line: %s\n"), line);
-                goto out;
-            }
-
-            // create row array
-            int n_rows = 180/LAT_SIZ;
-            lat_rows = (LatRow *) calloc (n_rows, sizeof(LatRow));
-
-            // read each city
-            int n_cities = 0;
+            // read each city and build temp lists of location and name
+            char **names = NULL;                // temp malloced list of persistent malloced names
+            LatLong *lls = NULL;                // temp malloced list of locations
+            int n_cities = 0;                   // number in use in each list
+            int n_malloced = 0;                 // number malloced in each list
+            char line[200];
             while (getTCPLine (cities_client, line, sizeof(line), NULL)) {
 
-                // crack info
-                float rlat, rlng;
-                if (sscanf (line, "%f, %f", &rlat, &rlng) != 2)
+                // crack
+                char name[101];
+                float lat, lng;
+                if (sscanf (line, "%f, %f, \"%100[^\"]\"", &lat, &lng, name) != 3)
                     continue;
-                int lat_row = (rlat+90)/LAT_SIZ;
-                if (lat_row < 0 || lat_row >= n_rows)
-                    continue;
-                char *city_start = strchr (line, '"');
-                if (!city_start)
-                    continue;
-                city_start += 1;
-                char *city_end = strchr (city_start, '"');
-                if (!city_end)
-                    continue;
-                *city_end = '\0';
 
-                // append to appropriate latrow, sort later
-                LatRow *lrp = &lat_rows[lat_row];
-                lrp->cities = (City *) realloc (lrp->cities, (lrp->n_cities+1) * sizeof(City));
-                City *cp = &lrp->cities[lrp->n_cities++];
-                cp->name = strdup (city_start);
-                cp->lat_d = rlat;
-                cp->lng_d = rlng;
+                // grow lists if full
+                if (n_cities + 1 > n_malloced) {
+                    n_malloced += 100;
+                    names = (char **) realloc (names, n_malloced * sizeof(char *));
+                    lls = (LatLong *) realloc (lls, n_malloced * sizeof(LatLong));
+                    if (!names || !lls)
+                        fatalError ("alloc cities: %d %p %p", n_malloced, names, lls);
+                }
+
+                // add to lists
+                names[n_cities] = strdup (name);
+                LatLong &new_ll = lls[n_cities];
+                new_ll.lat_d = lat;
+                new_ll.lng_d = lng;
+                normalizeLL (new_ll);
 
                 // good
                 n_cities++;
 
             }
-            Serial.printf (_FX("Cities: found %d %d x %d\n"), n_cities, LAT_SIZ, LNG_SIZ);
+            Serial.printf (_FX("Cities: found %d\n"), n_cities);
 
-            // sort each row by lng
-            for (int i = 0; i < n_rows; i++)
-                qsort (lat_rows[i].cities, lat_rows[i].n_cities, sizeof(City), cityQS);
+            // build tree -- N.B. can not build as we read because realloc could move left/right pointers
+            KD3Node *city_tree = (KD3Node *) calloc (n_cities, sizeof(KD3Node));
+            if (!city_tree && n_cities > 0)
+                fatalError ("alloc cities tree: %d", n_cities);
+            for (int i = 0; i < n_cities; i++) {
+                KD3Node &kd3 = city_tree[i];
+                ll2KD3Node (lls[i], kd3);
+                kd3.data = (void*) names[i];
+            }
+
+            // finished with temporary lists -- names themselves live forever
+            free (names);
+            free (lls);
+
+            // sort
+            city_root = mkKD3NodeTree (city_tree, n_cities, 0);
         }
 
     out:
@@ -179,25 +107,24 @@ void readCities()
  */
 const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
 {
-
-        // ignore if not ready
-        if (!lat_rows)
+        // ignore if not ready or failed
+        if (!city_root)
             return (NULL);
 
-        // decide row based on latitude bin
-        int lat_row = (ll.lat_d+90)/LAT_SIZ;
-        if (lat_row < 0 || lat_row >= 180/LAT_SIZ || lat_rows[lat_row].n_cities < 1)
-            return (NULL);
-
-        // check this row for closest city row size, if any
-        City *best_cp = closestCityInRow (lat_rows[lat_row], ll);
+        // search
+        KD3Node seach_city;
+        ll2KD3Node (ll, seach_city);
+        KD3Node *best_city = NULL;
+        float best_dist = 0;
+        int n_visited = 0;
+        nearestKD3Node (city_root, &seach_city, 0, &best_city, &best_dist, &n_visited);
+        // printf ("**** visted %d\n", n_visited);
 
         // report results if successful
-        if (best_cp) {
-            city_ll.lat_d = best_cp->lat_d;
-            city_ll.lng_d = best_cp->lng_d;
-            normalizeLL (city_ll);
-            return (best_cp->name);
+        best_dist = nearestKD3Dist2Miles (best_dist);   // convert to miles
+        if (best_dist < MAX_CSR_DIST) {
+            KD3Node2ll (*best_city, city_ll);
+            return ((char*)(best_city->data));
         } else {
             return (NULL);
         }
@@ -216,4 +143,4 @@ const char *getNearestCity (const LatLong &ll, LatLong &city_ll) {
 
 void readCities() {}
 
-#endif // _IS_UNIX
+#endif // _SUPPORT_CITIES

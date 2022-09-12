@@ -15,8 +15,6 @@
 #define BEACONR         9                       // beacon symbol radius, pixels
 #define BLEG            (BEACONR-4)             // beacon symbol leg length
 #define BEACONCW        6                       // beacon char width
-#define BEACONCH        9                       // beacon call height
-#define BEACONCY        7                       // beacon call top coord +y from center of triangle
 #define BORDER_COL      RGB565(127,127,127)     // control box border color
 
 typedef struct {
@@ -61,11 +59,19 @@ static NCDXFBeacon blist[NBEACONS] = {
 
 /* symbol color for each frequency
  */
+#if defined(_SUPPORT_PSKREPORTER)
+#define BCOL_14 getMapColor(BAND20_CSPR)
+#define BCOL_18 getMapColor(BAND17_CSPR)
+#define BCOL_21 getMapColor(BAND15_CSPR)
+#define BCOL_24 getMapColor(BAND12_CSPR)
+#define BCOL_28 getMapColor(BAND10_CSPR)
+#else
 #define BCOL_14 RA8875_RED              // 14.100 MHz
 #define BCOL_18 RA8875_GREEN            // 18.110 MHz
 #define BCOL_21 RGB565(100,100,255)     // 21.150 MHz
 #define BCOL_24 RA8875_YELLOW           // 24.930 MHz
 #define BCOL_28 RA8875_MAGENTA          // 28.200 MHz
+#endif
 #define BCOL_S  RA8875_BLACK            // silent, not actually drawn
 #define BCOL_N  6                       // number of color states
 
@@ -160,21 +166,17 @@ static bool overBeacon (const SCoord &s, const NCDXFBeacon &nb)
 }
 
 
-/* update beacon display, typically on each 10 second period and
- *   if erase_too then also erase those that are off
- *   if immediate then do it now, else only if time for the 10 second update period
- *   if force do it even if brb_mode != BRB_SHOW_BEACONS (eg erase all after turning off)
+/* update beacon display, typically on each 10 second period unless immediate.
  */
-void updateBeacons (bool erase_too, bool immediate, bool force)
+void updateBeacons (bool immediate)
 {
-    // bale if not showing beacons and not asked to do it anyway
-    if (brb_mode != BRB_SHOW_BEACONS && !force)
-        return;
+    // counts as on as long as in rotation set, need not be in front now
+    bool beacons_on = brb_rotset & (1 << BRB_SHOW_BEACONS);
 
-    // bale if not immediate and we are still in the same 10 second interval
+    // process if immediate or (beacons are on and it's a new time period)
     static uint8_t prev_sec10;
     uint8_t sec10 = second(nowWO())/10;
-    if (!immediate && sec10 == prev_sec10)
+    if (!immediate && (!beacons_on || sec10 == prev_sec10))
         return;
     prev_sec10 = sec10;
 
@@ -184,23 +186,22 @@ void updateBeacons (bool erase_too, bool immediate, bool force)
     bool erased_any = false;
     setBeaconStates();
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
-        if (bp->c == BCOL_S || brb_mode != BRB_SHOW_BEACONS) {
-            if (erase_too) {
-                eraseBeacon (*bp);
-                erased_any = true;
-            }
+        if (bp->c == BCOL_S || !beacons_on) {
+            eraseBeacon (*bp);
+            erased_any = true;
         } else if (overMap(bp->s) && !overRSS (bp->call_b)) {
             drawBeacon (*bp);
         }
     }
 
-    // draw other symbols in case erasing a beacon clobbered some
+#if defined(_IS_ESP8266)
+    // draw other symbols in case erasing a beacon clobbered some -- beware recursion!
     if (erased_any)
         drawAllSymbols(false);
+#endif
 
     updateClocks(false);
 
-    // printFreeHeap(F("updateBeacons"));
 }
 
 /* update screen location for all beacons.
@@ -209,7 +210,7 @@ void updateBeaconScreenLocations()
 {
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
         ll2s (deg2rad(bp->lat), deg2rad(bp->lng), bp->s, 3*BEACONCW);   // about max
-        setMapTagBox (bp->call, bp->s, BEACONCH, bp->call_b);
+        setMapTagBox (bp->call, bp->s, BEACONR/2+1, bp->call_b);
     }
 }
 
@@ -217,7 +218,7 @@ void updateBeaconScreenLocations()
  */
 bool overAnyBeacon (const SCoord &s)
 {
-    if (brb_mode != BRB_SHOW_BEACONS)
+    if (!(brb_rotset & (1 << BRB_SHOW_BEACONS)))
         return (false);
 
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
@@ -409,4 +410,23 @@ void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS])
     (void) setPlotChoice (pp, pc);
     plot_rotset[pp] = 1 << pc;
     savePlotOps();
+}
+
+/* init brb_rotset and brb_mode
+ */
+void initBRBRotset()
+{
+    if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset) || brb_rotset == 0) {
+        brb_mode = BRB_SHOW_BEACONS;            // just pick one that is always possible
+        brb_rotset = 1 << brb_mode;    
+        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
+    } else {
+        // arbitrarily set brb_mode to first bit, will be double-checked later
+        for (int i = 0; i < BRB_N; i++) {
+            if (brb_rotset & (1 << i)) {
+                brb_mode = i;
+                break;
+            }
+        }
+    }
 }

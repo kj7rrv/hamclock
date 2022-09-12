@@ -9,17 +9,26 @@
 // set for core info
 static bool _trace_client = false;
 
+// default constructor
 WiFiClient::WiFiClient()
 {
+        // init
 	socket = -1;
 	n_peek = 0;
         next_peek = 0;
 }
 
+// constructor handed an open socket to use
 WiFiClient::WiFiClient(int fd)
 {
-	if (fd >= 0 && _trace_client)
-            printf ("WiFiCl: new WiFiClient inheriting socket %d\n", fd);
+        // init
+	socket = -1;
+	n_peek = 0;
+        next_peek = 0;
+
+        if (fd >= 0 && _trace_client)
+            printf ("WiFiCl: new WiFiClient inheriting fd %d\n", fd);
+
 	socket = fd;
 	n_peek = 0;
         next_peek = 0;
@@ -30,7 +39,7 @@ WiFiClient::operator bool()
 {
         bool is_active = socket != -1;
         if (_trace_client && is_active)
-            printf ("WiFiCl: socket %d is active\n", socket);
+            printf ("WiFiCl: fd %d is active\n", socket);
 	return (is_active);
 }
 
@@ -68,7 +77,7 @@ int WiFiClient::connect_to (int sockfd, struct sockaddr *serv_addr, int addrlen,
 
         /* looks good - restore blocking */
         if (fcntl (sockfd, F_SETFL, flags) < 0)
-            printf ("WiFiCl: fcntl socket %d: %s\n", sockfd, strerror(errno));
+            printf ("WiFiCl: fcntl fd %d: %s\n", sockfd, strerror(errno));
 
         return (0);
 }
@@ -136,7 +145,7 @@ bool WiFiClient::connect(const char *host, int port)
 
         /* ok */
         if (_trace_client)
-            printf ("WiFiCl: new %s:%d socket %d\n", host, port, sockfd);
+            printf ("WiFiCl: new %s:%d fd %d\n", host, port, sockfd);
         freeaddrinfo (aip);
 	socket = sockfd;
 	n_peek = 0;
@@ -163,7 +172,7 @@ void WiFiClient::stop()
 {
 	if (socket >= 0) {
             if (_trace_client)
-                printf ("WiFiCl: socket %d is now closed\n", socket);
+                printf ("WiFiCl: fd %d is now closed\n", socket);
 	    shutdown (socket, SHUT_RDWR);
 	    close (socket);
 	    socket = -1;
@@ -196,7 +205,7 @@ int WiFiClient::available()
         tv.tv_usec = 0;
         int s = select (socket+1, &rset, NULL, NULL, &tv);
         if (s < 0) {
-            printf ("WiFiCl: socket %d select err: %s\n", socket, strerror(errno));
+            printf ("WiFiCl: fd %d select err: %s\n", socket, strerror(errno));
 	    stop();
 	    return (0);
 	}
@@ -212,9 +221,9 @@ int WiFiClient::available()
 	} else {
             if (n == 0) {
                 if (_trace_client)
-                    printf ("WiFiCl: socket %d read EOF\n", socket);
+                    printf ("WiFiCl: fd %d read EOF\n", socket);
             } else
-                printf ("WiFiCl: socket %d read err: %s\n", socket, strerror(errno));
+                printf ("WiFiCl: fd %d read err: %s\n", socket, strerror(errno));
 	    stop();
 	    return (0);
 	}
@@ -239,14 +248,14 @@ int WiFiClient::write (const uint8_t *buf, int n)
 	    if (nw < 0) {
                 // select says it won't block but it still might be temporarily EAGAIN
                 if (errno != EAGAIN) {
-                    printf ("WiFiCl: write: %s\n", strerror(errno));
+                    printf ("WiFiCl: write fd %d: %s\n", socket, strerror(errno));
                     stop();             // avoid repeated failed attempts
                     return (0);
                 } else
                     nw = 0;             // act like nothing happened
 	    }
 	    if (_trace_client) {
-                printf ("WiFiCl: write %d", nw);
+                printf ("WiFiCl: write %d to fd %d: ", nw, socket);
                 bool all_printable = true;
                 for (int i = 0; i < nw; i++) {
                     if (!isprint(buf[ntot+i])) {
@@ -255,7 +264,7 @@ int WiFiClient::write (const uint8_t *buf, int n)
                     }
                 }
                 if (all_printable)
-                    printf (" %.*s\n", nw, buf+ntot);
+                    printf (" \"%.*s\"\n", nw, buf+ntot);
                 else
                     printf ("\n");
             }

@@ -348,9 +348,7 @@ static uint32_t getCountdownLeft()
  */
 static void setSWColor()
 {
-    uint8_t r, g, b;
-    hsvtorgb (&r, &g, &b, sw_hue, SW_HSV_S, SW_HSV_V);
-    sw_col = RGB565 (r, g, b);
+    sw_col = HSV565 (sw_hue, SW_HSV_S, SW_HSV_V);
 }
 
 /* draw the current countdown_period if currently on the main SW page
@@ -374,11 +372,7 @@ static void drawColorScale()
 
     // rainbow
     for (uint16_t dx = 0; dx < color_b.w; dx++) {
-        uint8_t r, g, b;
-        uint8_t h = 255*dx/color_b.w;
-        hsvtorgb (&r, &g, &b, h, SW_HSV_S, SW_HSV_V);
-        uint16_t c = RGB565 (r, g, b);
-        // tft.drawLine (color_b.x + dx, color_b.y, color_b.x + dx, color_b.y + color_b.h, c);
+        uint16_t c = HSV565 (255*dx/color_b.w, SW_HSV_S, SW_HSV_V);
         tft.drawPixel (color_b.x + dx, color_b.y + color_b.h/2, c);
     }
 

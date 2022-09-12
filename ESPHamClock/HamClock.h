@@ -71,14 +71,29 @@
   #define _SUPPORT_KX3
 #endif
 
-// phot only supported on ESP and then only if phot is detected
+// phot only supported on ESP and then only if real phot is detected
 #if defined(_IS_ESP8266)
   #define _SUPPORT_PHOT
 #endif
 
-// dx cluster path plotting not on ESP
+// dx cluster path plotting not on ESP because paths can't be drawn in raster mode
 #if !defined(_IS_ESP8266)
-    #define _SUPPORT_CLP
+    #define _SUPPORT_CLPATH
+#endif
+
+// PSKReporter not supported on ESP because it requires accessing https, and also can't draw raster paths
+#if !defined(_IS_ESP8266)
+    #define _SUPPORT_PSKREPORTER
+#endif
+
+// roaming cities is not supported on ESP because it is touch only
+#if !defined(_IS_ESP8266)
+    #define _SUPPORT_CITIES
+#endif
+
+// zones not on ESP -- they fit in flash ok but can't be drawn in raster fashion
+#if !defined(_IS_ESP8266)
+    #define _SUPPORT_ZONES
 #endif
 
 
@@ -319,6 +334,9 @@ typedef enum {
     PLOT_CH_DRAP,
     PLOT_CH_COUNTDOWN,
     PLOT_CH_STEREO_A,
+#if defined(_SUPPORT_PSKREPORTER)
+    PLOT_CH_PSK,
+#endif
 
     PLOT_CH_N
 } PlotChoice;
@@ -423,7 +441,7 @@ enum {
 };
 
 // show NCDXF beacons or one of other controls
-extern uint8_t brb_mode;
+
 typedef enum {
     BRB_SHOW_BEACONS,                   // NCDXF beacons
     BRB_SHOW_ONOFF,                     // on/off/idle times
@@ -435,8 +453,39 @@ typedef enum {
     BRB_N,                              // count
 } BRB_MODE;
 
+extern uint8_t brb_mode;                // one of BRB_MODE
+extern time_t brb_rotationT;            // time at which to rotate, if more than 1 bit in rotset
+extern uint8_t brb_rotset;              // bitmask of all active BRB_MODE choices
+                                        // N.B. brb_rotset must always include brb_mode
+#define BRBIsRotating()                 ((brb_rotset & ~(1 << brb_mode)) != 0)  // any bits other than mode
+extern const char *brb_names[BRB_N];    // menu names -- must be in same order as BRB_MODE
 
-extern uint8_t azm_on;                  // whether azimuthal else mercator projection
+// map projection styles
+extern uint8_t map_proj;
+typedef enum {
+    MAPP_MERCATOR,                      // 2D
+    MAPP_AZIMUTHAL,                     // two hemispheres, left centered on DE
+    MAPP_AZIM1,                         // full sphere centered on DE
+    MAPP_N
+} MapProjection;
+extern const char *map_projnames[MAPP_N];   // projection names
+#define AZIM1_ZOOM       1.1F           // horizon will be 180/AZIM1_ZOOM degrees from DE
+
+// map grid options
+typedef enum {
+    MAPGRID_OFF,
+    MAPGRID_TROPICS,
+    MAPGRID_LATLNG,
+    MAPGRID_MAID,
+    MAPGRID_AZIM,
+#if defined(_SUPPORT_ZONES)
+    MAPGRID_CQZONES,
+    MAPGRID_ITUZONES,
+#endif
+    MAPGRID_N
+} MapGridStyle;
+extern uint8_t mapgrid_choice;
+extern const char *grid_styles[MAPGRID_N];
 
 extern SBox dx_info_b;                  // dx info pane
 extern SBox satname_b;                  // satellite name pick
@@ -477,17 +526,6 @@ extern const char *_FX_helper(const char *flash_string);
 
 extern char *stack_start;               // used to estimate stack usage
 
-// map grid options
-enum {
-    MAPGRID_OFF,
-    MAPGRID_TROPICS,
-    MAPGRID_LATLNG,
-    MAPGRID_MAID,
-    MAPGRID_N
-};
-extern uint8_t mapgrid_choice;
-extern const char *grid_styles[MAPGRID_N];
-
 #define MAX_PREF_LEN     4              // maximumm prefix length
 
 
@@ -515,6 +553,9 @@ typedef struct {
 #define N_WXINFO_FIELDS 10
 
 
+// cursor distance to map point
+#define MAX_CSR_DIST    150             // miles
+
 
 
 /*********************************************************************************************
@@ -528,12 +569,13 @@ extern bool newVersionIsAvailable (char *nv, uint16_t nvl);
 extern bool askOTAupdate(char *ver);
 extern void drawDXTime(void);
 extern void drawDXMarker(bool force);
-extern void drawAllSymbols(bool erase_too);
+extern void drawAllSymbols(bool beacons_too);
 extern void drawTZ(const TZInfo &tzi);
 extern bool inBox (const SCoord &s, const SBox &b);
 extern bool inCircle (const SCoord &s, const SCircle &c);
 extern void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...);
-extern void reboot(void);
+extern void doReboot(void);
+extern void doExit(void);
 extern void printFreeHeap (const __FlashStringHelper *label);
 extern void getWorstMem (int *heap, int *stack);
 extern void resetWatchdog(void);
@@ -566,7 +608,6 @@ extern void setOnAir (bool on);
 extern void drawCallsign (bool all);
 extern void logState (void);
 extern const char *hc_version;
-extern void printStacktrace(const char *fmt, ...);
 extern void fillSBox (const SBox &box, uint16_t color);
 extern void drawSBox (const SBox &box, uint16_t color);
 
@@ -715,16 +756,19 @@ extern const char *gpsd_server, *ntp_server;
 #define RGB565(R,G,B)   ((((uint16_t)(R) & 0xF8) << 8) | (((uint16_t)(G) & 0xFC) << 3) | ((uint16_t)(B) >> 3))
 
 // extract 8-bit colors from uint16_t RGB565 color in range 0-255
-#define RGB565_R(c)     (((c) & 0xF800) >> 8)
-#define RGB565_G(c)     (((c) & 0x07E0) >> 3)
-#define RGB565_B(c)     (((c) & 0x001F) << 3)
+#define RGB565_R(c)     (255*(((c) & 0xF800) >> 11)/((1<<5)-1))
+#define RGB565_G(c)     (255*(((c) & 0x07E0) >> 5)/((1<<6)-1))
+#define RGB565_B(c)     (255*((c) & 0x001F)/((1<<5)-1))
 
 #define GRAY    RGB565(140,140,140)
 #define BRGRAY  RGB565(200,200,200)
+#define DKGRAY  RGB565(50,50,50)
 #define DYELLOW RGB565(255,212,112)
 
 extern void hsvtorgb(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t h, uint8_t s, uint8_t v);
 extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t b);
+extern uint16_t HSV565 (uint8_t h, uint8_t s, uint8_t v);
+
 
 
 
@@ -736,9 +780,13 @@ extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, u
  *
  */
 
-#define MAX_SPOTCALL_LEN                12
+#define MAX_SPOTCALL_LEN                12      // including \0
+#define MAX_SPOTGRID_LEN                MAID_CHARLEN
 typedef struct {
+    char de_call[MAX_SPOTCALL_LEN];     // DE call
     char dx_call[MAX_SPOTCALL_LEN];     // DX call
+    char de_grid[MAX_SPOTGRID_LEN];     // DE grid
+    char dx_grid[MAX_SPOTGRID_LEN];     // DX grid
     float dx_lat, dx_lng;               // dx location, rads +N +E
     float de_lat, de_lng;               // de location, rads +N +E
     float kHz;                          // freq
@@ -755,6 +803,7 @@ extern void drawDXClusterSpotsOnMap (void);
 extern void updateDXClusterSpotScreenLocations(void);
 extern bool isDXClusterConnected(void);
 extern bool sendDXClusterDELLGrid(void);
+extern bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp);
 
 
 
@@ -770,7 +819,7 @@ extern bool sendDXClusterDELLGrid(void);
 
 
 
-#define DX_R    8                       // dx marker radius (erases better if even)
+#define DX_R    6                       // dx marker radius (erases better if even)
 #define DX_COLOR RA8875_GREEN
 
 extern SCircle dx_c;
@@ -784,8 +833,8 @@ extern uint8_t show_km;                 // show prop path distance in km, else m
 extern uint8_t show_lp;                 // show prop long path, else short path
 #define ERAD_M  3959.0F                 // earth radius, miles
 
-#define DE_R 8                          // radius of DE marker   (erases better if even)
-#define DEAP_R 8                        // radius of DE antipodal marker (erases better if even)
+#define DE_R 6                          // radius of DE marker   (erases better if even)
+#define DEAP_R 6                        // radius of DE antipodal marker (erases better if even)
 #define DE_COLOR  RGB565(255,125,0)     // orange
 
 extern SCircle de_c;
@@ -796,11 +845,11 @@ extern LatLong deap_ll;
 extern LatLong sun_ss_ll;
 extern LatLong moon_ss_ll;
 
-#define SUN_R 9                         // radius of sun marker
+#define SUN_R 6                         // radius of sun marker
 extern float sslng, sslat, csslat, ssslat;
 extern SCircle sun_c;
 
-#define MOON_R 9                        // radius of moon marker
+#define MOON_R 6                        // radius of moon marker
 #define MOON_COLOR  RGB565(150,150,150)
 extern SCircle moon_c;
 
@@ -811,6 +860,9 @@ extern void drawMoreEarth (void);
 extern void eraseDEMarker (void);
 extern void eraseDEAPMarker (void);
 extern void drawDEMarker (bool force);
+extern bool showDEAPMarker(void);
+extern bool showDXMarker(void);
+extern bool showDEMarker(void);
 extern void drawDEAPMarker (void);
 extern void drawDEInfo (void);
 extern void drawDECalTime (bool center);
@@ -837,12 +889,13 @@ extern void eraseSCircle (const SCircle &c);
 extern void drawRSSBox (void);
 extern void eraseRSSBox (void);
 extern void drawMapMenu(void);
-extern bool segmentSpanOk (SCoord &s0, SCoord &s1, uint16_t border);
 extern void roundLatLong (LatLong &ll);
 extern void initScreen(void);
 extern bool checkOnAir(void);
 extern float lngDiff (float dlng);
 extern bool overViewBtn (const SCoord &s, uint16_t border);
+extern bool segmentSpanOk (const SCoord &s0, const SCoord &s1, uint16_t border);
+
 
 
 
@@ -981,6 +1034,31 @@ extern void updateGPSDLoc(void);
 
 
 
+
+/*********************************************************************************************
+ *
+ * kd3tree.cpp
+ *
+ */
+
+struct kd_node_t {
+    float s[3];                         // xyz coords on unit sphere
+    struct kd_node_t *left, *right;     // branches
+    void *data;                         // user data
+};
+
+typedef struct kd_node_t KD3Node;
+
+extern KD3Node* mkKD3NodeTree (KD3Node *t, int len, int idx);
+extern void nearestKD3Node (KD3Node *root, KD3Node *nd, int idx, KD3Node **best, float *best_dist,
+    int *n_visited);
+extern void ll2KD3Node (const LatLong &ll, KD3Node &n);
+extern void KD3Node2ll (const KD3Node &n, LatLong &ll);
+extern float nearestKD3Dist2Miles(float d);
+
+
+
+
 /*********************************************************************************************
  *
  * setup.cpp
@@ -996,6 +1074,32 @@ typedef enum {
 
 #define N_DXCLCMDS              4               // n dx cluster commands
 
+
+// N.B. must match colsel_pr[] order
+typedef enum {
+    SATFOOT_CSPR,
+    SATPATH_CSPR,
+    SHORTPATH_CSPR,
+    LONGPATH_CSPR,
+    GRID_CSPR,
+#if defined(_SUPPORT_PSKREPORTER)
+    BAND160_CSPR,
+    BAND80_CSPR,
+    BAND60_CSPR,
+    BAND40_CSPR,
+    BAND30_CSPR,
+    BAND20_CSPR,
+    BAND17_CSPR,
+    BAND15_CSPR,
+    BAND12_CSPR,
+    BAND10_CSPR,
+    BAND6_CSPR,
+    BAND2_CSPR,
+#endif
+    N_CSPR
+} CSIds;
+
+
 extern void clockSetup(void);
 extern const char *getWiFiSSID(void);
 extern const char *getWiFiPW(void);
@@ -1008,7 +1112,7 @@ extern bool useMetricUnits(void);
 extern bool useGeoIP(void);
 extern bool useGPSDTime(void);
 extern bool useGPSDLoc(void);
-extern bool mapDXClusterSpots(void);
+extern bool labelDXClusterSpots(void);
 extern bool plotSpotCallsigns(void);
 extern bool rotateScreen(void);
 extern float getBMETempCorr(int i);
@@ -1023,10 +1127,8 @@ extern bool useDXCluster(void);
 extern uint32_t getKX3Baud(void);
 extern void drawStringInBox (const char str[], const SBox &b, bool inverted, uint16_t color);
 extern bool logUsageOk(void);
-extern uint16_t getSatPathColor(void);
-extern uint16_t getSatFootColor(void);
-extern uint16_t getShortPathColor(void);
-extern uint16_t getLongPathColor(void);
+extern uint16_t getMapColor (CSIds cid);
+extern const char* getMapColorName (CSIds cid);
 extern uint8_t getBrMax(void);
 extern uint8_t getBrMin(void);
 extern bool getX11FullScreen(void);
@@ -1034,9 +1136,6 @@ extern bool latSpecIsValid (const char *lng_spec, float &lng);
 extern bool lngSpecIsValid (const char *lng_spec, float &lng);
 extern bool getDemoMode(void);
 extern void setDemoMode(bool on);
-extern uint16_t getGridColor(void);
-extern uint16_t getLT10MHzColor(void);
-extern uint16_t getGT10MHzColor(void);
 extern int16_t getCenterLng(void);
 extern void setCenterLng(int16_t);
 extern DateFormat getDateFormat(void);
@@ -1045,8 +1144,8 @@ extern bool getRotctld (char host[], int *portp);
 extern bool getFlrig (char host[], int *portp);
 extern const char *getDXClusterLogin(void);
 extern bool getDXSpotPaths(void);
-
-void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
+extern bool setMapColor (const char *name, uint16_t rgb565);
+extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 
 
 
@@ -1115,6 +1214,7 @@ extern const char *getMapStyle (char s[]);
 extern void drawMapScale(void);
 extern void eraseMapScale(void);
 extern bool mapScaleIsUp(void);
+extern void mapMsg (uint32_t dwell_ms, const char *fmt, ...);
 
 
 typedef struct {
@@ -1202,13 +1302,14 @@ extern const uint16_t moon_image[HC_MOON_W*HC_MOON_H] PROGMEM;
 #define NCDXF_B_NFIELDS         4       // n fields in NCDXF_b
 #define NCDXF_B_MAXLEN          10      // max field length
 
-extern void updateBeacons (bool erase_too, bool immediate, bool force);
+extern void updateBeacons (bool immediate);
 extern void updateBeaconScreenLocations(void);
 extern bool overAnyBeacon (const SCoord &s);
 extern void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS]);
 extern void drawBeaconKey(void);
 extern void doNCDXFBoxTouch (const SCoord &s);
 extern void drawNCDXFBox(void);
+extern void initBRBRotset(void);
 extern void drawNCDXFStats (const char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
                           const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
                           const uint16_t colors[NCDXF_B_NFIELDS]);
@@ -1256,7 +1357,7 @@ typedef enum {
     NV_UTC_OFFSET,              // offset from UTC, seconds
     NV_PLOT_1,                  // Pane 1 PlotChoice
     NV_PLOT_2,                  // Pane 2 PlotChoice
-    NV_BRB_MODE,                // Beacon box mode: 0=bcns; 1=On/Off; 2=photresistor; 3=brightness, 4=sp wx
+    NV_BRB_ROTSET,              // Beacon box mode bit mask
     NV_PLOT_3,                  // Pane 3 PlotChoice
 
     NV_RSS_ON,                  // whether to display RSS
@@ -1268,7 +1369,7 @@ typedef enum {
     NV_LP,                      // whether to show DE-DX long or short path info
     NV_METRIC_ON,               // whether to use metric or imperical values
     NV_LKSCRN_ON,               // whether screen lock is on
-    NV_AZIMUTHAL_ON,            // whether map is azimuthal or mercator
+    NV_MAPPROJ,                 // 0: merc 1: azim 2: azim 1
     NV_ROTATE_SCRN,             // whether to flip screen
 
     NV_WIFI_SSID,               // WIFI SSID
@@ -1278,7 +1379,7 @@ typedef enum {
     NV_DE_SRSS,                 // whether DE pane shows sun times 0=until or 1=at
 
     NV_DX_SRSS,                 // whether DX pane shows sun times 0=until or 1=at or 2=DX prefix
-    NV_LLGRID,                  // map grid style 0=off; 1=tropics; 2=lat-lng; 3=maindenhead
+    NV_GRIDSTYLE,               // map grid style 0=off; 1=tropics; 2=lat-lng; 3=maindenhead, 4=radial
     NV_DPYON,                   // deprecated since NV_DAILYONOFF
     NV_DPYOFF,                  // deprecated since NV_DAILYONOFF
     NV_DXHOST,                  // DX cluster host name
@@ -1356,10 +1457,23 @@ typedef enum {
     NV_DXCMD2,                  // dx cluster command 2
     NV_DXCMD3,                  // dx cluster command 3
     NV_DXCMDUSED,               // bitmask of dx cluster commands in use
-    NV_GT10MHZ_COL,             // dx path color for spots above 10 MHz as RGB 565
-    NV_LT10MHZ_COL,             // dx path color for spots below 10 MHz as RGB 565
+    NV_PSK_MODEBITS,            // bit 0: on=psk off=wspr bit 1: on=bycall off=bygrid
+    NV_PSK_BANDS,               // bit mask 0 .. 11 160 .. 2m
+    NV_160M_COLOR,              // 160 m path color as RGB 565
+    NV_80M_COLOR,               // 80 m path color as RGB 565
+    NV_60M_COLOR,               // 60 m path color as RGB 565
+    NV_40M_COLOR,               // 40 m path color as RGB 565
+    NV_30M_COLOR,               // 30 m path color as RGB 565
+    NV_20M_COLOR,               // 20 m path color as RGB 565
+    NV_17M_COLOR,               // 17 m path color as RGB 565
+    NV_15M_COLOR,               // 15 m path color as RGB 565
+    NV_12M_COLOR,               // 12 m path color as RGB 565
+    NV_10M_COLOR,               // 10 m path color as RGB 565
+    NV_6M_COLOR,                // 6 m path color as RGB 565
+    NV_2M_COLOR,                // 2 m path color as RGB 565
 
     NV_N
+
 } NV_Name;
 
 // string valued lengths including trailing EOS
@@ -1452,12 +1566,14 @@ extern void prepPlotBox (const SBox &box);
 extern SBox plot_b[PANE_N];                     // box for each pane
 extern PlotChoice plot_ch[PANE_N];              // current choice in each pane
 extern const char *plot_names[PLOT_CH_N];       // must be in same order as PlotChoice
-extern time_t next_rotationT[PANE_N];           // time of next rotation, iff > 1 bit set in rotset[i]
+extern time_t plot_rotationT[PANE_N];           // time of next rotation, iff > 1 bit set in rotset[i]
 extern uint32_t plot_rotset[PANE_N];            // bitmask of all PlotChoice rotation choices
-                                                // N.B. rotset[i] must always include plot_ch[i]
+                                                // N.B. plot_rotset[i] must always include plot_ch[i]
 
 #define PLOT_ROT_INTERVAL       30              // rotation interval, secs
 #define PLOT_ROT_WARNING        5               // show rotation about to occur, secs
+
+#define paneIsRotating(pp)    ((plot_rotset[pp] & ~(1 << plot_ch[pp])) != 0)   // any bit other than plot_ch
 
 extern void insureCountdownPaneSensible(void);
 extern bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt);
@@ -1466,10 +1582,10 @@ extern PlotPane findPaneForChoice (PlotChoice pc);
 extern PlotPane findPaneChoiceNow (PlotChoice pc);
 extern PlotChoice getNextRotationChoice (PlotPane pp, PlotChoice pc);
 extern PlotChoice getAnyAvailableChoice (void);
-extern bool paneIsRotating (PlotPane pp);
 extern bool plotChoiceIsAvailable (PlotChoice ch);
 extern void logPaneRotSet (PlotPane pp, PlotChoice ch);
-extern void showRotatingBorder (bool soon, PlotPane pp);
+extern void logBRBRotSet(void);
+extern void showRotatingBorder (void);
 extern void initPlotPanes(void);
 extern void savePlotOps(void);
 extern bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color);
@@ -1487,6 +1603,67 @@ extern bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, boo
 
 extern bool nearestPrefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1]);
 
+
+
+
+
+/*********************************************************************************************
+ *
+ * pskreporter.cpp
+ *
+ */
+
+
+#if defined(_SUPPORT_PSKREPORTER)
+
+#define PSK_DOTR       2                // end point marker radius (also use by dxcluster)
+
+// info stored about each report
+// N.B. match char sizes with sscanf in pskreporter.cpp
+typedef struct {
+    time_t posting;
+    char txgrid[10];
+    char txcall[20];
+    char rxgrid[10];
+    char rxcall[20];
+    char mode[20];
+    LatLong ll;
+    long Hz;
+    int snr;
+} PSKReport;
+
+typedef enum {
+    PSKMB_PSK = 1,                      // data is from PSK, else WSPR
+    PSKMB_CALL = 2,                     // using call, else grid
+    PSKMB_OFDE = 4,                     // spot of DE, else by DE
+} PSKModeBits;
+typedef enum {
+    PSKBAND_160M,
+    PSKBAND_80M,
+    PSKBAND_60M,
+    PSKBAND_40M,
+    PSKBAND_30M,
+    PSKBAND_20M,
+    PSKBAND_17M,
+    PSKBAND_15M,
+    PSKBAND_12M,
+    PSKBAND_10M,
+    PSKBAND_6M,
+    PSKBAND_2M,
+    PSKBAND_N
+} PSKBandSetting;
+extern uint8_t psk_mask;                // bitmask of PSKModeBits
+extern uint32_t psk_bands;              // bitmask of 1 << PSKBandSetting
+
+extern void updatePSKReporter (bool force);
+extern bool checkPSKTouch (const SCoord &s, const SBox &box);
+extern void drawPSKPane (void);
+extern void initPSKState(void);
+extern uint16_t getBandColor (long Hz);
+extern void drawPSKPaths (void);
+extern bool getClosestPSK (const LatLong &ll, const PSKReport **rpp);
+
+#endif // _SUPPORT_PSKREPORTER
 
 
 
@@ -1746,6 +1923,28 @@ extern bool updateDEWX (const SBox &box);
 extern bool updateDXWX (const SBox &box);
 extern void showDXWX(void);
 extern void showDEWX(void);
+
+
+
+/*********************************************************************************************
+ *
+ * zones.cpp
+ *
+ */
+
+#if defined(_SUPPORT_ZONES)
+
+typedef enum {
+    ZONE_CQ,
+    ZONE_ITU
+} ZoneID;
+
+extern bool findZoneNumber (ZoneID id, const SCoord &s, int *zone_n);
+extern void updateZoneSCoords(ZoneID id);
+extern void drawZone (ZoneID id, uint16_t color, int n_only);
+
+#endif // _SUPPORT_ZONES
+
 
 
 #endif // _HAMCLOCK_H

@@ -28,9 +28,7 @@ static uint16_t getWiFiMeterColor (const SBox &box, uint16_t x)
         return (RA8875_GREEN);
     float frac = powf((float)(x - box.x)/box.w, pwr);
     uint8_t h = 85*frac;                // hue 0 is red, 255/3 = 85 is green
-    uint8_t r, g, b;
-    hsvtorgb (&r, &g, &b, h, 255, 255);
-    return (RGB565(r,g,b));
+    return (HSV565(h,255,255));
 }
 
 /* read wifi signal strength.

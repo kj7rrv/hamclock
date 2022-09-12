@@ -9,17 +9,12 @@
 
 #include <stdint.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #ifdef _USE_X11
 
-#include <sys/time.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-
-// simplest to just recreate the same fb structure
-struct fb_var_screeninfo {
-    int xres, yres;
-};
 
 #endif // _USE_X11
 
@@ -33,6 +28,13 @@ struct fb_var_screeninfo {
 #include <linux/kd.h>
 #include <linux/input.h>
 
+#else
+
+// this originally comes from linux/fb.h but we reuse this portion of it for all cases
+struct fb_var_screeninfo {
+    int xres, yres;
+};
+
 #endif	// _USE_FB0
 
 #include "gfxfont.h"
@@ -43,9 +45,11 @@ extern const GFXfont Courier_Prime_Sans6pt7b;
 #define RGB565(R,G,B)   ((((uint16_t)(R) & 0xF8) << 8) | (((uint16_t)(G) & 0xFC) << 3) | ((uint16_t)(B) >> 3))
 #endif
 
-#define RGB565_R(c)     (((c) & 0xF800) >> 8)
-#define RGB565_G(c)     (((c) & 0x07E0) >> 3)
-#define RGB565_B(c)     (((c) & 0x001F) << 3)
+#define RGB565_R(c)     (255*(((c) & 0xF800) >> 11)/((1<<5)-1))
+#define RGB565_G(c)     (255*(((c) & 0x07E0) >> 5)/((1<<6)-1))
+#define RGB565_B(c)     (255*((c) & 0x001F)/((1<<5)-1))
+
+
 
 #define	RGB1632(C16)	((((uint32_t)(C16)&0xF800)<<8) | (((uint32_t)(C16)&0x07E0)<<5) | (((C16)&0x001F)<<3))
 #define	RGB3216(C32)	RGB565(((C32)>>16)&0xFF, ((C32)>>8)&0xFF, ((C32)&0xFF))

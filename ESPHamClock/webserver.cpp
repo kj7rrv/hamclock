@@ -59,6 +59,7 @@ typedef enum {
     // 15
     DEMO_SAT,
     DEMO_EME,
+    DEMO_AUXTIME,
 
     DEMO_N,
 
@@ -89,6 +90,11 @@ char *trim (char *str)
     while (sl > 0 && isspace(str[sl-1]))
         str[--sl] = '\0';
     return (str);
+}
+
+static bool rgbOk (int r, int g, int b)
+{
+    return (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255);
 }
 
 /* set name to value in wa.
@@ -314,7 +320,7 @@ static void reportPaneChoices (WiFiClient &client, PlotPane pp)
                 snprintf (buf+l, sizeof(buf)-l, "/%dW", bc_power);
             client.print(buf);
         }
-        int sleft = next_rotationT[pp] - t0;
+        int sleft = plot_rotationT[pp] - t0;
         snprintf (buf, sizeof(buf), _FX(" rotating in %02d:%02d"), sleft/60, sleft%60);
         client.print(buf);
     }
@@ -767,32 +773,36 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
     client.println();
 
     // report map projection
-    FWIFIPR (client, F("MapProj   "));
-    if (azm_on)
-        FWIFIPRLN (client, F("Azimuthal"));
-    else
-        FWIFIPRLN (client, F("Mercator"));
+    snprintf (buf, sizeof(buf), _FX("MapProj   %s\n"), map_projnames[map_proj]);
 
     // report grid overlay
     snprintf (buf, sizeof(buf), _FX("MapGrid   %s\n"), grid_styles[mapgrid_choice]);
+    client.print(buf);
+
+    // report merc center longitude
+    snprintf (buf, sizeof(buf), _FX("MerCenter %d degs\n"), getCenterLng());
     client.print(buf);
 
     // report panes
     for (int pp = 0; pp < PANE_N; pp++)
         reportPaneChoices (client, (PlotPane)pp);
 
-    // report NCDXF beacon box state
+    // report each selected NCDXF beacon box state
     FWIFIPR (client, F("NCDXF     "));
-    switch ((BRB_MODE)brb_mode) {
-    case BRB_SHOW_BEACONS:  FWIFIPRLN (client, F("Beacons")); break;
-    case BRB_SHOW_ONOFF:    FWIFIPRLN (client, F("OnOff_timers")); break;
-    case BRB_SHOW_PHOT:     FWIFIPRLN (client, F("Photocell")); break;
-    case BRB_SHOW_BR:       FWIFIPRLN (client, F("Brightness")); break;
-    case BRB_SHOW_SWSTATS:  FWIFIPRLN (client, F("SpaceWX stats")); break;
-    case BRB_SHOW_BME76:    FWIFIPRLN (client, F("BME@76 stats")); break;
-    case BRB_SHOW_BME77:    FWIFIPRLN (client, F("BME@77 stats")); break;
-    case BRB_N:             FWIFIPRLN (client, F("???")); break;
+    for (unsigned i = 0; i < 8*sizeof(brb_rotset)-1; i++) {
+        int j = (brb_mode + i) % BRB_N; // start list with current
+        if (brb_rotset & (1 << j)) {
+            if (j != brb_mode)
+                FWIFIPR (client, F(","));
+            client.print(brb_names[j]);
+        }
     }
+    if (BRBIsRotating()) {
+        int sleft = brb_rotationT - now();
+        snprintf (buf, sizeof(buf), _FX(" rotating in %02d:%02d\n"), sleft/60, sleft%60);
+    } else
+        strcpy (buf, "\n");
+    client.print (buf);
 
     // report display brightness and timers
     uint16_t pcon, t_idle, t_idle_left;
@@ -1021,6 +1031,16 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
                 RGB565_G(cs_info.bg_color), RGB565_B(cs_info.bg_color)); 
     client.print(buf);
 
+    // report each map color
+    for (int i = 0; i < N_CSPR; i++) {
+        uint16_t color = getMapColor((CSIds)i);
+        const char *color_name = getMapColorName((CSIds)i);
+        char uscore_name[30];
+        strncpySubChar (uscore_name, color_name, '_', ' ', sizeof(uscore_name));
+        snprintf (buf, sizeof(buf), _FX("%-16s%d,%d,%d\n"), uscore_name,
+                        RGB565_R(color), RGB565_G(color), RGB565_B(color)); 
+        client.print(buf);
+    }
 
     // done
     return (true);
@@ -1435,8 +1455,7 @@ static bool setWiFiTitle (WiFiClient &client, char line[])
     uint16_t fg_c = 0;
     if (fg) {
         int r, g, b;
-        if (sscanf (fg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || r < 0 || r > 255 || g < 0 || g > 255
-                        || b < 0 || b > 255) {
+        if (sscanf (fg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || !rgbOk (r, g, b)) {
             strcpy (line, garbcmd);
             return (false);
         }
@@ -1451,8 +1470,7 @@ static bool setWiFiTitle (WiFiClient &client, char line[])
             rainbow = true;
         else {
             int r, g, b;
-            if (sscanf (bg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || r < 0 || r > 255 || g < 0 || g > 255
-                            || b < 0 || b > 255) {
+            if (sscanf (bg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || !rgbOk (r, g, b)) {
                 strcpy (line, garbcmd);
                 return (false);
             }
@@ -1949,23 +1967,21 @@ static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[])
         return (false);
 
     // handy
-    const char *lat = wa.value[0];
-    const char *lng = wa.value[1];
-    const char *grid = wa.value[2];
+    const char *lat_spec = wa.value[0];
+    const char *lng_spec = wa.value[1];
+    const char *grid_spec = wa.value[2];
     const char *tz = wa.value[3];
 
     // check and engage depending on args given
-    if (lat && lng && !grid) {
+    if (lat_spec && lng_spec && !grid_spec) {
 
         LatLong ll;
-        ll.lat_d = atof (lat);
-        if (ll.lat_d < -90 || ll.lat_d > 90) {
-            strcpy (line, _FX("lat must be -90 .. +90"));
+        if (!latSpecIsValid (lat_spec, ll.lat_d)) {
+            strcpy (line, _FX("bad lat"));
             return (false);
         }
-        ll.lng_d = atof (lng);
-        if (ll.lng_d < -180 || ll.lng_d >= 180) {
-            strcpy (line, _FX("lng must be -180 .. +180"));
+        if (!lngSpecIsValid (lng_spec, ll.lng_d)) {
+            strcpy (line, _FX("bad lng"));
             return (false);
         }
 
@@ -1975,28 +1991,28 @@ static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[])
         else
             newDE (ll, NULL);
 
-    } else if (grid && !lat && !lng) {
+    } else if (!lat_spec && !lng_spec && grid_spec) {
 
-        size_t gridlen = strlen(grid);
+        size_t gridlen = strlen(grid_spec);
         if (gridlen != 4 && gridlen != 6) {
-            strcpy (line, _FX("Grid must be 4 or 6 chars"));
+            strcpy (line, _FX("grid must be 4 or 6 chars"));
             return (false);
         }
         LatLong ll;
-        if (!maidenhead2ll (ll, grid)) {
-            strcpy (line, _FX("Invalid grid"));
+        if (!maidenhead2ll (ll, grid_spec)) {
+            strcpy (line, _FX("bad grid"));
             return (false);
         }
 
         // engage
         if (new_dx)
-            newDX (ll, grid, NULL);
+            newDX (ll, grid_spec, NULL);
         else
-            newDE (ll, grid);
+            newDE (ll, grid_spec);
 
     } else {
 
-        strcpy (line, garbcmd);
+        strcpy (line, _FX("do not mix lat/lng and grid"));
         return (false);
     }
 
@@ -2033,6 +2049,71 @@ static bool setWiFiNewDE (WiFiClient &client, char line[])
 static bool setWiFiNewDX (WiFiClient &client, char line[])
 {
     return (setWiFiNewDEDX_helper (client, true, line));
+}
+
+/* set a map view color, names must match those displayed in Setup after changing all '_' to ' '
+ */
+static bool setWiFiMapColor (WiFiClient &client, char line[])
+{
+    // easier not to use WebArgs in this case
+    char color[30];
+    int r, g, b;
+    if (sscanf (line, "%29[^=]=%d,%d,%d", color, &r, &g, &b) != 4 || !rgbOk (r, g, b)) {
+        strcpy (line, garbcmd);
+        return (false);
+    }
+
+    // now try to install
+    if (!setMapColor (color, RGB565(r,g,b))) {
+        strcpy (line, "bad name");
+        return (false);
+    }
+
+    // it worked, so restart map
+    initEarthMap();
+
+    #if defined(_SUPPORT_PSKREPORTER)
+        // update psk pane in case a band color changed; it knows to ignore if not up
+        drawPSKPane();    
+    #endif
+
+    // ack
+    startPlainText (client);
+    client.print("ok\n");
+
+    // good
+    return (true);
+}
+
+/* set a new mercator center longitude, even if not currently showing mercator
+ */
+static bool setWiFiMerCenter (WiFiClient &client, char line[])
+{
+    // crack args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "lng";
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // get candidate longitude
+    float new_lng;
+    if (!lngSpecIsValid (wa.value[0], new_lng)) {
+        strcpy (line, "bad longitude");
+        return (false);
+    }
+
+    // set and restart map if showing mercator
+    setCenterLng (new_lng);
+    if (map_proj == MAPP_MERCATOR)
+        initEarthMap();
+
+    // ack
+    startPlainText (client);
+    client.print("ok\n");
+
+    // good
+    return (true);
 }
 
 
@@ -2104,14 +2185,18 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
     }
 
     // check projection
-    int my_azm = -1;
+    int my_proj = -1;
     if (P) {
-        if (!strcmp (P, _FX("Azimuthal")))
-            my_azm = 1;
-        else if (!strcmp (P, _FX("Mercator")))
-            my_azm = 0;
-        else {
-            strcpy (line, _FX("Projection: Azimuthal, Mercator"));
+        for (int i = 0; i < MAPP_N; i++) {
+            if (strcmp (P, map_projnames[i]) == 0) {
+                my_proj = i;
+                break;
+            }
+        }
+        if (my_proj < 0) {
+            size_t ll = sprintf (line, "Projection: %s", map_projnames[0]);
+            for (int i = 1; i < MAPP_N; i++)
+                ll += sprintf (line+ll, ", %s", map_projnames[i]);
             return (false);
         }
     }
@@ -2152,12 +2237,12 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
     }
     if (G && my_llg != mapgrid_choice) {
         mapgrid_choice = my_llg;
-        NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
+        NVWriteUInt8 (NV_GRIDSTYLE, mapgrid_choice);
         full_redraw = true;
     }
-    if (P && my_azm != azm_on) {
-        azm_on = my_azm;
-        NVWriteUInt8 (NV_AZIMUTHAL_ON, azm_on);
+    if (P && my_proj != map_proj) {
+        map_proj = my_proj;
+        NVWriteUInt8 (NV_MAPPROJ, map_proj);
         full_redraw = true;
     }
     if (N && my_night != night_on) {
@@ -2811,7 +2896,7 @@ static bool doWiFiReboot (WiFiClient &client, char *unused)
     wdDelay(1000);
 
     Serial.println (F("restarting..."));
-    reboot();
+    doReboot();
 
     // never returns but compiler doesn't know that
     return (true);
@@ -2983,11 +3068,11 @@ static LiveConnection *startLiveConnection (const String &IP)
     // if still none available, grow list
     if (!lp) {
         clives = (LiveConnection *) realloc (clives, (n_clives+1)*sizeof(LiveConnection));
-        if (clives) {
-            lp = &clives[n_clives++];
-            if (!initLiveConnection(lp,IP))
-                return (NULL);
-        }
+        if (!clives)
+            fatalError ("live web connection: %d", n_clives);
+        lp = &clives[n_clives++];
+        if (!initLiveConnection(lp,IP))
+            return (NULL);
         if (lp)
             printf ("LIVE: grow clives to %d for %s\n", n_clives, lp->IP);
     }
@@ -3125,6 +3210,8 @@ static bool getWiFiLiveUpdate (WiFiClient &client, char *errmsg)
 
     // collect the current screen image
     uint8_t *img_now = (uint8_t *) malloc (LIVE_NBYTES);
+    if (!img_now)
+        fatalError ("Can not malloc(%d) for web image", LIVE_NBYTES);
     if (live_verbose > 1)
         printf ("LIVE: reading pixels for %s update\n", lp->IP);
     readLiveImageNow (img_now);
@@ -3374,10 +3461,7 @@ static bool doWiFiExit (WiFiClient &client, char *unused)
     FWIFIPRLN (client, F("exiting"));
 
     Serial.print (F("Exiting\n"));
-    setFullBrightness();
-    eraseScreen();
-    wdDelay(500);
-    exit(0);
+    doExit();
 
     // lint
     return (true);
@@ -3424,6 +3508,8 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
+    { "set_mercenter?",     setWiFiMerCenter,      "lng=X" },
+    { "set_mapcolor?",      setWiFiMapColor,       "setup_name=R,G,B" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
     { "set_newde?",         setWiFiNewDE,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
     { "set_newdx?",         setWiFiNewDX,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
@@ -3486,7 +3572,8 @@ static bool roCommand (const char *cmd)
 static bool logCommandOk (const char *line)
 {
     return (!strstr (line, _FX("/get_live.bin"))
-                && !strstr (line, _FX("/set_mouse")));
+                && !strstr (line, _FX("/set_mouse"))
+                && !strstr (line, _FX("/set_touch")));
 }
 
 /* run the given web server command.
@@ -3537,6 +3624,7 @@ static bool runWebserverCommand (WiFiClient &client, bool ro, char *command)
 
 /* service remote connection.
  * if ro, only accept get commands and set_touch
+ * N.B. caller is expected to call client.stop()
  */
 static void serveRemote(WiFiClient &client, bool ro)
 {
@@ -3546,13 +3634,14 @@ static void serveRemote(WiFiClient &client, bool ro)
     // first line must be the GET except set_rss which can be POST
     if (!getTCPLine (client, line, line_mem.getSize(), NULL)) {
         sendHTTPError (client, _FX("empty web query"));
-        goto out;
+        return;
     }
     if (strncmp (line, _FX("GET /"), 5) && strncmp (line, _FX("POST /set_rss?"), 14)) {
         Serial.println (line);
         sendHTTPError (client, _FX("Method must be GET (or POST with set_rss)"));
-        goto out;
+        return;
     }
+    // Serial.printf ("web: %s\n", line);
 
     // discard remainder of header
     (void) httpSkipHeader (client);
@@ -3567,7 +3656,7 @@ static void serveRemote(WiFiClient &client, bool ro)
 
     // run command
     if (runWebserverCommand (client, ro, strchr (line,'/')+1))
-        goto out;
+        return;
 
     // if get here, command was not found so list help
     startPlainText(client);
@@ -3607,10 +3696,6 @@ static void serveRemote(WiFiClient &client, bool ro)
         }
     }
 
-  out:
-
-    client.stop();
-    // printFreeHeap (F("serveRemote"));
 }
 
 /* check if someone is trying to tell/ask us something
@@ -3619,8 +3704,10 @@ void checkWebServer(bool ro)
 {
     if (remoteServer) {
         WiFiClient client = remoteServer->available();
-        if (client)
+        if (client) {
             serveRemote(client, ro);
+            client.stop();
+        }
     }
 }
 
@@ -3696,25 +3783,26 @@ void runNextDemoCommand()
         8,      // DEMO_PANE2
         8,      // DEMO_PANE3
         4,      // DEMO_RSS
-        11,     // DEMO_NEWDX
+        9,      // DEMO_NEWDX
 
                 // 5
-        2,      // DEMO_MAPPROJ
-        2,      // DEMO_MAPNIGHT
-        2,      // DEMO_MAPGRID
+        3,      // DEMO_MAPPROJ
+        3,      // DEMO_MAPNIGHT
+        3,      // DEMO_MAPGRID
         1,      // DEMO_MAPSTYLE
-        8,      // DEMO_NCDXF
+        9,      // DEMO_NCDXF
                 
                 // 10
-        1,      // DEMO_VOACAP
-        9,      // DEMO_CALLFG
-        9,      // DEMO_CALLBG
-        14,     // DEMO_DEFMT
+        2,      // DEMO_VOACAP
+        5,      // DEMO_CALLFG
+        4,      // DEMO_CALLBG
+        12,     // DEMO_DEFMT
         4,      // DEMO_ONAIR
 
                 // 15
         5,      // DEMO_SAT
-        4       // DEMO_EME
+        5,      // DEMO_EME
+        7       // DEMO_AUXTIME
     };
 
     // record previous choice to avoid repeats
@@ -3842,20 +3930,20 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         break;
 
     case DEMO_MAPPROJ:
-        azm_on = !azm_on;
-        NVWriteUInt8 (NV_AZIMUTHAL_ON, azm_on);
+        map_proj = (map_proj + 1) % MAPP_N;
+        NVWriteUInt8 (NV_MAPPROJ, map_proj);
         initEarthMap();
-        if (azm_on)
+        if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
-        demoMsg (ok, choice, msg, _FX("Proj %s"), azm_on ? "Azm" : "Mer");
+        demoMsg (ok, choice, msg, _FX("Proj %s"), map_projnames[map_proj]);
         break;
 
     case DEMO_MAPNIGHT:
         night_on = !night_on;
         NVWriteUInt8 (NV_NIGHT_ON, night_on);
         initEarthMap();
-        if (azm_on)
+        if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
         demoMsg (ok, choice, msg, _FX("Night %s"), night_on ? "On" : "Off");
@@ -3863,9 +3951,9 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
 
     case DEMO_MAPGRID:
         mapgrid_choice = (mapgrid_choice + 1) % MAPGRID_N;
-        NVWriteUInt8 (NV_LLGRID, mapgrid_choice);
+        NVWriteUInt8 (NV_GRIDSTYLE, mapgrid_choice);
         initEarthMap();
-        if (azm_on)
+        if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
         demoMsg (ok, choice, msg, "Grid %s", grid_styles[mapgrid_choice]);
@@ -3883,7 +3971,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         // TODO: brightness, on/off times?
         brb_mode = brb_mode == BRB_SHOW_SWSTATS ? BRB_SHOW_BEACONS : BRB_SHOW_SWSTATS;
         drawNCDXFBox();
-        updateBeacons(true, true, true);
+        updateBeacons(true);
         ok = true;
         demoMsg (ok, choice, msg, _FX("NCDXF %s"), brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
         break;
@@ -4003,6 +4091,13 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             slow = true;                // allow for time spent in drawMoonElPlot
         }
         demoMsg (ok, choice, msg, "EME");
+        break;
+
+    case DEMO_AUXTIME:
+        auxtime = (AuxTimeFormat)random(AUXT_N);
+        updateClocks(true);
+        ok = true;
+        demoMsg (ok, choice, msg, "Aux time %s", auxtime_names[(int)auxtime]);
         break;
 
     case DEMO_N:

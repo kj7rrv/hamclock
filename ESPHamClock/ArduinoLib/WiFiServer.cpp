@@ -59,10 +59,17 @@ bool WiFiServer::begin(char ynot[])
         serv_socket.sin_addr.s_addr = htonl (INADDR_ANY);
         serv_socket.sin_port = htons ((unsigned short)port);
         if (::setsockopt(sfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) < 0) {
-            sprintf (ynot, "setsockopt: %s", strerror(errno));
+            sprintf (ynot, "setsockopt(SO_REUSEADDR): %s", strerror(errno));
 	    close (sfd);
 	    return (false);
 	}
+    #ifdef SO_REUSEPORT
+        if (::setsockopt(sfd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) < 0) {
+            sprintf (ynot, "setsockopt(SO_REUSEPORT): %s", strerror(errno));
+	    close (sfd);
+	    return (false);
+	}
+    #endif
         if (::bind(sfd,(struct sockaddr*)&serv_socket,sizeof(serv_socket)) < 0) {
             sprintf (ynot, "bind: %s", strerror(errno));
 	    close (sfd);
@@ -95,7 +102,7 @@ bool WiFiServer::begin(char ynot[])
 
         /* ok */
         if (_trace_server)
-            printf ("WiFiSvr: new server socket %d\n", sfd);
+            printf ("WiFiSvr: new server fd %d\n", sfd);
         socket = sfd;
         return (true);
 }
@@ -113,7 +120,7 @@ WiFiClient WiFiServer::available()
                 printf ("WiFiSvr: new server client fd %d\n", cli_fd);
         }
 
-	// return as a client
+	// return as a client, -1 will just mean no connection was available
 	WiFiClient result(cli_fd);
         return (result);
 }
@@ -122,7 +129,7 @@ void WiFiServer::stop()
 {
         if (socket >= 0) {
             if (_trace_server)
-                printf ("WiFiSvr: closing socket %d\n", socket);
+                printf ("WiFiSvr: closing fd %d\n", socket);
             close (socket);
             socket = -1;
         }

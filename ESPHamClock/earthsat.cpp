@@ -10,23 +10,24 @@
 
 bool dx_info_for_sat;                   // global to indicate whether dx_info_b is for DX info or sat info
 
+// path drawing
 #if defined(_IS_ESP8266)
     // this requires dense collection of individual dots that are plotted as the map is drawn
     #define MAX_PATH    2000            // max number of points in orbit path
     #define FOOT_ALT0   1000            // n dots for 0 deg altitude locus
     #define FOOT_ALT30  300             // n dots for 30 deg altitude locus
     #define FOOT_ALT60  100             // n dots for 60 deg altitude locus
-    #define N_FOOT      3               // number of footprint segments
 #else
-    // connect the dots with lines drawn all at once after the map
+    // much sparser because here draw lines all at once after the map
     #define MAX_PATH    250             // max number of points in orbit path
-    #define FOOT_ALT0   125             // n dots for 0 deg altitude locus
-    #define FOOT_ALT30  40              // n dots for 30 deg altitude locus
-    #define FOOT_ALT60  15              // n dots for 60 deg altitude locus
-    #define N_FOOT      3               // number of footprint segments
+    #define FOOT_ALT0   100             // n dots for 0 deg altitude locus
+    #define FOOT_ALT30  35              // n dots for 30 deg altitude locus
+    #define FOOT_ALT60  12              // n dots for 60 deg altitude locus
 #endif
+#define N_FOOT      3                   // number of footprint altitude loci
 
 
+// config
 #define ALARM_DT        (1.0F/1440.0F)  // flash this many days before an event
 #define RISING_RATE     1               // flash at this rate when sat about to rise
 #define SETTING_RATE    10              // flash at this rate when sat about to set
@@ -61,6 +62,7 @@ typedef struct {
 } SatRiseSet;
 
 
+// state
 static const char sat_get_all[] PROGMEM = "/esats.pl?getall=";     // command to get all TLE
 static const char sat_one_page[] = "/esats.pl?tlename=%s"; // command to get one TLE
 static Satellite *sat;                  // satellite definition, if any
@@ -224,12 +226,10 @@ static void updateFootPrint (float satlat, float satlng)
     for (uint8_t alt_i = 0; alt_i < N_FOOT; alt_i++) {
 
         // start with max n points
-        sat_foot[alt_i] = (SCoord *) realloc (sat_foot[alt_i], max_foot[alt_i]*sizeof(SCoord));
-        SCoord *foot_path = sat_foot[alt_i];
-        if (!foot_path) {
-            Serial.println (F("Failed to malloc sat_foot"));
-            while (1);                  // timeout
-        }
+        int n_malloc = max_foot[alt_i]*sizeof(SCoord);
+        SCoord *foot_path = sat_foot[alt_i] = (SCoord *) realloc (sat_foot[alt_i], n_malloc);
+        if (!foot_path && n_malloc > 0)
+            fatalError (_FX("sat_foot: %d"), n_malloc);
 
         // satellite viewing altitude
         float valt = deg2rad(foot_alts[alt_i]);
@@ -589,11 +589,21 @@ static void setSatMapNameLoc()
     map_name_b.w = bw;
     map_name_b.h = bh;
 
-    if (azm_on) {
+    switch ((MapProjection)map_proj) {
+
+    case MAPP_AZIM1:
+        // easy: just print in upper right
+        map_name_b.x = map_b.x + map_b.w - map_name_b.w - 1;
+        map_name_b.y = map_b.y + 10;
+        break;
+
+    case MAPP_AZIMUTHAL:
         // easy: just print on top between hemispheres
         map_name_b.x = map_b.x + (map_b.w - map_name_b.w)/2 ;
         map_name_b.y = map_b.y + 10;
-    } else {
+        break;
+
+    case MAPP_MERCATOR: {
         // locate name away from current sat location and misc symbols
 
         // start in south pacific
@@ -629,6 +639,10 @@ static void setSatMapNameLoc()
         // ok
         map_name_b.x = name_l_s.x;
         map_name_b.y = name_l_s.y;
+        } break;
+
+    default:
+        fatalError (_FX("Bug! setSatMapNameLoc() bad map_proj %d"), map_proj);
 
     }
 }
@@ -1392,19 +1406,21 @@ void drawSatPathAndFoot()
 
     resetWatchdog();
 
+    uint16_t path_color = getMapColor(SATPATH_CSPR);
     for (int i = 1; i < n_path; i++) {
         SCoord &sp0 = sat_path[i-1];
         SCoord &sp1 = sat_path[i];
         if (segmentSpanOk(sp0,sp1,1))
-            tft.drawLine (sp0.x, sp0.y, sp1.x, sp1.y, 2, getSatPathColor());
+            tft.drawLine (sp0.x, sp0.y, sp1.x, sp1.y, 1, path_color);
     }
 
+    uint16_t foot_color = getMapColor(SATFOOT_CSPR);
     for (int alt_i = 0; alt_i < N_FOOT; alt_i++) {
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
             SCoord &sf0 = sat_foot[alt_i][foot_i];
             SCoord &sf1 = sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
             if (segmentSpanOk(sf0,sf1,1))
-                tft.drawLine (sf0.x, sf0.y, sf1.x, sf1.y, 2, getSatFootColor());
+                tft.drawLine (sf0.x, sf0.y, sf1.x, sf1.y, 1, foot_color);
         }
     }
 }
@@ -1422,31 +1438,33 @@ void drawSatPointsOnRow (uint16_t y0)
     // draw fat pixel above so we don't clobber it on next row down
 
     // path
+    uint16_t path_color = getMapColor(SATPATH_CSPR);
     for (uint16_t p = 0; p < n_path; p++) {
         SCoord s = sat_path[p];
         if (y0 == s.y && overMap(s)) {
-            tft.drawPixel (s.x, s.y, getSatPathColor());
+            tft.drawPixel (s.x, s.y, path_color);
             s.y -= 1;
-            if (overMap(s)) tft.drawPixel (s.x, s.y, getSatPathColor());
+            if (overMap(s)) tft.drawPixel (s.x, s.y, path_color);
             s.x += 1;
-            if (overMap(s)) tft.drawPixel (s.x, s.y, getSatPathColor());
+            if (overMap(s)) tft.drawPixel (s.x, s.y, path_color);
             s.y += 1;
-            if (overMap(s)) tft.drawPixel (s.x, s.y, getSatPathColor());
+            if (overMap(s)) tft.drawPixel (s.x, s.y, path_color);
         }
     }
 
     // 3 footprint segments
+    uint16_t foot_color = getMapColor(SATFOOT_CSPR);
     for (uint8_t alt_i = 0; alt_i < N_FOOT; alt_i++) {
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
             SCoord s = sat_foot[alt_i][foot_i];
             if (y0 == s.y && overMap(s)) {
-                tft.drawPixel (s.x, s.y, getSatFootColor());
+                tft.drawPixel (s.x, s.y, foot_color);
                 s.y -= 1;
-                if (overMap(s)) tft.drawPixel (s.x, s.y, getSatFootColor());
+                if (overMap(s)) tft.drawPixel (s.x, s.y, foot_color);
                 s.x += 1;
-                if (overMap(s)) tft.drawPixel (s.x, s.y, getSatFootColor());
+                if (overMap(s)) tft.drawPixel (s.x, s.y, foot_color);
                 s.y += 1;
-                if (overMap(s)) tft.drawPixel (s.x, s.y, getSatFootColor());
+                if (overMap(s)) tft.drawPixel (s.x, s.y, foot_color);
             }
         }
     }
@@ -1470,7 +1488,7 @@ void drawSatNameOnRow(uint16_t y0)
     strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
 
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setTextColor (getSatFootColor());
+    tft.setTextColor (getMapColor(SATFOOT_CSPR));
     tft.setCursor (map_name_b.x, map_name_b.y + map_name_b.h - 1);
     tft.print (user_name);
 }

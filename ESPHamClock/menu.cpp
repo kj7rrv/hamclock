@@ -51,10 +51,10 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
     case MENU_01OFN:    // fallthru
     case MENU_1OFN:
         if (mi.set)
-            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2 + 1, MENU_IS/2, MENU_FGC);
+            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_FGC);
         else {
-            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2 + 1, MENU_IS/2, MENU_BGC);
-            tft.drawCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2 + 1, MENU_IS/2, MENU_FGC);
+            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_BGC);
+            tft.drawCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_FGC);
         }
         if (draw_label) {
             tft.setCursor (box.x + mi.indent + MENU_IS + MENU_IS/2, box.y);
@@ -65,10 +65,10 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
     case MENU_AL1OFN:   // fallthru
     case MENU_TOGGLE:
         if (mi.set)
-            tft.fillRect (box.x + mi.indent, box.y + 1, MENU_IS, MENU_IS, MENU_FGC);
+            tft.fillRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_FGC);
         else {
-            tft.fillRect (box.x + mi.indent, box.y + 1, MENU_IS, MENU_IS, MENU_BGC);
-            tft.drawRect (box.x + mi.indent, box.y + 1, MENU_IS, MENU_IS, MENU_FGC);
+            tft.fillRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_BGC);
+            tft.drawRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_FGC);
         }
         if (draw_label) {
             tft.setCursor (box.x + mi.indent + MENU_IS + MENU_IS/2, box.y);
@@ -328,6 +328,24 @@ bool runMenu (MenuInfo &menu)
 
     // erase in prep for caller to restore covered content
     fillSBox (menu.menu_b, RA8875_BLACK);
+
+    // record settings
+    Serial.printf (_FX("Menu result after %s:\n"), ok ? "Ok" : "Cancel");
+    for (int i = 0; i < menu.n_items; i++) {
+        MenuItem &mi = menu.items[i];
+        switch (mi.type) {
+        case MENU_1OFN:         // fallthru
+        case MENU_01OFN:        // fallthru
+        case MENU_AL1OFN:       // fallthru
+        case MENU_TOGGLE:
+            Serial.printf (_FX("  %-15s g%d s%d\n"), mi.label ? mi.label : "", mi.group, mi.set);
+            break;
+        case MENU_LABEL:        // fallthru
+        case MENU_IGNORE:       // fallthru
+        case MENU_BLANK:
+            break;
+        }
+    }
 
     return (ok);
 }

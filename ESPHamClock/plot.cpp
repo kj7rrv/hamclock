@@ -4,6 +4,7 @@
 #include "HamClock.h"
 
 #define BORDER_COLOR    GRAY
+#define GRID_COLOR      RGB565(35,35,35)
 #define TICKLEN         2                       // length of plot tickmarks, pixels
 #define TGAP            10                      // top gap for title
 #define BGAP            15                      // bottom gap for x labels
@@ -133,14 +134,10 @@ uint16_t color, float y_min, float y_max, char *label_str)
             // mark exponents and customary X ray levels, extend levels across in darker color
             uint16_t tx = box.x+2*FONTW+TICKLEN+5;
             uint16_t step_h = (box.h-BGAP-TGAP)/nyt;
-            uint8_t h, s, v, r, g, b;
-            rgbtohsv (&h, &s, &v, RGB565_R(color), RGB565_G(color), RGB565_B(color)); 
-            hsvtorgb (&r, &g, &b, h, s, v/5);
-            uint16_t bk_col = RGB565(r,g,b);
             for (int i = 0; i < nyt; i++) {
                 uint16_t ty = (uint16_t)(box.y + TGAP + (box.h-BGAP-TGAP)*(1 - (yticks[i]-miny)/dy) + 0.5F);
                 tft.drawLine (tx-TICKLEN, ty, tx, ty, color);           // main tick
-                tft.drawLine (tx, ty, box.x+box.w-1, ty, bk_col);       // level line across
+                tft.drawLine (tx, ty, box.x+box.w-1, ty, GRID_COLOR);   // level line across
                 tft.setCursor (tx-FONTW-1, ty-step_h+(step_h-FONTH)/2-1);
                 switch ((int)yticks[i]) {
                 case -9: tft.setCursor (tx-TICKLEN-2*FONTW-1, ty-FONTH/2); tft.print(-9); break;
@@ -158,6 +155,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
             for (int i = 0; i < nyt; i++) {
                 uint16_t ty = (uint16_t)(box.y + TGAP + (box.h-BGAP-TGAP)*(1 - (yticks[i]-miny)/dy) + 0.5F);
                 tft.drawLine (tx, ty, tx+TICKLEN, ty, color);
+                tft.drawLine (box.x+LGAP, ty, box.x+box.w-1, ty, GRID_COLOR);
                 // label first, last or whole number change but never two adjacent or just before last
                 if (i == 0 || i == nyt-1 || (!prev_tick && (int)yticks[i-1] != (int)yticks[i] && i != nyt-2)){
                     sprintf (buf, "%.0f", yticks[i]);
@@ -184,6 +182,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
         for (int i = 0; i < nxt; i++) {
             uint16_t tx = (uint16_t)(box.x+LGAP + (box.w-LGAP-1)*(xticks[i]-minx)/dx + 0.5F);
             tft.drawLine (tx, box.y+box.h-BGAP, tx, box.y+box.h-BGAP+TICKLEN, color);
+            tft.drawLine (tx, box.y+box.h-BGAP, tx, box.y+TGAP, GRID_COLOR);
         }
 
         // always label 0 if within larger range
@@ -424,7 +423,7 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
     #define PTOP_Y (box.y + TOP_B + PGAP)               // plot top y
     #define PBOT_Y (box.y+box.h-PBOT_B)                 // plot bottom y
     #define PLEFT_X (box.x + PLEFT_B)                   // plot left x
-    #define PRIGHT_X (box.x+box.w-PRIGHT_B)             // plot right x
+    #define PRIGHT_X (box.x+box.w-PRIGHT_B-1)           // plot right x
     #define PLOT_W (PRIGHT_X - PLEFT_X)                 // plot width
     #define PLOT_H (PBOT_Y - PTOP_Y)                    // plot height
     #define PCOL_W (PLOT_W/PLOT_COLS-1)                 // plot column width
@@ -493,12 +492,12 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
         uint16_t x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
         if (hr >= 10) {
             // close packing centered
-            tft.setCursor (x-3, timeline_y);
+            tft.setCursor (x-2, timeline_y);
             tft.print (hr/10);
-            tft.setCursor (x+1, timeline_y);
+            tft.setCursor (x+2, timeline_y);
             tft.print (hr%10);
         } else {
-            tft.setCursor (x-1, timeline_y);
+            tft.setCursor (x, timeline_y);
             tft.print (hr);
         }
     }
@@ -534,17 +533,26 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
             // rel:    0     10         33         66          100
             // color: black   |   red    |  yellow  |   green
             // hue:      x         0          43          85
-            uint8_t h, s = 250, v, r, g, b;
+            uint8_t h, s = 250, v;
             v = rel < 10 ? 0 : 250;
             h = rel < 33 ? 0 : (rel < 66 ? 43 : 85);
-            hsvtorgb (&r, &g, &b, h, s, v);
-            uint16_t color = RGB565 (r, g, b);
+            uint16_t color = HSV565 (h, s, v);
 
             // draw color box
             int p_row = m_col;
             uint16_t p_y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
             tft.fillRect (p_x, p_y, PCOL_W, PROW_H, color);
         }
+    }
+
+    // grid lines
+    for (int p_col = 0; p_col <= PLOT_COLS; p_col++) {
+        uint16_t x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
+        tft.drawLine (x, PBOT_Y, x, PTOP_Y, GRID_COLOR);
+    }
+    for (int p_row = 0; p_row <= PLOT_ROWS; p_row++) {
+        uint16_t y = PTOP_Y + PLOT_H*p_row/PLOT_ROWS;
+        tft.drawLine (PLEFT_X, y, PRIGHT_X, y, GRID_COLOR);
     }
 
     printFreeHeap (F("plotBandConditions"));

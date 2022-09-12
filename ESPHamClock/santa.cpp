@@ -61,9 +61,10 @@ static const uint8_t santa[SANTA_W*SANTA_H] PROGMEM = {
 };
 
 #define SANTA_WPIX      (SANTA_W*8)     // width in pixels
+#define SANTA_HPIX      (SANTA_H)       // height in pixels
 
 // boundary box
-SBox santa_b = {0, 0, SANTA_WPIX, SANTA_H};
+SBox santa_b = {0, 0, SANTA_WPIX, SANTA_HPIX};
 
 /* draw santa on christmas eve, else move him off the map
  */
@@ -80,40 +81,55 @@ void drawSanta()
 
         int hr = hour(t);
         int mn = minute(t);
-        uint16_t santa_x, santa_y;
+        uint16_t santa_x = 0, santa_y = 0;
 
         // place so it moves over the globe througout the day.
         // left-right each hour, top-bottom throughout the day
-        if (azm_on) {
 
-            // find corner so santa is totally within hemisphere circle
+        switch ((MapProjection)map_proj) {
+
+        case MAPP_AZIM1:        // fallthru
+        case MAPP_AZIMUTHAL: {
+
+            // find corner so santa is totally within its hemisphere circle
 
             uint16_t map_y_cntr = map_b.y + map_b.h/2;
             uint16_t hemi_r = map_b.w/4;
             uint16_t corner_dy = sqrtf(hemi_r*hemi_r - SANTA_WPIX/2*SANTA_WPIX/2);
             uint16_t y_top = map_y_cntr - corner_dy;
-            uint16_t y_bot = map_y_cntr + corner_dy - SANTA_H;
+            uint16_t y_bot = map_y_cntr + corner_dy - SANTA_HPIX;
             santa_y = y_top + hr*(y_bot-y_top)/24;
 
-            uint16_t map_x_cntr = mn > 30 ? map_b.x + 3*hemi_r : map_b.x + hemi_r;
-            uint16_t dy = santa_y > map_y_cntr ? santa_y - map_y_cntr + SANTA_H : map_y_cntr - santa_y;
+            uint16_t map_x_cntr;
+            if (map_proj == MAPP_AZIMUTHAL)
+                map_x_cntr = mn > 30 ? map_b.x + 3*hemi_r : map_b.x + hemi_r;
+            else
+                map_x_cntr = map_b.x + map_b.w/2;
+            uint16_t dy = santa_y > map_y_cntr ? santa_y - map_y_cntr + SANTA_HPIX : map_y_cntr - santa_y;
             uint16_t half_w = sqrtf(hemi_r*hemi_r - dy*dy);
             uint16_t x_left = map_x_cntr - half_w;
             uint16_t x_right = map_x_cntr + half_w - SANTA_WPIX;
             santa_x = x_left + (mn > 30 ? (mn-30)*(x_right-x_left)/30 : mn*(x_right-x_left)/30);
 
-        } else {
+            } break;
+
+        case MAPP_MERCATOR:
 
             // move linearly through map
 
             santa_x = map_b.x + 20 + mn*(map_b.w - 20 - SANTA_WPIX)/60;
-            santa_y = map_b.y + 10 + hr*(map_b.h - SANTA_H)/24;
+            santa_y = map_b.y + 10 + hr*(map_b.h - SANTA_HPIX)/24;
+
+            break;
+
+        default:
+            fatalError (_FX("Bug! drawSanta() bad map_proj %d"), map_proj);
         }
 
         // erase first if moved, unless not shown
         if (santa_b.x != 0 && (santa_b.x != santa_x || santa_b.y != santa_y)) {
             // Serial.printf ("Erasing santa from %d x %d\n", santa_b.x, santa_b.y);
-            for (uint8_t sr = 0; sr < SANTA_H; sr++) {
+            for (uint8_t sr = 0; sr < SANTA_HPIX; sr++) {
                 resetWatchdog();
                 for (uint8_t sc = 0; sc < SANTA_W; sc++) {
                     for (uint8_t bc = 0; bc < 8; bc++) {
@@ -138,7 +154,7 @@ void drawSanta()
 
         // paint
         // Serial.printf ("Painting santa at %d x %d\n", santa_b.x, santa_b.y);
-        for (uint8_t sr = 0; sr < SANTA_H; sr++) {
+        for (uint8_t sr = 0; sr < SANTA_HPIX; sr++) {
             resetWatchdog();
             for (uint8_t sc = 0; sc < SANTA_W; sc++) {
                 uint8_t mask = pgm_read_byte(&santa[sr*SANTA_W+sc]);

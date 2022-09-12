@@ -7,7 +7,7 @@
 
 #if defined (_IS_UNIX)
 
-char live_html[] =  R"(
+char live_html[] =  R"_raw_html_(
 <!DOCTYPE html>
 <html>
 
@@ -16,23 +16,32 @@ char live_html[] =  R"(
     <title>
         HamClock Live!
     </title>
+    
+    <style>
+
+        #hamclock-cvs {
+            touch-action: pinch-zoom; /* allow both 1-finger moves and multi-touch p-z */
+        }
+
+    </style>
 
     <script>
 
         // config
-        const UPDATE_MS = 1000;         // update interval
+        const UPDATE_MS = 200;          // update interval
+        const MOUSE_HOLD_MS = 3000;     // mouse down duration to implement hold action
         const APP_W = 800;              // app coord system width
         const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
 
         // state
-        var drawing_verbose = 0;        // > 0 for more info about drwaing
-        var event_verbose = 0;          // > 0 for more info about keyboard or mouse activity
+        var drawing_verbose = 0;        // > 0 for more info about drawing
+        var web_verbose = 0;            // > 0 for more info about web commands
+        var event_verbose = 0;          // > 0 for more info about keyboard or pointer activity
         var prev_regnhdr;               // for erasing if drawing_verbose > 1
-        var scale = 0;                  // size factor -- set for real when get first whole image
-        var upd_tid;                    // update pacing timer id
+        var app_scale = 0;              // size factor -- set for real when get first whole image
         var msec_corr;                  // msecs we should add to send to arrive at server at best time
-        var update_sent = 0;            // Date.now when last Update request was sent
-        var update_pending = false;     // set while waiting for update
+        var pointerdown_ms = 0;         // Date.now when pointerdown event
+        var pointermove_ms = 0;         // Date.now when pointermove event
         var cvs, ctx;                   // handy
 
 
@@ -50,21 +59,19 @@ char live_html[] =  R"(
             // also use the image info to set overall size and scaling.
             function getFullImage() {
 
-                update_pending = true;
-                update_sent = Date.now();
+                let update_sent = Date.now();
                 sendGetRequest ('get_live.png', 'blob')
                 .then (function (response) {
                     drawFullImage (response);
-                    runNextSecond (getUpdate, 1);
+                    runSoon (getUpdate, 1);
                 })
                 .catch (function (err) {
                     console.log(err);
                     reloadThisPage();
                 })
                 .finally (function() {
-                    if (drawing_verbose)
+                    if (web_verbose)
                         console.log ("  getFullImage took " + (Date.now() - update_sent) + " ms");
-                    update_pending = false;
                 });
             }
 
@@ -72,41 +79,70 @@ char live_html[] =  R"(
             // request one incremental update then schedule another if repeat else a full update
             function getUpdate (repeat) {
 
-                update_pending = true;
-                update_sent = Date.now();
+                let update_sent = Date.now();
                 sendGetRequest ('get_live.bin', 'arraybuffer')
                 .then (function (response) {
                     drawUpdate (response);
                     if (repeat)
-                        runNextSecond (getUpdate, 1);
+                        runSoon (getUpdate, 1);
                 })
                 .catch (function (err) {
                     console.log(err);
-                    runNextSecond (getFullImage, 0);
+                    runSoon (getFullImage, 0);
                 })
                 .finally (function() {
-                    if (drawing_verbose)
+                    if (web_verbose)
                         console.log ("  getUpdate took " + (Date.now() - update_sent) + " ms");
-                    update_pending = false;
                 });
             }
 
 
-            // init canvas size and configure to stay centered
-            function initCanvas (w,h) {
+            // given inherent hamclock build size, set canvas size and configure to stay centered
+            function initCanvas (hc_w, hc_h) {
+                if (drawing_verbose) {
+                    console.log("document.documentElement.clientWidth = " + document.documentElement.clientWidth);
+                    console.log("window.innerWidth = " + window.innerWidth);
+                    console.log ("hamclock is " +  hc_w + " x " +  hc_h);
+                }
 
-                if (drawing_verbose)
-                    console.log ("canvas is " + w + " x " + h);
-                scale = w/APP_W;
-                cvs.width = w;
-                cvs.height = h;
-                cvs.style.width = w + "px";
-                cvs.style.height = h + "px";
+                // pixels to draw on always match the real clock size
+                cvs.width =  hc_w;
+                cvs.height =  hc_h;
+
+                // get window area dimensions
+                let win_w = document.documentElement.clientWidth || window.innerWidth;
+                let win_h = document.documentElement.clientHeight || window.innerHeight;
+
+                // center if HC is smaller else shrink to fit
+                if (hc_w < win_w && hc_h < win_h) {
+
+                    // hc is smaller -- center in full screen
+                    cvs.style.width = hc_w + "px";
+                    cvs.style.height = hc_h + "px";
+
+                } else {
+
+                    // hc is larger -- shrink to fit preserving aspect
+                    if (win_w*hc_h > win_h*hc_w) {
+                        hc_w = hc_w*win_h/hc_h;
+                        hc_h = win_h;
+                    } else {
+                        hc_h = hc_h*win_w/hc_w;
+                        hc_w = win_w;
+                    }
+                    cvs.style.width = hc_w + "px";
+                    cvs.style.height = hc_h + "px";
+                }
+
+                // center 
                 cvs.style.position = 'absolute';
                 cvs.style.top = "50%";
                 cvs.style.left = "50%";
-                // top right bottom left
-                cvs.style.margin = (-h/2) + "px" + " 0 0 " + (-w/2) + "px";
+                cvs.style.margin = (-hc_h/2) + "px" + " 0 0 " + (-hc_w/2) + "px"; // trbl
+                app_scale = hc_w/APP_W;
+
+                if (drawing_verbose)
+                    console.log ("canvas is " + hc_w + " x " + hc_h + " app_scale " + app_scale);
             }
 
             // display the given full png blob
@@ -188,48 +224,52 @@ char live_html[] =  R"(
                     }).
                     catch(function(err) {
                         console.log("update promise err: ", err);
-                        runNextSecond (getFullImage, 0);
+                        runSoon (getFullImage, 0);
                     });
                 }
 
             }
 
-            // schedule func(arg) for next second
-            function runNextSecond (func, arg) {
+            // schedule func(arg) soon
+            var upd_tid = 0;                            // update pacing timer id
+            function runSoon (func, arg) {
 
                 // insure no nested requests
-                clearTimeout(upd_tid);
-
-                // compute delay sending so message arrives at server just after start of second
-                const msec_wait = (msec_corr - (Date.now() - update_sent) + 10000) % 1000;  // msec 0 .. 999
+                if (upd_tid) {
+                    if (web_verbose)
+                        console.log ("cancel pending timer");
+                    clearTimeout(upd_tid);
+                }
 
                 // register callback
-                upd_tid = setTimeout (func, msec_wait, arg);
-                if (drawing_verbose)
-                    console.log ("  set timer for " + func.name + " in " + msec_wait + " ms to correct " + msec_corr);
+                upd_tid = setTimeout (function(){upd_tid = 0; func(arg);}, UPDATE_MS);
+                if (web_verbose)
+                    console.log ("  set timer for " + func.name + " in " + UPDATE_MS + " ms");
             }
 
-            // given a mouse event return coords with respect to canvas scaled to application.
+            // given any pointer event return coords with respect to canvas scaled to application.
             // returns undefined if scaling factor is not yet known.
             function getAppCoords (event) {
 
-                if (scale) {
+                if (app_scale) {
                     const rect = cvs.getBoundingClientRect();
-                    const x = Math.round((event.clientX - rect.left)/scale);
-                    const y = Math.round((event.clientY - rect.top)/scale);
+                    const x = Math.round((event.clientX - rect.left)/app_scale);
+                    const y = Math.round((event.clientY - rect.top)/app_scale);
                     return ({x, y});
                 }
             }
 
 
-            // send the given user event, then start update if successful for immediate feedback
+            // send the given user event.
             function sendUserEvent (get) {
 
                 if (event_verbose)
                     console.log ('sending ' + get);
                 sendGetRequest (get, 'text')
                 .then (function(response) {
-                    getUpdate(0);
+                    // we used to do an immediate update for immediate feedback but with faster looping
+                    // it just caused a large backlog
+                    // getUpdate(0);
                 })
                 .catch (function (err) {
                     console.log(err);
@@ -237,19 +277,62 @@ char live_html[] =  R"(
             }
 
 
-            // connect onClick to send set_touch to hamclock
-            cvs.addEventListener ('click', function(event) {
+            // record time of pointerdown
+            cvs.addEventListener ('pointerdown', function(event) {
+                pointerdown_ms = Date.now();
+                event.preventDefault();
+                if (event_verbose)
+                    console.log ('pointer down');
+            });
 
-                // extract coords and whether metakey was pressed
-                const m = getAppCoords (event);
-                if (!m) {
-                    console.log("onclick: don't know scale yet");
+            // pointerup: send touch, hold depending on duration since pointerdown
+            cvs.addEventListener ('pointerup', function(event) {
+                event.preventDefault();
+
+                // ignore if pointer moved
+                if (!pointerdown_ms) {
+                    if (event_verbose)
+                        console.log ('cancel pointerup because pointer moved');
                     return;
                 }
-                let hold = event.metaKey;
+
+                // extract application coords
+                const m = getAppCoords (event);
+
+                // decide whether hold
+                let pointer_dt = pointerdown_ms ? Date.now() - pointerdown_ms : 0;
+                let hold = pointer_dt >= MOUSE_HOLD_MS;
+                pointerdown_ms = 0;
 
                 // compose and send
                 let get = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
+                sendUserEvent (get);
+            });
+
+
+            // connect pointermove to send set_mouse to hamclock
+            cvs.addEventListener ('pointermove', function(event) {
+                event.preventDefault();
+
+                // not crazy fast
+                let now = Date.now();
+                let move_dt = now - pointermove_ms;
+                if (move_dt < UPDATE_MS)
+                    return;
+                pointermove_ms = now;
+
+                // extract application coords
+                const m = getAppCoords (event);
+                if (!m) {
+                    console.log("pointermove: don't know app_scale yet");
+                    return;
+                }
+
+                // cancel pointer down
+                pointerdown_ms = 0;
+
+                // compose and send
+                let get = 'set_mouse?x=' + m.x + '&y=' + m.y;
                 sendUserEvent (get);
             });
 
@@ -290,6 +373,14 @@ char live_html[] =  R"(
                 sendUserEvent (get);
             });
 
+            // respond to mobile device being rotated
+            // window.addEventListener("orientationchange", function(event) {
+            window.addEventListener("resize", function(event) {
+                if (event_verbose)
+                    console.log ("resize event");
+                // get full image to establish new screen size
+                runSoon (getFullImage, 0);
+            });
 
             // reload this page as last resort, probably because server process restarted
             function reloadThisPage() {
@@ -310,7 +401,7 @@ char live_html[] =  R"(
             function sendGetRequest (url, type) {
 
                 return new Promise(function (resolve, reject) {
-                    if (drawing_verbose)
+                    if (web_verbose)
                         console.log ('sendGetRequest ' + url);
                     let xhr = new XMLHttpRequest();
                     xhr.open('GET', url);
@@ -347,11 +438,12 @@ char live_html[] =  R"(
 
 <body onload='onLoad()' bgcolor='black' >
 
-    <!-- page is a single centered canvas, size will be set to match hamclock build size -->
+    <!-- page is a single canvas, size will be set based on hamclock build size -->
     <canvas id='hamclock-cvs'></canvas>
 
 </body>
 </html> 
-)";
+
+)_raw_html_";
 
 #endif
