@@ -123,7 +123,7 @@ void drawSanta()
             break;
 
         default:
-            fatalError (_FX("Bug! drawSanta() bad map_proj %d"), map_proj);
+            fatalError (_FX("drawSanta() bad map_proj %d"), map_proj);
         }
 
         // erase first if moved, unless not shown

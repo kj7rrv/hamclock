@@ -642,7 +642,7 @@ static void setSatMapNameLoc()
         } break;
 
     default:
-        fatalError (_FX("Bug! setSatMapNameLoc() bad map_proj %d"), map_proj);
+        fatalError (_FX("setSatMapNameLoc() bad map_proj %d"), map_proj);
 
     }
 }
@@ -1370,8 +1370,14 @@ void updateSatPath()
     uint16_t max_path = isSatMoon() ? 1 : MAX_PATH;         // N.B. only set the current location if Moon
     for (uint16_t p = 0; p < max_path; p++) {
 
-        // compute next point
-        ll2s (satlat, satlng, sat_path[n_path], 2);
+        // 1/3rd are off screen to make a dashed line effect
+        // N.B. hack knows MAX_PATH is 250 for UNIX and blanks 2/3 on ESP and 1/2 on UNIX
+        if (getSatPathDashed() && (p % (MAX_PATH*3/250)) < (MAX_PATH*2/250-1)) {
+            sat_path[n_path] = {1000, 1000};
+        } else {
+            // compute next point along path
+            ll2s (satlat, satlng, sat_path[n_path], 2);
+        }
 
         // skip duplicate points
         if (n_path == 0 || memcmp (&sat_path[n_path], &sat_path[n_path-1], sizeof(SCoord)))
@@ -1991,7 +1997,7 @@ void drawDXSatMenu (const SCoord &s)
             initScreen();
 
         } else {
-            fatalError (_FX("Bug! no dx sat menu"));
+            fatalError (_FX("no dx sat menu"));
         }
 
     } else {

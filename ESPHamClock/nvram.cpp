@@ -140,6 +140,8 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_10M_COLOR
     2,                          // NV_6M_COLOR
     2,                          // NV_2M_COLOR
+    4,                          // NV_DASHED
+    1,                          // NV_BEAR_MAG
 
 };
 

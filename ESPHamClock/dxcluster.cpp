@@ -426,7 +426,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
         } else {
 
-            fatalError (_FX("Bug! no LL from cluster cl_type= %d\n"), cl_type);
+            fatalError (_FX("no LL from cluster cl_type= %d\n"), cl_type);
             return (false);
         }
 
@@ -518,10 +518,11 @@ static void drawSpotOnMap (DXClusterSpot &spot)
                 if (prev_s.x > 0) {
                     if (segmentSpanOk(prev_s, s, 0)) {
                         tft.drawLine (prev_s.x, prev_s.y, s.x, s.y, 1, color);
-                        // record first and last
-                        if (de_s.x == 0)
+                        // record ends only if really the first and last
+                        if (i == 1)
                             de_s = prev_s;
-                        dx_s = s;
+                        if (i == n_step)
+                            dx_s = s;
                     } else
                        s.x = 0;
                 }

@@ -109,6 +109,8 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define CSEL_DH         6                       // demo strip height
 #define CSEL_TBCOL      RA8875_RED              // tick box active color
 #define CSEL_TBSZ       20                      // tick box size
+#define CSEL_TBDY       4                       // tick box y offset from R2Y
+#define CSEL_NDASH      10                      // n segments in dashed color sample
 
 // OnOff layout constants
 #define OO_Y0           150                     // top y
@@ -304,10 +306,11 @@ typedef enum {
     DATEFMT_MDY_BPR,
     DATEFMT_DMYYMD_BPR,
     UNITS_BPR,
+    BEARING_BPR,
+    FLIP_BPR,
     LOGUSAGE_BPR,
     DEMO_BPR,
     X11_FULLSCRN_BPR,
-    FLIP_BPR,
 
     N_BPR
 } BPIds;
@@ -361,17 +364,15 @@ static BoolPrompt bool_pr[N_BPR] = {
     {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL},
     {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
                                                         // entangled: MDY: F X   DMY: T F  YMD:  T T
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H},  false, "Units?", "Imperial", "Metric"},
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H},  false, "Bearings?", "True N", "Magnetic N"},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
 
 
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Units?", "Imperial", "Metric"},
-
-
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
+    {4, {400,  R2Y(0), 140, PR_H}, {540, R2Y(0),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
+    {4, {400,  R2Y(1), 140, PR_H}, {540, R2Y(1),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
+    {4, {400,  R2Y(2), 140, PR_H}, {540, R2Y(2),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
                                                                 // state box wide enough for "Won't fit"
-
-    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
 
     // "page 6" -- index 5
 
@@ -427,80 +428,86 @@ typedef struct {
     uint8_t r, g, b;                            // current color in full precision color
 } ColSelPrompt;
 
+/* SATPATH_CSPR dashed box
+ */
+static SBox csel_satpath_b = {CSEL_COL1X+CSEL_DDX+CSEL_DW+15, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ};
+static bool csel_satpath_state = true;
 
 /* color selector prompts.
  *   N.B. must match CSIds order
- *   N.B. init assumes first is set
  */
-static ColSelPrompt colsel_pr[N_CSPR] = {
+static ColSelPrompt csel_pr[N_CSPR] = {
     {{CSEL_COL1X+CSEL_PDX, R2Y(0), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(0)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(0)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            true, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
+            true, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(1), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(1)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(1)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path"},
+            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(2), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(2)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(2)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, DE_COLOR, NV_SHORTPATHCOLOR, "Short prop path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(3), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(3)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(3)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(3)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(229,191,131), NV_LONGPATHCOLOR, "Long prop path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(4), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(4)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(4)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(4)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid"},
-#if defined(_SUPPORT_PSKREPORTER)
+#if !defined(_SUPPORT_PSKESP)
+
+    // ESP does not draw paths so doesn't need band colors
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(6)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, GRAY, NV_160M_COLOR, "160 m path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(7)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(200,20,140), NV_80M_COLOR, "80 m path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(8)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(140,200,20), NV_60M_COLOR, "60 m path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(9)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(140,20,200), NV_40M_COLOR, "40 m path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(10)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(20,200,255), NV_30M_COLOR, "30 m path"},
     {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(11)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL1X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RA8875_RED, NV_20M_COLOR, "20 m path"},   // match NCDXF
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(6)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RA8875_GREEN, NV_17M_COLOR, "17 m path"},   // match NCDXF
     {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(7)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(100,100,255), NV_15M_COLOR, "15 m path"},      // match NCDXF
     {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(8)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RA8875_YELLOW, NV_12M_COLOR, "12 m path"},     // match NCDXF
     {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(9)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RA8875_MAGENTA, NV_10M_COLOR, "10 m path"}, // match NCDXF
+            false, RGB565(255,125,0), NV_10M_COLOR, "10 m path"}, // match NCDXF
     {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(10)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RGB565(20,140,200), NV_6M_COLOR, "6 m path"},
     {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
-            {CSEL_COL2X, R2Y(11)+4, CSEL_TBSZ, CSEL_TBSZ},
+            {CSEL_COL2X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
             false, RA8875_WHITE, NV_2M_COLOR, "2 m path"},
 #endif
@@ -577,9 +584,9 @@ static void drawPageButton()
     drawStringInBox (buf, page_b, false, DONE_C);
 }
 
-static void drawDoneButton()
+static void drawDoneButton(bool on)
 {
-    drawStringInBox ("Done", done_b, false, DONE_C);
+    drawStringInBox ("Done", done_b, on, DONE_C);
 }
 
 
@@ -652,6 +659,7 @@ static bool boolIsRelevant (BoolPrompt *bp)
     }
 
     if (bp == &bool_pr[DATEFMT_DMYYMD_BPR]) {
+        // this test works correctly for display purposes, but prevents tabbing into DMYYMD if MDY is false
         if (!bool_pr[DATEFMT_MDY_BPR].state)
             return (false);
     }
@@ -811,9 +819,10 @@ static void nextTabFocus()
 
         { NULL, &bool_pr[DATEFMT_MDY_BPR] },
         { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
-        { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[LOGUSAGE_BPR] },
+        { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[DEMO_BPR] },
+        { NULL, &bool_pr[BEARING_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
 
@@ -1257,12 +1266,35 @@ static void getCSelBoxColor (const SCoord &s, uint8_t &r, uint8_t &g, uint8_t &b
 
 /* draw a color selector demo
  */
-static void drawCSelDemoSwatch (const ColSelPrompt &p)
+static void drawCSelDemoSwatch (const ColSelPrompt *p)
 {
-    uint16_t c = RGB565(p.r, p.g, p.b);
-    fillSBox (p.d_box, c);
+    uint16_t c = RGB565(p->r, p->g, p->b);
+
+    if (p == &csel_pr[SATPATH_CSPR] && csel_satpath_state) {
+        // dashed
+        for (int i = 0; i < CSEL_NDASH; i++) {
+            uint16_t dx = i * p->d_box.w / CSEL_NDASH;
+            tft.fillRect (p->d_box.x + dx, p->d_box.y, p->d_box.w/CSEL_NDASH, p->d_box.h,
+                        (i&1) ? RA8875_BLACK : c);
+        }
+    } else {
+        fillSBox (p->d_box, c);
+    }
 }
 
+/* draw the csel_satpath tick box
+ */
+static void drawCSelSatPathTickBox()
+{
+    uint16_t dash_y = csel_satpath_b.y + csel_satpath_b.h/2;
+    fillSBox (csel_satpath_b, csel_satpath_state ? CSEL_TBCOL : RA8875_BLACK);
+    for (int i = 0; i < CSEL_NDASH; i++) {
+        uint16_t dx = i * csel_satpath_b.w / CSEL_NDASH;
+        tft.drawLine (csel_satpath_b.x + dx, dash_y, csel_satpath_b.x + dx + csel_satpath_b.w / CSEL_NDASH, 
+                        dash_y, (i&1) ? RA8875_BLACK : CSEL_TBCOL);
+    }
+    drawSBox (csel_satpath_b, RA8875_WHITE);
+}
 
 /* draw a color selector prompt tick box, on or off depending on state.
  */
@@ -1339,14 +1371,17 @@ static void drawCSelInitGUI()
     resetWatchdog();
     tft.setTextColor (PR_C);
     for (int i = 0; i < N_CSPR; i++) {
-        ColSelPrompt &p = colsel_pr[i];
+        ColSelPrompt &p = csel_pr[i];
         tft.setCursor (p.p_box.x, p.p_box.y+p.p_box.h-PR_D);
         tft.printf ("%s:", p.p_str);
         drawCSelTickBox (p);
-        drawCSelDemoSwatch (p);
+        drawCSelDemoSwatch (&p);
         if (p.state)
             drawCSelPromptColor (p);
     }
+
+    // satpath
+    drawCSelSatPathTickBox();
 }
 
 /* handle a possible touch event while on the color selection page.
@@ -1359,24 +1394,31 @@ static bool handleCSelTouch (SCoord &s)
     // check for setting a new color for the current selection
     if (inBox (s, csel_ctl_b)) {
         for (int i = 0; i < N_CSPR; i++) {
-            ColSelPrompt &p = colsel_pr[i];
+            ColSelPrompt &p = csel_pr[i];
             if (p.state) {
                 getCSelBoxColor(s, p.r, p.g, p.b);
                 drawCSelPromptColor(p);
-                drawCSelDemoSwatch (p);
+                drawCSelDemoSwatch (&p);
                 break;
             }
         }
         ours = true;
 
+    // else check for changing satpath dashed
+    } else if (inBox (s, csel_satpath_b)) {
+        csel_satpath_state = !csel_satpath_state;
+        drawCSelDemoSwatch (&csel_pr[SATPATH_CSPR]);
+        drawCSelSatPathTickBox();
+        ours = true;
+
     // else check for changing the current selection
     } else {
         for (int i = 0; i < N_CSPR; i++) {
-            ColSelPrompt &pi = colsel_pr[i];
+            ColSelPrompt &pi = csel_pr[i];
             if (inBox (s, pi.t_box) && !pi.state) {
                 // clicked an off box, make it the only one on (ignore clicking an on box)
                 for (int j = 0; j < N_CSPR; j++) {
-                    ColSelPrompt &pj = colsel_pr[j];
+                    ColSelPrompt &pj = csel_pr[j];
                     if (pj.state) {
                         pj.state = false;
                         drawCSelTickBox (pj);
@@ -1625,21 +1667,21 @@ static void changePage (int new_page)
         eraseScreen();
         drawPageButton();
         drawCurrentPageFields();
-        drawDoneButton();
+        drawDoneButton(false);
 
     } else if (new_page == ONOFF_PAGE) {
         // new page is just the on/off table
         eraseScreen();
         drawPageButton();
         drawOnOffControls();
-        drawDoneButton();
+        drawDoneButton(false);
 
     } else if (new_page == COLOR_PAGE) {
         // new page is color, always a fresh start
         eraseScreen();
         drawPageButton();
         drawCSelInitGUI();
-        drawDoneButton();
+        drawDoneButton(false);
         setInitialFocus ();
 
     } else {
@@ -1655,7 +1697,7 @@ static void changePage (int new_page)
             drawPageButton();
             drawCurrentPageFields();
             drawKeyboard();
-            drawDoneButton();
+            drawDoneButton(false);
         }
     }
 }
@@ -2160,7 +2202,7 @@ static void initSetup()
     // init colors
 
     for (int i = 0; i < N_CSPR; i++) {
-        ColSelPrompt &p = colsel_pr[i];
+        ColSelPrompt &p = csel_pr[i];
         uint16_t c;
         if (!NVReadUInt16 (p.nv, &c)) {
             c = p.def_c;
@@ -2170,6 +2212,14 @@ static void initSetup()
         p.g = RGB565_G(c);
         p.b = RGB565_B(c);
     }
+
+    // dashed
+    uint32_t dashed;
+    if (!NVReadUInt32 (NV_DASHED, &dashed)) {
+        dashed = 0;
+        NVWriteUInt32 (NV_DASHED, dashed);
+    }
+    csel_satpath_state = (dashed & (1 << SATPATH_CSPR)) ? true : false;
 
     // X11 flags, engage immediately if defined or sensible thing to do
     uint16_t x11flags;
@@ -2251,6 +2301,13 @@ static void initSetup()
         NVWriteUInt8 (NV_METRIC_ON, met);
     }
     bool_pr[UNITS_BPR].state = (met != 0);
+
+    uint8_t b_mag;
+    if (!NVReadUInt8 (NV_BEAR_MAG, &b_mag)) {
+        b_mag = 0;
+        NVWriteUInt8 (NV_BEAR_MAG, b_mag);
+    }
+    bool_pr[BEARING_BPR].state = (b_mag != 0);
 
     if (!NVReadInt16 (NV_CENTERLNG, &center_lng)) {
         center_lng = 0;
@@ -2549,47 +2606,6 @@ static void runSetup()
             // check for possible secondary implications
 
             if (bp == &bool_pr[DATEFMT_MDY_BPR]) {
-
-                // cycle to the next of three possibilities
-                // MDY: F X   DMY: T F  YMD:  T T
-
-                if (bool_pr[DATEFMT_MDY_BPR].state) {
-                    // DATEFMT_MDY_BPR just toggled so state was F X = MDY, want DMY next
-                    bool_pr[DATEFMT_MDY_BPR].state = true;
-                    bool_pr[DATEFMT_DMYYMD_BPR].state = false;
-                } else {
-                    if (bool_pr[DATEFMT_DMYYMD_BPR].state) {
-                        // DATEFMT_MDY_BPR just toggled so state was T T = YMD, want MDY next
-                        bool_pr[DATEFMT_MDY_BPR].state = false;
-                        bool_pr[DATEFMT_DMYYMD_BPR].state = false;
-                    } else {
-                        // DATEFMT_MDY_BPR just toggled so state was T F = DMY, want YMD next
-                        bool_pr[DATEFMT_MDY_BPR].state = true;
-                        bool_pr[DATEFMT_DMYYMD_BPR].state = true;
-                    }
-                }
-                drawBoolPairState(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
-
-            } else if (bp == &bool_pr[DATEFMT_DMYYMD_BPR]) {
-
-                // cycle to the next of three possibilities
-                // MDY: F X   DMY: T F  YMD:  T T
-
-                if (bool_pr[DATEFMT_MDY_BPR].state) {
-                    if (bool_pr[DATEFMT_DMYYMD_BPR].state) {
-                        // DATEFMT_DMYYMD_BPR just toggled so state was T F = DMY, want YMD next
-                        bool_pr[DATEFMT_MDY_BPR].state = true;
-                        bool_pr[DATEFMT_DMYYMD_BPR].state = true;
-                    } else {
-                        // DATEFMT_DMYYMD_BPR just toggled so state was T T = YMD, want MDY next
-                        bool_pr[DATEFMT_MDY_BPR].state = false;
-                        bool_pr[DATEFMT_DMYYMD_BPR].state = false;
-                    }
-                } else {
-                    // DATEFMT_DMYYMD_BPR just toggled so state was F X = MDY, want DMY next
-                    bool_pr[DATEFMT_MDY_BPR].state = true;
-                    bool_pr[DATEFMT_DMYYMD_BPR].state = false;
-                }
                 drawBoolPairState(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
 
             } else if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
@@ -2834,6 +2850,8 @@ static void runSetup()
 
     } while (!(inBox (s, done_b) || c == '\r' || c == '\n') || !validateStringPrompts());
 
+    drawDoneButton(true);
+
     // all fields are valid
 
 }
@@ -2853,6 +2871,7 @@ static void finishSettingUp()
     NVWriteString(NV_CALLSIGN, callsign);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
+    NVWriteUInt8 (NV_BEAR_MAG, bool_pr[BEARING_BPR].state);
     NVWriteUInt32 (NV_KX3BAUD, bool_pr[KX3ON_BPR].state ? (bool_pr[KX3BAUD_BPR].state ? 38400 : 4800) : 0);
     NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
     NVWriteFloat (NV_PRESCORR, pres_corr[BME_76]);
@@ -2912,10 +2931,13 @@ static void finishSettingUp()
 
     // save colors
     for (int i = 0; i < N_CSPR; i++) {
-        ColSelPrompt &p = colsel_pr[i];
+        ColSelPrompt &p = csel_pr[i];
         uint16_t c = RGB565(p.r, p.g, p.b);
         NVWriteUInt16 (p.nv, c);
     }
+
+    // save which colors are dashed -- N.B. just satpath for now
+    NVWriteUInt32 (NV_DASHED, csel_satpath_state ? (1 << SATPATH_CSPR) : 0);
 
     // set DE tz and grid only if ll was edited and op is not using some other method to set location
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state && ll_edited) {
@@ -3140,6 +3162,13 @@ bool rotateScreen()
 bool useMetricUnits()
 {
     return (bool_pr[UNITS_BPR].state);
+}
+
+/* return whether bearings should be magnetic, else true
+ */
+bool useMagBearing()
+{
+    return (bool_pr[BEARING_BPR].state);
 }
 
 /* return whether to draw dx paths
@@ -3431,7 +3460,7 @@ uint16_t getMapColor (CSIds id)
 {
     uint16_t c;
     if (id >= 0 && id < N_CSPR) {
-        ColSelPrompt &p = colsel_pr[id];
+        ColSelPrompt &p = csel_pr[id];
         c = RGB565(p.r, p.g, p.b);
     } else
         c = RA8875_BLACK;
@@ -3444,7 +3473,7 @@ const char* getMapColorName (CSIds id)
 {
     const char *n;
     if (id >= 0 && id < N_CSPR)
-        n = colsel_pr[id].p_str;
+        n = csel_pr[id].p_str;
     else
         n = "???";
     return (n);
@@ -3462,7 +3491,7 @@ bool setMapColor (const char *name, uint16_t rgb565)
 
     // look for match
     for (int i = 0; i < N_CSPR; i++) {
-        ColSelPrompt &p = colsel_pr[i];
+        ColSelPrompt &p = csel_pr[i];
         if (strcmp (scrub_name, p.p_str) == 0) {
             NVWriteUInt16 (p.nv, rgb565);
             p.r = RGB565_R(rgb565);
@@ -3472,4 +3501,11 @@ bool setMapColor (const char *name, uint16_t rgb565)
         }
     }
     return (false);
+}
+
+/* return whether satpath should be dashed
+ */
+bool getSatPathDashed()
+{
+    return (csel_satpath_state);
 }

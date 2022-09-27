@@ -133,11 +133,14 @@ static void setDisplayBrightness(bool log)
             const char *argv_sso[] = {          // try turning off system dimming
                 "xset", "dpms", "0", "0", "0", NULL
             };
-            const char *argv_dpms[] = {         // try forcing dpms
+            const char *argv_ssvr[] = {         // and turning off the screen saver
+                "xset", "s", "0", NULL
+            };
+            const char *argv_dpms[] = {         // now try forcing dpms
                 "xset", "dpms", "force", bpwm > BPWM_MAX/2 ? "on" : "off", NULL
             };
             const char **argvs[] = {            // collect for easy use
-                argv_vcg, argv_sso, argv_dpms, NULL
+                argv_vcg, argv_sso, argv_ssvr, argv_dpms, NULL
             };
             for (const char ***av = argvs; *av != NULL; av++) {
                 const char **argv = *av;

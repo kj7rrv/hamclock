@@ -59,18 +59,19 @@ static NCDXFBeacon blist[NBEACONS] = {
 
 /* symbol color for each frequency
  */
-#if defined(_SUPPORT_PSKREPORTER)
+#if defined(_SUPPORT_PSKESP)
+// no getMapColor for band colors
+#define BCOL_14 RA8875_RED              // 14.100 MHz
+#define BCOL_18 RA8875_GREEN            // 18.110 MHz
+#define BCOL_21 RGB565(100,100,255)     // 21.150 MHz
+#define BCOL_24 RA8875_YELLOW           // 24.930 MHz
+#define BCOL_28 RGB565(255,125,0)       // 28.200 MHz
+#else
 #define BCOL_14 getMapColor(BAND20_CSPR)
 #define BCOL_18 getMapColor(BAND17_CSPR)
 #define BCOL_21 getMapColor(BAND15_CSPR)
 #define BCOL_24 getMapColor(BAND12_CSPR)
 #define BCOL_28 getMapColor(BAND10_CSPR)
-#else
-#define BCOL_14 RA8875_RED              // 14.100 MHz
-#define BCOL_18 RA8875_GREEN            // 18.110 MHz
-#define BCOL_21 RGB565(100,100,255)     // 21.150 MHz
-#define BCOL_24 RA8875_YELLOW           // 24.930 MHz
-#define BCOL_28 RA8875_MAGENTA          // 28.200 MHz
 #endif
 #define BCOL_S  RA8875_BLACK            // silent, not actually drawn
 #define BCOL_N  6                       // number of color states
@@ -118,11 +119,13 @@ static void drawBeacon (NCDXFBeacon &nb)
 }
 
 /* erase beacon
- * N.B. redrawing sat path does avoid gaps but can be out of sync with currently visible and show double.
+ * only needed on ESP
  */
 static void eraseBeacon (NCDXFBeacon &nb)
 {
     resetWatchdog();
+
+#if defined (_IS_ESP8266)
 
     // redraw map under symbol
     for (int8_t dy = -BEACONR; dy <= BEACONR/2; dy += 1) {
@@ -136,6 +139,8 @@ static void eraseBeacon (NCDXFBeacon &nb)
         for (uint16_t x = nb.call_b.x; x < nb.call_b.x + nb.call_b.w; x++)
             drawMapCoord (x, y);
     }
+
+#endif
 }
 
 
@@ -182,7 +187,7 @@ void updateBeacons (bool immediate)
 
     resetWatchdog();
 
-    // ok, update each beacon
+    // now update each beacon as required
     bool erased_any = false;
     setBeaconStates();
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
@@ -194,11 +199,9 @@ void updateBeacons (bool immediate)
         }
     }
 
-#if defined(_IS_ESP8266)
     // draw other symbols in case erasing a beacon clobbered some -- beware recursion!
     if (erased_any)
         drawAllSymbols(false);
-#endif
 
     updateClocks(false);
 

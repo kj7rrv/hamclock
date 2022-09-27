@@ -50,6 +50,7 @@ OBJS = \
 	gpsd.o \
         kd3tree.o \
 	live-html.o \
+        magdecl.o \
 	maidenhead.o \
 	mapmanage.o \
 	menu.o \

@@ -244,7 +244,7 @@ bool runMenu (MenuInfo &menu)
         }
     }
     if (vrow_i != n_activerows)                      // sanity check
-        fatalError (_FX("Bug! menu row %d != %d / %d"), vrow_i, n_activerows, menu.n_items);
+        fatalError (_FX("menu row %d != %d / %d"), vrow_i, n_activerows, menu.n_items);
 
     // immediate draw if menu is over map
     tft.drawPR();

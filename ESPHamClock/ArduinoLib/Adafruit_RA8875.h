@@ -297,7 +297,7 @@ class Adafruit_RA8875 {
 
         struct timeval mouse_tv;
         int mouse_idle;
-        #define MOUSE_FADE 5000         // ms
+        #define MOUSE_FADE 10000        // ms
 
         // total display size
         volatile int screen_w, screen_h;

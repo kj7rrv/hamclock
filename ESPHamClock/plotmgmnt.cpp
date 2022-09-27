@@ -43,9 +43,7 @@ const char *plot_names[PLOT_CH_N] = {
     "DRAP",             // PLOT_CH_DRAP,
     "Countdown",        // PLOT_CH_COUNTDOWN,
     "STEREO_A",         // PLOT_CH_STEREO_A,
-#if defined(_SUPPORT_PSKREPORTER)
     "Live_spots"        // PLOT_CH_PSK,
-#endif
 };
 
 /* retrieve the plot choice for the given pane from NV, if set
@@ -66,7 +64,7 @@ static bool getPlotChoiceNV (PlotPane new_pp, PlotChoice *new_ch)
         ok = NVReadUInt8 (NV_PLOT_3, &ch);
         break;
     default:
-        fatalError (_FX("Bug! getPlotChoiceNV() bad plot pane %d"), (int)new_pp);
+        fatalError (_FX("getPlotChoiceNV() bad plot pane %d"), (int)new_pp);
         return (false);
     }
 
@@ -137,14 +135,12 @@ bool plotChoiceIsAvailable (PlotChoice ch)
     case PLOT_CH_SOLWIND:       // fallthru
     case PLOT_CH_DRAP:          // fallthru
     case PLOT_CH_STEREO_A:      // fallthru
-#if defined(_SUPPORT_PSKREPORTER)
     case PLOT_CH_PSK:           // fallthru
-#endif
         return (true);
         break;
 
     default:
-        fatalError (_FX("Bug! plotChoiceIsAvailable() bad choice %d"), (int)ch);
+        fatalError (_FX("plotChoiceIsAvailable() bad choice %d"), (int)ch);
         return (false);
     }
 
@@ -283,7 +279,7 @@ PlotPane findPaneChoiceNow (PlotChoice ch)
     // return (PANE_NONE);
 
     if (PANE_N != 3)
-        fatalError (_FX("Bug! PANE_N != 3"));
+        fatalError (_FX("PANE_N != 3"));
 
     if (plot_ch[PANE_1] == ch)
         return (PANE_1);
@@ -305,7 +301,7 @@ PlotPane findPaneForChoice (PlotChoice ch)
     // return (PANE_NONE);
 
     if (PANE_N != 3)
-        fatalError (_FX("Bug! PANE_N != 3"));
+        fatalError (_FX("PANE_N != 3"));
 
     uint32_t mask = 1 << ch;
     if (plot_rotset[PANE_1] & mask)
@@ -329,7 +325,7 @@ PlotChoice getNextRotationChoice (PlotPane pp, PlotChoice pc)
             return ((PlotChoice)pc_test);
     }
 
-    fatalError (_FX("Bug! getNextRotationChoice() none for pane %d"), (int)pp+1);
+    fatalError (_FX("getNextRotationChoice() none for pane %d"), (int)pp+1);
     return (plot_ch[pp]);
 }
 
@@ -351,7 +347,7 @@ PlotChoice getAnyAvailableChoice()
                 return (ch);
         }
     }
-    fatalError (_FX("Bug! no available pane choices"));
+    fatalError (_FX("no available pane choices"));
 
     // never get here, just for lint
     return (PLOT_CH_FLUX);
@@ -369,7 +365,7 @@ void insureCountdownPaneSensible()
                 if (plot_ch[i] == PLOT_CH_COUNTDOWN) {
                     setDefaultPaneChoice((PlotPane)i);
                     if (!setPlotChoice ((PlotPane)i, plot_ch[i])) {
-                        fatalError (_FX("Bug! can not replace Countdown pain %d with %s"),
+                        fatalError (_FX("can not replace Countdown pain %d with %s"),
                                     i+1, plot_names[plot_ch[i]]);
                     }
                 }
@@ -421,13 +417,11 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
             return(true);
         }
         break;
-#if defined (_SUPPORT_PSKREPORTER)
     case PLOT_CH_PSK:
         if (checkPSKTouch (s, box))
             return (true);
         in_top = true;
         break;
-#endif
 
     // tapping a BME below top rotates just among other BME and disables auto rotate.
     // try all possibilities because they might be on other panes.
@@ -488,7 +482,7 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
 
     // always engage even if same to erase menu
     if (!setPlotChoice (pp, ch)) {
-        fatalError (_FX("Bug! checkPlotTouch bad choice %d pane %d"), (int)ch, (int)pp+1);
+        fatalError (_FX("checkPlotTouch bad choice %d pane %d"), (int)ch, (int)pp+1);
         // never returns
     }
 

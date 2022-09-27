@@ -1,34 +1,331 @@
 /* manage PSKReporter and WSPR records and drawing.
- * once queried we make no distinction.
+ * ESP only has a simple pane option with no band controls and no map paths.
  */
 
 #include "HamClock.h"
 
-uint8_t psk_mask;                               // one of PSKModeBits
-uint32_t psk_bands;                             // bitmask of PSKBandSetting
 
-
-
-#if defined(_SUPPORT_PSKREPORTER)
-
-
-// config
-#define PSK_POLL_DT     30                      // polling period, seconds
-#define MSG_DWELL       4000                    // status message dwell time, ms
-
-// state
-static PSKReport *reports;                      // malloced list of reports
-static int n_reports;                           // n used in reports[]
-static int n_malloced;                          // n malloced in reports[]
-static time_t last_update;                      // time of last update
-static KD3Node *kd3tree, *kd3root;              // n_reports of nodes that point into reports[] and tree
-static bool psk_trace = false;                  // set for additional logging
-
-// query urls
+// common query urls
 static const char psk_page[] = "/fetchPSKReporter.pl";
 static const char wspr_page[] = "/fetchWSPR.pl";
 
-// band edges and colors
+
+
+#if defined(_SUPPORT_PSKESP)
+
+/****************************************************************************************************
+ *
+ * ESP has just a pane with counts per band, no map paths.
+ * rather than try to chop up here and there we just build a separate implementation -- see below for UNIX
+ *
+ ****************************************************************************************************/
+
+
+// global state
+uint8_t psk_mask;                               // one of PSKModeBits
+
+// config
+#define MSG_DWELL       4000                    // status message dwell time, ms
+
+// band edges and name
+typedef struct {
+    uint32_t min_kHz, max_kHz;
+    const char name[4];
+} BandEdge;
+static BandEdge bands[PSKBAND_N] PROGMEM = {    // must match PSKBandSetting
+    {  1800,   2000,  "160" },
+    {  3500,   4000,  "80"  },
+    {  5330,   5410,  "60"  },
+    {  7000,   7300,  "40"  },
+    { 10100,  10150,  "30"  },
+    { 14000,  14350,  "20"  },
+    { 18068,  18168,  "17"  },
+    { 21000,  21450,  "15"  },
+    { 24890,  24990,  "12"  },
+    { 28000,  29700,  "10"  },
+    { 50000,  54000,  "6"   },
+    {144000, 148000,  "2"   },
+};
+
+static int spcount[PSKBAND_N];                   // spots count per band
+
+/* return index of bands[] containing Hz, else -1
+ * ESP
+ */
+static int searchBands (long Hz)
+{
+    int kHz = (int)(Hz/1000);
+
+    int min_i = 0;
+    int max_i = PSKBAND_N-1;
+    while (min_i <= max_i) {
+        int mid = (min_i + max_i)/2;
+        if (pgm_read_dword(&bands[mid].max_kHz) < kHz)
+            min_i = mid+1;
+        else if (pgm_read_dword(&bands[mid].min_kHz) > kHz)
+            max_i = mid-1;
+        else
+            return (mid);
+    }
+    return (-1);
+}
+
+/* ESP
+ */
+void initPSKState()
+{
+    if (!NVReadUInt8 (NV_PSK_MODEBITS, &psk_mask)) {
+        // default PSK of grid
+        psk_mask = PSKMB_PSK | PSKMB_OFDE;
+        NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
+    }
+}
+
+/* ESP
+ */
+void savePSKState()
+{
+    NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
+}
+
+/* draw the PSK pane in its current box
+ * ESP
+ */
+void drawPSKPane (const SBox &box)
+{
+    // clear
+    prepPlotBox (box);
+
+    // title
+    static const char *title = "Live Spots";
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    uint16_t tw = getTextWidth(title);
+    tft.setTextColor (RGB565(100,100,255));
+    tft.setCursor (box.x + (box.w - tw)/2, box.y + 27);
+    tft.print (title);
+
+    // DE maid for some titles
+    char de_maid[MAID_CHARLEN];
+    getNVMaidenhead (NV_DE_GRID, de_maid);
+    de_maid[4] = '\0';
+
+    // which list and source
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    char where_how[70];
+    snprintf (where_how, sizeof(where_how), "%s %s using %s",
+                psk_mask & PSKMB_OFDE ? "of" : "by",
+                psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
+                psk_mask & PSKMB_PSK ? "PSK" : "WSPR");
+    uint16_t whw = getTextWidth(where_how);
+    tft.setCursor (box.x + (box.w-whw)/2, box.y + box.h/4);
+    tft.print (where_how);
+
+    // table
+    #define TBLGAP (box.w/20)
+    #define TBCOLW (43*box.w/100)
+    for (int i = 0; i < PSKBAND_N; i++) {
+        int row = i % (PSKBAND_N/2);
+        int col = i / (PSKBAND_N/2);
+        uint16_t x = box.x + TBLGAP + col*(TBCOLW+TBLGAP);
+        uint16_t y = box.y + 5*box.h/12 + row*(box.h/2)/(PSKBAND_N/2);
+        char bname[10], report[30];
+        snprintf (report, sizeof(report), "%3sm %5d", strcpy_P (bname, bands[i].name), spcount[i]);
+        tft.fillRect (x, y-1, TBCOLW, box.h/14, DKGRAY);
+        tft.setTextColor (RA8875_WHITE);
+        tft.setCursor (x+2, y);
+        tft.print (report);
+    }
+}
+
+/* query PSK reporter or WSPR for new reports, return whether ok
+ * ESP
+ */
+bool updatePSKReporter ()
+{
+    WiFiClient psk_client;
+    bool ok = false;
+    int n_reports = 0;
+
+    // handy DE maid if needed
+    char de_maid[MAID_CHARLEN];
+    getNVMaidenhead (NV_DE_GRID, de_maid);
+    de_maid[4] = '\0';
+
+    // build query
+    char query[100];
+    bool data_psk = (psk_mask & PSKMB_PSK) != 0;
+    bool use_call = (psk_mask & PSKMB_CALL) != 0;
+    bool of_de = (psk_mask & PSKMB_OFDE) != 0;
+    snprintf (query, sizeof(query), "%s?%s%s=%s",
+                                        data_psk ? psk_page : wspr_page,
+                                        of_de ? "of" : "by",
+                                        use_call ? "call" : "grid",
+                                        use_call ? getCallsign() : de_maid);
+    Serial.printf ("PSK: query: %s\n", query);
+
+    // fetch and fill reports[]
+    resetWatchdog();
+    if (wifiOk() && psk_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+        resetWatchdog();
+
+        // query web page
+        httpHCGET (psk_client, svr_host, query);
+
+        // skip header
+        if (!httpSkipHeader (psk_client)) {
+            mapMsg (MSG_DWELL, "PSK error: no header");
+            goto out;
+        }
+
+        // reset counts
+        n_reports = 0;
+        for (int i = 0; i < PSKBAND_N; i++)
+            spcount[i] = 0;
+
+        // read lines -- anything unexpected is considered an error message
+        char line[100];
+        while (getTCPLine (psk_client, line, sizeof(line), NULL)) {
+
+            // parse. N.B. match sscanf sizes with elements
+            PSKReport new_r;
+            memset (&new_r, 0, sizeof(new_r));
+            if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
+                            &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
+                            new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
+                mapMsg (MSG_DWELL, line);
+                goto out;
+            }
+
+            // add to spcount if meets all requirements
+            const char *msg_call = of_de ? new_r.txcall : new_r.rxcall;
+            const char *msg_grid = of_de ? new_r.txgrid : new_r.rxgrid;
+            const char *other_grid = of_de ? new_r.rxgrid : new_r.txgrid;
+            if (maidenhead2ll (new_r.ll, other_grid)
+                                && ((use_call && strcasecmp (getCallsign(), msg_call) == 0)
+                                        || (!use_call && strncasecmp (de_maid, msg_grid, 4) == 0))
+                                ) {
+
+                // count
+                int b = searchBands (new_r.Hz);
+                if (b >= 0 && b < PSKBAND_N) {
+                    spcount[b]++;
+                    n_reports++;
+                }
+            }
+        }
+
+        // ok
+        ok = true;
+
+    } else
+        mapMsg (MSG_DWELL, "Spot connection failed");
+
+out:
+    // finish up
+    psk_client.stop();
+    Serial.printf ("PSK: found %d %s reports %s %s\n", n_reports,
+                        data_psk ? "PSK" : "WSPR",
+                        of_de ? "of" : "by",
+                        use_call ? getCallsign() : de_maid);
+
+    // already reported any problems
+    return (ok);
+}
+
+/* check for tap at s known to be within a PLOT_CH_PSK box.
+ * return whether it was ours.
+ * ESP
+ */
+bool checkPSKTouch (const SCoord &s, const SBox &box)
+{
+    // done if tap title
+    if (s.y < box.y+box.h/5)
+        return (false);
+
+    // handy current state
+    bool data_psk = (psk_mask & PSKMB_PSK) != 0;
+    bool use_call = (psk_mask & PSKMB_CALL) != 0;
+    bool of_de = (psk_mask & PSKMB_OFDE) != 0;
+
+    // menu
+    #define PRI_INDENT 2
+    #define SEC_INDENT 0
+    #define MI_N 9
+    MenuItem mitems[MI_N];
+    mitems[0] = {MENU_LABEL, false, 0, PRI_INDENT, "Data:"};
+    mitems[1] = {MENU_LABEL, false, 0, PRI_INDENT, "Spot:"};
+    mitems[2] = {MENU_LABEL, false, 0, PRI_INDENT, "What:"};
+    mitems[3] = {MENU_1OFN,  data_psk, 1, SEC_INDENT, "PSK"};
+    mitems[4] = {MENU_1OFN,  of_de, 2, SEC_INDENT, "of DE"};
+    mitems[5] = {MENU_1OFN,  use_call, 3, SEC_INDENT, "Call"};
+    mitems[6] = {MENU_1OFN,  !data_psk, 1, SEC_INDENT, "WSPR"};
+    mitems[7] = {MENU_1OFN,  !of_de, 2, SEC_INDENT, "by DE"};
+    mitems[8] = {MENU_1OFN,  !use_call, 3, SEC_INDENT, "Grid"};
+
+    // create a box for the menu
+    SBox menu_b;
+    menu_b.x = box.x+21;
+    menu_b.y = box.y+35;
+    menu_b.w = 0;       // shrink to fit
+
+    // run
+    SBox ok_b;
+    MenuInfo menu = {menu_b, ok_b, true, false, 3, MI_N, mitems};
+    if (runMenu (menu)) {
+
+        // set new mode
+        psk_mask = 0;
+        if (mitems[3].set)
+            psk_mask |= PSKMB_PSK;
+        if (mitems[4].set)
+            psk_mask |= PSKMB_OFDE;
+        if (mitems[5].set)
+            psk_mask |= PSKMB_CALL;
+
+        // persist
+        savePSKState();
+
+        // refresh
+        updatePSKReporter ();
+    }
+
+    // draw pane even if cancel to restore
+    drawPSKPane(box);
+
+    // ours alright
+    return (true);
+}
+
+
+
+#else // !_SUPPORT_PSKESP
+
+
+/****************************************************************************************************
+ *
+ * general UNIX implementation.
+ * rather than try to chop up here and there we just build a separate implementation -- see above for ESP
+ *
+ ****************************************************************************************************/
+
+
+// global state
+uint8_t psk_mask;                               // one of PSKModeBits
+uint32_t psk_bands;                             // bitmask of PSKBandSetting
+
+// config
+#define MSG_DWELL       4000                    // status message dwell time, ms
+
+// private state
+static PSKReport *reports;                      // malloced list of reports
+static int n_reports;                           // n used in reports[]
+static int n_malloced;                          // n malloced in reports[]
+static KD3Node *kd3tree, *kd3root;              // n_reports of nodes that point into reports[] and tree
+
+
+// band edges, name, color and count
 typedef struct {
     int min_kHz, max_kHz;
     const char *name;
@@ -51,6 +348,7 @@ static BandEdge bands[PSKBAND_N] = {            // must match PSKBandSetting
 };
 
 /* return index of bands[] containing Hz, else -1
+ * UNIX
  */
 static int searchBands (long Hz)
 {
@@ -72,6 +370,7 @@ static int searchBands (long Hz)
 
 /* return whether we want to use the given frequency.
  * N.B. as a hack to avoid another search, increment bands[b].count whether or not we want to use it
+ * UNIX
  */
 static bool wantBand (long Hz)
 {
@@ -83,7 +382,19 @@ static bool wantBand (long Hz)
     return (false);
 }
 
+/* dither ll so multiple spots at same location will be found by kdtree
+ * UNIX
+ */
+static void ditherLL (LatLong &ll)
+{
+    // up some fraction of a 4 char grid
+    ll.lat_d += (1.0F*random(1000)/1000.0F - 0.5F)/4.0F;
+    ll.lng_d += (2.0F*random(1000)/1000.0F - 1.0F)/4.0F;
+    normalizeLL(ll);
+}
+
 /* return drawing color for the given frequency, or black if not found.
+ * UNIX
  */
 uint16_t getBandColor (long Hz)
 {
@@ -91,6 +402,8 @@ uint16_t getBandColor (long Hz)
     return (b >= 0 ? getMapColor(bands[b].cid) : RA8875_BLACK);
 }
 
+/* UNIX
+ */
 void initPSKState()
 {
     if (!NVReadUInt8 (NV_PSK_MODEBITS, &psk_mask)) {
@@ -107,22 +420,19 @@ void initPSKState()
     }
 }
 
-static void savePSKState()
+/* UNIX
+ */
+void savePSKState()
 {
     NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
     NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
 }
 
-/* draw the PSK pane in its current box, if any
+/* draw the PSK pane in its current box
+ * UNIX
  */
-void drawPSKPane ()
+void drawPSKPane (const SBox &box)
 {
-    // ignore if pane currently not to be visible
-    PlotPane pp = findPaneChoiceNow(PLOT_CH_PSK);
-    if (pp == PANE_NONE)
-        return;
-    SBox &box = plot_b[pp];
-
     // clear
     prepPlotBox (box);
 
@@ -134,13 +444,18 @@ void drawPSKPane ()
     tft.setCursor (box.x + (box.w - tw)/2, box.y + 27);
     tft.print (title);
 
+    // DE maid for some titles
+    char de_maid[MAID_CHARLEN];
+    getNVMaidenhead (NV_DE_GRID, de_maid);
+    de_maid[4] = '\0';
+
     // which list and source
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
-    char where_how[70];
-    snprintf (where_how, sizeof(where_how), "%s DE %s using %s",
+    char where_how[100];
+    snprintf (where_how, sizeof(where_how), "%s %s using %s",
                 psk_mask & PSKMB_OFDE ? "of" : "by",
-                psk_mask & PSKMB_CALL ? "call" : "grid",
+                psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
                 psk_mask & PSKMB_PSK ? "PSK" : "WSPR");
     uint16_t whw = getTextWidth(where_how);
     tft.setCursor (box.x + (box.w-whw)/2, box.y + box.h/4);
@@ -155,14 +470,15 @@ void drawPSKPane ()
         uint16_t x = box.x + TBLGAP + col*(TBCOLW+TBLGAP);
         uint16_t y = box.y + 5*box.h/12 + row*(box.h/2)/(PSKBAND_N/2);
         char report[30];
-        snprintf (report, sizeof(report), "%3s: %5d", bands[i].name, bands[i].count);
+        snprintf (report, sizeof(report), "%3sm %5d", bands[i].name, bands[i].count);
         if (psk_bands & (1<<i)) {
             tft.fillRect (x, y-1, TBCOLW, box.h/14, getMapColor(bands[i].cid));
             tft.setTextColor (RA8875_BLACK);
             tft.setCursor (x+2, y);
             tft.print (report);
         } else {
-            tft.setTextColor (DKGRAY);
+            tft.fillRect (x, y-1, TBCOLW, box.h/14, RA8875_BLACK);
+            tft.setTextColor (GRAY);
             tft.setCursor (x+2, y);
             tft.print (report);
         }
@@ -170,6 +486,7 @@ void drawPSKPane ()
 }
 
 /* draw the current set of spot paths in reports[] if enabled
+ * UNIX
  */
 void drawPSKPaths ()
 {
@@ -195,7 +512,8 @@ void drawPSKPaths ()
             if (prev_s.x > 0) {
                 if (segmentSpanOk(prev_s, s, 0)) {
                     tft.drawLine (prev_s.x, prev_s.y, s.x, s.y, 1, color);
-                    last_good_s = s;
+                    if (i == n_step)            // only mark if really at the end of the path
+                        last_good_s = s;
                 } else
                    s.x = 0;
             }
@@ -212,23 +530,15 @@ void drawPSKPaths ()
     }
 }
 
-/* query PSK reporter or WSPR for new reports, if sufficient time has ellapsed or forced.
+/* query PSK reporter or WSPR for new reports, return whether ok
+ * UNIX
  */
-void updatePSKReporter (bool force)
+bool updatePSKReporter ()
 {
-    // ignore if not in any rotation set
-    if (findPaneForChoice(PLOT_CH_PSK) == PANE_NONE)
-        return;
-
-    // skip if too fast unless force
-    time_t t0 = now();
-    if (last_update + PSK_POLL_DT > t0 && !force)
-        return;
-    last_update = t0;
-
     WiFiClient psk_client;
+    bool ok = false;
 
-    // need DE maid regardless
+    // handy DE maid if needed
     char de_maid[MAID_CHARLEN];
     getNVMaidenhead (NV_DE_GRID, de_maid);
     de_maid[4] = '\0';
@@ -269,8 +579,7 @@ void updatePSKReporter (bool force)
         char line[100];
         while (getTCPLine (psk_client, line, sizeof(line), NULL)) {
 
-            if (psk_trace)
-                printf ("PSK: fetched %s\n", line);
+            // printf ("PSK: fetched %s\n", line);
 
             // parse. N.B. match sscanf sizes with elements
             PSKReport new_r;
@@ -278,7 +587,7 @@ void updatePSKReporter (bool force)
             if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
                             &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
                             new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
-                // TODO mapMsg (MSG_DWELL, "PSK error: %s", line);   // anything unexpected is assumed be an err
+                mapMsg (MSG_DWELL, line);
                 goto out;
             }
 
@@ -291,19 +600,18 @@ void updatePSKReporter (bool force)
                                         || (!use_call && strncasecmp (de_maid, msg_grid, 4) == 0))
                                 && wantBand (new_r.Hz)) {
 
-                // match! grow reports list if necessary
+                // match! dither ll and little so duplicate locations are unique
+                ditherLL (new_r.ll);
+
+                // grow list if necessary
                 if (n_reports + 1 > n_malloced) {
                     reports = (PSKReport *) realloc (reports, (n_malloced += 100) * sizeof(PSKReport));
                     if (!reports)
                         fatalError ("Live Spots: %d", n_malloced);
                 }
 
-                // set next location
+                // set next spot
                 reports[n_reports++] = new_r;
-
-            } else {
-                if (psk_trace)
-                    printf ("PSK: unmatched info: %s\n", line);
             }
         }
 
@@ -321,8 +629,8 @@ void updatePSKReporter (bool force)
         }
         kd3root = mkKD3NodeTree (kd3tree, n_reports, 0);
 
-        // ok! show new counts immediately, paths will follow shortly via drawMoreEarth()
-        drawPSKPane();
+        // ok
+        ok = true;
 
     } else
         mapMsg (MSG_DWELL, "Spot connection failed");
@@ -336,10 +644,12 @@ out:
                         use_call ? getCallsign() : de_maid);
 
     // already reported any problems
+    return (ok);
 }
 
 /* check for tap at s known to be within a PLOT_CH_PSK box.
  * return whether it was ours.
+ * UNIX
  */
 bool checkPSKTouch (const SCoord &s, const SBox &box)
 {
@@ -419,17 +729,18 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
         savePSKState();
 
         // refresh
-        updatePSKReporter (true);
+        updatePSKReporter ();
     }
 
     // draw pane even if cancel to restore
-    drawPSKPane();
+    drawPSKPane(box);
 
     // ours alright
     return (true);
 }
 
 /* return report of spot closest to ll if appropriate.
+ * UNIX
  */
 bool getClosestPSK (const LatLong &ll, const PSKReport **rpp)
 {
@@ -460,5 +771,4 @@ bool getClosestPSK (const LatLong &ll, const PSKReport **rpp)
 }
 
 
-
-#endif // _SUPPORT_PSKREPORTER)
+#endif // _!_SUPPORT_PSKESP

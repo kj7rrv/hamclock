@@ -127,6 +127,8 @@ static const char *sdo_filename[4] = {
 #define MOON_INTERVAL   30                      // update interval, secs
 static bool moon_reverting;                     // flag for revertPlot1();
 
+// Live spots
+#define PSK_INTERVAL    49                      // polling period. secs
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
@@ -598,7 +600,8 @@ void checkBandConditions (const SBox &b, bool force)
 {
     // update if asked to or out of sync with prop map or it's time to refresh or it's off over an hour
     bool update_bc = force || (prop_map != PROP_MAP_OFF && tdiff(bc_time,map_time)>=3600)
-                           || (now()>next_bc) || tdiff(nowWO(),bc_time)>=3600;
+                           || (now() > next_bc)
+                           || (tdiff (nowWO(), bc_time) >= 3600);
     if (!update_bc)
         return;
 
@@ -609,6 +612,9 @@ void checkBandConditions (const SBox &b, bool force)
     } else {
         // retry soon
         next_bc = nextWiFiRetry();
+
+        // if problem persists more than an hour, this prevents the tdiff's above from being true every time
+        map_time = bc_time = nowWO() - 1000;
     }
 }
 
@@ -688,7 +694,7 @@ static void checkMap(void)
     } else {
 
         // eh??
-        fatalError (_FX("Bug! no map"));
+        fatalError (_FX("no map"));
 
     }
 }
@@ -1091,8 +1097,11 @@ static bool checkXRay (time_t t)
     return (true);
 }
 
-/* check for tap at s known to be within BandConditions box b.
- * tapping a band loads prop map; tapping timeline toggle bc_utc_tl; tapping power cycles bc_power 1-1000 W.
+/* check for tap at s known to be within BandConditions box b:
+ *    tapping a band loads prop map;
+ *    tapping timeline toggles bc_utc_tl;
+ *    tapping power offers power menu;
+ *    tapping SP/LP toggles.
  * return whether tap was useful for us.
  * N.B. coordinate tap positions with plotBandConditions()
  */
@@ -1109,6 +1118,14 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     power_b.w = b.w/5;
     power_b.h = b.h/12;
     // drawSBox (power_b, RA8875_WHITE);
+
+    // lr corner for SP/LP
+    SBox splp_b;
+    splp_b.x = b.x + 2*b.w/3;
+    splp_b.y = b.y + 13*b.h/14;
+    splp_b.w = b.w/4;
+    splp_b.h = b.h/12;
+    // drawSBox (splp_b, RA8875_WHITE);
 
     // timeline strip
     SBox tl_b;
@@ -1154,6 +1171,15 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         checkBandConditions (b, true);
         if (power_changed)
             scheduleNewVOACAPMap(prop_map);
+
+    } else if (inBox (s, splp_b)) {
+
+        // toggle short/long path -- update DX info too
+        show_lp = !show_lp;
+        NVWriteUInt8 (NV_LP, show_lp);
+        checkBandConditions (b, true);
+        drawDXInfo ();
+        scheduleNewVOACAPMap(prop_map);
     
     } else if (inBox (s, tl_b)) {
 
@@ -1256,7 +1282,7 @@ static void checkBRB (time_t t)
             break;
 
         default:
-            fatalError (_FX("Bug! checkBRB() bad brb_mode: %d"), brb_mode);
+            fatalError (_FX("checkBRB() bad brb_mode: %d"), brb_mode);
             break;
         }
     }
@@ -1346,15 +1372,11 @@ static void revertPlot1 (uint32_t dt)
     case PLOT_CH_STEREO_A:
         next_stereo_a = revert_t;
         break;
-
-#if defined(_SUPPORT_PSKREPORTER)
     case PLOT_CH_PSK:
         next_psk = revert_t;
         break;
-#endif
-
     default:
-        fatalError(_FX("Bug! revertPlot1() choice %d"), plot_ch[PANE_1]);
+        fatalError(_FX("revertPlot1() choice %d"), plot_ch[PANE_1]);
         break;
     }
 }
@@ -1511,15 +1533,13 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         next_stereo_a = 0;
         break;
 
-#if defined(_SUPPORT_PSKREPORTER)
     case PLOT_CH_PSK:
         plot_ch[pp] = ch;
         next_psk = 0;
         break;
-#endif
 
     default:
-        fatalError (_FX("Bug! setPlotChoice() PlotPane %d, PlotChoice %d"), (int)pp, (int)ch);
+        fatalError (_FX("setPlotChoice() PlotPane %d, PlotChoice %d"), (int)pp, (int)ch);
         break;
 
     }
@@ -1759,17 +1779,20 @@ void updateWiFi(void)
             }
             break;
 
-    #if defined(_SUPPORT_PSKREPORTER)
         case PLOT_CH_PSK:
             if (t0 >= next_psk) { 
-                drawPSKPane();
-                next_psk = now() + ROTATION_INTERVAL;
+                if (updatePSKReporter()) {
+                    drawPSKPane(box);
+                    // paths are drawn by drawAllSymbols()
+                    next_psk = now() + PSK_INTERVAL;
+                } else {
+                    next_psk = nextWiFiRetry();
+                }
             }
             break;
-    #endif
 
         default:
-            fatalError (_FX("Bug! updateWiFi() bad choice: %d"), ch);
+            fatalError (_FX("updateWiFi() bad choice: %d"), ch);
             break;
         }
 
@@ -1784,10 +1807,14 @@ void updateWiFi(void)
     // freshen NCDXF_b
     checkBRB(t0);
 
-#if defined(_SUPPORT_PSKREPORTER)
-    // freshen psk reporter list -- it has its own cadance management
-    updatePSKReporter(false);
-#endif
+    // always check on psk if in rotation set but not up now
+    if (t0 >= next_psk && findPaneForChoice(PLOT_CH_PSK) != PANE_NONE
+                       && findPaneChoiceNow(PLOT_CH_PSK) == PANE_NONE) {
+        if (updatePSKReporter())
+            next_psk = now() + PSK_INTERVAL;
+        else
+            next_psk = nextWiFiRetry();
+    }
 
     // freshen RSS
     if (t0 >= next_rss) {
@@ -2669,7 +2696,7 @@ static bool updateSDO (const SBox &box, PlotChoice ch)
     case PLOT_CH_SDO_3: sdo_fn = sdo_filename[2]; break;
     case PLOT_CH_SDO_4: sdo_fn = sdo_filename[3]; break;
     default:
-        fatalError (_FX("Bug! updateSDO() bad choice: %d"), (int)ch);
+        fatalError (_FX("updateSDO() bad choice: %d"), (int)ch);
         return (false);
     }
 
@@ -3082,6 +3109,15 @@ void initWiFiRetry()
 
     // map is in memory
     // next_map = 0;
+}
+
+/* called to schedule an update to the live spots pane if in rotation
+ */
+void scheduleNewPSK()
+{
+    PlotPane psk_pp = findPaneForChoice (PLOT_CH_PSK);
+    if (psk_pp != PANE_NONE)
+        next_psk = 0;
 }
 
 /* called to schedule an update to the band conditions pane if up.

@@ -81,9 +81,9 @@
     #define _SUPPORT_CLPATH
 #endif
 
-// PSKReporter not supported on ESP because it requires accessing https, and also can't draw raster paths
-#if !defined(_IS_ESP8266)
-    #define _SUPPORT_PSKREPORTER
+// PSKReporter only partially supported on ESP because can't draw raster paths or spare mem for lists
+#if defined(_IS_ESP8266)
+    #define _SUPPORT_PSKESP
 #endif
 
 // roaming cities is not supported on ESP because it is touch only
@@ -334,9 +334,7 @@ typedef enum {
     PLOT_CH_DRAP,
     PLOT_CH_COUNTDOWN,
     PLOT_CH_STEREO_A,
-#if defined(_SUPPORT_PSKREPORTER)
     PLOT_CH_PSK,
-#endif
 
     PLOT_CH_N
 } PlotChoice;
@@ -470,6 +468,7 @@ typedef enum {
 } MapProjection;
 extern const char *map_projnames[MAPP_N];   // projection names
 #define AZIM1_ZOOM       1.1F           // horizon will be 180/AZIM1_ZOOM degrees from DE
+#define AZIM1_FISHEYE    1.15F          // center zoom -- 1 is natural
 
 // map grid options
 typedef enum {
@@ -895,6 +894,8 @@ extern bool checkOnAir(void);
 extern float lngDiff (float dlng);
 extern bool overViewBtn (const SCoord &s, uint16_t border);
 extern bool segmentSpanOk (const SCoord &s0, const SCoord &s1, uint16_t border);
+extern bool desiredBearing (const LatLong &ll, float &bear);
+
 
 
 
@@ -1077,12 +1078,12 @@ typedef enum {
 
 // N.B. must match colsel_pr[] order
 typedef enum {
-    SATFOOT_CSPR,
     SATPATH_CSPR,
+    SATFOOT_CSPR,
     SHORTPATH_CSPR,
     LONGPATH_CSPR,
     GRID_CSPR,
-#if defined(_SUPPORT_PSKREPORTER)
+#if !defined(_SUPPORT_PSKESP)
     BAND160_CSPR,
     BAND80_CSPR,
     BAND60_CSPR,
@@ -1146,6 +1147,9 @@ extern const char *getDXClusterLogin(void);
 extern bool getDXSpotPaths(void);
 extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
+extern bool getSatPathDashed(void);
+extern bool useMagBearing(void);
+
 
 
 
@@ -1160,7 +1164,7 @@ extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
  *
  */
 
-extern int magdecl (float l, float L, float e, float y, float *mdp);
+extern bool magdecl (float l, float L, float e, float y, float *mdp);
 
 
 
@@ -1455,22 +1459,28 @@ typedef enum {
     NV_DXCMD0,                  // dx cluster command 0
     NV_DXCMD1,                  // dx cluster command 1
     NV_DXCMD2,                  // dx cluster command 2
+
     NV_DXCMD3,                  // dx cluster command 3
     NV_DXCMDUSED,               // bitmask of dx cluster commands in use
     NV_PSK_MODEBITS,            // bit 0: on=psk off=wspr bit 1: on=bycall off=bygrid
     NV_PSK_BANDS,               // bit mask 0 .. 11 160 .. 2m
     NV_160M_COLOR,              // 160 m path color as RGB 565
+
     NV_80M_COLOR,               // 80 m path color as RGB 565
     NV_60M_COLOR,               // 60 m path color as RGB 565
     NV_40M_COLOR,               // 40 m path color as RGB 565
     NV_30M_COLOR,               // 30 m path color as RGB 565
     NV_20M_COLOR,               // 20 m path color as RGB 565
+
     NV_17M_COLOR,               // 17 m path color as RGB 565
     NV_15M_COLOR,               // 15 m path color as RGB 565
     NV_12M_COLOR,               // 12 m path color as RGB 565
     NV_10M_COLOR,               // 10 m path color as RGB 565
     NV_6M_COLOR,                // 6 m path color as RGB 565
+
     NV_2M_COLOR,                // 2 m path color as RGB 565
+    NV_DASHED,                  // CSIds bitmask set for dashed
+    NV_BEAR_MAG,                // show magnetic bearings, else true
 
     NV_N
 
@@ -1614,29 +1624,14 @@ extern bool nearestPrefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1]);
  */
 
 
-#if defined(_SUPPORT_PSKREPORTER)
-
-#define PSK_DOTR       2                // end point marker radius (also use by dxcluster)
-
-// info stored about each report
-// N.B. match char sizes with sscanf in pskreporter.cpp
-typedef struct {
-    time_t posting;
-    char txgrid[10];
-    char txcall[20];
-    char rxgrid[10];
-    char rxcall[20];
-    char mode[20];
-    LatLong ll;
-    long Hz;
-    int snr;
-} PSKReport;
+// all implementations share the following:
 
 typedef enum {
     PSKMB_PSK = 1,                      // data is from PSK, else WSPR
     PSKMB_CALL = 2,                     // using call, else grid
     PSKMB_OFDE = 4,                     // spot of DE, else by DE
 } PSKModeBits;
+
 typedef enum {
     PSKBAND_160M,
     PSKBAND_80M,
@@ -1652,18 +1647,45 @@ typedef enum {
     PSKBAND_2M,
     PSKBAND_N
 } PSKBandSetting;
+
+// info known about each report
+// N.B. match char sizes with sscanf in pskreporter.cpp
+typedef struct {
+    time_t posting;
+    char txgrid[10];
+    char txcall[20];
+    char rxgrid[10];
+    char rxcall[20];
+    char mode[20];
+    LatLong ll;
+    long Hz;
+    int snr;
+} PSKReport;
+
 extern uint8_t psk_mask;                // bitmask of PSKModeBits
+
+extern bool updatePSKReporter (void);
+extern bool checkPSKTouch (const SCoord &s, const SBox &box);
+extern void drawPSKPane (const SBox &box);
+extern void initPSKState(void);
+extern void savePSKState(void);
+
+#if !defined(_SUPPORT_PSKESP)
+
+// only UNIX adds the followsing:
+
+
+#define PSK_DOTR       2                // end point marker radius (also use by dxcluster)
+
 extern uint32_t psk_bands;              // bitmask of 1 << PSKBandSetting
 
-extern void updatePSKReporter (bool force);
-extern bool checkPSKTouch (const SCoord &s, const SBox &box);
-extern void drawPSKPane (void);
-extern void initPSKState(void);
 extern uint16_t getBandColor (long Hz);
 extern void drawPSKPaths (void);
 extern bool getClosestPSK (const LatLong &ll, const PSKReport **rpp);
 
-#endif // _SUPPORT_PSKREPORTER
+
+
+#endif // !_SUPPORT_PSKESP
 
 
 
@@ -1858,6 +1880,7 @@ typedef struct {
 extern void initSys (void);
 extern void initWiFiRetry(void);
 extern void scheduleNewBC(void);
+extern void scheduleNewPSK(void);
 extern void scheduleNewVOACAPMap(PropMapSetting pm);
 extern void scheduleNewCoreMap(CoreMaps cm);
 extern void updateWiFi(void);

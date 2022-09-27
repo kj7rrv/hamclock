@@ -163,7 +163,7 @@ static bool askHamlib (const char *cmd, char rsp[], size_t rsp_len)
     // insure cmd starts with +\ and ends with \n
     int cmd_l = strlen (cmd);
     if (strncmp (cmd, "+\\", 2) != 0 || cmd[cmd_l-1] != '\n')
-        fatalError (_FX("Bug! malformed askHamlib cmd: '%s'"), cmd);
+        fatalError (_FX("malformed askHamlib cmd: '%s'"), cmd);
 
     GIMBAL_TRACE (2, (_FX("GBL: ask %s"), cmd));       // includes \n
 

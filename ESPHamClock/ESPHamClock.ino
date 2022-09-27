@@ -576,10 +576,8 @@ void setup()
     // get grid style state
     NVReadUInt8 (NV_GRIDSTYLE, &mapgrid_choice);
 
-#if defined(_SUPPORT_PSKREPORTER)
     // init psk reporter
     initPSKState();
-#endif // _SUPPORT_PSKREPORTER
 
     // position the maiden label boxes
     maidlbltop_b.x = map_b.x;
@@ -1078,9 +1076,6 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     sendDXClusterDELLGrid();
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
-#if defined(_SUPPORT_PSKREPORTER)
-    updatePSKReporter(true);
-#endif // _SUPPORT_PSKREPORTER
 
     // log
     char de_grid[MAID_CHARLEN];
@@ -1253,6 +1248,29 @@ float *distp, float *bearp)
 void propDEPath (bool long_path, const LatLong &to_ll, float *distp, float *bearp)
 {
     return (propPath (long_path, de_ll, sdelat, cdelat, to_ll, distp, bearp));
+}
+
+/* convert the given true bearing in degrees [0..360) at ll to desired units.
+ * return whether desired units are magnetic, so no change in bear if return false.
+ */
+bool desiredBearing (const LatLong &ll, float &bear)
+{
+    resetWatchdog();
+
+    if (useMagBearing()) {
+        float decl;
+        time_t t0 = nowWO();
+        float yr = year(t0) + ((month(t0)-1) + (day(t0)-1)/30.0F)/12.0F;        // approx
+        if (!magdecl (ll.lat_d, ll.lng_d, 200, yr, &decl)) {
+            Serial.printf (_FX("Magnetic model only valid %g .. %g\n"), decl, decl+5);
+            return (false);
+        } else {
+            // Serial.printf ("magdecl @ %g = %g\n", yr, decl);
+            bear = fmodf (bear - decl + 360, 360);
+            return (true);
+        }
+    }
+    return (false);
 }
 
 /* draw great circle through DE and DX.
@@ -1697,7 +1715,7 @@ static bool overActiveMap (const SCoord &s)
     } else if (map_proj == MAPP_MERCATOR) {
         return (inBox(s,map_b));
     } else {
-        fatalError (_FX("Bug! overActiveMap bogus projection %d"), map_proj);
+        fatalError (_FX("overActiveMap bogus projection %d"), map_proj);
         return (false);         // lint 
     }
 }
@@ -2406,7 +2424,7 @@ static void shutdown(void)
         for(;;);
  #endif // _IS_UNIX
     default:
-        fatalError (_FX("Shutdown choice bug: %d"), selection);
+        fatalError (_FX("Shutdown choice: %d"), selection);
         return;
 
     }

@@ -513,20 +513,24 @@ static bool getWiFiDEDXInfo_helper (WiFiClient &client, char *unused, bool want_
         propDEPath (false, dx_ll, &dist, &B);
         dist *= ERAD_M;                             // radians to miles
         B *= 180/M_PIF;                             // radians to degrees
+        bool B_ismag = desiredBearing (de_ll, B);
         if (show_km)
             dist *= 1.609344F;                      // mi - > km
         FWIFIPR (client, F("DX_path_SP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg\n"), dist, show_km ? "km" : "mi", B);
+        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, show_km ? "km" : "mi", B,
+                B_ismag ? _FX("magnetic") : _FX("true"));
         client.print (buf);
 
         // show long path info
         propDEPath (true, dx_ll, &dist, &B);
         dist *= ERAD_M;                             // radians to miles
         B *= 180/M_PIF;                             // radians to degrees
+        B_ismag = desiredBearing (de_ll, B);
         if (show_km)
             dist *= 1.609344F;                      // mi - > km
         FWIFIPR (client, F("DX_path_LP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg\n"), dist, show_km ? "km" : "mi", B);
+        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, show_km ? "km" : "mi", B,
+                B_ismag ? _FX("magnetic") : _FX("true"));
         client.print (buf);
 
     } else {
@@ -705,8 +709,6 @@ static bool getWiFiDXSpots (WiFiClient &client, char *line)
 
     // print each row
     FWIFIPR (client, F("#  kHz   Call        UTC  Grid      Lat     Lng       Dist   Bear\n"));
-    float sdelat = sinf(de_ll.lat);
-    float cdelat = cosf(de_ll.lat);
     for (uint8_t i = 0; i < nspots; i++) {
 
         DXClusterSpot &spot = spots[i];
@@ -716,16 +718,17 @@ static bool getWiFiDXSpots (WiFiClient &client, char *line)
         const char *f_fmt = spot.kHz < 1e6 ? "%8.1f" : "%8.0f";
         int bufl = snprintf (buf, sizeof(buf), f_fmt, spot.kHz);
 
-        // distance and bearing
+        // distance and bearing from DE
         LatLong to_ll;
         to_ll.lat = spot.dx_lat;
         to_ll.lat_d = rad2deg(to_ll.lat);
         to_ll.lng = spot.dx_lng;
         to_ll.lng_d = rad2deg(to_ll.lng);
         float dist, bear;
-        propPath (show_lp, de_ll, sdelat, cdelat, to_ll, &dist, &bear);
+        propDEPath (show_lp, to_ll, &dist, &bear);
         dist *= ERAD_M;                                 // angle to miles
         bear *= 180/M_PIF;                              // rad -> degrees
+        bool bear_ismag = desiredBearing (de_ll, bear);
         if (show_km)                                    // match DX display
             dist *= 1.609344F;                          // miles -> km
 
@@ -734,8 +737,9 @@ static bool getWiFiDXSpots (WiFiClient &client, char *line)
         ll2maidenhead (grid, to_ll);
 
         // add remaining fields
-        snprintf (buf+bufl, sizeof(buf)-bufl, _FX(" %-*s %04u %s   %6.2f %7.2f   %6.0f   %4.0f\n"),
-                MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs, grid, to_ll.lat_d, to_ll.lng_d, dist, bear);
+        snprintf (buf+bufl, sizeof(buf)-bufl, _FX(" %-*s %04u %s   %6.2f %7.2f   %6.0f   %4.0f %s\n"),
+                MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs, grid, to_ll.lat_d, to_ll.lng_d, dist, bear,
+                bear_ismag ? _FX("magnetic") : _FX("true"));
 
         // print
         client.print(buf);
@@ -786,6 +790,18 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
     // report panes
     for (int pp = 0; pp < PANE_N; pp++)
         reportPaneChoices (client, (PlotPane)pp);
+
+    // report psk if active
+    FWIFIPR (client, F("LiveSpots "));
+    if (findPaneForChoice(PLOT_CH_PSK) != PANE_NONE) {
+        snprintf (buf, sizeof(buf), "%s DE %s using %s\n", 
+                            psk_mask & PSKMB_OFDE ? "of" : "by",
+                            psk_mask & PSKMB_CALL ? "call" : "grid",
+                            psk_mask & PSKMB_PSK ? "PSK" : "WSPR");
+    } else {
+        strcpy (buf, "off\n");
+    }
+    client.print(buf);
 
     // report each selected NCDXF beacon box state
     FWIFIPR (client, F("NCDXF     "));
@@ -2074,7 +2090,7 @@ static bool setWiFiMapColor (WiFiClient &client, char line[])
 
     #if defined(_SUPPORT_PSKREPORTER)
         // update psk pane in case a band color changed; it knows to ignore if not up
-        drawPSKPane();    
+        scheduleNewPSK();
     #endif
 
     // ack
@@ -2926,6 +2942,119 @@ static bool doWiFiUpdate (WiFiClient &client, char *unused)
 }
 
 
+/* change the live spots configuration
+ *   spot=of|by&what=call|grid&data=psk|wspr&bands=160,...
+ */
+static bool setWiFiLiveSpots (WiFiClient &client, char *line)
+{
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "spot";                       // 0
+    wa.name[wa.nargs++] = "what";                       // 1
+    wa.name[wa.nargs++] = "data";                       // 2
+    wa.name[wa.nargs++] = "bands";                      // 3
+
+    // parse
+    if (!parseWebCommand (wa, line, line))
+        return (false);
+
+    // since components are optional we start with the current mask and modify
+    uint8_t new_mask = psk_mask;
+
+    if (wa.found[0]) {
+        const char *spot = wa.value[0];
+        if (strcmp (spot, "of") == 0)
+            new_mask |= PSKMB_OFDE;
+        else if (strcmp (spot, "by") == 0)
+            new_mask &= ~PSKMB_OFDE;
+        else {
+            strcpy (line, "spot not by or of");
+            return (false);
+        }
+    }
+
+    if (wa.found[1]) {
+        const char *what = wa.value[1];
+        if (strcmp (what, "call") == 0)
+            new_mask |= PSKMB_CALL;
+        else if (strcmp (what, "grid") == 0)
+            new_mask &= ~PSKMB_CALL;
+        else {
+            strcpy (line, "what not call or grid");
+            return (false);
+        }
+    }
+
+    if (wa.found[2]) {
+        const char *data = wa.value[2];
+        if (strcmp (data, "psk") == 0)
+            new_mask |= PSKMB_PSK;
+        else if (strcmp (data, "wspr") == 0)
+            new_mask &= ~PSKMB_PSK;
+        else {
+            strcpy (line, "data not psk or wspr");
+            return (false);
+        }
+    }
+
+    // new set of bands, if set
+#if defined (_SUPPORT_PSKESP)
+    // temp fake
+    int psk_bands = 0;
+#endif
+    uint32_t new_bands = 0;
+    if (wa.found[3]) {
+        char bands[strlen(wa.value[3])+1];
+        strcpy (bands, wa.value[3]);
+        if (strcmp (bands, "all") == 0) {
+            new_bands = (1 << PSKBAND_N) - 1;
+        } else {
+            char *token, *string = bands;
+            while ((token = strsep (&string, ",")) != NULL) {
+                switch (atoi(token)) {
+                case 160: new_bands |= (1 << PSKBAND_160M); break;
+                case 80:  new_bands |= (1 << PSKBAND_80M);  break;
+                case 60:  new_bands |= (1 << PSKBAND_60M);  break;
+                case 40:  new_bands |= (1 << PSKBAND_40M);  break;
+                case 30:  new_bands |= (1 << PSKBAND_30M);  break;
+                case 20:  new_bands |= (1 << PSKBAND_20M);  break;
+                case 17:  new_bands |= (1 << PSKBAND_17M);  break;
+                case 15:  new_bands |= (1 << PSKBAND_15M);  break;
+                case 12:  new_bands |= (1 << PSKBAND_12M);  break;
+                case 10:  new_bands |= (1 << PSKBAND_10M);  break;
+                case 6:   new_bands |= (1 << PSKBAND_6M);   break;
+                case 2:   new_bands |= (1 << PSKBAND_2M);   break;
+                default:
+                    strcpy (line, "unknown band");
+                    return (false);
+                }
+            }
+        }
+    } else {
+        // no change if not specified
+        new_bands = psk_bands;
+    }
+
+    // skip if no change
+    if (psk_mask == new_mask && psk_bands == new_bands) {
+        strcpy (line, "no change");
+        return (false);
+    }
+
+    // ok - engage
+    psk_mask = new_mask;
+    psk_bands = new_bands;
+    savePSKState();
+    scheduleNewPSK();
+
+    // ack
+    startPlainText (client);
+    client.print ("ok\n");
+
+    // ok
+    return (true);
+}
+
 #if defined(_IS_UNIX)
 
 /* implement a live web server connection.
@@ -2984,7 +3113,7 @@ static bool getWiFifavicon (WiFiClient &client, char *errmsg)
 static void readLiveImageNow (uint8_t img[LIVE_NBYTES])
 {
     if (!tft.getRawPix (img, LIVE_NPIX))
-        fatalError ("Bug! getRawPix wrong size: %d\n", LIVE_NPIX);
+        fatalError ("getRawPix wrong size: %d\n", LIVE_NPIX);
 }
 
 /* initialize a LiveConnection for the given IP making no assumptions about its current content.
@@ -3013,7 +3142,7 @@ static bool initLiveConnection (LiveConnection *lp, const String &IP)
 static void destroyLiveConnection (LiveConnection *lp)
 {
     if (!lp->in_use)
-        fatalError ("Bug! destroying unused live connection");
+        fatalError ("destroying unused live connection");
     printf ("LIVE: destroy: %s\n", lp->IP);
     free (lp->pixels);
     lp->in_use = false;
@@ -3094,7 +3223,7 @@ static LiveConnection *startLiveConnection (const String &IP)
 static void saveLiveConnectionImage (LiveConnection *lp, uint8_t *pixels)
 {
     if (!lp->in_use)
-        fatalError ("Bug! saving to unused live connection");
+        fatalError ("saving to unused live connection");
     if (live_verbose > 1)
         printf ("LIVE:   saving image for %s\n", lp->IP);
     memcpy ((void*)lp->pixels, pixels, LIVE_NBYTES);
@@ -3291,7 +3420,7 @@ static bool getWiFiLiveUpdate (WiFiClient &client, char *errmsg)
         }
     }
     if (n_bloks != (chg0-chg_regns)/BLOK_NBYTES)        // assert
-        fatalError ("Bug! live regions %d != %d", n_bloks, (chg0-chg_regns)/BLOK_NBYTES);
+        fatalError ("live regions %d != %d", n_bloks, (chg0-chg_regns)/BLOK_NBYTES);
 
     if (live_verbose) {
         struct timeval tv1;
@@ -3482,7 +3611,7 @@ static bool doWiFiExit (WiFiClient &client, char *unused)
  * the whole table uses arrays so strings are in ESP FLASH too.
  */
 #define CT_MAX_CMD      20                              // max command string length
-#define CT_MAX_HELP     55                              // max help string length       // TODO
+#define CT_MAX_HELP     60                              // max help string length
 #define CT_FUNP(ctp) ((PCTF)pgm_read_dword(&ctp->funp)) // handy function pointer
 typedef bool (*PCTF)(WiFiClient &client, char *line);   // ptr to command table function
 typedef struct {
@@ -3508,6 +3637,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
+    { "set_livespots?",     setWiFiLiveSpots,   "spot=of|by&what=call|grid&data=psk|wspr&bands=all|160,..." },
     { "set_mercenter?",     setWiFiMerCenter,      "lng=X" },
     { "set_mapcolor?",      setWiFiMapColor,       "setup_name=R,G,B" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
@@ -3814,7 +3944,7 @@ void runNextDemoCommand()
         for (unsigned i = 0; i < DEMO_N; i++)
             sum += item_probs[i];
         if (sum != 100)
-            fatalError (_FX("Bug! demo probs sum %u != 100\n"), sum);
+            fatalError (_FX("demo probs sum %u != 100\n"), sum);
     }
 
     // attempt a change until successful.

@@ -511,9 +511,41 @@ static void drawMapGrid()
         break;
 
     default:
-        fatalError (_FX("Bug! drawMapGrid() bad mapgrid_choice: %d"), mapgrid_choice);
+        fatalError (_FX("drawMapGrid() bad mapgrid_choice: %d"), mapgrid_choice);
         break;
     }
+}
+
+/* drawMouseLoc() helper to show DE distance and bearing to given location.
+ * update ty to account for vertical space used.
+ * UNIX only
+ */
+static void drawMLDB (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
+{
+    // get distance and bearing to spot location
+    float dist, bearing;
+    propDEPath (show_lp, ll, &dist, &bearing);
+    dist *= ERAD_M;                             // angle to miles
+    bearing *= 180/M_PIF;                       // rad -> degrees
+    if (show_km)
+        dist *= 1.609344F;                      // mi - > km
+
+    // get bearing from DE in desired units
+    bool bearing_ismag = desiredBearing (de_ll, bearing);
+
+    // show direction
+    tft.setCursor (tx, ty += dy);
+    tft.printf (_FX("%s %5.0f"), show_lp ? "LP" : "SP", bearing);
+    if (bearing_ismag) {
+        tft.setCursor(tft.getCursorX()+2, ty-2); 
+        tft.print ('M');
+    } else {
+        tft.drawCircle (tft.getCursorX()+2, ty+1, 1, RA8875_WHITE);         // home-made degree
+    }
+
+    // show distance
+    tft.setCursor (tx, ty += dy);
+    tft.printf (_FX("%6.0f %s"), dist, show_km ? "km" : "mi");
 }
 
 /* draw local information about the current cursor position over the world map.
@@ -628,21 +660,24 @@ static void drawMouseLoc()
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
         tft.printf (buf);
 
+#if 0
         // show age
         time_t t0 = now();
         int age = t0 >= psk_rp->posting ? t0 - psk_rp->posting : 0;
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("Age %5d", age/60);                 // want minutes
+#endif
 
-        // show lat/long
+        // show freq
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Lat %4.0f%c", fabsf(psk_rp->ll.lat_d), psk_rp->ll.lat_d < 0 ? 'S' : 'N');
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Lng %4.0f%c", fabsf(psk_rp->ll.lng_d), psk_rp->ll.lng_d < 0 ? 'W' : 'E');
+        tft.printf ("KHz%6d", psk_rp->Hz/1000);
 
         // show snr
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("SNR %5d", psk_rp->snr);
+
+        // show distance and bearing
+        drawMLDB (psk_rp->ll, tx+TEXT_INDENT, LINE_DY, ty);
 
         // border in band color
         tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
@@ -679,15 +714,12 @@ static void drawMouseLoc()
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("Time %04d", dxc_s.utcs);
 
-        // show lat/long
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Lat %4.0f%c", fabsf(dxc_ll.lat_d), dxc_ll.lat_d < 0 ? 'S' : 'N');
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Lng %4.0f%c", fabsf(dxc_ll.lng_d), dxc_ll.lng_d < 0 ? 'W' : 'E');
-
         // show freq
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("KHz%6.0f", dxc_s.kHz);
+
+        // show distance and bearing
+        drawMLDB (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
 
         // border in band color
         tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
@@ -715,22 +747,8 @@ static void drawMouseLoc()
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("LMT %02d:%02d", hour(lt), minute(lt));
 
-        // get distance and bearing to cursor location
-        float dist, bearing;
-        propDEPath (show_lp, ll, &dist, &bearing);
-        dist *= ERAD_M;                             // angle to miles
-        bearing *= 180/M_PIF;                       // rad -> degrees
-        if (show_km)
-            dist *= 1.609344F;                      // mi - > km
-
-        // show direction
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf (_FX("%s %5.0f"), show_lp ? "LP" : "SP", bearing);
-        tft.drawCircle (tft.getCursorX()+2, ty+1, 1, RA8875_WHITE);         // degree
-
-        // show distance
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf (_FX("%6.0f %s"), dist, show_km ? "km" : "mi");
+        // show distance and bearing
+        drawMLDB (ll, tx+TEXT_INDENT, LINE_DY, ty);
 
         // zones
         ty += LINE_DY;
@@ -803,7 +821,7 @@ static void drawAzmStars()
         break;
 
     default:
-        fatalError (_FX("Bug! drawAzmStars() bad map_proj %d"), map_proj);
+        fatalError (_FX("drawAzmStars() bad map_proj %d"), map_proj);
     }
 }
 
@@ -1257,10 +1275,10 @@ void drawMoreEarth()
         drawMapGrid();
         drawSatPathAndFoot();
         drawSatNameOnRow (0);
-        drawAllSymbols(true);
         if (waiting4DXPath())
             drawDXPath();
         drawPSKPaths ();
+        drawAllSymbols(true);
         drawMouseLoc();
 
         // draw now
@@ -1324,7 +1342,7 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
         float ca, B;
         solveSphere (ll.lng - de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &ca, &B);
         float a = AZIM1_ZOOM*acosf (ca);
-        float R = fminf (a*map_b.h/(2*M_PIF), map_b.h/2 - edge - 1);        // well clear
+        float R = fminf (map_b.h/2*powf(a/M_PIF,1/AZIM1_FISHEYE), map_b.h/2 - edge - 1);
         float dx = R*sinf(B);
         float dy = R*cosf(B);
         s.x = roundf(map_b.x + map_b.w/2 + dx);
@@ -1354,7 +1372,7 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
         } break;
 
     default:
-        fatalError (_FX("Bug! ll2s() bad map_proj %d"), map_proj);
+        fatalError (_FX("ll2s() bad map_proj %d"), map_proj);
     }
 
 }
@@ -1414,7 +1432,7 @@ bool s2ll (const SCoord &s, LatLong &ll)
             return(false);
 
         // use screen triangle to find globe
-        float b = sqrtf((float)r2/h2) * M_PIF / AZIM1_ZOOM;
+        float b = powf((float)r2/h2, AZIM1_FISHEYE/2.0F) * M_PIF / AZIM1_ZOOM;     // /2 just for sqrt
         float A = (M_PI_2F) - atan2f (dy, dx);
         float ca, B;
         solveSphere (A, b, sdelat, cdelat, &ca, &B);
@@ -1436,7 +1454,7 @@ bool s2ll (const SCoord &s, LatLong &ll)
         } break;
 
     default:
-        fatalError (_FX("Bug! s2ll() bad map_proj %d"), map_proj);
+        fatalError (_FX("s2ll() bad map_proj %d"), map_proj);
     }
 
 
@@ -1644,7 +1662,7 @@ void drawMapCoord (const SCoord &s)
             break;
 
         default:
-            fatalError (_FX("Bug! drawMapCoord() bad mapgrid_choice: %d"), mapgrid_choice);
+            fatalError (_FX("drawMapCoord() bad mapgrid_choice: %d"), mapgrid_choice);
             break;
 
         }
@@ -1804,6 +1822,9 @@ void drawDXInfo ()
     if (show_km)
         dist *= 1.609344F;                      // mi - > km
 
+    // convert to magnetic if desired
+    bool bearing_ismag = desiredBearing (de_ll, bearing);
+
     // print, capturing where units and deg/path can go
     tft.setCursor (dx_info_b.x, dx_info_b.y+5*vspace-4);
     tft.printf ("%.0f", dist);
@@ -1813,10 +1834,10 @@ void drawDXInfo ()
     uint16_t deg_x = tft.getCursorX() + 3;
     uint16_t deg_y = tft.getCursorY();
 
-    // home-made degree symbol
+    // home-made degree symbol if true, else M for magnetic
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setCursor (deg_x, deg_y-bh-bh/6);
-    tft.print ('o');
+    tft.print (bearing_ismag ? 'M' : 'o');
 
     // rows for small chars
     uint16_t sm_y0 = deg_y - 13*bh/20;

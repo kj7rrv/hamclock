@@ -382,7 +382,7 @@ static void drawDigitalClock (time_t delocal_t)
         bl += snprintf (buf+bl, sizeof(buf)-bl, "%s, ", dayShortStr(wd));
         bl += snprintf (buf+bl, sizeof(buf)-bl, "%d %s %d", yr, monthShortStr(mo), dy);
     } else {
-        fatalError (_FX("Bug! bad date fmt: %d"), (int)getDateFormat());
+        fatalError (_FX("bad date fmt: %d"), (int)getDateFormat());
     }
     if (de_time_fmt == DETIME_DIGITAL_12)
         bl += snprintf (buf+bl, sizeof(buf)-bl, " %s", hr < 12 ? "AM" : "PM");
@@ -491,7 +491,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
             } else {
 
-                fatalError (_FX("Bug! bad format: %d"), (int)getDateFormat());
+                fatalError (_FX("bad format: %d"), (int)getDateFormat());
 
             }
 
@@ -997,7 +997,7 @@ void updateClocks(bool all)
             drawDigitalClock (tp.t + de_tz.tz_secs);
             break;
         default:
-            fatalError (_FX("Bug! unknown de fmt %d"), de_time_fmt);
+            fatalError (_FX("unknown de fmt %d"), de_time_fmt);
             break;
         }
 
@@ -1201,7 +1201,7 @@ bool checkClockTouch (SCoord &s)
         }
 
         // save new offset
-        NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
+        NVWriteInt32 (NV_UTC_OFFSET, utc_offset);
 
         // show whether UTC now
         drawUTCButton();
@@ -1248,7 +1248,7 @@ void changeTime (time_t t)
         utc_offset += t - nowWO();
 
     // save
-    NVWriteUInt32 (NV_UTC_OFFSET, utc_offset);
+    NVWriteInt32 (NV_UTC_OFFSET, utc_offset);
 
     // UTC button, normal loop will update clocks
     drawUTCButton();

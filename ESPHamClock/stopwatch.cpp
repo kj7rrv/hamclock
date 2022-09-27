@@ -457,7 +457,7 @@ static void drawDigit (const SBox &b, int digit, uint16_t lt)
         tft.fillRect (b.x+t, b.y+ho2-to2, w-2*t, t, sw_col);
         break;
     default:
-        fatalError(_FX("Bug! drawDigit %d"), digit);
+        fatalError(_FX("drawDigit %d"), digit);
         break;
     }
 }
@@ -533,7 +533,7 @@ static void drawSWTime(uint32_t t)
     ndig++;
 
     if (ndig != SW_ND)
-        fatalError (_FX("Bug! stopwatch %d != %d"), ndig, SW_ND);
+        fatalError (_FX("stopwatch %d != %d"), ndig, SW_ND);
 }
 
 

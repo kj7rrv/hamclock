@@ -742,7 +742,7 @@ static bool installFileMaps()
 
         // confirm core_map is one of the file styles
         if (core_map != CM_COUNTRIES && core_map != CM_TERRAIN && core_map != CM_DRAP && core_map !=CM_AURORA)
-            fatalError (_FX("Bug! style not a file map %d"), core_map);        // does not return
+            fatalError (_FX("style not a file map %d"), core_map);        // does not return
 
         // create names and titles
         const char *style = map_styles[core_map];
@@ -937,7 +937,7 @@ float propMap2MHz (PropMapSetting pms)
         case PROP_MAP_15M: return (21.1);
         case PROP_MAP_12M: return (24.9);
         case PROP_MAP_10M: return (28.2);
-        default: fatalError (_FX("Bug! bad MHz PMS %d"), pms); return (0);
+        default: fatalError (_FX("bad MHz PMS %d"), pms); return (0);
         }
 }
 
@@ -954,7 +954,7 @@ int propMap2Band (PropMapSetting pms)
         case PROP_MAP_15M: return (15);
         case PROP_MAP_12M: return (12);
         case PROP_MAP_10M: return (10);
-        default: fatalError (_FX("Bug! bad Band PMS %d"), pms); return (0);
+        default: fatalError (_FX("bad Band PMS %d"), pms); return (0);
         }
 }
 
@@ -1010,7 +1010,7 @@ void drawMapScale()
         title = "% Chance";
         break;
     default:
-        fatalError (_FX("Bug! drawMapScale core_map %d"), (int)core_map);
+        fatalError (_FX("drawMapScale core_map %d"), (int)core_map);
         return;         // lint
     }
 

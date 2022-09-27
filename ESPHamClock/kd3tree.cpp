@@ -8,12 +8,12 @@
  *    g++ -Wall -O2 -D_UNIT_TEST -o x.kd3tree kd3tree.cpp && ./x.kd3tree 
  */
 
+
+/* use HamClock.h but if unit test then define here what we need from it
+ */
+
 #if defined (_UNIT_TEST)
 
-#define _SUPPORT_PSKREPORTER
-
-/* define stuff normally found in HamClock.h
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +23,7 @@
 #include <sys/time.h>
 
 
+#define _IS_UNIX
 
 typedef struct {
     float lat, lng;                     // radians north, east
@@ -47,16 +48,16 @@ struct kd_node_t {
 typedef struct kd_node_t KD3Node;
 
 
-#else
+#else // !_UNIT_TEST
 
 #include "HamClock.h"
 
-#endif
+#endif // !_UNIT_TEST
 
 
 
 
-#if defined(_SUPPORT_PSKREPORTER)
+#if defined(_IS_UNIX)
 
 // handy
 static float sqr(float a) { return (a*a); }
@@ -183,9 +184,11 @@ float nearestKD3Dist2Miles(float d)
     return (ERAD_M*sqrtf(d));
 }
 
-#endif // _SUPPORT_PSKREPORTER
+#endif // _IS_UNIX
 
  
+
+
 #if defined (_UNIT_TEST)
 
 
