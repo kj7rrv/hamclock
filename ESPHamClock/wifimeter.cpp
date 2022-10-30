@@ -37,7 +37,7 @@ static uint16_t getWiFiMeterColor (const SBox &box, uint16_t x)
 bool readWiFiRSSI(int &rssi)
 {
     int r = WiFi.RSSI();
-    if (r < 100) {                      // 100 is magic value meaning bad
+    if (r < 10) {
         rssi = r;
         return (true);
     } else {

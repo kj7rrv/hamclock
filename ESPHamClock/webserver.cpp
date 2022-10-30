@@ -60,6 +60,7 @@ typedef enum {
     DEMO_SAT,
     DEMO_EME,
     DEMO_AUXTIME,
+    DEMO_PSKMASK,
 
     DEMO_N,
 
@@ -3000,7 +3001,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char *line)
     // new set of bands, if set
 #if defined (_SUPPORT_PSKESP)
     // temp fake
-    int psk_bands = 0;
+    uint32_t psk_bands = 0;
 #endif
     uint32_t new_bands = 0;
     if (wa.found[3]) {
@@ -3932,7 +3933,8 @@ void runNextDemoCommand()
                 // 15
         5,      // DEMO_SAT
         5,      // DEMO_EME
-        7       // DEMO_AUXTIME
+        6,      // DEMO_AUXTIME
+        1,      // DEMO_PSKMASK
     };
 
     // record previous choice to avoid repeats
@@ -4228,6 +4230,18 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         updateClocks(true);
         ok = true;
         demoMsg (ok, choice, msg, "Aux time %s", auxtime_names[(int)auxtime]);
+        break;
+
+    case DEMO_PSKMASK:
+        psk_mask = 0;
+        if (random(100) > 50)
+            psk_mask |= PSKMB_OFDE;
+        if (random(100) > 50)
+            psk_mask |= PSKMB_CALL;
+        if (random(100) > 50)
+            psk_mask |= PSKMB_PSK;
+        ok = true;
+        demoMsg (ok, choice, msg, "psk_mask 0x%X", psk_mask);
         break;
 
     case DEMO_N:

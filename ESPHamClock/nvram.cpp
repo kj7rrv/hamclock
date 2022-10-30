@@ -142,6 +142,10 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_2M_COLOR
     4,                          // NV_DASHED
     1,                          // NV_BEAR_MAG
+    1,                          // NV_WSJT_SETSDX
+    1,                          // NV_WSJT_DX
+    2,                          // NV_PSK_MAXAGE
+    1,                          // NV_WEEKMON
 
 };
 

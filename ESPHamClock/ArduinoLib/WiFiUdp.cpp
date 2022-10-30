@@ -103,25 +103,31 @@ IPAddress WiFiUDP::remoteIP()
 
 void WiFiUDP::beginPacket (const char *host, int port)
 {
-        // get host
-        struct hostent *server;
-	server = ::gethostbyname(host);
-	if (server == NULL) {
-	    printf ("%s:%d: %s\n", host, port, strerror(errno));
-	    return;
-	}
+        struct addrinfo hints, *aip;
+        char port_str[16];
+        
+        /* lookup host address.
+         * N.B. must call freeaddrinfo(aip) after successful call before returning
+         */ 
+        memset (&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        sprintf (port_str, "%d", port);
+        int error = ::getaddrinfo (host, port_str, &hints, &aip);
+        if (error) {
+            printf ("WiFiUDP: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
+            return;
+        }
+        
+        /* connect */
+        if (connect (sockfd, aip->ai_addr, aip->ai_addrlen) < 0) {
+            printf ("WiFiUDP: connect(%s,%d): %s\n", host, port, strerror(errno));
+            freeaddrinfo (aip);
+            return;
+        }
 
-        // connect
-        struct sockaddr_in serveraddr;
-	memset ((char *) &serveraddr, 0, sizeof(serveraddr));
-	serveraddr.sin_family = AF_INET;
-	memcpy((char *)&serveraddr.sin_addr.s_addr, (char *)server->h_addr, server->h_length);
-	serveraddr.sin_port = htons(port);
-	if (::connect( sockfd, (struct sockaddr *) &serveraddr, sizeof(serveraddr) ) < 0 ) {
-            sockfd = -1;
-	    printf ("Can not connect to %s:%d: %s\n", host, port, strerror(errno));
-	    return;
-	}
+        /* clean up */
+        freeaddrinfo (aip);
 }
 
 void WiFiUDP::write (uint8_t *buf, int n)

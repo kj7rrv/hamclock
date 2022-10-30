@@ -52,9 +52,9 @@ static int spcount[PSKBAND_N];                   // spots count per band
 /* return index of bands[] containing Hz, else -1
  * ESP
  */
-static int searchBands (long Hz)
+static int findBand (long Hz)
 {
-    int kHz = (int)(Hz/1000);
+    unsigned kHz = (int)(Hz/1000);
 
     int min_i = 0;
     int max_i = PSKBAND_N-1;
@@ -109,11 +109,11 @@ void drawPSKPane (const SBox &box)
     getNVMaidenhead (NV_DE_GRID, de_maid);
     de_maid[4] = '\0';
 
-    // which list and source
+    // show which list and source
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
     char where_how[70];
-    snprintf (where_how, sizeof(where_how), "%s %s using %s",
+    snprintf (where_how, sizeof(where_how), "%s %s - %s",
                 psk_mask & PSKMB_OFDE ? "of" : "by",
                 psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
                 psk_mask & PSKMB_PSK ? "PSK" : "WSPR");
@@ -157,7 +157,7 @@ bool updatePSKReporter ()
     bool data_psk = (psk_mask & PSKMB_PSK) != 0;
     bool use_call = (psk_mask & PSKMB_CALL) != 0;
     bool of_de = (psk_mask & PSKMB_OFDE) != 0;
-    snprintf (query, sizeof(query), "%s?%s%s=%s",
+    snprintf (query, sizeof(query), "%s?%s%s=%s",       // rely on fetch script default age
                                         data_psk ? psk_page : wspr_page,
                                         of_de ? "of" : "by",
                                         use_call ? "call" : "grid",
@@ -175,7 +175,7 @@ bool updatePSKReporter ()
 
         // skip header
         if (!httpSkipHeader (psk_client)) {
-            mapMsg (MSG_DWELL, "PSK error: no header");
+            mapMsg (MSG_DWELL, _FX("Spots err: no header"));
             goto out;
         }
 
@@ -194,7 +194,7 @@ bool updatePSKReporter ()
             if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
                             &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
                             new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
-                mapMsg (MSG_DWELL, line);
+                mapMsg (MSG_DWELL, _FX("Spots err: %s"), line);
                 goto out;
             }
 
@@ -208,7 +208,7 @@ bool updatePSKReporter ()
                                 ) {
 
                 // count
-                int b = searchBands (new_r.Hz);
+                int b = findBand (new_r.Hz);
                 if (b >= 0 && b < PSKBAND_N) {
                     spcount[b]++;
                     n_reports++;
@@ -220,9 +220,16 @@ bool updatePSKReporter ()
         ok = true;
 
     } else
-        mapMsg (MSG_DWELL, "Spot connection failed");
+        mapMsg (MSG_DWELL, _FX("Spots connection failed"));
 
 out:
+    // reset counts if trouble
+    if (!ok) {
+        n_reports = 0;
+        for (int i = 0; i < PSKBAND_N; i++)
+            spcount[i] = 0;
+    }
+
     // finish up
     psk_client.stop();
     Serial.printf ("PSK: found %d %s reports %s %s\n", n_reports,
@@ -323,6 +330,7 @@ static PSKReport *reports;                      // malloced list of reports
 static int n_reports;                           // n used in reports[]
 static int n_malloced;                          // n malloced in reports[]
 static KD3Node *kd3tree, *kd3root;              // n_reports of nodes that point into reports[] and tree
+static uint16_t maxage_mins;                    // query period
 
 
 // band edges, name, color and count
@@ -350,7 +358,7 @@ static BandEdge bands[PSKBAND_N] = {            // must match PSKBandSetting
 /* return index of bands[] containing Hz, else -1
  * UNIX
  */
-static int searchBands (long Hz)
+static int findBand (long Hz)
 {
     int kHz = (int)(Hz/1000);
 
@@ -374,7 +382,7 @@ static int searchBands (long Hz)
  */
 static bool wantBand (long Hz)
 {
-    int b = searchBands(Hz);
+    int b = findBand(Hz);
     if (b >= 0) {
         bands[b].count++;
         return ((psk_bands & (1<<b)) != 0);
@@ -398,7 +406,7 @@ static void ditherLL (LatLong &ll)
  */
 uint16_t getBandColor (long Hz)
 {
-    int b = searchBands (Hz);
+    int b = findBand (Hz);
     return (b >= 0 ? getMapColor(bands[b].cid) : RA8875_BLACK);
 }
 
@@ -418,6 +426,11 @@ void initPSKState()
             psk_bands |= 1 << i;
         NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
     }
+    if (!NVReadUInt16 (NV_PSK_MAXAGE, &maxage_mins)) {
+        // default 30 minutes
+        maxage_mins = 30;
+        NVWriteUInt16 (NV_PSK_MAXAGE, maxage_mins);
+    }
 }
 
 /* UNIX
@@ -426,6 +439,7 @@ void savePSKState()
 {
     NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
     NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
+    NVWriteUInt16 (NV_PSK_MAXAGE, maxage_mins);
 }
 
 /* draw the PSK pane in its current box
@@ -449,14 +463,16 @@ void drawPSKPane (const SBox &box)
     getNVMaidenhead (NV_DE_GRID, de_maid);
     de_maid[4] = '\0';
 
-    // which list and source
+    // show which list and source
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
     char where_how[100];
-    snprintf (where_how, sizeof(where_how), "%s %s using %s",
+    snprintf (where_how, sizeof(where_how), "%s %s - %s %d %s",
                 psk_mask & PSKMB_OFDE ? "of" : "by",
                 psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
-                psk_mask & PSKMB_PSK ? "PSK" : "WSPR");
+                psk_mask & PSKMB_PSK ? "PSK" : "WSPR",
+                maxage_mins == 30 ? maxage_mins : maxage_mins/60,
+                maxage_mins == 30 ? "mins" : (maxage_mins == 60 ? "hour" : "hrs"));
     uint16_t whw = getTextWidth(where_how);
     tft.setCursor (box.x + (box.w-whw)/2, box.y + box.h/4);
     tft.print (where_how);
@@ -548,11 +564,12 @@ bool updatePSKReporter ()
     bool data_psk = (psk_mask & PSKMB_PSK) != 0;
     bool use_call = (psk_mask & PSKMB_CALL) != 0;
     bool of_de = (psk_mask & PSKMB_OFDE) != 0;
-    snprintf (query, sizeof(query), "%s?%s%s=%s",
+    snprintf (query, sizeof(query), "%s?%s%s=%s&maxage=%d",
                                         data_psk ? psk_page : wspr_page,
                                         of_de ? "of" : "by",
                                         use_call ? "call" : "grid",
-                                        use_call ? getCallsign() : de_maid);
+                                        use_call ? getCallsign() : de_maid,
+                                        maxage_mins*60 /* wants seconds */);
     printf ("PSK: query: %s\n", query);
 
     // fetch and fill reports[]
@@ -566,7 +583,7 @@ bool updatePSKReporter ()
 
         // skip header
         if (!httpSkipHeader (psk_client)) {
-            mapMsg (MSG_DWELL, "PSK error: no header");
+            mapMsg (MSG_DWELL, "Spots err: no header");
             goto out;
         }
 
@@ -587,7 +604,7 @@ bool updatePSKReporter ()
             if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
                             &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
                             new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
-                mapMsg (MSG_DWELL, line);
+                mapMsg (MSG_DWELL, "Spots err: %s", line);
                 goto out;
             }
 
@@ -633,9 +650,16 @@ bool updatePSKReporter ()
         ok = true;
 
     } else
-        mapMsg (MSG_DWELL, "Spot connection failed");
+        mapMsg (MSG_DWELL, "Spots connection failed");
 
 out:
+    // reset counts if trouble
+    if (!ok) {
+        n_reports = 0;
+        for (int i = 0; i < PSKBAND_N; i++)
+            bands[i].count = 0;
+    }
+
     // finish up
     psk_client.stop();
     printf ("PSK: found %d %s reports %s %s\n", n_reports,
@@ -664,36 +688,55 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
 
     // menu
     #define PRI_INDENT 2
-    #define SEC_INDENT 0
-    #define TRI_INDENT 12
-    #define MI_N (PSKBAND_N + 9)                                // bands + controls
+    #define SEC_INDENT 12
+    #define MI_N (PSKBAND_N + 15)                                // bands + controls
     MenuItem mitems[MI_N];
-    mitems[0] =     {MENU_LABEL, false, 0, PRI_INDENT, "Data:"};
-    mitems[1] =     {MENU_LABEL, false, 0, PRI_INDENT, "Spot:"};
-    mitems[2] =     {MENU_LABEL, false, 0, PRI_INDENT, "What:"};
-    mitems[3] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_160M)), 4, TRI_INDENT, bands[PSKBAND_160M].name};
-    mitems[4] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_80M)),  4, TRI_INDENT, bands[PSKBAND_80M].name};
-    mitems[5] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_60M)),  4, TRI_INDENT, bands[PSKBAND_60M].name};
-    mitems[6] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_40M)),  4, TRI_INDENT, bands[PSKBAND_40M].name};
-    mitems[7] =     {MENU_1OFN, data_psk, 1, SEC_INDENT, "PSK"};
-    mitems[8] =     {MENU_1OFN, of_de, 2, SEC_INDENT, "of DE"};
-    mitems[9] =     {MENU_1OFN, use_call, 3, SEC_INDENT, "Call"};
-    mitems[10] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_30M)),  4, TRI_INDENT, bands[PSKBAND_30M].name};
-    mitems[11] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_20M)),  4, TRI_INDENT, bands[PSKBAND_20M].name};
-    mitems[12]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_17M)),  4, TRI_INDENT, bands[PSKBAND_17M].name};
-    mitems[13]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_15M)),  4, TRI_INDENT, bands[PSKBAND_15M].name};
-    mitems[14]=    {MENU_1OFN, !data_psk, 1, SEC_INDENT, "WSPR"};
-    mitems[15]=    {MENU_1OFN, !of_de, 2, SEC_INDENT, "by DE"};
-    mitems[16]=    {MENU_1OFN, !use_call, 3, SEC_INDENT, "Grid"};
-    mitems[17]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_12M)),  4, TRI_INDENT, bands[PSKBAND_12M].name};
-    mitems[18]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_10M)),  4, TRI_INDENT, bands[PSKBAND_10M].name};
-    mitems[19]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_6M)),   4, TRI_INDENT, bands[PSKBAND_6M].name};
-    mitems[20]= {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_2M)),   4, TRI_INDENT, bands[PSKBAND_2M].name};
+
+    mitems[0] = {MENU_LABEL, false, 0, PRI_INDENT, "Data:"};
+    mitems[1] = {MENU_LABEL, false, 0, PRI_INDENT, "Spot:"};
+    mitems[2] = {MENU_LABEL, false, 0, PRI_INDENT, "What:"};
+    mitems[3] = {MENU_LABEL, false, 5, PRI_INDENT, "Age:"};
+    mitems[4] = {MENU_1OFN,  false, 6, 5, "2 hrs"};
+    mitems[5] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_160M)), 4, SEC_INDENT, bands[PSKBAND_160M].name};
+    mitems[6] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_80M)),  4, SEC_INDENT, bands[PSKBAND_80M].name};
+    mitems[7] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_60M)),  4, SEC_INDENT, bands[PSKBAND_60M].name};
+    mitems[8] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_40M)),  4, SEC_INDENT, bands[PSKBAND_40M].name};
+
+    mitems[9]  = {MENU_1OFN, data_psk, 1, PRI_INDENT, "PSK"};
+    mitems[10] = {MENU_1OFN, of_de,    2, PRI_INDENT, "of DE"};
+    mitems[11] = {MENU_1OFN, use_call, 3, PRI_INDENT, "Call"};
+    mitems[12] = {MENU_1OFN, false,    6, PRI_INDENT, "30 min"};
+    mitems[13] = {MENU_1OFN, false,    6, PRI_INDENT, "6 hrs"};
+    mitems[14] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_30M)),  4, SEC_INDENT, bands[PSKBAND_30M].name};
+    mitems[15] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_20M)),  4, SEC_INDENT, bands[PSKBAND_20M].name};
+    mitems[16] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_17M)),  4, SEC_INDENT, bands[PSKBAND_17M].name};
+    mitems[17] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_15M)),  4, SEC_INDENT, bands[PSKBAND_15M].name};
+
+    mitems[18] = {MENU_1OFN, !data_psk, 1, PRI_INDENT, "WSPR"};
+    mitems[19] = {MENU_1OFN, !of_de,    2, PRI_INDENT, "by DE"};
+    mitems[20] = {MENU_1OFN, !use_call, 3, PRI_INDENT, "Grid"};
+    mitems[21] = {MENU_1OFN, false,     6, PRI_INDENT, "1 hour"};
+    mitems[22] = {MENU_1OFN, false,     6, PRI_INDENT, "24 hrs"};
+    mitems[23] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_12M)),  4, SEC_INDENT, bands[PSKBAND_12M].name};
+    mitems[24] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_10M)),  4, SEC_INDENT, bands[PSKBAND_10M].name};
+    mitems[25] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_6M)),   4, SEC_INDENT, bands[PSKBAND_6M].name};
+    mitems[26] = {MENU_AL1OFN, (bool)(psk_bands & (1<<PSKBAND_2M)),   4, SEC_INDENT, bands[PSKBAND_2M].name};
+
+    // set age
+    switch (maxage_mins) {
+    case 30:    mitems[12].set = true; break;
+    case 60:    mitems[21].set = true; break;
+    case 120:   mitems[4].set  = true; break;
+    case 720:   mitems[13].set = true; break;
+    case 1440:  mitems[22].set = true; break;
+    default:
+        fatalError ("Bad maxage_mins: %d", maxage_mins);
+    }
 
     // create a box for the menu
     SBox menu_b;
-    menu_b.x = box.x+21;
-    menu_b.y = box.y+35;
+    menu_b.x = box.x+14;
+    menu_b.y = box.y+10;
     menu_b.w = 0;       // shrink to fit
 
     // run
@@ -703,27 +746,43 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
 
         // set new mode
         psk_mask = 0;
-        if (mitems[7].set)
-            psk_mask |= PSKMB_PSK;
-        if (mitems[8].set)
-            psk_mask |= PSKMB_OFDE;
         if (mitems[9].set)
+            psk_mask |= PSKMB_PSK;
+        if (mitems[10].set)
+            psk_mask |= PSKMB_OFDE;
+        if (mitems[11].set)
             psk_mask |= PSKMB_CALL;
 
         // set new bands
         psk_bands = 0;
-        psk_bands |= mitems[3].set  << PSKBAND_160M;
-        psk_bands |= mitems[4].set  << PSKBAND_80M;
-        psk_bands |= mitems[5].set  << PSKBAND_60M;
-        psk_bands |= mitems[6].set  << PSKBAND_40M;
-        psk_bands |= mitems[10].set << PSKBAND_30M;
-        psk_bands |= mitems[11].set << PSKBAND_20M;
-        psk_bands |= mitems[12].set << PSKBAND_17M;
-        psk_bands |= mitems[13].set << PSKBAND_15M;
-        psk_bands |= mitems[17].set << PSKBAND_12M;
-        psk_bands |= mitems[18].set << PSKBAND_10M;
-        psk_bands |= mitems[19].set << PSKBAND_6M;
-        psk_bands |= mitems[20].set << PSKBAND_2M;
+        psk_bands |= mitems[5].set  << PSKBAND_160M;
+        psk_bands |= mitems[6].set  << PSKBAND_80M;
+        psk_bands |= mitems[7].set  << PSKBAND_60M;
+        psk_bands |= mitems[8].set  << PSKBAND_40M;
+        psk_bands |= mitems[14].set << PSKBAND_30M;
+        psk_bands |= mitems[15].set << PSKBAND_20M;
+        psk_bands |= mitems[16].set << PSKBAND_17M;
+        psk_bands |= mitems[17].set << PSKBAND_15M;
+        psk_bands |= mitems[23].set << PSKBAND_12M;
+        psk_bands |= mitems[24].set << PSKBAND_10M;
+        psk_bands |= mitems[25].set << PSKBAND_6M;
+        psk_bands |= mitems[26].set << PSKBAND_2M;
+        if (!psk_bands)
+            fatalError ("No menu psk_bands");
+
+        // get new age
+        if (mitems[12].set)
+            maxage_mins = 30;
+        else if (mitems[21].set)
+            maxage_mins = 60;
+        else if (mitems[4].set)
+            maxage_mins = 120;
+        else if (mitems[13].set)
+            maxage_mins = 720;
+        else if (mitems[22].set)
+            maxage_mins = 1440;
+        else
+            fatalError ("No menu age");
 
         // persist
         savePSKState();

@@ -128,7 +128,7 @@ static const char *sdo_filename[4] = {
 static bool moon_reverting;                     // flag for revertPlot1();
 
 // Live spots
-#define PSK_INTERVAL    49                      // polling period. secs
+#define PSK_INTERVAL    69                      // polling period. secs
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
@@ -146,8 +146,10 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 #define WIFI_RETRY      10
 
 // pane auto rotation period in seconds -- most are the same but wx is longer
-#define ROTATION_INTERVAL       30
-#define ROTATION_WX_INTERVAL    60
+#define ROTATION_INTERVAL       30              // default pane rotation interval, s
+#define ROTATION_WX_INTERVAL    200             // default weather interval, s
+#define ROT_SLOW_DELTA          15              // seconds to defer for high server load
+static const char sload_page[] PROGMEM = "/loadfactor.pl";      // page to query for server load
 
 
 // time of next attempts -- 0 will refresh immediately -- reset in initWiFiRetry()
@@ -199,6 +201,71 @@ static bool updateRSS (void);
 static uint32_t crackBE32 (uint8_t bp[]);
 
 
+/* retrieve server overload factor, with default if error.
+ */
+static int queryServerOverLoad (void)
+{
+    WiFiClient sl_client;
+    int overload = 2;
+    float load;
+    int ncores;
+    bool ok = false;
+
+    resetWatchdog();
+    if (wifiOk() && sl_client.connect(svr_host, HTTPPORT)) {
+        updateClocks(false);
+
+        // query web page
+        httpHCPGET (sl_client, svr_host, sload_page);
+
+        // skip response header
+        if (!httpSkipHeader (sl_client)) {
+            Serial.print (F("server load header fail\n"));
+            goto out;
+        }
+
+        // next line is load and ncores
+        char line[50];
+        if (!getTCPLine (sl_client, line, sizeof(line), NULL)) {
+            Serial.print (F("missing server load line\n"));
+            goto out;
+        }
+        // Serial.println (line);
+        if (sscanf (line, "%f %d", &load, &ncores) != 2) {
+            Serial.printf (_FX("bogus server load line: %s"), line);
+            goto out;
+        }
+
+        // ok!
+        overload = (int) fmaxf (0, load - ncores);
+        Serial.printf (_FX("SL: %g %d overload %d\n"), load, ncores, overload);
+        ok = true;
+
+    }
+
+    // clean up
+out:
+
+    sl_client.stop();
+    updateClocks(false);
+    resetWatchdog();
+    printFreeHeap (F("queryServerOverLoad"));
+
+    if (!ok)
+        Serial.printf (_FX("SL: overload failed\n"));
+
+    return (overload);
+}
+
+/* get pane rotation interval, depending on pane and server load
+ */
+static int getRotationInterval(PlotChoice pc)
+{
+    int interval = (pc == PLOT_CH_DEWX || pc == PLOT_CH_DXWX) ? ROTATION_WX_INTERVAL : ROTATION_INTERVAL;
+    int server_overload = queryServerOverLoad();
+    return (interval + server_overload * ROT_SLOW_DELTA);
+}
+
 /* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
  */
 static time_t tdiff (const time_t t1, const time_t t2)
@@ -211,14 +278,18 @@ static time_t tdiff (const time_t t1, const time_t t2)
 }
 
 /* return the next retry time_t.
- * retries are spaced out every WIFI_RETRY to avoid swamping the server
+ * retries are spaced out every WIFI_RETRY or more depending on server load to avoid swamping the server
  */
 static time_t nextWiFiRetry()
 {
+    // if we are retrying this probably won't work either but give it a try anyway
+    int server_overload = queryServerOverLoad();
+    int interval = (1 + server_overload) * WIFI_RETRY;
+
     static time_t prev_try;
     time_t t0 = now();
-    time_t next_t0 = t0 + WIFI_RETRY;                   // interval after now
-    time_t next_try = prev_try + WIFI_RETRY;            // interval after prev rot
+    time_t next_t0 = t0 + interval;                     // interval after now
+    time_t next_try = prev_try + interval;              // interval after prev rot
     prev_try = next_t0 > next_try ? next_t0 : next_try; // use whichever is later
     return (prev_try);
 }
@@ -228,7 +299,7 @@ static time_t nextWiFiRetry()
  */
 static time_t nextPaneRotationTime(PlotPane pp, PlotChoice pc)
 {
-    time_t interval = (pc == PLOT_CH_DEWX || pc == PLOT_CH_DXWX) ? ROTATION_WX_INTERVAL : ROTATION_INTERVAL;
+    int interval = getRotationInterval(pc);
     time_t rot_time = now() + interval;
 
     // find soonest rot_time that is interval from all other active panes
@@ -390,7 +461,7 @@ static void initWiFi (bool verbose)
         Serial.printf (_FX("Trying network %d\n"), ndots);
         if (timesUp(&t0,timeout) || ndots == (sizeof(dots)-1)) {
             if (myssid)
-                tftMsg (verbose, 1000, _FX("WiFi failed -- check credentials?"));
+                tftMsg (verbose, 1000, _FX("WiFi failed -- signal? credentials?"));
             else
                 tftMsg (verbose, 1000, _FX("Network connection attempt failed"));
             return;
@@ -1247,7 +1318,7 @@ static void checkBRB (time_t t)
                             next_rotT = plot_rotationT[i];
                     }
                 }
-                brb_rotationT = next_rotT ? next_rotT : t + ROTATION_INTERVAL;
+                brb_rotationT = next_rotT ? next_rotT : t + getRotationInterval(PLOT_CH_NONE);
 
                 break;
             }
@@ -1782,12 +1853,13 @@ void updateWiFi(void)
         case PLOT_CH_PSK:
             if (t0 >= next_psk) { 
                 if (updatePSKReporter()) {
-                    drawPSKPane(box);
                     // paths are drawn by drawAllSymbols()
                     next_psk = now() + PSK_INTERVAL;
                 } else {
                     next_psk = nextWiFiRetry();
                 }
+                // draw pane even if error to reset displated counts
+                drawPSKPane(box);
             }
             break;
 
@@ -1964,7 +2036,7 @@ time_t getNTPUTC(const char **server)
  */
 bool getChar (WiFiClient &client, char *cp)
 {
-    #define GET_TO 5000 // millis()
+    #define GET_TO 10000 // millis()
 
     resetWatchdog();
 

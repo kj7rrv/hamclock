@@ -2262,8 +2262,10 @@ void wdDelay(int ms)
 bool timesUp (uint32_t *prev, uint32_t dt)
 {
     uint32_t ms = millis();
-    if (ms < *prev || ms - *prev < dt)          // allow for ms < prev
+    if (ms < *prev || ms - *prev < dt) {        // allow for ms < prev
+        resetWatchdog();
         return (false);
+    }
     *prev = ms;
     return (true);
 }

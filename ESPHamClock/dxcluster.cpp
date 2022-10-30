@@ -164,6 +164,15 @@ typedef enum {
 static DXClusterType cl_type;
 
 
+/* return the current host name
+ */
+static const char *getHostName()
+{
+        if (useWSJTX())
+            return ("WSJT-X");
+        else
+            return (getDXClusterHost());
+}
 
 /* given a spot[] index, draw in box if visible depending on top_vis
  */
@@ -733,11 +742,11 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
         // get each ll from grids
         LatLong ll_de, ll_dx;
         if (!maidenhead2ll (ll_de, de_grid)) {
-            // dxcLog (_FX("%s invalid DE grid: %s\n"), de_call, de_grid);
+            dxcLog (_FX("%s invalid or missing DE grid: %s\n"), de_call, de_grid);
             return;
         }
         if (!maidenhead2ll (ll_dx, dx_grid)) {
-            // dxcLog (_FX("%s invalid DX grid: %s\n"), dx_call, dx_grid);
+            dxcLog (_FX("%s invalid or missing DX grid: %s\n"), dx_call, dx_grid);
             return;
         }
 
@@ -759,8 +768,9 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
         int mn = minute();
         new_spot.utcs = hr*100 + mn;
 
-        // add to list
-        addDXClusterSpot (box, new_spot);
+        // add to list and set dx if desired
+        if (addDXClusterSpot (box, new_spot) && setWSJTDX())
+            engageRow (spots[n_spots-1]);
 
         // printFreeHeap(F("wsjtxParseStatusMsg"));
 }
@@ -839,20 +849,19 @@ static void prefillDXList(const SBox &box)
 
 #endif // _USE_SHOWDX
 
-/* try to connect to the cluster defined by getDXClusterHost():getDXClusterPort().
+/* try to connect to the cluster.
  * if success: dx_client or wsjtx_server is live and return true,
  * else: both are closed, display error msg in box, return false.
  */
 static bool connectDXCluster (const SBox &box)
 {
-        const char *dxhost = getDXClusterHost();
+        const char *dxhost = getHostName();
         int dxport = getDXClusterPort();
 
         dxcLog (_FX("Connecting to %s:%d\n"), dxhost, dxport);
         resetWatchdog();
 
-        // decide type from host name
-        if (!strcasecmp (dxhost, "WSJT-X") || !strcasecmp (dxhost, "JTDX")) {
+        if (useWSJTX()) {
 
             // create fresh UDP for WSJT-X
             wsjtx_server.stop();
@@ -973,7 +982,7 @@ static bool connectDXCluster (const SBox &box)
  */
 static void showHostPort (const SBox &box, uint16_t c)
 {
-        const char *dxhost = getDXClusterHost();
+        const char *dxhost = getHostName();
         int dxport = getDXClusterPort();
 
         char name[(box.w-2)/FONT_W];

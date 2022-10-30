@@ -660,21 +660,24 @@ static void drawMouseLoc()
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
         tft.printf (buf);
 
-#if 0
+        // show freq
+        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.printf ("kHz%6d", psk_rp->Hz/1000);
+
         // show age
         time_t t0 = now();
         int age = t0 >= psk_rp->posting ? t0 - psk_rp->posting : 0;
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Age %5d", age/60);                 // want minutes
-#endif
+        if (age < 3600)
+            tft.printf ("Age %4dm", age/60);                    // minutes
+        else
+            tft.printf ("Age %4.1fh", age/3600.0F);             // hours
 
-        // show freq
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("KHz%6d", psk_rp->Hz/1000);
-
+#if 0
         // show snr
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("SNR %5d", psk_rp->snr);
+#endif
 
         // show distance and bearing
         drawMLDB (psk_rp->ll, tx+TEXT_INDENT, LINE_DY, ty);
@@ -716,7 +719,7 @@ static void drawMouseLoc()
 
         // show freq
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("KHz%6.0f", dxc_s.kHz);
+        tft.printf ("kHz%6.0f", dxc_s.kHz);
 
         // show distance and bearing
         drawMLDB (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
@@ -747,9 +750,6 @@ static void drawMouseLoc()
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("LMT %02d:%02d", hour(lt), minute(lt));
 
-        // show distance and bearing
-        drawMLDB (ll, tx+TEXT_INDENT, LINE_DY, ty);
-
         // zones
         ty += LINE_DY;
         if (cqzone_n) {
@@ -769,6 +769,9 @@ static void drawMouseLoc()
             tft.setCursor (tx+TEXT_INDENT, ty);
             tft.printf ("Pfx %5s", prefix);
         }
+
+        // show distance and bearing
+        drawMLDB (ll, tx+TEXT_INDENT, LINE_DY, ty);
 
         // border
         tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,

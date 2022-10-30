@@ -144,8 +144,8 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define ERR_C           RA8875_RED              // err msg color
 
 // validation constants
-#define MAX_BME_DTEMP   15
-#define MAX_BME_DPRES   20
+#define MAX_BME_DTEMP   20
+#define MAX_BME_DPRES   400                     // eg correction for 10k feet is 316 hPa
 
 
 // NV_X11FLAGS bit defns
@@ -170,6 +170,7 @@ typedef struct {
 
 // N.B. must match string_pr[] order
 typedef enum {
+    // page "1"
     CALL_SPR,
     LAT_SPR,
     LNG_SPR,
@@ -177,15 +178,17 @@ typedef enum {
     WIFISSID_SPR,
     WIFIPASS_SPR,
 
+    // page "2"
     NTPHOST_SPR,
-    DXHOST_SPR,
     DXPORT_SPR,
+    DXHOST_SPR,
     DXLOGIN_SPR,
     DXCLCMD0_SPR,
     DXCLCMD1_SPR,
     DXCLCMD2_SPR,
     DXCLCMD3_SPR,
 
+    // page "3"
     RIGPORT_SPR,
     RIGHOST_SPR,
     ROTPORT_SPR,
@@ -193,6 +196,7 @@ typedef enum {
     FLRIGPORT_SPR,
     FLRIGHOST_SPR,
 
+    // page "4"
     CENTERLNG_SPR,
     TEMPCORR_SPR,
     PRESCORR_SPR,
@@ -221,9 +225,10 @@ static StringPrompt string_pr[N_SPR] = {
 
     {1, {100, R2Y(0), 60, PR_H}, {180, R2Y(0), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
 
-    {1, { 20, R2Y(2), 70, PR_H}, {100, R2Y(2), 250, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
     {1, { 20, R2Y(3), 70, PR_H}, {100, R2Y(3),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {1, { 20, R2Y(4), 70, PR_H}, {100, R2Y(4), 250, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
+    {1, { 20, R2Y(4), 70, PR_H}, {100, R2Y(4), 250, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
+    {1, { 20, R2Y(5), 70, PR_H}, {100, R2Y(5), 250, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
+
     {1, {350, R2Y(2), 50, PR_H}, {400, R2Y(2), 400, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(3), 50, PR_H}, {400, R2Y(3), 400, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(4), 50, PR_H}, {400, R2Y(4), 400, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
@@ -232,12 +237,12 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 3" -- index 2
 
+    {2, {160, R2Y(0), 60, PR_H}, {220, R2Y(0),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {320, R2Y(0), 60, PR_H}, {380, R2Y(0), 400, PR_H}, "host:", righost, NV_RIGHOST_LEN, 0},
+    {2, {160, R2Y(1), 60, PR_H}, {220, R2Y(1),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {320, R2Y(1), 60, PR_H}, {380, R2Y(1), 400, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
     {2, {160, R2Y(2), 60, PR_H}, {220, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", righost, NV_RIGHOST_LEN, 0},
-    {2, {160, R2Y(3), 60, PR_H}, {220, R2Y(3),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(3), 60, PR_H}, {380, R2Y(3), 400, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
-    {2, {160, R2Y(4), 60, PR_H}, {220, R2Y(4),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(4), 60, PR_H}, {380, R2Y(4), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
+    {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
 
     // "page 4" -- index 3
 
@@ -280,37 +285,45 @@ typedef struct {
 
 // N.B. must match bool_pr[] order
 typedef enum {
+    // page "1"
     GPSDON_BPR,
     GPSDFOLLOW_BPR,
     GEOIP_BPR,
     WIFI_BPR,
 
+    // page "2"
     NTPSET_BPR,
     CLUSTER_BPR,
+    CLISWSJTX_BPR,
     CLLBL_BPR,
     CLLBLCALL_BPR,
     CLPATH_BPR,
+    SETDX_BPR,
     DXCLCMD0_BPR,
     DXCLCMD1_BPR,
     DXCLCMD2_BPR,
     DXCLCMD3_BPR,
 
+    // page "3"
     RIGUSE_BPR,
     ROTUSE_BPR,
     FLRIGUSE_BPR,
 
+    // page "4"
     GPIOOK_BPR,
     KX3ON_BPR,
     KX3BAUD_BPR,
 
+    // page "5"
     DATEFMT_MDY_BPR,
     DATEFMT_DMYYMD_BPR,
+    WEEKDAY1MON_BPR,
     UNITS_BPR,
     BEARING_BPR,
-    FLIP_BPR,
     LOGUSAGE_BPR,
     DEMO_BPR,
     X11_FULLSCRN_BPR,
+    FLIP_BPR,
 
     N_BPR
 } BPIds;
@@ -332,11 +345,13 @@ static BoolPrompt bool_pr[N_BPR] = {
     {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 300, PR_H}, false, "NTP?", "Use default set of servers", 0},
 
     {1, {10,  R2Y(1),  90, PR_H},  {100, R2Y(1), 60,  PR_H}, false, "Cluster?", "No", "Yes"},
+    {1, {200, R2Y(1),  90, PR_H},  {290, R2Y(1), 60,  PR_H}, false, "WSJT-X?", "No", "Yes"},
 
-    {1, { 20, R2Y(5),  70, PR_H},  {100, R2Y(5), 60,  PR_H}, false, "Label?", "No", NULL},
-    {1, {100, R2Y(5),   0, PR_H},  {100, R2Y(5), 60,  PR_H}, false, NULL, "Prefix", "Call"},
+    {1, { 20, R2Y(2),  70, PR_H},  {100, R2Y(2), 60,  PR_H}, false, "Label?", "No", NULL},
+    {1, {100, R2Y(2),   0, PR_H},  {100, R2Y(2), 60,  PR_H}, false, NULL, "Prefix", "Call"},
                                                         // entangled: None: F X  Prefix: T F  Call: T T
-    {1, {200, R2Y(5),  70, PR_H},  {270, R2Y(5), 60,  PR_H}, false, "Path?", "No", "Yes"},
+    {1, {200, R2Y(2),  90, PR_H},  {290, R2Y(2), 50,  PR_H}, false, "Path?", "No", "Yes"},
+    {1, {200, R2Y(3),  90, PR_H},  {290, R2Y(3), 50,  PR_H}, false, "Set DX?", "No", "Yes"},
 
     {1, {350, R2Y(2),   0, PR_H},   {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
     {1, {350, R2Y(3),   0, PR_H},   {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
@@ -345,9 +360,9 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 3" -- index 2
 
-    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "rigctld?", "No", "Yes"},
-    {2, {10,  R2Y(3), 100, PR_H},  {100, R2Y(3),  60, PR_H}, false, "rotctld?", "No", "Yes"},
-    {2, {10,  R2Y(4), 100, PR_H},  {100, R2Y(4),  60, PR_H}, false, "flrig?", "No", "Yes"},
+    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes"},
+    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes"},
+    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes"},
 
 
     // "page 4" -- index 3
@@ -364,15 +379,16 @@ static BoolPrompt bool_pr[N_BPR] = {
     {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL},
     {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
                                                         // entangled: MDY: F X   DMY: T F  YMD:  T T
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H},  false, "Units?", "Imperial", "Metric"},
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H},  false, "Bearings?", "True N", "Magnetic N"},
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H},  false, "Week starts?", "Sunday", "Monday"},
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H},  false, "Units?", "Imperial", "Metric"},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H},  false, "Bearings?", "True N", "Magnetic N"},
 
 
     {4, {400,  R2Y(0), 140, PR_H}, {540, R2Y(0),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
     {4, {400,  R2Y(1), 140, PR_H}, {540, R2Y(1),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
     {4, {400,  R2Y(2), 140, PR_H}, {540, R2Y(2),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
                                                                 // state box wide enough for "Won't fit"
+    {4, {400,  R2Y(3), 140, PR_H}, {540, R2Y(3),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
 
     // "page 6" -- index 5
 
@@ -406,7 +422,7 @@ typedef struct {
 #define ONOFF_PAGE      6                       // 0-based counting
 #define N_PAGES         (HAVE_ONOFF() ? 7 : 6)  // last page is on/off
 #define SPIDER_PAGE     1
-#define SPIDER_X        500
+#define SPIDER_X        480
 #define SPIDER_Y        (R2Y(2) - PR_D)
 static Focus cur_focus;
 static int cur_page;
@@ -560,12 +576,24 @@ static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 2, PAGE_W, PAGE_H};
 // note whether ll edited
 static bool ll_edited;
 
-/* set ll_edited if cur_focus is lat or long
+/* set ll_edited if sp is LAT_SPR or LNG_SPR
  */
-static void checkLLEdit()
+static void checkLLEdit(const StringPrompt *sp)
 {
-    if (cur_focus.sp && (cur_focus.sp == &string_pr[LAT_SPR] || cur_focus.sp == &string_pr[LNG_SPR] ))
+    if (sp == &string_pr[LAT_SPR] || sp == &string_pr[LNG_SPR])
         ll_edited = true;
+}
+
+
+/* remove blanks from s IN PLACE.
+ */
+static void noBlanks (char *s)
+{
+    char c, *s_to = s;
+    while ((c = *s++) != '\0')
+        if (c != ' ')
+            *s_to++ = c;
+    *s_to = '\0';
 }
 
 /* draw, or erase, the Spider commands table header
@@ -574,7 +602,7 @@ static void drawSpiderCommandsHeader (bool draw)
 {
     tft.setTextColor (draw ? PR_C : BG_C);
     tft.setCursor (SPIDER_X, SPIDER_Y);
-    tft.print ("Spider Commands");
+    tft.print ("Spider Commands:");
 }
 
 static void drawPageButton()
@@ -616,6 +644,11 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     }
 
+    if (bp == &bool_pr[CLISWSJTX_BPR]) {
+        if (!bool_pr[CLUSTER_BPR].state)
+            return (false);
+    }
+
     if (bp == &bool_pr[CLLBLCALL_BPR]) {
         if (!bool_pr[CLUSTER_BPR].state || !bool_pr[CLLBL_BPR].state)
             return (false);
@@ -629,9 +662,16 @@ static bool boolIsRelevant (BoolPrompt *bp)
                 return (false);
     }
 
+    if (bp == &bool_pr[SETDX_BPR]) {
+        // only show if enabled and host is WSJT
+        if (!bool_pr[CLUSTER_BPR].state || !bool_pr[CLISWSJTX_BPR].state)
+            return (false);
+    }
+
     if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
                     || bp == &bool_pr[DXCLCMD2_BPR] || bp == &bool_pr[DXCLCMD3_BPR]) {
-        if (!bool_pr[CLUSTER_BPR].state)
+        // only show if enabled and host is not WSJT
+        if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
             return (false);
     }
 
@@ -695,10 +735,21 @@ static bool stringIsRelevant (StringPrompt *sp)
         #endif
     }
 
-    if (sp == &string_pr[DXHOST_SPR] || sp == &string_pr[DXPORT_SPR] || sp == &string_pr[DXLOGIN_SPR]
-                    || sp == &string_pr[DXCLCMD0_SPR] || sp == &string_pr[DXCLCMD1_SPR]
-                    || sp == &string_pr[DXCLCMD2_SPR] || sp == &string_pr[DXCLCMD3_SPR]) {
+    if (sp == &string_pr[DXHOST_SPR]) {
+        if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
+            return (false);
+    }
+
+    if (sp == &string_pr[DXPORT_SPR]) {
         if (!bool_pr[CLUSTER_BPR].state)
+            return (false);
+    }
+
+    if (sp == &string_pr[DXCLCMD0_SPR] || sp == &string_pr[DXCLCMD1_SPR]
+                    || sp == &string_pr[DXCLCMD2_SPR] || sp == &string_pr[DXCLCMD3_SPR]
+                    || sp == &string_pr[DXLOGIN_SPR]) {
+        // only show if enabled and host is not WSJT
+        if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
             return (false);
     }
 
@@ -776,17 +827,20 @@ static void nextTabFocus()
         { NULL, &bool_pr[NTPSET_BPR] },
         {       &string_pr[NTPHOST_SPR], NULL},
         { NULL, &bool_pr[CLUSTER_BPR] },
-        {       &string_pr[DXHOST_SPR], NULL},
+        { NULL, &bool_pr[CLISWSJTX_BPR] },
+        { NULL, &bool_pr[CLLBL_BPR] },
+        { NULL, &bool_pr[CLLBLCALL_BPR] },
+        { NULL, &bool_pr[CLPATH_BPR] },
         { NULL, &bool_pr[DXCLCMD0_BPR] },
         {       &string_pr[DXCLCMD0_SPR], NULL},
         {       &string_pr[DXPORT_SPR], NULL},
+        { NULL, &bool_pr[SETDX_BPR] },
         { NULL, &bool_pr[DXCLCMD1_BPR] },
         {       &string_pr[DXCLCMD1_SPR], NULL},
-        {       &string_pr[DXLOGIN_SPR], NULL},
+        {       &string_pr[DXHOST_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD2_BPR] },
         {       &string_pr[DXCLCMD2_SPR], NULL},
-        { NULL, &bool_pr[CLLBL_BPR] },
-        { NULL, &bool_pr[CLLBLCALL_BPR] },
+        {       &string_pr[DXLOGIN_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD3_BPR] },
         {       &string_pr[DXCLCMD3_SPR], NULL},
 
@@ -820,10 +874,11 @@ static void nextTabFocus()
         { NULL, &bool_pr[DATEFMT_MDY_BPR] },
         { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
         { NULL, &bool_pr[LOGUSAGE_BPR] },
-        { NULL, &bool_pr[UNITS_BPR] },
+        { NULL, &bool_pr[WEEKDAY1MON_BPR] },
         { NULL, &bool_pr[DEMO_BPR] },
-        { NULL, &bool_pr[BEARING_BPR] },
+        { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
+        { NULL, &bool_pr[BEARING_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
 
         // page 3
@@ -873,6 +928,10 @@ static void setFocus (StringPrompt *sp, BoolPrompt *bp)
  */
 static void setInitialFocus()
 {
+    // just stay if still on current page
+    if ((cur_focus.sp && cur_focus.sp->page == cur_page) || (cur_focus.bp && cur_focus.bp->page == cur_page))
+        return;
+
     StringPrompt *sp0 = NULL;
     BoolPrompt *bp0 = NULL;
 
@@ -884,14 +943,20 @@ static void setInitialFocus()
         }
     }
 
-    if (!sp0) {
-        for (int i = 0; i < N_BPR; i++) {
-            BoolPrompt *bp = &bool_pr[i];
-            if (boolIsRelevant(bp)) {
-                bp0 = bp;
-                break;
-            }
+    for (int i = 0; i < N_BPR; i++) {
+        BoolPrompt *bp = &bool_pr[i];
+        if (boolIsRelevant(bp)) {
+            bp0 = bp;
+            break;
         }
+    }
+
+    // if find both, use the one on the higher row
+    if (sp0 && bp0) {
+        if (sp0->p_box.y < bp0->p_box.y)
+            bp0 = NULL;
+        else
+            sp0 = NULL;
     }
 
     setFocus (sp0, bp0);
@@ -1151,17 +1216,6 @@ static void drawKeyboard()
     drawStringInBox ("Delete", delete_b, false, DEL_C);
 }
 
-
-/* remove blanks from s IN PLACE.
- */
-static void noBlanks (char *s)
-{
-    char c, *s_to = s;
-    while ((c = *s++) != '\0')
-        if (c != ' ')
-            *s_to++ = c;
-    *s_to = '\0';
-}
 
 
 /* convert a screen coord on the virtual keyboard to its char value, if any.
@@ -1634,7 +1688,7 @@ static void drawCurrentPageFields()
     }
 
     // draw spider header if appropriate
-    if (cur_page == SPIDER_PAGE && bool_pr[CLUSTER_BPR].state)
+    if (cur_page == SPIDER_PAGE && bool_pr[CLUSTER_BPR].state && !bool_pr[CLISWSJTX_BPR].state)
         drawSpiderCommandsHeader(true);
 
     #if defined(_WIFI_ALWAYS)
@@ -1649,13 +1703,10 @@ static void drawCurrentPageFields()
 }
 
 
-/* change cur_page to the given page, do nothing is already set
+/* change cur_page to the given page
  */
 static void changePage (int new_page)
 {
-    if (new_page == cur_page)
-        return;
-
     // save current then update
     int prev_page = cur_page;
     cur_page = new_page;
@@ -1715,6 +1766,7 @@ static bool portOK (const char *port_str, int min_port, uint16_t *portp)
     return (true);
 }
 
+
 /* return whether the given string seems to be a legit host name and fits in the given length.
  * N.B. all blanks are removed IN PLACE
  */
@@ -1754,7 +1806,7 @@ static bool validateStringPrompts()
     // check cluster info if used
     if (bool_pr[CLUSTER_BPR].state) {
         char *clhost = string_pr[DXHOST_SPR].v_str;
-        if (!hostOK(clhost,NV_DXHOST_LEN) && strcasecmp (clhost, "WSJT-X") && strcasecmp (clhost, "JTDX"))
+        if (!hostOK(clhost,NV_DXHOST_LEN) && !bool_pr[CLISWSJTX_BPR].state)
             badsid[n_badsid++] = DXHOST_SPR;
         if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dxport))         // 23 is telnet
             badsid[n_badsid++] = DXPORT_SPR;
@@ -1791,25 +1843,26 @@ static bool validateStringPrompts()
             badsid[n_badsid++] = FLRIGPORT_SPR;
     }
 
-    // check for plausible temperature corrections
-    char *tc_str = string_pr[TEMPCORR_SPR].v_str;
-    temp_corr[BME_76] = atof (tc_str);
-    if (fabsf(temp_corr[BME_76]) > MAX_BME_DTEMP)
-        badsid[n_badsid++] = TEMPCORR_SPR;
-    char *tc2_str = string_pr[TEMPCORR2_SPR].v_str;
-    temp_corr[BME_77] = atof (tc2_str);
-    if (fabsf(temp_corr[BME_77]) > MAX_BME_DTEMP)
-        badsid[n_badsid++] = TEMPCORR2_SPR;
+    // check for plausible temperature and pressure corrections if used
+    if (bool_pr[GPIOOK_BPR].state) {
+        char *tc_str = string_pr[TEMPCORR_SPR].v_str;
+        temp_corr[BME_76] = atof (tc_str);
+        if (fabsf(temp_corr[BME_76]) > MAX_BME_DTEMP)
+            badsid[n_badsid++] = TEMPCORR_SPR;
+        char *tc2_str = string_pr[TEMPCORR2_SPR].v_str;
+        temp_corr[BME_77] = atof (tc2_str);
+        if (fabsf(temp_corr[BME_77]) > MAX_BME_DTEMP)
+            badsid[n_badsid++] = TEMPCORR2_SPR;
 
-    // check for plausible pressure corrections
-    char *pc_str = string_pr[PRESCORR_SPR].v_str;
-    pres_corr[BME_76] = atof (pc_str);
-    if (fabsf(pres_corr[BME_76]) > MAX_BME_DPRES)
-        badsid[n_badsid++] = PRESCORR_SPR;
-    char *pc2_str = string_pr[PRESCORR2_SPR].v_str;
-    pres_corr[BME_77] = atof (pc2_str);
-    if (fabsf(pres_corr[BME_77]) > MAX_BME_DPRES)
-        badsid[n_badsid++] = PRESCORR2_SPR;
+        char *pc_str = string_pr[PRESCORR_SPR].v_str;
+        pres_corr[BME_76] = atof (pc_str);
+        if (fabsf(pres_corr[BME_76]) > MAX_BME_DPRES)
+            badsid[n_badsid++] = PRESCORR_SPR;
+        char *pc2_str = string_pr[PRESCORR2_SPR].v_str;
+        pres_corr[BME_77] = atof (pc2_str);
+        if (fabsf(pres_corr[BME_77]) > MAX_BME_DPRES)
+            badsid[n_badsid++] = PRESCORR2_SPR;
+    }
 
     // require ssid and pw if wifi
     if (bool_pr[WIFI_BPR].state) {
@@ -2118,17 +2171,40 @@ static void initSetup()
         memset (dxcl_cmds[3], 0, sizeof(dxcl_cmds[3]));
         NVWriteString(NV_DXCMD3, dxcl_cmds[3]);
     }
+
+    uint8_t nv_wsjt;
+    if (!NVReadUInt8 (NV_WSJT_DX, &nv_wsjt)) {
+        // check host for possible backwards compat
+        if (strcasecmp(dxhost,"WSJT-X") == 0 || strcasecmp(dxhost,"JTDX") == 0) {
+            nv_wsjt = 1;
+            memset (dxhost, 0, sizeof(dxhost));
+            NVWriteString(NV_DXHOST, dxhost);
+        } else
+            nv_wsjt = 0;
+        NVWriteUInt8 (NV_WSJT_DX, nv_wsjt);
+    }
+    bool_pr[CLISWSJTX_BPR].state = (nv_wsjt != 0);
+
     uint8_t nv_dx;
     if (!NVReadUInt8 (NV_USEDXCLUSTER, &nv_dx)) {
-        nv_dx = bool_pr[CLUSTER_BPR].state = false;
-        NVWriteUInt8 (NV_USEDXCLUSTER, 0);
-    } else
-        bool_pr[CLUSTER_BPR].state = (nv_dx != 0);
+        nv_dx = false;
+        NVWriteUInt8 (NV_USEDXCLUSTER, nv_dx);
+    }
+    bool_pr[CLUSTER_BPR].state = (nv_dx != 0);
+
     uint8_t clmap;
     if (!NVReadUInt8 (NV_MAPSPOTS, &clmap)) {
         clmap = NVMS_NONE;
         NVWriteUInt8 (NV_MAPSPOTS, clmap);
     }
+
+    uint8_t nv_setdx;
+    if (!NVReadUInt8 (NV_WSJT_SETSDX, &nv_setdx)) {
+        nv_setdx = false;
+        NVWriteUInt8 (NV_WSJT_SETSDX, nv_setdx);
+    }
+    bool_pr[SETDX_BPR].state = (nv_setdx != 0);
+
     bool_pr[CLLBL_BPR].state = ((clmap & NVMS_PCMASK) != NVMS_NONE);
     bool_pr[CLLBLCALL_BPR].state = ((clmap & NVMS_PCMASK) == NVMS_CALL);
     bool_pr[CLPATH_BPR].state = (clmap & NVMS_PATH) != 0;
@@ -2301,6 +2377,13 @@ static void initSetup()
         NVWriteUInt8 (NV_METRIC_ON, met);
     }
     bool_pr[UNITS_BPR].state = (met != 0);
+
+    uint8_t weekmon;
+    if (!NVReadUInt8 (NV_WEEKMON, &weekmon)) {
+        weekmon = 0;
+        NVWriteUInt8 (NV_WEEKMON, weekmon);
+    }
+    bool_pr[WEEKDAY1MON_BPR].state = (weekmon != 0);
 
     uint8_t b_mag;
     if (!NVReadUInt8 (NV_BEAR_MAG, &b_mag)) {
@@ -2559,7 +2642,7 @@ static void runSetup()
                 drawSPValue (sp);
                 drawCursor ();
 
-                checkLLEdit();
+                checkLLEdit(sp);
             }
 
 
@@ -2581,7 +2664,7 @@ static void runSetup()
                 drawSPValue (sp);
                 drawCursor ();
 
-                checkLLEdit();
+                checkLLEdit(sp);
             }
 
         } else if (tappedBool (s, &bp) || (c == ' ' && cur_focus.bp)) {
@@ -2717,45 +2800,9 @@ static void runSetup()
                 }
             }
 
-            else if (bp == &bool_pr[CLUSTER_BPR]) {
-                // show/hide dx cluster prompts
-                if (bp->state) {
-                    // show controls 
-                    drawBPState (&bool_pr[CLUSTER_BPR]);
-                    drawSPPromptValue (&string_pr[DXHOST_SPR]);
-                    drawSPPromptValue (&string_pr[DXPORT_SPR]);
-                    drawSPPromptValue (&string_pr[DXLOGIN_SPR]);
-                    drawSPPromptValue (&string_pr[DXCLCMD0_SPR]);
-                    drawSPPromptValue (&string_pr[DXCLCMD1_SPR]);
-                    drawSPPromptValue (&string_pr[DXCLCMD2_SPR]);
-                    drawSPPromptValue (&string_pr[DXCLCMD3_SPR]);
-                    drawBPPromptState (&bool_pr[DXCLCMD0_BPR]);
-                    drawBPPromptState (&bool_pr[DXCLCMD1_BPR]);
-                    drawBPPromptState (&bool_pr[DXCLCMD2_BPR]);
-                    drawBPPromptState (&bool_pr[DXCLCMD3_BPR]);
-                    drawBPPrompt (&bool_pr[CLLBL_BPR]);
-                    drawBoolPairState (CLLBL_BPR, CLLBLCALL_BPR);
-                    drawBPPromptState (&bool_pr[CLPATH_BPR]);
-                    drawSpiderCommandsHeader(true);
-                } else {
-                    // hide all and say No
-                    drawBPState (&bool_pr[CLUSTER_BPR]);
-                    eraseSPPromptValue (&string_pr[DXHOST_SPR]);
-                    eraseSPPromptValue (&string_pr[DXPORT_SPR]);
-                    eraseSPPromptValue (&string_pr[DXLOGIN_SPR]);
-                    eraseSPPromptValue (&string_pr[DXCLCMD0_SPR]);
-                    eraseSPPromptValue (&string_pr[DXCLCMD1_SPR]);
-                    eraseSPPromptValue (&string_pr[DXCLCMD2_SPR]);
-                    eraseSPPromptValue (&string_pr[DXCLCMD3_SPR]);
-                    eraseBPPromptState (&bool_pr[DXCLCMD0_BPR]);
-                    eraseBPPromptState (&bool_pr[DXCLCMD1_BPR]);
-                    eraseBPPromptState (&bool_pr[DXCLCMD2_BPR]);
-                    eraseBPPromptState (&bool_pr[DXCLCMD3_BPR]);
-                    eraseBPPromptState (&bool_pr[CLLBL_BPR]);
-                    eraseBPPromptState (&bool_pr[CLLBLCALL_BPR]);
-                    eraseBPPromptState (&bool_pr[CLPATH_BPR]);
-                    drawSpiderCommandsHeader(false);
-                }
+            else if (bp == &bool_pr[CLUSTER_BPR] || bp == &bool_pr[CLISWSJTX_BPR]) {
+                // so many show/hide dx cluster prompts easier to just redraw the page
+                changePage (cur_page);
             }
 
             else if (bp == &bool_pr[GPSDON_BPR]) {
@@ -2871,6 +2918,7 @@ static void finishSettingUp()
     NVWriteString(NV_CALLSIGN, callsign);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
+    NVWriteUInt8 (NV_WEEKMON, bool_pr[WEEKDAY1MON_BPR].state);
     NVWriteUInt8 (NV_BEAR_MAG, bool_pr[BEARING_BPR].state);
     NVWriteUInt32 (NV_KX3BAUD, bool_pr[KX3ON_BPR].state ? (bool_pr[KX3BAUD_BPR].state ? 38400 : 4800) : 0);
     NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
@@ -2883,6 +2931,8 @@ static void finishSettingUp()
                 | (bool_pr[GPSDON_BPR].state && bool_pr[GPSDFOLLOW_BPR].state ? USEGPSD_FORLOC_BIT : 0));
     NVWriteString (NV_GPSDHOST, gpsdhost);
     NVWriteUInt8 (NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
+    NVWriteUInt8 (NV_WSJT_SETSDX, bool_pr[SETDX_BPR].state);
+    NVWriteUInt8 (NV_WSJT_DX, bool_pr[CLISWSJTX_BPR].state);
     NVWriteString (NV_DXHOST, dxhost);
     NVWriteString (NV_DXCMD0, dxcl_cmds[0]);
     NVWriteString (NV_DXCMD1, dxcl_cmds[1]);
@@ -3112,7 +3162,7 @@ const char *getCallsign()
 }
 
 /* return pointer to static storage containing the DX cluster host
- * N.B. only sensible if useDXCluster() is true
+ * N.B. only sensible if useDXCluster() and !useWSJTX()
  */
 const char *getDXClusterHost()
 {
@@ -3162,6 +3212,13 @@ bool rotateScreen()
 bool useMetricUnits()
 {
     return (bool_pr[UNITS_BPR].state);
+}
+
+/* return whether week starts on Monday, else Sunday
+ */
+bool weekStartsOnMonday()
+{
+    return (bool_pr[WEEKDAY1MON_BPR].state);
 }
 
 /* return whether bearings should be magnetic, else true
@@ -3440,7 +3497,7 @@ void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS])
  */
 bool setDXCluster (char *host, const char *port_str, char ynot[])
 {
-    if (!hostOK(host,NV_DXHOST_LEN) && strcasecmp (host, "WSJT-X") && strcasecmp (host, "JTDX")) {
+    if (!hostOK(host,NV_DXHOST_LEN)) {
         strcpy (ynot, _FX("Bad host"));
         return (false);
     }
@@ -3508,4 +3565,18 @@ bool setMapColor (const char *name, uint16_t rgb565)
 bool getSatPathDashed()
 {
     return (csel_satpath_state);
+}
+
+/* return whether receiving a WSTX spot also sets DX
+ */
+bool setWSJTDX(void)
+{
+    return (bool_pr[SETDX_BPR].state);
+}
+
+/* return whether dx host is actually WSJT-X, else 
+ */
+bool useWSJTX(void)
+{
+    return (bool_pr[CLISWSJTX_BPR].state);
 }

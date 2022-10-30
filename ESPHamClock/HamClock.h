@@ -243,7 +243,7 @@ extern void radioResetIO(void);
 #define SERVERPORT      8080
 
 // default menu timeout, millis
-#define MENU_TO         20000
+#define MENU_TO         30000
 
 // maidenhead character arrey length, including EOS
 #define MAID_CHARLEN     7
@@ -564,7 +564,6 @@ typedef struct {
  */
 
 
-extern bool newVersionIsAvailable (char *nv, uint16_t nvl);
 extern bool askOTAupdate(char *ver);
 extern void drawDXTime(void);
 extern void drawDXMarker(bool force);
@@ -1149,6 +1148,10 @@ extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 extern bool getSatPathDashed(void);
 extern bool useMagBearing(void);
+extern bool setWSJTDX(void);
+extern bool useWSJTX(void);
+extern bool weekStartsOnMonday(void);
+
 
 
 
@@ -1386,7 +1389,7 @@ typedef enum {
     NV_GRIDSTYLE,               // map grid style 0=off; 1=tropics; 2=lat-lng; 3=maindenhead, 4=radial
     NV_DPYON,                   // deprecated since NV_DAILYONOFF
     NV_DPYOFF,                  // deprecated since NV_DAILYONOFF
-    NV_DXHOST,                  // DX cluster host name
+    NV_DXHOST,                  // DX cluster host name, unless using WSJT
 
     NV_DXPORT,                  // DX cluster port number
     NV_SWHUE,                   // stopwatch color RGB 565
@@ -1462,8 +1465,8 @@ typedef enum {
 
     NV_DXCMD3,                  // dx cluster command 3
     NV_DXCMDUSED,               // bitmask of dx cluster commands in use
-    NV_PSK_MODEBITS,            // bit 0: on=psk off=wspr bit 1: on=bycall off=bygrid
-    NV_PSK_BANDS,               // bit mask 0 .. 11 160 .. 2m
+    NV_PSK_MODEBITS,            // live spots mode: bit 0: on=psk off=wspr bit 1: on=bycall off=bygrid
+    NV_PSK_BANDS,               // live spots bands: bit mask 0 .. 11 160 .. 2m
     NV_160M_COLOR,              // 160 m path color as RGB 565
 
     NV_80M_COLOR,               // 80 m path color as RGB 565
@@ -1481,6 +1484,10 @@ typedef enum {
     NV_2M_COLOR,                // 2 m path color as RGB 565
     NV_DASHED,                  // CSIds bitmask set for dashed
     NV_BEAR_MAG,                // show magnetic bearings, else true
+    NV_WSJT_SETSDX,             // whether WSJT-X spots set DX
+    NV_WSJT_DX,                 // whether dx cluster is WSJT-X
+    NV_PSK_MAXAGE,              // live spots max age, minutes
+    NV_WEEKMON,                 // whether week starts on Monday
 
     NV_N
 
@@ -1580,7 +1587,6 @@ extern time_t plot_rotationT[PANE_N];           // time of next rotation, iff > 
 extern uint32_t plot_rotset[PANE_N];            // bitmask of all PlotChoice rotation choices
                                                 // N.B. plot_rotset[i] must always include plot_ch[i]
 
-#define PLOT_ROT_INTERVAL       30              // rotation interval, secs
 #define PLOT_ROT_WARNING        5               // show rotation about to occur, secs
 
 #define paneIsRotating(pp)    ((plot_rotset[pp] & ~(1 << plot_ch[pp])) != 0)   // any bit other than plot_ch

@@ -53,6 +53,7 @@
 #define	__FlashStringHelper char
 #define strlen_P  strlen
 #define strcpy_P  strcpy
+#define strncpy_P  strncpy
 #define strcmp_P  strcmp
 #define strncmp_P  strncmp
 #define strspn_P  strspn

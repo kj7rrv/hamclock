@@ -712,10 +712,11 @@ void drawCalendar(bool force)
     tft.fillRect (de_info_b.x, cal_y, de_info_b.w, cal_h, RA8875_BLACK);
 
     // find column for 1st of this month
+    int week_mon = weekStartsOnMonday() ? 1 : 0;
     uint8_t today = tm.Day;                     // save today's date, 1 based
     tm.Day = 1;                                 // set 1st
     uint32_t t1st = makeTime(tm);               // synth new time
-    uint8_t col1 = weekday (t1st) - 1;          // 0-based column of 1st day of month
+    uint8_t col1 = (weekday (t1st) - 1 - week_mon + 7)%7;          // 0-based column of 1st day of month
 
     // find number of days in this month
     if (++tm.Month == 13) {                     // advance to next month, which is 1-based
@@ -727,7 +728,7 @@ void drawCalendar(bool force)
 
     // find required number of rows
     int8_t dom = 1-col1;                        // 1-based day of month in first cell, <=0 if prev mon
-    uint8_t n_cols = 7;                         // always 7 cols
+    const uint8_t n_cols = 7;                   // always 7 cols
     uint8_t n_rows = (dtm - dom + 7)/n_cols;    // n rows required
     // Serial.printf ("col1= %d dtm= %d dom= %d n_cols= %d n_rows= %d\n", col1, dtm, dom, n_cols, n_rows);
 
@@ -741,19 +742,32 @@ void drawCalendar(bool force)
         tft.drawLine (x, cal_y, x, de_info_b.y+de_info_b.h-1, DE_COLOR);
     }
 
-    // fill dates
+    // prep font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setTextColor (RA8875_WHITE);
+
+    // fill dates or day names
     for (uint8_t r = 0; r < n_rows; r++) {
         for (uint8_t c = 0; c < n_cols; c++) {
+            uint16_t x0 = CAL_BW + de_info_b.x + c*(de_info_b.w-2*CAL_BW)/n_cols + 4;
+            uint16_t y0 = cal_y + r*cal_h/n_rows + 3;
             if (dom >= 1 && dom <= dtm) {
-                tft.setTextColor (dom == today ? RA8875_WHITE : DE_COLOR);
-                uint16_t x0 = CAL_BW + de_info_b.x + c*(de_info_b.w-2*CAL_BW)/n_cols + 4;
+                // date
+                tft.setTextColor (utc_offset == 0 && dom == today ? RA8875_WHITE : DE_COLOR);
                 if (dom < 10)
                     x0 += 2;
-                tft.setCursor (x0, cal_y + r*cal_h/n_rows + 3);
+                tft.setCursor (x0, y0);
                 tft.print (dom);
+            } else {
+                // name of day
+                static char dnames[7*2+1] PROGMEM = "SuMoTuWeThFrSa";
+                char dname[3];
+                strncpy_P (dname, &dnames[2*((c+week_mon)%7)], 2);
+                dname[2] = '\0';
+                tft.setTextColor (GRAY);
+                tft.setCursor (x0, y0);
+                tft.print(dname);
             }
+
             dom++;
         }
     }
