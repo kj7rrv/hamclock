@@ -172,12 +172,12 @@ void calibrateTouch (bool force)
         tft.drawCircle (display[i].x, display[i].y, TAP_RAD, RA8875_WHITE);
         if (display[i].x < tft.width()/2) {
             tft.setCursor (display[i].x+20, display[i].y+10);
-            sprintf (buf, _FX("< %s here carefully %d times "), prompt, N_TAPS);
+            snprintf (buf, sizeof(buf), _FX("< %s here carefully %d times "), prompt, N_TAPS);
             tft.print (buf);
             counter_x = display[i].x-35;
         } else {
             tft.setCursor (display[i].x-365, display[i].y+10);
-            sprintf (buf, _FX("%s here carefully %d times > "), prompt, N_TAPS);
+            snprintf (buf, sizeof(buf), _FX("%s here carefully %d times > "), prompt, N_TAPS);
             tft.print (buf);
             counter_x = tft.getCursorX() + 35;
         }

@@ -6,8 +6,8 @@
 #include "IPAddress.h"
 #include "WiFiClient.h"
 
-// set for core info
-static bool _trace_client = false;
+// set for more verbose info
+static int _trace_client = 0;
 
 // default constructor
 WiFiClient::WiFiClient()
@@ -117,7 +117,7 @@ bool WiFiClient::connect(const char *host, int port)
         memset (&hints, 0, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
-        sprintf (port_str, "%d", port);
+        snprintf (port_str, sizeof(port_str), "%d", port);
         int error = ::getaddrinfo (host, port_str, &hints, &aip);
         if (error) {
             printf ("WiFiCl: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
@@ -254,7 +254,7 @@ int WiFiClient::write (const uint8_t *buf, int n)
                 } else
                     nw = 0;             // act like nothing happened
 	    }
-	    if (_trace_client) {
+	    if (_trace_client > 1) {
                 printf ("WiFiCl: write %d to fd %d: ", nw, socket);
                 bool all_printable = true;
                 for (int i = 0; i < nw; i++) {
@@ -287,14 +287,14 @@ void WiFiClient::print (String s)
 void WiFiClient::print (float f)
 {
 	char buf[32];
-	int n = sprintf (buf, "%g", f);
+	int n = snprintf (buf, sizeof(buf), "%g", f);
 	write ((const uint8_t *) buf, n);
 }
 
 void WiFiClient::print (float f, int s)
 {
 	char buf[32];
-	int n = sprintf (buf, "%.*f", s, f);
+	int n = snprintf (buf, sizeof(buf), "%.*f", s, f);
 	write ((const uint8_t *) buf, n);
 }
 
@@ -314,28 +314,28 @@ void WiFiClient::println (String s)
 void WiFiClient::println (float f)
 {
 	char buf[32];
-	int n = sprintf (buf, "%g\r\n", f);
+	int n = snprintf (buf, sizeof(buf), "%g\r\n", f);
 	write ((const uint8_t *) buf, n);
 }
 
 void WiFiClient::println (float f, int s)
 {
 	char buf[32];
-	int n = sprintf (buf, "%.*f\r\n", s, f);
+	int n = snprintf (buf, sizeof(buf), "%.*f\r\n", s, f);
 	write ((const uint8_t *) buf, n);
 }
 
 void WiFiClient::println (int i)
 {
 	char buf[32];
-	int n = sprintf (buf, "%d\r\n", i);
+	int n = snprintf (buf, sizeof(buf), "%d\r\n", i);
 	write ((const uint8_t *) buf, n);
 }
 
 void WiFiClient::println (uint32_t i)
 {
 	char buf[32];
-	int n = sprintf (buf, "%u\r\n", i);
+	int n = snprintf (buf, sizeof(buf), "%u\r\n", i);
 	write ((const uint8_t *) buf, n);
 }
 

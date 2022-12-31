@@ -157,23 +157,23 @@ void nearestKD3Node (KD3Node *root, KD3Node *nd, int idx, KD3Node **best, float 
 
 /* handy convert ll.lat/lng to KD3Node
  */
-void ll2KD3Node (const LatLong &ll, KD3Node &n)
+void ll2KD3Node (const LatLong &ll, KD3Node *kp)
 {
     float clat = cosf(ll.lat);
-    n.s[0] = clat*cosf(ll.lng);
-    n.s[1] = clat*sinf(ll.lng);
-    n.s[2] = sinf(ll.lat);
+    kp->s[0] = clat*cosf(ll.lng);
+    kp->s[1] = clat*sinf(ll.lng);
+    kp->s[2] = sinf(ll.lat);
 }
 
 /* handy convert KD3Node to ll
  */
-void KD3Node2ll (const KD3Node &n, LatLong &ll)
+void KD3Node2ll (const KD3Node &n, LatLong *llp)
 {
-    ll.lat = asinf (n.s[2]);
-    ll.lat_d = rad2deg(ll.lat);
+    llp->lat = asinf (n.s[2]);
+    llp->lat_d = rad2deg(llp->lat);
 
-    ll.lng = atan2f (n.s[1], n.s[0]);
-    ll.lng_d = rad2deg(ll.lng);
+    llp->lng = atan2f (n.s[1], n.s[0]);
+    llp->lng_d = rad2deg(llp->lng);
 }
 
 /* handy convert nearestKD3Node() best_dist to earth distance in miles
@@ -197,12 +197,13 @@ float nearestKD3Dist2Miles(float d)
 
 #define rand1() (rand() / (float)RAND_MAX)
 
-void rand_pt (KD3Node &n)
+// set kp to a random location
+void rand_pt (KD3Node *kp)
 {
     LatLong ll;
     ll.lat = M_PIF*rand1() - M_PIF/2;
     ll.lng = 2*M_PIF*rand1() - M_PIF;
-    ll2KD3Node (ll, n);
+    ll2KD3Node (ll, kp);
 }
 
 
@@ -218,15 +219,15 @@ int main(int ac, char *av[])
 
     srand(time(NULL));
     for (i = 0; i < N; i++) {
-        rand_pt (million[i]);
+        rand_pt (&million[i]);
         char buf[100];
-        sprintf (buf, "%6d %g %g %g", i, million[i].s[0], million[i].s[1], million[i].s[2]);
+        snprintf (buf, sizeof(buf), "%6d %g %g %g", i, million[i].s[0], million[i].s[1], million[i].s[2]);
         million[i].data = strdup(buf);
     }
  
     root = mkKD3NodeTree(million, N, 0);
 
-    rand_pt(testNode);
+    rand_pt(&testNode);
     visited = 0;
     found = NULL;
     best_dist = 0;
@@ -247,7 +248,7 @@ int main(int ac, char *av[])
     float worst_dist = 0;
     gettimeofday(&tv0, NULL);
     for (i = 0; i < test_runs; i++) {
-        rand_pt(testNode);
+        rand_pt(&testNode);
         found = NULL;
         best_dist = 0;
         nearestKD3Node(root, &testNode, 0, &found, &best_dist, &seen);

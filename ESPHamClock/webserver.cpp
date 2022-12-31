@@ -21,12 +21,10 @@ const char platform[] = "HamClock-FreeBSD";
 const char platform[] = "HamClock-UNIX";
 #endif
 
-// LIVE
-time_t last_live;                                       // last update time
-static int live_verbose = 0;                            // greater is more
 
-// persistent server for listening for remote connections
-static WiFiServer *remoteServer;
+// persistent server listening for restful connections
+static WiFiServer *restful_server;
+int restful_port = RESTFUL_PORT;
 
 // handy default message strings
 static const char garbcmd[] = "Garbled command";
@@ -65,31 +63,34 @@ typedef enum {
     DEMO_N,
 
 } DemoChoice;
-static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[]);
+static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg_len);
 
 // hack around frame buffer readback weirdness that requires ignoring the very first pixel
 static bool first_pixel = true;
 
-#define MAX_WEBARGS     10
 
-typedef struct {
-    const char *name[MAX_WEBARGS];              // name to look for
-    const char *value[MAX_WEBARGS];             // ptr to its value, or NULL
-    bool found[MAX_WEBARGS];                    // whether this name was found in the original GET command
-    int nargs;
-} WebArgs;
-
-/* remove leading and trailing white space IN PLACE, return new start.
+/* remove leading and trailing white space IN PLACE, return str.
  */
 char *trim (char *str)
 {
     if (!str)
         return (str);
-    while (isspace(*str))
-        str++;
-    size_t sl = strlen (str);
+
+    // skip leading blanks
+    char *blank = str;
+    while (isspace(*blank))
+        blank++;
+
+    // copy from first-nonblank back to beginning
+    size_t sl = strlen (blank);
+    if (blank > str)
+        memmove (str, blank, sl+1);             // include \0
+
+    // skip back from over trailing blanks
     while (sl > 0 && isspace(str[sl-1]))
         str[--sl] = '\0';
+
+    // return same starting point
     return (str);
 }
 
@@ -98,11 +99,11 @@ static bool rgbOk (int r, int g, int b)
     return (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255);
 }
 
-/* set name to value in wa.
- * return whether found.
- * N.B. we accommodate name pointing within ynot
+/* find name within wa and set its value.
+ * return true if ok, else false with reason in ynot[].
+ * N.B. we accommodate name and value pointing within ynot[].
  */
-static bool setWCValue (WebArgs &wa, const char *name, const char *value, char ynot[])
+static bool setWCValue (WebArgs &wa, const char *name, const char *value, char ynot[], size_t ynot_len)
 {
     // name is required
     if (!name || name[0] == '\0') {
@@ -110,23 +111,27 @@ static bool setWCValue (WebArgs &wa, const char *name, const char *value, char y
         return (false);
     }
 
-    // copy name in case is within ynot
+    // copy name in case it is within ynot -- N.B. free() before leaving!
     char *name_copy = strdup (name);
 
+    // find name
     for (int i = 0; i < wa.nargs; i++) {
         if (strcmp (name_copy, wa.name[i]) == 0) {
+            // found, but beware dup
             if (wa.found[i]) {
-                sprintf (ynot, _FX("%s set more than once"), name_copy);
+                snprintf (ynot, ynot_len, _FX("%s set more than once"), name_copy);
                 free (name_copy);
                 return (false);
             }
             wa.value[i] = value;
             wa.found[i] = true;
+            free (name_copy);
             return (true);
         }
     }
 
-    sprintf (ynot, _FX("unknown arg: %s"), name_copy);
+    snprintf (ynot, ynot_len, _FX("unknown arg: %s"), name_copy);
+
     free (name_copy);
     return (false);
 }
@@ -134,13 +139,13 @@ static bool setWCValue (WebArgs &wa, const char *name, const char *value, char y
 /* given wa containing all expected names, parse the given web GET command for each of their values, if any.
  * line is one or more of <empty> A or A=x separated by &.
  * we assume line[] starts just after "GET /xxx?" and has the trailing http/n removed.
- * line will be modified by changing all '&' and '=' to '\0'.
- * all value pointers will point into line[].
- * value will be NULL if no '=' or "" if nothing after '='.
- * return true if ok else false with excuse in ynot.
- * N.B. we accommodate line and ynot being the same memory
+ * Notes:
+ *   line will be modified by changing all '&' and '=' to '\0'.
+ *   all value pointers will point into line[].
+ *   value will be NULL if no '=' or "" or nothing after '='.
+ * return true if ok else false with excuse in back in line
  */
-static bool parseWebCommand (WebArgs &wa, char line[], char ynot[])
+bool parseWebCommand (WebArgs &wa, char line[], size_t line_len)
 {
     // init all unknown
     memset (wa.value, 0, sizeof (wa.value));
@@ -155,6 +160,7 @@ static bool parseWebCommand (WebArgs &wa, char line[], char ynot[])
 
     // init working name and value pointers
     char *name = line, *value = NULL;
+    char *line0 = line;
 
     // scan entire line -- N.B. this loop returns when it finds '\0'
     for (; ; line++) {
@@ -162,7 +168,7 @@ static bool parseWebCommand (WebArgs &wa, char line[], char ynot[])
         case PWC_LOOKING_4_NAME:
             if (*line == '=') {
                 if (name[0] == '\0') {
-                    strcpy (ynot, _FX("missing name"));
+                    strcpy (line, _FX("missing name"));
                     return (false);
                 }
                 *line = '\0';                                   // terminate name
@@ -170,34 +176,34 @@ static bool parseWebCommand (WebArgs &wa, char line[], char ynot[])
                 state = PWC_LOOKING_4_VALUE;                    // now look for value
             } else if (*line == '&') {
                 *line = '\0';                                   // terminate name
-                if (!setWCValue (wa, trim(name), NULL, ynot))
+                if (!setWCValue (wa, trim(name), NULL, line0, line_len))
                     return (false);
                 name = line + 1;                                // start next name
                 value = NULL;                                   // no value yet
             } else if (*line == '\0') {
-                if (name[0] == '\0')                            // no name at all is ok
-                    return (true);
-                return (setWCValue (wa, trim(name), trim(value), ynot));
+                if (name[0] == '\0')
+                    return (true);                              // no name at all is ok
+                return (setWCValue (wa, trim(name), trim(value), line0, line_len));
             }
             break;
 
         case PWC_LOOKING_4_VALUE:
             if (*line == '&') {
                 *line = '\0';                                   // terminate value
-                if (!setWCValue (wa, trim(name), trim(value), ynot))
+                if (!setWCValue (wa, trim(name), trim(value), line0, line_len))
                     return (false);
                 name = line + 1;                                // start next name
                 value = NULL;                                   // no value yet
                 state = PWC_LOOKING_4_NAME;                     // now look for name
             } else if (*line == '\0') {
-                return (setWCValue (wa, trim(name), trim(value), ynot));
+                return (setWCValue (wa, trim(name), trim(value), line0, line_len));
             }
             break;
         }
     }
 
     // should never get here
-    strcpy (ynot, _FX("Bogus syntax"));
+    strcpy (line, _FX("Bogus syntax"));
     return (false);
 }
 
@@ -265,7 +271,7 @@ static bool replaceEncoding (char *from)
 
 /* send initial response indicating body will be plain text
  */
-static void startPlainText (WiFiClient &client)
+void startPlainText (WiFiClient &client)
 {
     resetWatchdog();
 
@@ -278,20 +284,30 @@ static void startPlainText (WiFiClient &client)
 }
 
 /* send the given message as HTTP error 400 Bad request.
+ * N.B. we expect the resulting message to include a final newline.
  */
-static void sendHTTPError (WiFiClient &client, const char *errmsg)
+void sendHTTPError (WiFiClient &client, const char *fmt, ...)
 {
     resetWatchdog();
 
+    // expand
+    StackMalloc errmsg_pool(200);
+    char *errmsg = errmsg_pool.getMem();
+    size_t em_len = errmsg_pool.getSize();
+    va_list ap;
+    va_start (ap, fmt);
+    vsnprintf (errmsg, em_len, fmt, ap);
+    va_end (ap);
+
     // preserve locally
-    Serial.println (errmsg);
+    Serial.print (errmsg);
 
     // send to client
     FWIFIPRLN (client, F("HTTP/1.0 400 Bad request"));
     sendUserAgent (client);
     FWIFIPRLN (client, F("Content-Type: text/plain; charset=us-ascii"));
     FWIFIPRLN (client, F("Connection: close\r\n"));             // include extra blank line
-    client.println (errmsg);
+    client.print (errmsg);
 
     resetWatchdog();
 }
@@ -301,7 +317,7 @@ static void sendHTTPError (WiFiClient &client, const char *errmsg)
 static void reportPaneChoices (WiFiClient &client, PlotPane pp)
 {
     // which pane
-    char buf[50];
+    char buf[100];
     snprintf (buf, sizeof(buf), "Pane%d     ", (int)pp+1);
     client.print(buf);
 
@@ -372,9 +388,10 @@ static void getStopwatchReport (char buf[], size_t bufl)
 
 /* send screen capture as bmp file
  */
-static bool getWiFiCaptureBMP(WiFiClient &client, char *unused)
+static bool getWiFiCaptureBMP(WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void)(unused);
+    (void)(unused_line);
+    (void)(line_len);
 
     #define CORESZ 14                           // always 14 bytes at front
     #define HDRVER 108                          // BITMAPV4HEADER, also n bytes in subheader
@@ -484,9 +501,10 @@ static bool getWiFiCaptureBMP(WiFiClient &client, char *unused)
 
 /* helper to report DE or DX info which are very similar
  */
-static bool getWiFiDEDXInfo_helper (WiFiClient &client, char *unused, bool want_de)
+static bool getWiFiDEDXInfo_helper (WiFiClient &client, char line[], size_t line_len, bool want_de)
 {
-    (void) unused;
+    (void)(line);
+    (void)(line_len);
 
     char buf[100];
 
@@ -515,10 +533,10 @@ static bool getWiFiDEDXInfo_helper (WiFiClient &client, char *unused, bool want_
         dist *= ERAD_M;                             // radians to miles
         B *= 180/M_PIF;                             // radians to degrees
         bool B_ismag = desiredBearing (de_ll, B);
-        if (show_km)
-            dist *= 1.609344F;                      // mi - > km
+        if (useMetricUnits())
+            dist *= KM_PER_MI;
         FWIFIPR (client, F("DX_path_SP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, show_km ? "km" : "mi", B,
+        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, useMetricUnits() ? "km" : "mi", B,
                 B_ismag ? _FX("magnetic") : _FX("true"));
         client.print (buf);
 
@@ -527,10 +545,10 @@ static bool getWiFiDEDXInfo_helper (WiFiClient &client, char *unused, bool want_
         dist *= ERAD_M;                             // radians to miles
         B *= 180/M_PIF;                             // radians to degrees
         B_ismag = desiredBearing (de_ll, B);
-        if (show_km)
-            dist *= 1.609344F;                      // mi - > km
+        if (useMetricUnits())
+            dist *= KM_PER_MI;
         FWIFIPR (client, F("DX_path_LP    "));
-        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, show_km ? "km" : "mi", B,
+        snprintf (buf, sizeof(buf), _FX("%.0f %s @ %.0f deg %s\n"), dist, useMetricUnits() ? "km" : "mi", B,
                 B_ismag ? _FX("magnetic") : _FX("true"));
         client.print (buf);
 
@@ -681,22 +699,24 @@ static bool getWiFiDEDXInfo_helper (WiFiClient &client, char *unused, bool want_
 
 /* remote report DE info
  */
-static bool getWiFiDEInfo (WiFiClient &client, char *unused)
+static bool getWiFiDEInfo (WiFiClient &client, char line[], size_t line_len)
 {
-    return (getWiFiDEDXInfo_helper (client, unused, false));
+    return (getWiFiDEDXInfo_helper (client, line, line_len, false));
 }
 
 /* remote report DX info
  */
-static bool getWiFiDXInfo (WiFiClient &client, char *unused)
+static bool getWiFiDXInfo (WiFiClient &client, char line[], size_t line_len)
 {
-    return (getWiFiDEDXInfo_helper (client, unused, true));
+    return (getWiFiDEDXInfo_helper (client, line, line_len, true));
 }
 
 /* remote report current set of DX spots
  */
-static bool getWiFiDXSpots (WiFiClient &client, char *line)
+static bool getWiFiDXSpots (WiFiClient &client, char line[], size_t line_len)
 {
+    (void)line_len;
+
     // retrieve spots, if available
     DXClusterSpot *spots;
     uint8_t nspots;
@@ -730,8 +750,8 @@ static bool getWiFiDXSpots (WiFiClient &client, char *line)
         dist *= ERAD_M;                                 // angle to miles
         bear *= 180/M_PIF;                              // rad -> degrees
         bool bear_ismag = desiredBearing (de_ll, bear);
-        if (show_km)                                    // match DX display
-            dist *= 1.609344F;                          // miles -> km
+        if (useMetricUnits())
+            dist *= KM_PER_MI;
 
         // grid
         char grid[MAID_CHARLEN];
@@ -750,11 +770,46 @@ static bool getWiFiDXSpots (WiFiClient &client, char *line)
     return (true);
 }
 
+/* report current Live Spots stats, if active
+ */
+static bool getWiFiLiveStats (WiFiClient &client, char *line, size_t line_len)
+{
+    PSKBandStats stats[PSKBAND_N];
+    const char *names[PSKBAND_N];
+    if (!getPSKBandStats (stats, names)) {
+        snprintf (line, line_len, _FX("No live spots"));
+        return (false);
+    }
+
+    // start reply
+    startPlainText (client);
+
+    // heading
+    char buf[100];
+    if (useMetricUnits())
+        FWIFIPR (client, F("# Band Count MaxKm    @Lat    @Lng\n"));
+    else
+        FWIFIPR (client, F("# Band Count MaxMi    @Lat    @Lng\n"));
+
+    // table
+    for (int i = 0; i < PSKBAND_N; i++) {
+        PSKBandStats &s = stats[i];
+        snprintf (buf, sizeof(buf), _FX("%-6s %5d %5.0f %7.2f %7.2f\n"), names[i], s.count,
+                useMetricUnits() ? s.maxkm : s.maxkm / KM_PER_MI, rad2deg(s.maxlat), rad2deg(s.maxlng));
+        client.print(buf);
+    }
+
+    // done
+    return (true);
+}
+
+
 /* remote report some basic clock configuration
  */
-static bool getWiFiConfig (WiFiClient &client, char *unused)
+static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     const __FlashStringHelper *not_sup = F("N/A");
     char buf[100];
@@ -779,6 +834,7 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
 
     // report map projection
     snprintf (buf, sizeof(buf), _FX("MapProj   %s\n"), map_projnames[map_proj]);
+    client.print(buf);
 
     // report grid overlay
     snprintf (buf, sizeof(buf), _FX("MapGrid   %s\n"), grid_styles[mapgrid_choice]);
@@ -1050,8 +1106,8 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
 
     // report each map color
     for (int i = 0; i < N_CSPR; i++) {
-        uint16_t color = getMapColor((CSIds)i);
-        const char *color_name = getMapColorName((CSIds)i);
+        uint16_t color = getMapColor((ColorSelection)i);
+        const char *color_name = getMapColorName((ColorSelection)i);
         char uscore_name[30];
         strncpySubChar (uscore_name, color_name, '_', ' ', sizeof(uscore_name));
         snprintf (buf, sizeof(buf), _FX("%-16s%d,%d,%d\n"), uscore_name,
@@ -1066,9 +1122,10 @@ static bool getWiFiConfig (WiFiClient &client, char *unused)
 /* report current satellite info to the given WiFi connection, or none.
  * always return true
  */
-static bool getWiFiSatellite (WiFiClient &client, char *unused)
+static bool getWiFiSatellite (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // start reply
     startPlainText (client);
@@ -1160,12 +1217,12 @@ static bool getWiFiSatellite (WiFiClient &client, char *unused)
 
 /* report all available satellites.
  */
-static bool getWiFiAllSatellites (WiFiClient &client, char *line)
+static bool getWiFiAllSatellites (WiFiClient &client, char line[], size_t line_len)
 {
     // get names and elements
     const char **all_names = getAllSatNames();
     if (all_names == NULL) {
-        strcpy (line, _FX("No sats"));
+        (void) snprintf (line, line_len, _FX("No sats"));
         return (false);
     }
 
@@ -1186,10 +1243,10 @@ static bool getWiFiAllSatellites (WiFiClient &client, char *line)
 
 /* send the current collection of sensor data to client in tabular format.
  */
-static bool getWiFiSensorData (WiFiClient &client, char *line)
+static bool getWiFiSensorData (WiFiClient &client, char line[], size_t line_len)
 {
     if (getNBMEConnected() == 0) {
-        strcpy (line, _FX("No sensors"));
+        (void) snprintf (line, line_len, _FX("No sensors"));
         return (false);
     }
 
@@ -1231,24 +1288,25 @@ static bool getWiFiSensorData (WiFiClient &client, char *line)
 
 /* given age in seconds, set string to short approx description.
  */
-static char *ageStr (long secs, char *str)
+static char *ageStr (long secs, char *str, size_t str_len)
 {
     if (secs < 60)
-        sprintf (str, "%2ld secs", secs);
+        snprintf (str, str_len, "%2ld secs", secs);
     else if (secs < 3600)
-        sprintf (str, "%2ld mins", secs/60);
+        snprintf (str, str_len, "%2ld mins", secs/60);
     else if (secs < 24*3600)
-        sprintf (str, "%2ld hrs", secs/3600);
+        snprintf (str, str_len, "%2ld hrs", secs/3600);
     else 
-        sprintf (str, "1+ days");
+        snprintf (str, str_len, "1+ days");
     return (str);
 }
 
 /* send the current space weather stats to client
  */
-static bool getWiFiSpaceWx (WiFiClient &client, char *unused)
+static bool getWiFiSpaceWx (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // send html header
     startPlainText(client);
@@ -1263,40 +1321,41 @@ static bool getWiFiSpaceWx (WiFiClient &client, char *unused)
 
     // send values and ages
     char buf[100];
-    char age[20];
+    char age[30];
 
     client.print (F(" Datum   Value    Age\n"));
     client.print (F("-------- -----  -------\n"));
 
-    snprintf (buf, sizeof(buf), _FX("SSN      %5.1f  %s\n"), ssn.value, ageStr(ssn.age, age));
+    snprintf (buf, sizeof(buf), _FX("SSN      %5.1f  %s\n"), ssn.value, ageStr(ssn.age, age, sizeof(age)));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("KP        %4.0f  %s\n"), kp.value, ageStr(kp.age, age));
+    snprintf (buf, sizeof(buf), _FX("KP        %4.0f  %s\n"), kp.value, ageStr(kp.age, age, sizeof(age)));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("FLUX     %5.1f  %s\n"), flux.value, ageStr(flux.age, age));
+    snprintf (buf, sizeof(buf), _FX("FLUX     %5.1f  %s\n"), flux.value, ageStr(flux.age, age, sizeof(age)));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("XRAY      %4s  %s\n"), xray, ageStr(xray_age, age));
+    snprintf (buf, sizeof(buf), _FX("XRAY      %4s  %s\n"), xray, ageStr(xray_age, age, sizeof(age)));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("SOLWIND   %4.1f  %s\n"), swind.value, ageStr(swind.age, age));
+    snprintf (buf, sizeof(buf), _FX("SOLWIND   %4.1f  %s\n"), swind.value, ageStr(swind.age,age,sizeof(age)));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("DRAP      %4.1f  %s\n"), drap.value, ageStr(drap.age, age));
+    snprintf (buf, sizeof(buf), _FX("DRAP      %4.1f  %s\n"), drap.value, ageStr(drap.age, age, sizeof(age)));
     client.print (buf);
 
     for (int i = 0; i < PROP_MAP_N; i++) {
         int band = propMap2Band ((PropMapSetting)i);
         // match format in plotBandConditions()
-        snprintf (buf, sizeof(buf), _FX("DEDX_%02dm  %4.0f  %s\n"), band, 99*path[i], ageStr(path_age, age));
+        snprintf (buf, sizeof(buf), _FX("DEDX_%02dm  %4.0f  %s\n"), band, 99*path[i],
+                                ageStr(path_age, age, sizeof(age)));
         client.print (buf);
     }
 
     for (int i = 0; i < N_NOAASW_C; i++) {
         for (int j = 0; j < N_NOAASW_V; j++) {
             snprintf (buf, sizeof(buf), _FX("NSPW_%c%d   %4d  %s\n"), noaaspw.cat[i], j, noaaspw.val[i][j],
-                    ageStr(noaaspw_age, age));
+                    ageStr(noaaspw_age, age, sizeof(age)));
             client.print (buf);
         }
     }
@@ -1310,9 +1369,10 @@ static bool getWiFiSpaceWx (WiFiClient &client, char *unused)
 
 /* send some misc system info
  */
-static bool getWiFiSys (WiFiClient &client, char *unused)
+static bool getWiFiSys (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     char buf[100];
 
@@ -1330,8 +1390,9 @@ static bool getWiFiSys (WiFiClient &client, char *unused)
     FWIFIPR (client, F("MaxStack ")); client.println (worst_stack);
     FWIFIPR (client, F("MaxWDDT  ")); client.println (max_wd_dt);
     FWIFIPR (client, F("Platform ")); client.println (platform);
-    FWIFIPR (client, F("Backend  ")); client.println (svr_host);
-    FWIFIPR (client, F("SvrPort  ")); client.println (svr_port);
+    FWIFIPR (client, F("BEHost   ")); client.println (backend_host);
+    FWIFIPR (client, F("BEPort   ")); client.println (BACKEND_PORT);
+    FWIFIPR (client, F("MACaddr  ")); client.println (WiFi.macAddress().c_str());
     FWIFIPR (client, F("S/N      ")); client.println (ESP.getChipId());
 #if defined(_IS_ESP8266)
     FWIFIPR (client, F("MinHeap  ")); client.println (worst_heap);
@@ -1402,12 +1463,77 @@ static bool getWiFiSys (WiFiClient &client, char *unused)
     return (true);
 }
 
+/* report the current VOACAP Band Conditions matrix, if not too old
+ */
+static bool getWiFiVOACAP (WiFiClient &client, char *line, size_t line_len)
+{
+    // bm is a matrix of 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
+    BandCdtnMatrix bm;
+    if (!getBCMatrix (bm)) {
+        (void) snprintf (line, line_len, _FX("not available"));
+        return(false);
+    }
+
+    // send html header
+    startPlainText(client);
+
+    // find utc and DE hour now. these will be the matrix row in plot column 0.
+    int utc_hour_now = hour (nowWO());
+    int de_hour_now = hour (nowWO() + de_tz.tz_secs);
+    int hr_now = bc_utc_tl ? utc_hour_now : de_hour_now;
+
+    // display matrix -- rotated with same layout as plotBandConditions()
+    char buf[100];
+    int buf_l = 0;
+    for (int p_row = 0; p_row < BMTRX_COLS; p_row++) {  // print 1 row for each matrix column
+        int m_col = BMTRX_COLS - 1 - p_row;             // convert to bm col with 10 (last col) on top
+
+        // start with band name
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("%2dm  "), propMap2Band((PropMapSetting)m_col));
+
+        // scan matrix _column_ for this band
+        for (int p_col = 0; p_col < BMTRX_ROWS; p_col++) {
+
+            // shift so current time is first column
+            int m_row = (p_col + utc_hour_now + 48) % 24;
+
+            // get reliability
+            uint8_t rel = bm[m_row][m_col];
+
+            buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("%3d"), rel);
+        }
+
+        // finish with band freq
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, " %5.0f MHz\n", propMap2MHz((PropMapSetting)m_col));
+
+        // print and restart
+        client.print (buf);
+        buf_l = 0;
+    }
+
+    // bottom row is time DE or utc depending on bc_utc_tl but "now" always column 1
+    buf_l = 0;
+    buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("%-5s"), bc_utc_tl ? _FX("UTC") : _FX("DE"));
+    for (int p_col = 0; p_col < BMTRX_ROWS; p_col++) {
+        int hr = (hr_now + p_col) % 24;
+        if ((hr%4) != 0)
+            buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("   "));
+        else
+            buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("%3d"), hr);
+    }
+    client.println (buf);
+
+    // ok!
+    return (true);
+}
+
 
 /* send current clock time
  */
-static bool getWiFiTime (WiFiClient &client, char *unused)
+static bool getWiFiTime (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // send html header
     startPlainText(client);
@@ -1437,10 +1563,10 @@ static bool getWiFiTime (WiFiClient &client, char *unused)
         int mn_os = off_abs/60;
         off_abs -= mn_os*60;
         int sc_os = off_abs;
-        bl += sprintf (buf+bl, "= Z%c", off < 0 ? '-' : '+');
+        bl += snprintf (buf+bl, sizeof(buf)-bl, "= Z%c", off < 0 ? '-' : '+');
         if (dy_os != 0)
-            bl += sprintf (buf+bl, "%dd", dy_os);
-        bl += sprintf (buf+bl, _FX("%02d:%02d:%02d\n"), hr_os, mn_os, sc_os);
+            bl += snprintf (buf+bl, sizeof(buf)-bl, "%dd", dy_os);
+        bl += snprintf (buf+bl, sizeof(buf)-bl, _FX("%02d:%02d:%02d\n"), hr_os, mn_os, sc_os);
     }
     client.print (buf);
 
@@ -1450,7 +1576,7 @@ static bool getWiFiTime (WiFiClient &client, char *unused)
 /* remote command to set call sign to some message and set fg and bg colors.
  * all are optional in any order; restore defaults if no args at all.
  */
-static bool setWiFiTitle (WiFiClient &client, char line[])
+static bool setWiFiTitle (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1460,7 +1586,7 @@ static bool setWiFiTitle (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "bg";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -1533,7 +1659,7 @@ static bool setWiFiTitle (WiFiClient &client, char line[])
 
 /* run a DemoChoice or turn off
  */
-static bool setWiFiDemo (WiFiClient &client, char line[])
+static bool setWiFiDemo (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1543,10 +1669,10 @@ static bool setWiFiDemo (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "n";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
-    char buf[100];
+    char buf[200];
 
     // crack
     if (wa.found[0] && wa.value[0] == NULL) {
@@ -1567,7 +1693,7 @@ static bool setWiFiDemo (WiFiClient &client, char line[])
         // n=x
         int choice;
         if (!atoiOnly(wa.value[2], &choice) || choice < 0 || choice >= DEMO_N) {
-            sprintf (line, _FX("Demo codes 0 .. %d"), DEMO_N-1);
+            snprintf (line, line_len, _FX("Demo codes 0 .. %d"), DEMO_N-1);
             return (false);
         }
 
@@ -1579,7 +1705,7 @@ static bool setWiFiDemo (WiFiClient &client, char line[])
 
         // run it
         bool slow;
-        if (runDemoChoice ((DemoChoice)choice, slow, buf)) {
+        if (runDemoChoice ((DemoChoice)choice, slow, buf, sizeof(buf))) {
             strcat (buf, "\n");
             Serial.print (buf);
         } else {
@@ -1604,7 +1730,7 @@ static bool setWiFiDemo (WiFiClient &client, char line[])
 /* remote command to set the DE time format and/or atin
  * set_defmt?fmt=[one from menu]&atin=RSAtAt|RSInAgo"
  */
-static bool setWiFiDEformat (WiFiClient &client, char line[])
+static bool setWiFiDEformat (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1613,7 +1739,7 @@ static bool setWiFiDEformat (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "atin";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // fmt is required
@@ -1635,9 +1761,9 @@ static bool setWiFiDEformat (WiFiClient &client, char line[])
         }
     }
     if (new_fmt < 0) {
-        size_t ll = sprintf (line, _FX("Formats: %s"), detime_names[0]);
+        size_t ll = snprintf (line, line_len, _FX("Formats: %s"), detime_names[0]);
         for (int i = 1; i < DETIME_N; i++)
-            ll += sprintf (line+ll, ", %s", detime_names[i]);
+            ll += snprintf (line+ll, line_len-ll, ", %s", detime_names[i]);
         return (false);
     }
 
@@ -1645,7 +1771,7 @@ static bool setWiFiDEformat (WiFiClient &client, char line[])
     uint8_t new_desrss = desrss;
     if (atin) {
         if (new_fmt != DETIME_INFO) {
-            sprintf (line, _FX("atin requires %s"), detime_names[DETIME_INFO]);
+            snprintf (line, line_len, _FX("atin requires %s"), detime_names[DETIME_INFO]);
             return (false);
         }
         if (strcmp (atin, _FX("RSAtAt")) == 0)
@@ -1667,7 +1793,7 @@ static bool setWiFiDEformat (WiFiClient &client, char line[])
 
     // ack
     startPlainText (client);
-    sprintf (line, _FX("%s %s\n"), fmt, atin ? atin : "");
+    snprintf (line, line_len, _FX("%s %s\n"), fmt, atin ? atin : "");
     client.println (line);
 
     // ok
@@ -1676,7 +1802,7 @@ static bool setWiFiDEformat (WiFiClient &client, char line[])
 
 /* remote command to set a new dx cluster
  */
-static bool setWiFiCluster (WiFiClient &client, char line[])
+static bool setWiFiCluster (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1685,7 +1811,7 @@ static bool setWiFiCluster (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "port";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -1717,7 +1843,7 @@ static bool setWiFiCluster (WiFiClient &client, char line[])
 /* remote command to set up alarm clock
  *   state=off|armed&time=HR:MN
  */
-static bool setWiFiAlarm (WiFiClient &client, char line[])
+static bool setWiFiAlarm (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1726,7 +1852,7 @@ static bool setWiFiAlarm (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "time";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -1786,13 +1912,13 @@ static bool setWiFiAlarm (WiFiClient &client, char line[])
 
 /* remote command to set the aux time format
  */
-static bool setWiFiAuxTime (WiFiClient &client, char line[])
+static bool setWiFiAuxTime (WiFiClient &client, char line[], size_t line_len)
 {
     // parse
     WebArgs wa;
     wa.nargs = 0;
     wa.name[wa.nargs++] = "format";
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // look for matching name
@@ -1823,7 +1949,7 @@ static bool setWiFiAuxTime (WiFiClient &client, char line[])
 
 /* remote command to set display on or off
  */
-static bool setWiFiDisplayOnOff (WiFiClient &client, char line[])
+static bool setWiFiDisplayOnOff (WiFiClient &client, char line[], size_t line_len)
 {
     if (brOnOffOk()) {
 
@@ -1834,7 +1960,7 @@ static bool setWiFiDisplayOnOff (WiFiClient &client, char line[])
         wa.name[wa.nargs++] = "off";
 
         // parse
-        if (!parseWebCommand (wa, line, line))
+        if (!parseWebCommand (wa, line, line_len))
             return (false);
 
         // engage
@@ -1880,7 +2006,7 @@ static bool crackDOW (const char *daystr, int &dow)
 /* remote command to set display on/off/idle times
  * on=HR:MN&off=HR:MN&idle=mins&day=DOW
  */
-static bool setWiFiDisplayTimes (WiFiClient &client, char line[])
+static bool setWiFiDisplayTimes (WiFiClient &client, char line[], size_t line_len)
 {
 
     if (brOnOffOk()) {
@@ -1894,7 +2020,7 @@ static bool setWiFiDisplayTimes (WiFiClient &client, char line[])
         wa.name[wa.nargs++] = "idle";
 
         // parse
-        if (!parseWebCommand (wa, line, line))
+        if (!parseWebCommand (wa, line, line_len))
             return (false);
 
         // handy
@@ -1934,14 +2060,14 @@ static bool setWiFiDisplayTimes (WiFiClient &client, char line[])
         // ack
         startPlainText (client);
         const char hm_fmt[] = "%02d:%02d";
-        char buf[50];
+        char buf[100];
 
         FWIFIPR (client, F("On    "));
-        sprintf (buf, hm_fmt, on_hr, on_mn);
+        snprintf (buf, sizeof(buf), hm_fmt, on_hr, on_mn);
         client.println (buf);
 
         FWIFIPR (client, F("Off   "));
-        sprintf (buf, hm_fmt, off_hr, off_mn);
+        snprintf (buf, sizeof(buf), hm_fmt, off_hr, off_mn);
         client.println (buf);
 
         if (idle_mins >= 0) {
@@ -1969,7 +2095,7 @@ static bool setWiFiDisplayTimes (WiFiClient &client, char line[])
 /* set DE or DX from maidenhead locator, eg, AB12
  * return whether all ok
  */
-static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[])
+static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -1980,7 +2106,7 @@ static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[])
     wa.name[wa.nargs++] = "TZ";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -2051,26 +2177,26 @@ static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[])
     }
 
     // ack with updated info as if get
-    return (getWiFiDEDXInfo_helper (client, line, new_dx));
+    return (getWiFiDEDXInfo_helper (client, line, line_len, new_dx));
 }
 
 /* set DE from grid or lat/lng
  */
-static bool setWiFiNewDE (WiFiClient &client, char line[])
+static bool setWiFiNewDE (WiFiClient &client, char line[], size_t line_len)
 {
-    return (setWiFiNewDEDX_helper (client, false, line));
+    return (setWiFiNewDEDX_helper (client, false, line, line_len));
 }
 
 /* set DX from grid or lat/lng
  */
-static bool setWiFiNewDX (WiFiClient &client, char line[])
+static bool setWiFiNewDX (WiFiClient &client, char line[], size_t line_len)
 {
-    return (setWiFiNewDEDX_helper (client, true, line));
+    return (setWiFiNewDEDX_helper (client, true, line, line_len));
 }
 
 /* set a map view color, names must match those displayed in Setup after changing all '_' to ' '
  */
-static bool setWiFiMapColor (WiFiClient &client, char line[])
+static bool setWiFiMapColor (WiFiClient &client, char line[], size_t line_len)
 {
     // easier not to use WebArgs in this case
     char color[30];
@@ -2104,13 +2230,13 @@ static bool setWiFiMapColor (WiFiClient &client, char line[])
 
 /* set a new mercator center longitude, even if not currently showing mercator
  */
-static bool setWiFiMerCenter (WiFiClient &client, char line[])
+static bool setWiFiMerCenter (WiFiClient &client, char line[], size_t line_len)
 {
     // crack args
     WebArgs wa;
     wa.nargs = 0;
     wa.name[wa.nargs++] = "lng";
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // get candidate longitude
@@ -2139,7 +2265,7 @@ static bool setWiFiMerCenter (WiFiClient &client, char line[])
  * syntax: Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off
  * all keywords optional but require at least 1.
  */
-static bool setWiFiMapView (WiFiClient &client, char line[])
+static bool setWiFiMapView (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2151,7 +2277,7 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "Night";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -2177,9 +2303,9 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
             }
         }
         if (my_cm == CM_NONE) {
-            size_t ll = sprintf (line, _FX("Styles: %s"), map_styles[0]);
+            size_t ll = snprintf (line, line_len, _FX("Styles: %s"), map_styles[0]);
             for (int i = 1; i < CM_N; i++)
-                ll += sprintf (line+ll, ", %s", map_styles[i]);
+                ll += snprintf (line+ll, line_len-ll, ", %s", map_styles[i]);
             return (false);
         }
     }
@@ -2194,9 +2320,9 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
             }
         }
         if (my_llg < 0) {
-            size_t ll = sprintf (line, "Grid: %s", grid_styles[0]);
+            size_t ll = snprintf (line, line_len, "Grid: %s", grid_styles[0]);
             for (int i = 1; i < MAPGRID_N; i++)
-                ll += sprintf (line+ll, ", %s", grid_styles[i]);
+                ll += snprintf (line+ll, line_len-ll, ", %s", grid_styles[i]);
             return (false);
         }
     }
@@ -2211,9 +2337,9 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
             }
         }
         if (my_proj < 0) {
-            size_t ll = sprintf (line, "Projection: %s", map_projnames[0]);
+            size_t ll = snprintf (line, line_len, "Projection: %s", map_projnames[0]);
             for (int i = 1; i < MAPP_N; i++)
-                ll += sprintf (line+ll, ", %s", map_projnames[i]);
+                ll += snprintf (line+ll, line_len-ll, ", %s", map_projnames[i]);
             return (false);
         }
     }
@@ -2294,7 +2420,7 @@ static bool setWiFiMapView (WiFiClient &client, char line[])
 /* set a new correction for the given sensor
  *   sensor=76|77&dTemp=X&dPres=Y" },
  */
-static bool setWiFiSensorCorr (WiFiClient &client, char line[])
+static bool setWiFiSensorCorr (WiFiClient &client, char line[], size_t line_len)
 {
     if (getNBMEConnected() == 0) {
         strcpy (line, _FX("No sensors"));
@@ -2309,7 +2435,7 @@ static bool setWiFiSensorCorr (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "dPres";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -2374,8 +2500,10 @@ static bool setWiFiSensorCorr (WiFiClient &client, char line[])
  *    network    resume network connection
  *    file       list of titles follows header in POST format
  *    interval   set refresh interval, secs, min 5
+ *    on         display RSS, be it local or network
+ *    off        do not display RSS
  */
-static bool setWiFiRSS (WiFiClient &client, char line[])
+static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2385,9 +2513,11 @@ static bool setWiFiRSS (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "file";
     wa.name[wa.nargs++] = "network";
     wa.name[wa.nargs++] = "interval";
+    wa.name[wa.nargs++] = "on";
+    wa.name[wa.nargs++] = "off";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     StackMalloc buf_mem(150);
@@ -2408,7 +2538,7 @@ static bool setWiFiRSS (WiFiClient &client, char line[])
     } else if (wa.found[1] && wa.value[1] != NULL) {
         // turn off network and add title to local list if room
         if (!setRSSTitle (wa.value[1], n_titles, n_max)) {
-            sprintf (line, _FX("List is full -- max %d"), n_max);
+            snprintf (line, line_len, _FX("List is full -- max %d"), n_max);
             return (false);
         }
         buf[0] = '\0';                                  // use default reply
@@ -2427,8 +2557,22 @@ static bool setWiFiRSS (WiFiClient &client, char line[])
             snprintf (buf, buf_mem.getSize(), _FX("RSS interval now %d secs\n"), rss_interval);
             NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
         } else {
-            sprintf (line, _FX("Min interval %d seconds"), RSS_MIN_INT);
+            snprintf (line, line_len, _FX("Min interval %d seconds"), RSS_MIN_INT);
             return (false);
+        }
+
+    } else if (wa.found[5] && wa.value[5] == NULL) {
+        // turn on display with immediate update
+        rss_on = 1;;
+        NVWriteUInt8 (NV_RSS_ON, rss_on);
+        drawRSSBox();
+
+    } else if (wa.found[6] && wa.value[6] == NULL) {
+        // turn off display, if on
+        if (rss_on) {
+            rss_on = 0;
+            NVWriteUInt8 (NV_RSS_ON, rss_on);
+            eraseRSSBox();
         }
 
     } else {
@@ -2452,7 +2596,7 @@ static bool setWiFiRSS (WiFiClient &client, char line[])
 /* set new collection of plot choices for a given pane.
  * return whether ok
  */
-static bool setWiFiPane (WiFiClient &client, char line[])
+static bool setWiFiPane (WiFiClient &client, char line[], size_t line_len)
 {
     // first arg is 1-based pane number
     int pane_1;
@@ -2490,32 +2634,32 @@ static bool setWiFiPane (WiFiClient &client, char line[])
 
         // found?
         if (tok_pc == PLOT_CH_NONE) {
-            sprintf (line, _FX("Unknown choice for pane %d: %s"), pane_1, tok_copy);
+            snprintf (line, line_len, _FX("Unknown choice for pane %d: %s"), pane_1, tok_copy);
             return (false);
         }
 
         // in use elsewhere?
         PlotPane inuse_pp = findPaneForChoice(tok_pc);
         if (inuse_pp != PANE_NONE && inuse_pp != pp) {
-            sprintf (line, _FX("%s already set in pane %d"), tok_copy, (int)inuse_pp+1);
+            snprintf (line, line_len, _FX("%s already set in pane %d"), tok_copy, (int)inuse_pp+1);
             return (false);
         }
         
         // dx cluster?
         if (tok_pc == PLOT_CH_DXCLUSTER && pp == PANE_1) {
-            sprintf (line, _FX("%s not allowed on pane 1"), tok_copy);
+            snprintf (line, line_len, _FX("%s not allowed on pane 1"), tok_copy);
             return (false);
         }
 
         // available?
         if (!plotChoiceIsAvailable(tok_pc)) {
-            sprintf (line, _FX("%s is not available"), tok_copy);
+            snprintf (line, line_len, _FX("%s is not available"), tok_copy);
             return (false);
         }
 
         // room for more?
         if (n_pc == PLOT_CH_N) {
-            sprintf (line, _FX("too many choices"));
+            snprintf (line, line_len, _FX("too many choices"));
             return (false);
         }
 
@@ -2525,13 +2669,13 @@ static bool setWiFiPane (WiFiClient &client, char line[])
 
     // require at least 1
     if (n_pc == 0) {
-        sprintf (line, _FX("specify at least one choice for pane %d"), pane_1);
+        snprintf (line, line_len, _FX("specify at least one choice for pane %d"), pane_1);
         return (false);
     }
 
     // show first in list
     if (!setPlotChoice (pp, pc[0])) {
-        sprintf (line, _FX("%s failed for pane %d"), plot_names[pc[0]], pane_1);
+        snprintf (line, line_len, _FX("%s failed for pane %d"), plot_names[pc[0]], pane_1);
         return (false);
     }
 
@@ -2557,13 +2701,13 @@ static bool setWiFiPane (WiFiClient &client, char line[])
 /* try to set the satellite to the given name.
  * return whether command is successful.
  */
-static bool setWiFiSatName (WiFiClient &client, char line[])
+static bool setWiFiSatName (WiFiClient &client, char line[], size_t line_len)
 {
     resetWatchdog();
 
     // do it
     if (setSatFromName (line))
-        return (getWiFiSatellite (client, line));
+        return (getWiFiSatellite (client, line, line_len));
 
     // nope
     strcpy (line, _FX("Unknown sat"));
@@ -2573,7 +2717,7 @@ static bool setWiFiSatName (WiFiClient &client, char line[])
 /* set satellite from given TLE: set_sattle?name=n&t1=line1&t2=line2
  * return whether command is successful.
  */
-static bool setWiFiSatTLE (WiFiClient &client, char line[])
+static bool setWiFiSatTLE (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2583,7 +2727,7 @@ static bool setWiFiSatTLE (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "t2";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -2607,7 +2751,7 @@ static bool setWiFiSatTLE (WiFiClient &client, char line[])
 
     // try to install
     if (setSatFromTLE (name, t1, t2))
-        return (getWiFiSatellite (client, line));
+        return (getWiFiSatellite (client, line, line_len));
 
     // nope
     strcpy (line, _FX("Bad spec"));
@@ -2616,7 +2760,7 @@ static bool setWiFiSatTLE (WiFiClient &client, char line[])
 
 /* remote command to control stopwatch engine state
  */
-static bool setWiFiStopwatch (WiFiClient &client, char line[])
+static bool setWiFiStopwatch (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2628,7 +2772,7 @@ static bool setWiFiStopwatch (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "countdown";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // crack
@@ -2674,7 +2818,7 @@ static bool setWiFiStopwatch (WiFiClient &client, char line[])
  *  Now
  * return whether command is fully recognized.
  */
-static bool setWiFiTime (WiFiClient &client, char line[])
+static bool setWiFiTime (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2685,7 +2829,7 @@ static bool setWiFiTime (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "change";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
 
@@ -2745,7 +2889,7 @@ static bool setWiFiTime (WiFiClient &client, char line[])
 /* perform a touch screen action based on coordinates received via wifi GET
  * return whether all ok.
  */
-static bool setWiFiTouch (WiFiClient &client, char line[])
+static bool setWiFiTouch (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2755,14 +2899,14 @@ static bool setWiFiTouch (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "hold";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // require x and y within screen size
     int x, y;
     if (!atoiOnly(wa.value[0],&x) || x < 0 || x >= tft.width()
                 || !atoiOnly(wa.value[1],&y) || y < 0 || y >= tft.height()) {
-        sprintf (line, _FX("require 0 .. x .. %d and 0 .. y .. %d"), tft.width()-1, tft.height()-1);
+        snprintf (line,line_len, _FX("require 0 .. x .. %d and 0 .. y .. %d"), tft.width()-1, tft.height()-1);
         return (false);
     }
 
@@ -2780,7 +2924,7 @@ static bool setWiFiTouch (WiFiClient &client, char line[])
 
     // ack
     startPlainText (client);
-    char buf[50];
+    char buf[100];
     snprintf (buf, sizeof(buf), _FX("Touch %d %d %s\n"), x, y, h ? "hold" : "tap");
     client.print(buf);
 
@@ -2791,7 +2935,7 @@ static bool setWiFiTouch (WiFiClient &client, char line[])
 /* set the VOACAP map to the given band and/or power and/or timeline units
  * return whether all ok.
  */
-static bool setWiFiVOACAP (WiFiClient &client, char line[])
+static bool setWiFiVOACAP (WiFiClient &client, char line[], size_t line_len)
 {
     // define all possible args
     WebArgs wa;
@@ -2801,7 +2945,7 @@ static bool setWiFiVOACAP (WiFiClient &client, char line[])
     wa.name[wa.nargs++] = "tl";
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // handy
@@ -2883,7 +3027,7 @@ static bool setWiFiVOACAP (WiFiClient &client, char line[])
 
     // ack
     startPlainText (client);
-    char buf[50];
+    char buf[100];
     size_t l = snprintf (buf, sizeof(buf), _FX("VOACAP "));
     if (new_pms == PROP_MAP_OFF)
         l += snprintf (buf+l, sizeof(buf)-l, _FX("map off"));
@@ -2900,9 +3044,10 @@ static bool setWiFiVOACAP (WiFiClient &client, char line[])
 
 /* finish the wifi then restart
  */
-static bool doWiFiReboot (WiFiClient &client, char *unused)
+static bool doWiFiReboot (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // send html header then close
     startPlainText(client);
@@ -2921,17 +3066,18 @@ static bool doWiFiReboot (WiFiClient &client, char *unused)
 
 /* update firmware if available
  */
-static bool doWiFiUpdate (WiFiClient &client, char *unused)
+static bool doWiFiUpdate (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // prep for response but won't be one if we succeed with update
     startPlainText(client);
 
     // proceed if newer version is available
-    char ver[50];
+    char ver[100];
     if (newVersionIsAvailable (ver, sizeof(ver))) {
-        char msg[100];
+        char msg[200];
         snprintf (msg, sizeof(msg), _FX("updating from %s to %s ... \n"), hc_version, ver);
         client.print(msg);
         doOTAupdate(ver);                               // never returns if successful
@@ -2946,7 +3092,7 @@ static bool doWiFiUpdate (WiFiClient &client, char *unused)
 /* change the live spots configuration
  *   spot=of|by&what=call|grid&data=psk|wspr&bands=160,...
  */
-static bool setWiFiLiveSpots (WiFiClient &client, char *line)
+static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
 {
     WebArgs wa;
     wa.nargs = 0;
@@ -2956,7 +3102,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char *line)
     wa.name[wa.nargs++] = "bands";                      // 3
 
     // parse
-    if (!parseWebCommand (wa, line, line))
+    if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     // since components are optional we start with the current mask and modify
@@ -3056,535 +3202,19 @@ static bool setWiFiLiveSpots (WiFiClient &client, char *line)
     return (true);
 }
 
+
+
+
+
 #if defined(_IS_UNIX)
-
-/* implement a live web server connection.
- * the idea is to maintain an image of changed regions so browser only gets changes,
- *   saves at least 10x bandwidth. not implemented on ESP because reading pixels is so slow and because
- *   it does not have enough memory to build a png image
- */
-
-// import png writer -- complete implementation in a header file -- amazing.
-// https://github.com/nothings/stb
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-
-// png format is 3 bytes per pixel
-#define LIVE_BYPPIX     3                               // bytes per pixel
-#define LIVE_NPIX       (BUILD_H*BUILD_W)               // pixels per complete image
-#define LIVE_NBYTES     (LIVE_NPIX*LIVE_BYPPIX)         // bytes per complete image
-#define COMP_RGB        3                               // composition request code for RGB pixels
-
-
-// persistent copies of client screen shots used to build differences.
-typedef struct {
-    char IP[16];                                        // client IP xxx.xxx.xxx.xxx with EOS
-    uint8_t *pixels;                                    // malloced last known complete image of LIVE_NBYTES
-    time_t last_used;                                   // last time() this IP was used
-    bool in_use;                                        // whether this record is being used
-} LiveConnection;
-static LiveConnection *clives;                          // malloced list
-static int n_clives;                                    // n malloced (some may be unused)
-#define LIVE_EXPIRE     10                              // discard if not used within this many seconds
-
-
-/* send the favicon.ico icon
- * UNIX only
- */
-static bool getWiFifavicon (WiFiClient &client, char *errmsg)
-{
-    // send the web page header
-    resetWatchdog();
-    FWIFIPRLN (client, F("HTTP/1.0 200 OK"));
-    sendUserAgent (client);
-    FWIFIPRLN (client, F("Content-Type: image/x-icon"));
-    FWIFIPRLN (client, F("Connection: close\r\n"));
-
-    // send icon
-    writeFavicon (client);
-    Serial.println(F("favicon sent"));
-
-    // never fails :)
-    return (true);
-}
-
-/* read out the current image as an array of LIVE_NBYTES RGB pixels
- * UNIX only
- */
-static void readLiveImageNow (uint8_t img[LIVE_NBYTES])
-{
-    if (!tft.getRawPix (img, LIVE_NPIX))
-        fatalError ("getRawPix wrong size: %d\n", LIVE_NPIX);
-}
-
-/* initialize a LiveConnection for the given IP making no assumptions about its current content.
- * this includes a large malloc so return false of it fails.
- * UNIX only
- */
-static bool initLiveConnection (LiveConnection *lp, const String &IP)
-{
-    printf ("LIVE: init: %s\n", IP.c_str());
-
-    lp->pixels = (uint8_t *) malloc (LIVE_NBYTES);
-    if (!lp->pixels)
-        return (false);
-
-    strncpy (lp->IP, IP.c_str(), sizeof(lp->IP));
-    lp->IP[sizeof(lp->IP)-1] = '\0';
-    lp->last_used = time(NULL);
-    lp->in_use = true;
-
-    return (true);
-}
-
-/* destroy the memory used by the given LiveConnection and mark it as unused.
- * UNIX only
- */
-static void destroyLiveConnection (LiveConnection *lp)
-{
-    if (!lp->in_use)
-        fatalError ("destroying unused live connection");
-    printf ("LIVE: destroy: %s\n", lp->IP);
-    free (lp->pixels);
-    lp->in_use = false;
-}
-
-/* find an existing connection for this IP, if any
- * UNIX only
- */
-static LiveConnection *findLiveConnection (const String &IP)
-{
-    for (int i = 0; i < n_clives; i++) {
-        LiveConnection *lp = &clives[i];
-        if (lp->in_use && strcmp (lp->IP, IP.c_str()) == 0) {
-            if (live_verbose > 1)
-                printf ("LIVE: reusing %s\n", lp->IP);
-            return (lp);
-        }
-    }
-    printf ("LIVE: %s not found\n", IP.c_str());
-    return (NULL);
-}
-
-/* return a connection record for this IP including a fresh copy of the current image.
- * return NULL if trouble.
- * UNIX only
- */
-static LiveConnection *startLiveConnection (const String &IP)
-{
-    // first look for an existing record we can continue to use
-    LiveConnection *lp = findLiveConnection (IP);
-    if (lp && live_verbose > 1)
-        printf ("LIVE: start found %s\n", lp->IP);
-
-    // not found, look for a dormant entry to reuse and clean up other old ones along the way
-    if (!lp) {
-        for (int i = 0; i < n_clives; i++) {
-            LiveConnection *candidate_lp = &clives[i];
-            if (candidate_lp->in_use && candidate_lp->last_used < time(NULL) - LIVE_EXPIRE) {
-                destroyLiveConnection(candidate_lp);
-                if (!lp) {
-                    if (!initLiveConnection (candidate_lp, IP))
-                        return (NULL);
-                    lp = candidate_lp;
-                }
-            }
-        }
-        if (lp && live_verbose > 1)
-            printf ("LIVE: start repurposed for %s\n", lp->IP);
-    }
-
-
-    // if still none available, grow list
-    if (!lp) {
-        clives = (LiveConnection *) realloc (clives, (n_clives+1)*sizeof(LiveConnection));
-        if (!clives)
-            fatalError ("live web connection: %d", n_clives);
-        lp = &clives[n_clives++];
-        if (!initLiveConnection(lp,IP))
-            return (NULL);
-        if (lp)
-            printf ("LIVE: grow clives to %d for %s\n", n_clives, lp->IP);
-    }
-
-    // read current image if found
-    if (lp) {
-        printf ("LIVE: reading full image for %s\n", lp->IP);
-        readLiveImageNow (lp->pixels);
-    }
-
-    // return our best shot
-    return (lp);
-}
-
-/* save the given image for the given connection.
- * N.B. we assume memory is already allocated
- * UNIX only
- */
-static void saveLiveConnectionImage (LiveConnection *lp, uint8_t *pixels)
-{
-    if (!lp->in_use)
-        fatalError ("saving to unused live connection");
-    if (live_verbose > 1)
-        printf ("LIVE:   saving image for %s\n", lp->IP);
-    memcpy ((void*)lp->pixels, pixels, LIVE_NBYTES);
-    lp->last_used = time(NULL);
-}
-
-/* stbi_write_png_to_func helper to write the given array to the given WiFiClient
- * UNIX only
- */
-static void wifiSTBWrite_helper (void *context, void *data, int size)
-{
-    ((WiFiClient*)context)->write ((uint8_t*)data, size);
-    if (live_verbose) {
-        printf ("LIVE:   image %d bytes\n", size);
-        if (live_verbose > 1) {
-            FILE *fp = fopen ("/tmp/live.png", "w");
-            fwrite (data, size, 1, fp);
-            fclose(fp);
-        }
-    }
-
-
-}
-
-/* send complete screen capture as png file.
- * works ok stand-alone but typically used by live-html.cpp
- * UNIX only
- */
-static bool getWiFiLivePNG (WiFiClient &client, char *errmsg)
-{
-    // get connection info for this client
-    LiveConnection *lp = startLiveConnection (client.remoteIP());
-    if (!lp) {
-        strcpy (errmsg, "Max live clients");
-        return (false);
-    }
-
-    // send the web page header
-    resetWatchdog();
-    FWIFIPRLN (client, F("HTTP/1.0 200 OK"));
-    sendUserAgent (client);
-    FWIFIPRLN (client, F("Content-Type: image/png"));
-    FWIFIPRLN (client, F("Cache-Control: no-cache"));
-    FWIFIPRLN (client, F("Connection: close\r\n"));
-    if (live_verbose > 1)
-        Serial.println(F("web header sent"));
-
-    // convert to and send as png
-    stbi_write_png_compression_level = 2;       // faster with hardly any increase in size
-    stbi_write_png_to_func (wifiSTBWrite_helper, &client, BUILD_W, BUILD_H, COMP_RGB, lp->pixels,
-                                                                                LIVE_BYPPIX*BUILD_W);
-
-    // never fails :)
-    return (true);
-}
-
-/* send a collection of changed live screen updates.
- * UNIX only
- */
-static bool getWiFiLiveUpdate (WiFiClient &client, char *errmsg)
-{
-    // require an existing live connection
-    LiveConnection *lp = findLiveConnection (client.remoteIP());
-    if (!lp) {
-        strcpy (errmsg, "No previous image");
-        return (false);
-    }
-
-    // find time correction so next message arrives just after refresh with good margin
-    struct timeval arrive_tv;
-    gettimeofday (&arrive_tv, NULL);
-    int send_corr = (((4*REFRESH_US - arrive_tv.tv_usec)/10000) + 1000) % 100; // csecs 0 .. 99
-
-    // note in use
-    last_live = arrive_tv.tv_sec;
-
-    // we only send small regions that have changed since previous.
-    // image is divided into fixed sized blocks and those which have changed are coalesced into regions
-    // of height one block but variable length. these are collected and sent as one image of height one
-    // block preceded by a header defining the location and size of each region. the coordinates and
-    // length of a region are in units of blocks, not pixels, to reduce each value's size to one byte
-    // each in the header. smaller regions are more efficient but the coords must fit in 8 bit header value.
-    #define BLOK_W      (BUILD_W>1600?16:8)             // pixels wide
-    #define BLOK_H      8                               // pixels high
-    #define BLOK_NCOLS  (BUILD_W/BLOK_W)                // blocks in each row over entire image
-    #define BLOK_NROWS  (BUILD_H/BLOK_H)                // blocks in each col over entire image
-    #define BLOK_NPIX   (BLOK_W*BLOK_H)                 // size of 1 block, pixels
-    #define BLOK_NBYTES (BLOK_NPIX*LIVE_BYPPIX)         // size of 1 block, bytes
-    #define BLOK_WBYTES (BLOK_W*LIVE_BYPPIX)            // width of 1 block, bytes
-    #define MAX_REGNS   (BLOK_NCOLS*BLOK_NROWS)         // worse case number of regions
-    #if BLOK_NCOLS > 255                                // insure fits into uint8_t
-        #error too many block columns
-    #endif
-    #if BLOK_NROWS > 255                                // insure fits into uint8_t
-        #error too many block rows
-    #endif
-    #if MAX_REGNS > 65535                               // insure fits into uint16_t
-        #error too many live regions
-    #endif
-
-    // send the web page header
-    resetWatchdog();
-    FWIFIPRLN (client, F("HTTP/1.0 200 OK"));
-    sendUserAgent (client);
-    FWIFIPRLN (client, F("Content-Type: application/octet-stream"));
-    FWIFIPRLN (client, F("Cache-Control: no-cache"));
-    FWIFIPRLN (client, F("Connection: close\r\n"));
-    // Serial.println(F("update header sent"));  
-
-    // curious how long these steps take
-    struct timeval tv0;
-    gettimeofday (&tv0, NULL);
-
-    // collect the current screen image
-    uint8_t *img_now = (uint8_t *) malloc (LIVE_NBYTES);
-    if (!img_now)
-        fatalError ("Can not malloc(%d) for web image", LIVE_NBYTES);
-    if (live_verbose > 1)
-        printf ("LIVE: reading pixels for %s update\n", lp->IP);
-    readLiveImageNow (img_now);
-
-    if (live_verbose) {
-        struct timeval tv1;
-        gettimeofday (&tv1, NULL);
-        printf ("LIVE: get img_now %ld usec\n", (tv1.tv_sec-tv0.tv_sec)*1000000 + (tv1.tv_usec-tv0.tv_usec));
-        gettimeofday (&tv0, NULL);
-    }
-
-
-    // set header to location and length of each changed region.
-    typedef struct {
-        uint8_t x, y, l;                                // region location and length in units of blocks
-    } RegnLoc;
-    RegnLoc locs[MAX_REGNS];                            // room for max number of header region entries
-    uint16_t n_regns = 0;                               // n regions defined so far
-    int n_bloks = 0;                                    // n blocks within all regions so far
-
-    // build locs by checking each region for change across then down
-    for (int ry = 0; ry < BLOK_NROWS; ry++) {
-
-        // pre-check an image band all the way across BLOK_COLS hi, skip entirely if no change anywhere
-        int band_start = ry*LIVE_BYPPIX*BLOK_H*BUILD_W;
-        if (memcmp (&img_now[band_start], &(lp->pixels)[band_start], LIVE_BYPPIX*BLOK_H*BUILD_W) == 0)
-            continue;
-
-        // something changed, scan across this band checking each block
-        locs[n_regns].l = 0;                            // init n contiguous blocks that start here
-        for (int rx = 0; rx < BLOK_NCOLS; rx++) {
-            int blok_start = band_start + rx*BLOK_WBYTES;
-            uint8_t *now0 = &img_now[blok_start];       // first pixel in this block of current image
-            uint8_t *pre0 = &(lp->pixels)[blok_start];  // first pixel in this block of previous image
-
-            // check each row of this block for any change, start or add to region 
-            bool blok_changed = false;                  // set if any changed pixels in this block
-            for (int rr = 0; rr < BLOK_H; rr++) {
-                if (memcmp (now0+rr*LIVE_BYPPIX*BUILD_W, pre0+rr*LIVE_BYPPIX*BUILD_W, BLOK_WBYTES) != 0) {
-                    blok_changed = true;
-                    break;
-                }
-            }
-
-            // add to or start new region
-            if (blok_changed) {
-                if (locs[n_regns].l == 0) {
-                    locs[n_regns].x = rx;
-                    locs[n_regns].y = ry;
-                }
-                locs[n_regns].l++;
-                n_bloks++;
-            } else {
-                if (locs[n_regns].l > 0) {
-                    n_regns++;
-                    locs[n_regns].l = 0;
-                }
-            }
-        }
-
-        // add last region too if started
-        if (locs[n_regns].l > 0) {
-            n_regns++;
-        }
-    }
-
-    // now create one wide image containing each region as a separate sprite.
-    // remember each region must work as a separate image of size lx1 blocks.
-    uint8_t *chg_regns = (uint8_t*) malloc (n_bloks * BLOK_NBYTES);
-    uint8_t *chg0 = chg_regns;
-    for (int ry = 0; ry < BLOK_H; ry++) {
-        for (int i = 0; i < n_regns; i++) {
-            RegnLoc *lp = &locs[i];
-            uint8_t *now0 = &img_now[BUILD_W*LIVE_BYPPIX*(ry+BLOK_H*lp->y) + BLOK_WBYTES*lp->x];
-            memcpy (chg0, now0, BLOK_WBYTES*lp->l);
-            chg0 += BLOK_WBYTES*lp->l;
-        }
-    }
-    if (n_bloks != (chg0-chg_regns)/BLOK_NBYTES)        // assert
-        fatalError ("live regions %d != %d", n_bloks, (chg0-chg_regns)/BLOK_NBYTES);
-
-    if (live_verbose) {
-        struct timeval tv1;
-        gettimeofday (&tv1, NULL);
-        printf ("LIVE:   built %d/%d regions in %ld usec\n", n_regns, n_bloks,
-                        (tv1.tv_sec-tv0.tv_sec)*1000000 + (tv1.tv_usec-tv0.tv_usec));
-        gettimeofday (&tv0, NULL);
-    }
-
-    // send header table of regions -- N.B. must match live-html.cpp expectation.
-    // following header is x,y,l of each of n regions in units of blocks
-    uint8_t hdr[5+3*n_regns];
-    hdr[0] = BLOK_W;                            // block width, pixels
-    hdr[1] = BLOK_H;                            // block height, pixels
-    hdr[2] = send_corr;                         // send time correction, csec
-    hdr[3] = n_regns >> 8;                      // n regions, MSB
-    hdr[4] = n_regns & 0xff;                    // n regions, LSB
-    for (int i = 0; i < n_regns; i++) {
-        hdr[5+3*i] = locs[i].x;
-        hdr[6+3*i] = locs[i].y;
-        hdr[7+3*i] = locs[i].l;
-        if (live_verbose > 2)
-            printf ("   %d,%d %dx%d\n", locs[i].x*BLOK_W, locs[i].y*BLOK_H, locs[i].l*BLOK_W, BLOK_H);
-    }
-    client.write (hdr, sizeof(hdr));
-
-    // followed by one image containing one column BLOK_W wide of all changed regions
-    if (n_bloks > 0)
-        stbi_write_png_to_func (wifiSTBWrite_helper, &client, BLOK_W*n_bloks, BLOK_H,
-                            COMP_RGB, chg_regns, BLOK_WBYTES*n_bloks);
-
-    if (live_verbose) {
-        struct timeval tv1;
-        gettimeofday (&tv1, NULL);
-        printf ("LIVE:   write hdr %d and png in %ld usec\n", (int)sizeof(hdr),
-                        (tv1.tv_sec-tv0.tv_sec)*1000000 + (tv1.tv_usec-tv0.tv_usec));
-        gettimeofday (&tv0, NULL);
-        printf ("LIVE:   message arrived %d msecs after %ld\n", (int)(arrive_tv.tv_usec/1000), (long)nowWO());
-    }
-
-    // save as most recent complete image for this client
-    saveLiveConnectionImage (lp, img_now);
-
-    if (live_verbose) {
-        struct timeval tv1;
-        gettimeofday (&tv1, NULL);
-        printf ("LIVE:   save img_now %ld usec\n",
-                    (tv1.tv_sec-tv0.tv_sec)*1000000+(tv1.tv_usec-tv0.tv_usec));
-    }
-
-    // done with temps
-    free (chg_regns);
-    free (img_now);
-
-    // never fails :)
-    return (true);
-}
-
-/* host a live session
- * UNIX only
- */
-static bool doWiFiLive (WiFiClient &client, char *unused)
-{
-    (void) unused;
-
-    // send header
-    FWIFIPRLN (client, F("HTTP/1.0 200 OK"));
-    sendUserAgent (client);
-    FWIFIPRLN (client, F("Content-Type: text/html; charset=us-ascii"));
-    FWIFIPRLN (client, F("Connection: close\r\n"));             // include extra blank line
-
-    // send page
-    extern char live_html[];
-    client.print (live_html);
-
-    return (true);
-}
-
-/* received command from live client containing a character, act as if typed locally
- * UNIX only
- */
-static bool setWiFiChar (WiFiClient &client, char line[])
-{
-    WebArgs wa;
-    wa.nargs = 0;
-    wa.name[wa.nargs++] = "char";
-
-    // parse
-    if (!parseWebCommand (wa, line, line))
-        return (false);
-
-    // figure out the desired char
-    const char *str = wa.value[0];
-    int strl = strlen(str);
-    char c = str[0];
-    if (strl > 1) {
-        if (strcmp (str, "Escape") == 0)
-            c = 27;
-        else if (strcmp (str, "Enter") == 0 || strcmp (str, "Return") == 0)
-            c = '\n';
-        else if (strcmp (str, "Tab") == 0)
-            c = '\t';
-        else if (strcmp (str, "Backspace") == 0 || strcmp (str, "Delete") == 0)
-            c = '\b';
-        else if (strcmp (str, "Space") == 0)
-            c = ' ';
-        else {
-            memmove (line, str, strl+1);         // str points within line
-            return (false);
-        }
-    } else if (strl < 1 || !isprint(c)) {
-        sprintf (line, "Unknown char 0x%02X", c);
-        return (false);
-    }
-
-    // insert into getChar queue
-    tft.putChar(c);
-
-    // ack
-    startPlainText (client);
-    char buf[20];
-    snprintf (buf, sizeof(buf), "Typed 0x%02X %c\n", c, c);
-    client.print (buf);
-
-    return (true);
-}
-
-
-/* received command from live client containing a mouse motion event (no button), act as if happened locally
- * UNIX only
- */
-static bool setWiFiMouse (WiFiClient &client, char line[])
-{
-    WebArgs wa;
-    wa.nargs = 0;
-    wa.name[wa.nargs++] = "x";
-    wa.name[wa.nargs++] = "y";
-
-    // parse
-    if (!parseWebCommand (wa, line, line))
-        return (false);
-
-    // set
-    int x = atoi(wa.value[0]);
-    int y = atoi(wa.value[1]);
-    tft.setMouse (x, y);
-
-    // ack
-    startPlainText (client);
-    char buf[20];
-    snprintf (buf, sizeof(buf), "Mouse %d %d\n", x, y);
-    client.print (buf);
-
-    // ok
-    return (true);
-}
 
 /* exit -- makes no sense on ESP
  * UNIX only
  */
-static bool doWiFiExit (WiFiClient &client, char *unused)
+static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
 {
-    (void) unused;
+    (void)(unused_line);
+    (void)(line_len);
 
     // ack then die
     startPlainText(client);
@@ -3606,15 +3236,15 @@ static bool doWiFiExit (WiFiClient &client, char *unused)
  * functions are called with user input string beginning just after the command and sans HTTP.
  * N.B. set_ functions returning false shall replace the input string with a brief error message.
  *      functions returning true shall send http reply to client.
- *      get_ command[]'s shall include trailing space to detect and prevent trailing garbage.
+ *      command[]'s without ? shall include trailing space to detect and prevent trailing garbage.
  *      table is located down here in this file so all handlers are already conveniently defined above.
- *      last N_UNDOCCMD entries are not shown with help
+ *      last N_UNDOC_CMD entries are not shown with help
  * the whole table uses arrays so strings are in ESP FLASH too.
  */
 #define CT_MAX_CMD      20                              // max command string length
 #define CT_MAX_HELP     60                              // max help string length
 #define CT_FUNP(ctp) ((PCTF)pgm_read_dword(&ctp->funp)) // handy function pointer
-typedef bool (*PCTF)(WiFiClient &client, char *line);   // ptr to command table function
+typedef bool (*PCTF)(WiFiClient &client, char line[], size_t line_len);   // ptr to command table function
 typedef struct {
     const char command[CT_MAX_CMD];                     // command string
     PCTF funp;                                          // handler function
@@ -3622,16 +3252,18 @@ typedef struct {
 } CmdTble;
 static const CmdTble command_table[] PROGMEM = {
     { "get_capture.bmp ",   getWiFiCaptureBMP,     "get live screen shot in bmp format" },
-    { "get_config.txt ",    getWiFiConfig,         "get current display options" },
+    { "get_config.txt ",    getWiFiConfig,         "get current display settings" },
     { "get_de.txt ",        getWiFiDEInfo,         "get DE info" },
     { "get_dx.txt ",        getWiFiDXInfo,         "get DX info" },
     { "get_dxspots.txt ",   getWiFiDXSpots,        "get DX spots" },
+    { "get_livestats.txt ", getWiFiLiveStats,      "get live spots stats" },
     { "get_satellite.txt ", getWiFiSatellite,      "get current sat info" },
     { "get_satellites.txt ",getWiFiAllSatellites,  "get list of all sats" },
     { "get_sensors.txt ",   getWiFiSensorData,     "get sensor data" },
     { "get_spacewx.txt ",   getWiFiSpaceWx,        "get space weather info" },
     { "get_sys.txt ",       getWiFiSys,            "get system stats" },
     { "get_time.txt ",      getWiFiTime,           "get current time" },
+    { "get_voacap.txt ",    getWiFiVOACAP,         "get current band conditions matrix" },
     { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
     { "set_auxtime?",       setWiFiAuxTime,        "format=[one_from_menu]" },
     { "set_cluster?",       setWiFiCluster,        "host=xxx&port=yyy" },
@@ -3645,7 +3277,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_newde?",         setWiFiNewDE,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
     { "set_newdx?",         setWiFiNewDX,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
     { "set_pane?",          setWiFiPane,           "Pane[123]=X,Y,Z... any from:" },
-    { "set_rss?",           setWiFiRSS,            "reset|add=X|file|network|interval=secs" },
+    { "set_rss?",           setWiFiRSS,            "reset|add=X|file|network|interval=secs|on|off" },
     { "set_satname?",       setWiFiSatName,        "abc|none" },
     { "set_sattle?",        setWiFiSatTLE,         "name=abc&t1=line1&t2=line2" },
     { "set_senscorr?",      setWiFiSensorCorr,     "sensor=76|77&dTemp=X&dPres=Y" },
@@ -3659,69 +3291,43 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_voacap?",        setWiFiVOACAP,         "band=80-10&power=W&tz=DE|UTC" },
 #if defined(_IS_UNIX)
     { "exit ",              doWiFiExit,            "exit HamClock" },
-#endif // defined(_IS_UNIX)
+#endif // _IS_UNIX
     { "restart ",           doWiFiReboot,          "restart HamClock" },
     { "updateVersion ",     doWiFiUpdate,          "update to latest version"},
 
-    // the following entries are not shown with help -- update N_UNDOCCMD if change
+    // the following entries are never shown with --help -- update N_UNDOC_CMD if change
     { "set_demo?",          setWiFiDemo,           "on|off|n=N" },
-#if defined(_IS_UNIX)
-    { "favicon.ico ",       getWiFifavicon,        "return favicon image" },
-    { "get_live.png ",      getWiFiLivePNG,        "get initial live session image" },
-    { "get_live.bin ",      getWiFiLiveUpdate,     "get updated live session data" },
-    { "live.html ",         doWiFiLive,            "start live session" },
-    { "set_char?",          setWiFiChar,           "char=x" },
-    { "set_mouse?",         setWiFiMouse,          "x=X&y=Y" },
-#endif // defined(_IS_UNIX)
 };
 
-#define N_CMDTABLE      NARRAY(command_table)           // n entries in command table
-#if defined(_IS_UNIX)
-#define N_UNDOCCMD      7                               // n undoc commands at end of table for UNIX
-#else
-#define N_UNDOCCMD      1                               // n undoc commands at end of table for ESP
-#endif // defined(_IS_UNIX)
+#define N_CMDTABLE      NARRAY(command_table)           // real n entries in command table
+#define N_UNDOC_CMD      1                              // n undocumented commands at end of table
 
 /* return whether the given command is allowed in read-only web service
  */
-static bool roCommand (const char *cmd)
+static bool roCommandOk (const char *cmd)
 {
     return (strncmp (cmd, "get_", 4) == 0
-#if defined(_IS_UNIX)
-                    || strncmp (cmd, _FX("favicon.ico"), 11) == 0
-                    || strncmp (cmd, _FX("live.html"), 9) == 0
-                    || strncmp (cmd, _FX("set_char"), 8) == 0
-                    || strncmp (cmd, _FX("set_mouse"), 9) == 0
-#endif // defined(_IS_UNIX)
-                    || strncmp (cmd, _FX("set_alarm"), 9) == 0
-                    || strncmp (cmd, _FX("set_stopwatch"), 13) == 0
-                    || strncmp (cmd, _FX("set_touch"), 9) == 0);
-}
-
-/* return whether to log a web command -- some are just too frequent for routine logging
- */
-static bool logCommandOk (const char *line)
-{
-    return (!strstr (line, _FX("/get_live.bin"))
-                && !strstr (line, _FX("/set_mouse"))
-                && !strstr (line, _FX("/set_touch")));
+                    || strncmp_P (cmd, PSTR("set_alarm"), 9) == 0
+                    || strncmp_P (cmd, PSTR("set_stopwatch"), 13) == 0
+                    || strncmp_P (cmd, PSTR("set_touch"), 9) == 0);
 }
 
 /* run the given web server command.
  * send ack or error messages to client.
- * return whether command was found, regardless of whether it returned an error.
+ * return strictly whether command was recognized, regardless of whether it returned an error.
+ * N.B. caller must close client, we don't.
  */
-static bool runWebserverCommand (WiFiClient &client, bool ro, char *command)
+static bool runWebserverCommand (WiFiClient &client, bool ro, char *command, size_t max_cmd_len)
 {
     // search for command depending on context, execute its implementation function if found
-    if (!ro || roCommand (command)) {
+    if (!ro || roCommandOk (command)) {
         resetWatchdog();
-        for (unsigned i = 0; i < N_CMDTABLE; i++) {
+        for (int i = 0; i < N_CMDTABLE; i++) {
             const CmdTble *ctp = &command_table[i];
             int cmd_len = strlen_P (ctp->command);
             if (strncmp_P (command, ctp->command, cmd_len) == 0) {
 
-                // found command, skip to start of params
+                // found command, skip to params immediately following
                 char *params = command+cmd_len;
 
                 // replace any %XX encoded values
@@ -3736,11 +3342,8 @@ static bool runWebserverCommand (WiFiClient &client, bool ro, char *command)
                 // run handler, passing string starting right after the command, reply with error if trouble.
                 resetWatchdog();
                 PCTF funp = CT_FUNP(ctp);
-                if (!(*funp)(client, params)) {
-                    StackMalloc errmsg(cmd_len+strlen(params)+20);
-                    snprintf (errmsg.getMem(), errmsg.getSize(), "%.*s error: %s", cmd_len, command, params);
-                    sendHTTPError (client, errmsg.getMem());
-                }
+                if (!(*funp)(client, params, max_cmd_len - cmd_len))
+                    sendHTTPError (client, _FX("%.*s error: %s\n"), cmd_len, command, params);
 
                 // command found, even if it reported an error
                 return (true);
@@ -3748,14 +3351,14 @@ static bool runWebserverCommand (WiFiClient &client, bool ro, char *command)
         }
     }
 
-    // not found (or allowed)
-    Serial.printf (_FX("Unknown web command: %s\n"), command);
+    // not found (or allowed) -- but leave client open
+    Serial.printf (_FX("Unknown RESTful command: %s\n"), command);
     return (false);
 }
 
-/* service remote connection.
- * if ro, only accept get commands and set_touch
- * N.B. caller is expected to call client.stop()
+/* service remote restful connection.
+ * if ro, only accept the get commands and a few more as listed in roCommandOk().
+ * N.B. caller must close client, we don't.
  */
 static void serveRemote(WiFiClient &client, bool ro)
 {
@@ -3764,12 +3367,12 @@ static void serveRemote(WiFiClient &client, bool ro)
 
     // first line must be the GET except set_rss which can be POST
     if (!getTCPLine (client, line, line_mem.getSize(), NULL)) {
-        sendHTTPError (client, _FX("empty web query"));
+        sendHTTPError (client, _FX("empty RESTful query\n"));
         return;
     }
     if (strncmp (line, _FX("GET /"), 5) && strncmp (line, _FX("POST /set_rss?"), 14)) {
         Serial.println (line);
-        sendHTTPError (client, _FX("Method must be GET (or POST with set_rss)"));
+        sendHTTPError (client, _FX("Method must be GET (or POST with set_rss)\n"));
         return;
     }
     // Serial.printf ("web: %s\n", line);
@@ -3777,34 +3380,38 @@ static void serveRemote(WiFiClient &client, bool ro)
     // discard remainder of header
     (void) httpSkipHeader (client);
 
-    // log most commands but a few are just too frequent
-    if (logCommandOk (line) || live_verbose > 1) {
-        Serial.print (F("Command from "));
-            Serial.print(client.remoteIP());
-            Serial.print(F(": "));
-            Serial.println(line);
-    }
+    // log
+    Serial.print (F("Command from "));
+        Serial.print(client.remoteIP());
+        Serial.print(F(": "));
+        Serial.println(line);
+
+    // find beginning just after first -- we aleady know there is a /
+    char *cmd_start = strchr (line,'/')+1;
 
     // run command
-    if (runWebserverCommand (client, ro, strchr (line,'/')+1))
+    if (runWebserverCommand (client, ro, cmd_start, line + line_mem.getSize() - cmd_start))
         return;
 
-    // if get here, command was not found so list help
+    // if get here, command was not found but client is still open to list help
     startPlainText(client);
-    for (uint8_t i = 0; i < N_CMDTABLE-N_UNDOCCMD; i++) {
+#if defined(_IS_UNIX)
+    client.print ("HamClock Live is now on port 8081\r\n\r\n");
+#endif
+    for (uint8_t i = 0; i < N_CMDTABLE-N_UNDOC_CMD; i++) {
         const CmdTble *ctp = &command_table[i];
 
         // skip if not available for ro
         char ramcmd[CT_MAX_CMD];
         strcpy_P (ramcmd, ctp->command);
-        if (ro && !roCommand(ramcmd))
+        if (ro && !roCommandOk(ramcmd))
             continue;
 
         // command followed by help in separate column
         const int indent = 30;
         int cmd_len = strlen (ramcmd);
         client.print (ramcmd);
-        sprintf (line, "%*s", indent-cmd_len, "");
+        snprintf (line, line_mem.getSize(), "%*s", indent-cmd_len, "");
         client.print (line);
         client.println (FPSTR(ctp->help));
 
@@ -3816,8 +3423,8 @@ static void serveRemote(WiFiClient &client, bool ro)
             int ll = 0;
             for (int i = 0; i < PLOT_CH_N; i++) {
                 if (ll == 0)
-                    ll = sprintf (line, "%s", indent);
-                ll += sprintf (line+ll, " %s", plot_names[i]);
+                    ll = snprintf (line, line_mem.getSize(), "%s", indent);
+                ll += snprintf (line+ll, line_mem.getSize()-ll, " %s", plot_names[i]);
                 if (ll > max_w) {
                     client.println (line);
                     ll = 0;
@@ -3826,15 +3433,14 @@ static void serveRemote(WiFiClient &client, bool ro)
             client.println (line);
         }
     }
-
 }
 
 /* check if someone is trying to tell/ask us something
  */
 void checkWebServer(bool ro)
 {
-    if (remoteServer) {
-        WiFiClient client = remoteServer->available();
+    if (restful_server) {
+        WiFiClient client = restful_server->available();
         if (client) {
             serveRemote(client, ro);
             client.stop();
@@ -3842,23 +3448,25 @@ void checkWebServer(bool ro)
     }
 }
 
-bool initWebServer(char ynot[])
+/* call to start restful server.
+ * report ok with tftMsg but fatalError if trouble.
+ */
+void initWebServer()
 {
     resetWatchdog();
 
-    if (remoteServer)
-        return (true);
-
-    remoteServer = new WiFiServer(svr_port);
+    restful_server = new WiFiServer(restful_port);
 
     #if defined(_IS_ESP8266)
         // Arduino version returns void
-        (void) ynot;
-        remoteServer->begin();
-        return (true);
+        restful_server->begin();
     #else
-        return (remoteServer->begin(ynot));
+        char ynot[100];
+        if (!restful_server->begin(ynot))
+            fatalError ("Failed to start RESTful server on port %d: %s", restful_port, ynot);
     #endif
+
+    tftMsg (true, 0, "RESTful server on port %d", restful_port);
 
 }
 
@@ -3943,7 +3551,7 @@ void runNextDemoCommand()
     // confirm propabilities sum to 100 on first call
     if (prev_choice == DEMO_N) {
         unsigned sum = 0;
-        for (unsigned i = 0; i < DEMO_N; i++)
+        for (int i = 0; i < DEMO_N; i++)
             sum += item_probs[i];
         if (sum != 100)
             fatalError (_FX("demo probs sum %u != 100\n"), sum);
@@ -3958,7 +3566,7 @@ void runNextDemoCommand()
             unsigned p = random(100);
             unsigned sum = 0;
             choice = (DemoChoice)(DEMO_N - 1);          // default is end of prob list
-            for (unsigned i = 0; i < DEMO_N-1; i++) {
+            for (int i = 0; i < DEMO_N-1; i++) {
                 if (p < (sum += item_probs[i])) {
                     choice = (DemoChoice) i;
                     break;
@@ -3968,8 +3576,8 @@ void runNextDemoCommand()
         prev_choice = choice;
 
         // run choice
-        char msg[100];
-        ok = runDemoChoice (choice, prev_slow, msg);
+        char msg[200];
+        ok = runDemoChoice (choice, prev_slow, msg, sizeof(msg));
         Serial.println (msg);
 
     } while (!ok);
@@ -3977,7 +3585,7 @@ void runNextDemoCommand()
 
 /* handy helper to consistently format a demo command response into buf[]
  */
-static void demoMsg (bool ok, int n, char buf[], const char *fmt, ...)
+static void demoMsg (bool ok, int n, char buf[], size_t buf_len, const char *fmt, ...)
 {
     // format the message
     char msg[100];
@@ -3987,13 +3595,14 @@ static void demoMsg (bool ok, int n, char buf[], const char *fmt, ...)
     va_end (ap);
 
     // save with boilerplate to buf
-    sprintf (buf, _FX("Demo %d @ %ld %s: %s"), n, getUptime(NULL,NULL,NULL,NULL), ok ? "Ok" : "No", msg);
+    snprintf (buf, buf_len, _FX("Demo %d @ %ld %s: %s"), n,
+                        getUptime(NULL,NULL,NULL,NULL), ok ? "Ok" : "No", msg);
 }
 
 /* run the given DemoChoice. 
  * return whether appropriate and successful and, if so, whether it is likely to be slower than usual.
  */
-static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
+static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg_len)
 {
     // assume not
     slow = false;
@@ -4010,7 +3619,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
                 plot_rotset[PANE_1] = (1 << pc);   // no auto rotation
                 savePlotOps();
             }
-            demoMsg (ok, choice, msg, _FX("Pane 1 %s"), plot_names[pc]);
+            demoMsg (ok, choice, msg, msg_len, _FX("Pane 1 %s"), plot_names[pc]);
         }
         break;
 
@@ -4022,7 +3631,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
                 plot_rotset[PANE_2] = (1 << pc);   // no auto rotation
                 savePlotOps();
             }
-            demoMsg (ok, choice, msg, _FX("Pane 2 %s"), plot_names[pc]);
+            demoMsg (ok, choice, msg, msg_len, _FX("Pane 2 %s"), plot_names[pc]);
         }
         break;
 
@@ -4034,7 +3643,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
                 plot_rotset[PANE_3] = (1 << pc);   // no auto rotation
                 savePlotOps();
             }
-            demoMsg (ok, choice, msg, _FX("Pane 3 %s"), plot_names[pc]);
+            demoMsg (ok, choice, msg, msg_len, _FX("Pane 3 %s"), plot_names[pc]);
         }
         break;
 
@@ -4046,7 +3655,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         else
             eraseRSSBox();
         ok = true;
-        demoMsg (ok, choice, msg, _FX("RSS %s"), rss_on ? "On" : "Off");
+        demoMsg (ok, choice, msg, msg_len, _FX("RSS %s"), rss_on ? "On" : "Off");
         break;
 
     case DEMO_NEWDX:
@@ -4057,7 +3666,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             ll.lng_d = random(359)-180;
             newDX (ll, NULL, NULL);
             ok = true;
-            demoMsg (ok, choice, msg, _FX("NewDX %g %g"), ll.lat_d, ll.lng_d);
+            demoMsg (ok, choice, msg, msg_len, _FX("NewDX %g %g"), ll.lat_d, ll.lng_d);
         }
         break;
 
@@ -4068,7 +3677,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
-        demoMsg (ok, choice, msg, _FX("Proj %s"), map_projnames[map_proj]);
+        demoMsg (ok, choice, msg, msg_len, _FX("Proj %s"), map_projnames[map_proj]);
         break;
 
     case DEMO_MAPNIGHT:
@@ -4078,7 +3687,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
-        demoMsg (ok, choice, msg, _FX("Night %s"), night_on ? "On" : "Off");
+        demoMsg (ok, choice, msg, msg_len, _FX("Night %s"), night_on ? "On" : "Off");
         break;
 
     case DEMO_MAPGRID:
@@ -4088,7 +3697,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         if (map_proj != MAPP_MERCATOR)
             slow = true;
         ok = true;
-        demoMsg (ok, choice, msg, "Grid %s", grid_styles[mapgrid_choice]);
+        demoMsg (ok, choice, msg, msg_len, "Grid %s", grid_styles[mapgrid_choice]);
         break;
 
     case DEMO_MAPSTYLE:
@@ -4096,7 +3705,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         scheduleNewCoreMap (core_map);
         slow = true;
         ok = true;
-        demoMsg (ok, choice, msg, "Map %s", map_styles[core_map]);
+        demoMsg (ok, choice, msg, msg_len, "Map %s", map_styles[core_map]);
         break;
 
     case DEMO_NCDXF:
@@ -4105,7 +3714,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         drawNCDXFBox();
         updateBeacons(true);
         ok = true;
-        demoMsg (ok, choice, msg, _FX("NCDXF %s"), brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
+        demoMsg (ok, choice, msg, msg_len, _FX("NCDXF %s"), brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
         break;
 
     case DEMO_VOACAP:
@@ -4135,11 +3744,11 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
                 ok = true;
 
                 char ps[NV_MAPSTYLE_LEN];
-                demoMsg (ok, choice, msg, "VOACAP %s", getMapStyle(ps));
+                demoMsg (ok, choice, msg, msg_len, "VOACAP %s", getMapStyle(ps));
             } else {
                 // too old to use
                 ok = false;
-                demoMsg (ok, choice, msg, _FX("VOACAP too old"));
+                demoMsg (ok, choice, msg, msg_len, _FX("VOACAP too old"));
             }
         }
         break;
@@ -4153,7 +3762,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
             drawCallsign (false);   // just foreground
             ok = true;
-            demoMsg (ok, choice, msg, _FX("call FG 0x%02X %02X %02X"), RGB565_R(cs_info.fg_color),
+            demoMsg (ok, choice, msg, msg_len, _FX("call FG 0x%02X %02X %02X"), RGB565_R(cs_info.fg_color),
                                     RGB565_G(cs_info.fg_color), RGB565_B(cs_info.fg_color));
         }
         break;
@@ -4169,10 +3778,10 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             drawCallsign (true);    // fg and bg
             ok = true;
             if (cs_info.bg_rainbow)
-                demoMsg (ok, choice, msg, _FX("call BG Rainbow"));
+                demoMsg (ok, choice, msg, msg_len, _FX("call BG Rainbow"));
             else
-                demoMsg (ok, choice, msg, _FX("call BG 0x%02X %02X %02X"), RGB565_R(cs_info.bg_color),
-                                    RGB565_G(cs_info.bg_color), RGB565_B(cs_info.bg_color));
+                demoMsg (ok, choice, msg, msg_len, _FX("call BG 0x%02X %02X %02X"),
+                        RGB565_R(cs_info.bg_color), RGB565_G(cs_info.bg_color), RGB565_B(cs_info.bg_color));
         }
         break;
 
@@ -4181,7 +3790,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
         drawDEInfo();
         ok = true;
-        demoMsg (ok, choice, msg, "DE fmt %s", detime_names[de_time_fmt]);
+        demoMsg (ok, choice, msg, msg_len, "DE fmt %s", detime_names[de_time_fmt]);
         break;
 
     case DEMO_ONAIR:
@@ -4189,7 +3798,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             static bool toggle;
             setOnAir (toggle = !toggle);
             ok = true;
-            demoMsg (ok, choice, msg, _FX("ONAIR %s"), toggle ? "On" : "Off");
+            demoMsg (ok, choice, msg, msg_len, _FX("ONAIR %s"), toggle ? "On" : "Off");
         }
         break;
 
@@ -4200,7 +3809,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             if (getSatAzElNow (name, &az, &el, &range, &rate, &raz, &saz, &rhrs, &shrs)) {
                 // sat assigned, turn off
                 ok = setSatFromName("none");
-                demoMsg (ok, choice, msg, "Sat none");
+                demoMsg (ok, choice, msg, msg_len, "Sat none");
             } else {
                 // assign new sat
                 static const char *sats[] = {
@@ -4209,7 +3818,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
                 static int next_sat;
                 next_sat = (next_sat + 1) % NARRAY(sats);
                 ok = setSatFromName(sats[next_sat]);
-                demoMsg (ok, choice, msg, "Sat %s", sats[next_sat]);
+                demoMsg (ok, choice, msg, msg_len, "Sat %s", sats[next_sat]);
             }
             slow = true;
         }
@@ -4222,14 +3831,14 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
             initEarthMap();
             slow = true;                // allow for time spent in drawMoonElPlot
         }
-        demoMsg (ok, choice, msg, "EME");
+        demoMsg (ok, choice, msg, msg_len, "EME");
         break;
 
     case DEMO_AUXTIME:
         auxtime = (AuxTimeFormat)random(AUXT_N);
         updateClocks(true);
         ok = true;
-        demoMsg (ok, choice, msg, "Aux time %s", auxtime_names[(int)auxtime]);
+        demoMsg (ok, choice, msg, msg_len, "Aux time %s", auxtime_names[(int)auxtime]);
         break;
 
     case DEMO_PSKMASK:
@@ -4241,7 +3850,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[])
         if (random(100) > 50)
             psk_mask |= PSKMB_PSK;
         ok = true;
-        demoMsg (ok, choice, msg, "psk_mask 0x%X", psk_mask);
+        demoMsg (ok, choice, msg, msg_len, "psk_mask 0x%X", psk_mask);
         break;
 
     case DEMO_N:

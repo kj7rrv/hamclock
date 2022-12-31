@@ -1105,7 +1105,7 @@ const GFXglyph Courier_Prime_Sans6pt7bGlyphs[] PROGMEM = {
   {    43,   3,   1,   6,    1,    4 },   // 0x2D '-'
   {    44,   2,   2,   6,    2,    5 },   // 0x2E '.'
   {    45,   4,   8,   6,    1,    0 },   // 0x2F '/'
-  {    49,   5,   6,   6,    0,    1 },   // 0x30 '0'
+  {    49,   5,   6,   6,    1,    1 },   // 0x30 '0'
   {    54,   4,   6,   6,    1,    1 },   // 0x31 '1'
   {    57,   4,   6,   6,    1,    1 },   // 0x32 '2'
   {    60,   4,   6,   6,    1,    1 },   // 0x33 '3'
@@ -1173,7 +1173,7 @@ const GFXglyph Courier_Prime_Sans6pt7bGlyphs[] PROGMEM = {
   {   286,   4,   7,   6,    1,    2 },   // 0x71 'q'
   {   290,   4,   5,   6,    1,    2 },   // 0x72 'r'
   {   293,   4,   5,   6,    1,    2 },   // 0x73 's'
-  {   296,   4,   7,   6,    0,    0 },   // 0x74 't'
+  {   296,   4,   7,   6,    1,    0 },   // 0x74 't'
   {   300,   4,   5,   6,    1,    2 },   // 0x75 'u'
   {   303,   5,   5,   6,    1,    2 },   // 0x76 'v'
   {   307,   5,   5,   6,    1,    2 },   // 0x77 'w'
@@ -1187,8 +1187,8 @@ const GFXglyph Courier_Prime_Sans6pt7bGlyphs[] PROGMEM = {
 };
 
 const GFXfont Courier_Prime_Sans6pt7b PROGMEM = {
-  (uint8_t  *)Courier_Prime_Sans6pt7bBitmaps, 
-  (GFXglyph *)Courier_Prime_Sans6pt7bGlyphs, 0x20, 0x7E,  11 };
+  (uint8_t  *)Courier_Prime_Sans6pt7bBitmaps,   
+  (GFXglyph *)Courier_Prime_Sans6pt7bGlyphs, 0x20, 0x7E,    11 };
 
-// Approx. 1004 bytes#endif
+// Approx. 1004 bytes
 #endif

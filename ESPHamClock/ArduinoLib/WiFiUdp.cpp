@@ -112,7 +112,7 @@ void WiFiUDP::beginPacket (const char *host, int port)
         memset (&hints, 0, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
-        sprintf (port_str, "%d", port);
+        snprintf (port_str, sizeof(port_str), "%d", port);
         int error = ::getaddrinfo (host, port_str, &hints, &aip);
         if (error) {
             printf ("WiFiUDP: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));

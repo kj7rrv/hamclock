@@ -31,7 +31,6 @@ SCircle moon_c = {{0,0},MOON_R};                // screen coords of moon symbol
 LatLong moon_ss_ll;                             // sublunar location
 
 // dx options
-uint8_t show_km;                                // show great circle dist in km, else miles
 uint8_t show_lp;                                // display long path, else short part heading
 
 #define GRAYLINE_COS    (-0.208F)               // cos(90 + grayline angle), we use 12 degs
@@ -172,8 +171,8 @@ void drawDEInfo()
         drawDECalTime(false);
 
         // lat and lon
-        char buf[30];
-        sprintf (buf, _FX("%.0f%c  %.0f%c"),
+        char buf[50];
+        snprintf (buf, sizeof(buf), _FX("%.0f%c  %.0f%c"),
                     roundf(fabsf(de_ll.lat_d)), de_ll.lat_d < 0 ? 'S' : 'N',
                     roundf(fabsf(de_ll.lng_d)), de_ll.lng_d < 0 ? 'W' : 'E');
         tft.setCursor (de_info_b.x, de_info_b.y+2*vspace-6);
@@ -221,9 +220,9 @@ void drawDECalTime(bool center)
     // generate text
     char buf[32];
     if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
-        sprintf (buf, _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
+        snprintf (buf, sizeof(buf), _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
     else
-        sprintf (buf, _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
+        snprintf (buf, sizeof(buf), _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
 
     // set position
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -527,8 +526,8 @@ static void drawMLDB (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
     propDEPath (show_lp, ll, &dist, &bearing);
     dist *= ERAD_M;                             // angle to miles
     bearing *= 180/M_PIF;                       // rad -> degrees
-    if (show_km)
-        dist *= 1.609344F;                      // mi - > km
+    if (useMetricUnits())
+        dist *= KM_PER_MI;
 
     // get bearing from DE in desired units
     bool bearing_ismag = desiredBearing (de_ll, bearing);
@@ -545,7 +544,7 @@ static void drawMLDB (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
 
     // show distance
     tft.setCursor (tx, ty += dy);
-    tft.printf (_FX("%6.0f %s"), dist, show_km ? "km" : "mi");
+    tft.printf (_FX("%6.0f %s"), dist, useMetricUnits() ? "km" : "mi");
 }
 
 /* draw local information about the current cursor position over the world map.
@@ -1805,8 +1804,8 @@ void drawDXInfo ()
     tft.setTextColor (DX_COLOR);
 
     // lat and long
-    char buf[30];
-    sprintf (buf, _FX("%.0f%c  %.0f%c"),
+    char buf[50];
+    snprintf (buf, sizeof(buf), _FX("%.0f%c  %.0f%c"),
                 roundf(fabsf(dx_ll.lat_d)), dx_ll.lat_d < 0 ? 'S' : 'N',
                 roundf(fabsf(dx_ll.lng_d)), dx_ll.lng_d < 0 ? 'W' : 'E');
     tft.setCursor (dx_info_b.x, dx_info_b.y+3*vspace-8);
@@ -1822,8 +1821,8 @@ void drawDXInfo ()
     propDEPath (show_lp, dx_ll, &dist, &bearing);
     dist *= ERAD_M;                             // angle to miles
     bearing *= 180/M_PIF;                       // rad -> degrees
-    if (show_km)
-        dist *= 1.609344F;                      // mi - > km
+    if (useMetricUnits())
+        dist *= KM_PER_MI;
 
     // convert to magnetic if desired
     bool bearing_ismag = desiredBearing (de_ll, bearing);
@@ -1854,9 +1853,9 @@ void drawDXInfo ()
 
     // distance units
     tft.setCursor (units_x, sm_y0);
-    tft.print(show_km ? 'k' : 'm');
+    tft.print(useMetricUnits() ? 'k' : 'm');
     tft.setCursor (units_x, sm_y1);
-    tft.print(show_km ? 'm' : 'i');
+    tft.print(useMetricUnits() ? 'm' : 'i');
 
     // sun rise/set or prefix
     if (dxsrss == DXSRSS_PREFIX) {
@@ -1872,21 +1871,6 @@ void drawDXInfo ()
     } else {
         drawDXSunRiseSetInfo();
     }
-}
-
-/* return whether s is over DX distance portion of dx_info_b
- */
-bool checkDistTouch (const SCoord &s)
-{
-    uint16_t vspace = dx_info_b.h/DX_INFO_ROWS;
-
-    SBox b;
-    b.x = dx_info_b.x;
-    b.w = dx_info_b.w/2;
-    b.y = dx_info_b.y + 4*vspace;
-    b.h = vspace;
-
-    return (inBox (s, b));
 }
 
 /* return whether s is over DX path direction portion of dx_info_b
@@ -1931,9 +1915,9 @@ void drawDXTime()
 
     char buf[32];
     if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
-        sprintf (buf, _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
+        snprintf (buf, sizeof(buf), _FX("%02d:%02d %s %d"), hr, mn, monthShortStr(mo), dy);
     else
-        sprintf (buf, _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
+        snprintf (buf, sizeof(buf), _FX("%02d:%02d %d %s"), hr, mn, dy, monthShortStr(mo));
     tft.print(buf);
 }
 

@@ -34,3 +34,15 @@ void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp)
         }
 }
 
+/* simple and fast method to estimate angular separation between two LatLong, all in rads.
+ * to get path length in miles, multiply result by ERAD_M.
+ */
+float simpleSphereDist (const LatLong &ll1, const LatLong &ll2)
+{
+        float dlat = fabsf(ll1.lat - ll2.lat);
+        float dlng = fabsf(ll1.lng - ll2.lng);
+        if (dlng > M_PIF)
+            dlng = 2*M_PIF - dlng;
+        dlng *= cosf ((ll1.lat + ll2.lat)/2);
+        return (hypotf(dlat, dlng));
+}

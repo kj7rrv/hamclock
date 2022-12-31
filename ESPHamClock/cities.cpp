@@ -29,14 +29,14 @@ void readCities()
 
         Serial.println (cities_fn);
         resetWatchdog();
-        if (wifiOk() && cities_client.connect (svr_host, HTTPPORT)) {
+        if (wifiOk() && cities_client.connect (backend_host, BACKEND_PORT)) {
 
             // stay current
             updateClocks(false);
             resetWatchdog();
 
             // send query
-            httpHCPGET (cities_client, svr_host, cities_fn);
+            httpHCPGET (cities_client, backend_host, cities_fn);
 
             // skip http header
             if (!httpSkipHeader (cities_client)) {
@@ -85,9 +85,9 @@ void readCities()
             if (!city_tree && n_cities > 0)
                 fatalError ("alloc cities tree: %d", n_cities);
             for (int i = 0; i < n_cities; i++) {
-                KD3Node &kd3 = city_tree[i];
-                ll2KD3Node (lls[i], kd3);
-                kd3.data = (void*) names[i];
+                KD3Node *kp = &city_tree[i];
+                ll2KD3Node (lls[i], kp);
+                kp->data = (void*) names[i];
             }
 
             // finished with temporary lists -- names themselves live forever
@@ -113,7 +113,7 @@ const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
 
         // search
         KD3Node seach_city;
-        ll2KD3Node (ll, seach_city);
+        ll2KD3Node (ll, &seach_city);
         KD3Node *best_city = NULL;
         float best_dist = 0;
         int n_visited = 0;
@@ -123,7 +123,7 @@ const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
         // report results if successful
         best_dist = nearestKD3Dist2Miles (best_dist);   // convert to miles
         if (best_dist < MAX_CSR_DIST) {
-            KD3Node2ll (*best_city, city_ll);
+            KD3Node2ll (*best_city, &city_ll);
             return ((char*)(best_city->data));
         } else {
             return (NULL);

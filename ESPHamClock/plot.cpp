@@ -29,7 +29,7 @@ bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
 uint16_t color, float y_min, float y_max, float label_value)
 {
     char buf[32];
-    sprintf (buf, "%.*f", label_value >= 1000 ? 0 : 1, label_value);
+    snprintf (buf, sizeof(buf), "%.*f", label_value >= 1000 ? 0 : 1, label_value);
     return (plotXYstr (box, x, y, nxy, xlabel, ylabel, color, y_min, y_max, buf));
 }
 
@@ -112,7 +112,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
         // find minimal LGAP that accommodates widest y label
         LGAP = 0;
         for (int i = 0; i < nyt; i++) {
-            sprintf (buf, "%.0f", yticks[i]);   // N.B. use same format as label 
+            snprintf (buf, sizeof(buf), "%.0f", yticks[i]);   // N.B. use same format as label 
             uint16_t g = getTextWidth(buf) + TICKLEN + 5;
             if (g > LGAP)
                 LGAP = g;
@@ -158,7 +158,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
                 tft.drawLine (box.x+LGAP, ty, box.x+box.w-1, ty, GRID_COLOR);
                 // label first, last or whole number change but never two adjacent or just before last
                 if (i == 0 || i == nyt-1 || (!prev_tick && (int)yticks[i-1] != (int)yticks[i] && i != nyt-2)){
-                    sprintf (buf, "%.0f", yticks[i]);
+                    snprintf (buf, sizeof(buf), "%.0f", yticks[i]);
                     tft.setCursor (tx - getTextWidth(buf) - 1, ty - FONTH/2);
                     tft.print (buf);
                     prev_tick = true;
@@ -176,7 +176,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
         uint16_t txty = box.y+box.h-FONTH-2;
         tft.setCursor (box.x+LGAP, txty);
         tft.print (minx,0);
-        sprintf (buf, "%c%d", maxx > 0 ? '+' : ' ', (int)maxx);
+        snprintf (buf, sizeof(buf), "%c%d", maxx > 0 ? '+' : ' ', (int)maxx);
         tft.setCursor (box.x+box.w-getTextWidth(buf)-1, txty);
         tft.print (buf);
         for (int i = 0; i < nxt; i++) {
@@ -208,7 +208,12 @@ uint16_t color, float y_min, float y_max, char *label_str)
             uint16_t h = y[i]*(box.h-BGAP-TGAP)/maxy;
             uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-2-w)*(x[i]-minx)/dx);
             uint16_t py = (uint16_t)(box.y + TGAP + 1 + (box.h-BGAP-TGAP)*(1 - (y[i]-miny)/dy));
-            uint16_t co = y[i] < 4 ? RA8875_GREEN : y[i] == 4 ? RA8875_YELLOW : RA8875_RED;
+            uint16_t co = y[i] < 4.5 ? RGB565(0x91,0xd0,0x51) : 
+                          y[i] < 5.5 ? RGB565(0xf6,0xeb,0x16) :
+                          y[i] < 6.5 ? RGB565(0xfe,0xc8,0x04) :
+                          y[i] < 7.5 ? RGB565(0xff,0x96,0x02) :
+                          y[i] < 8.5 ? RGB565(0xff,0x00,0x00) :
+                          RGB565(0xc7,0x01,0x00);
             if (h > 0)
                 tft.fillRect (px, py, w, h, co);
         } else {
@@ -280,7 +285,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     tft.setTextColor(color);
     selectFontStyle (BOLD_FONT, LARGE_FONT);
     f = useMetricUnits() ? wi.temperature_c : 9*wi.temperature_c/5+32;
-    sprintf (buf, "%.0f %c", f, useMetricUnits() ? 'C' : 'F');
+    snprintf (buf, sizeof(buf), "%.0f %c", f, useMetricUnits() ? 'C' : 'F');
     w = maxStringW (buf, box.w-attr_w);
     tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
     tft.print(buf);
@@ -308,9 +313,9 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
 
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         if (useMetricUnits())
-            sprintf (buf, _FX("%.0f%% %.0f"), wi.humidity_percent, wi.pressure_hPa);
+            snprintf (buf, sizeof(buf), _FX("%.0f%% %.0f"), wi.humidity_percent, wi.pressure_hPa);
         else
-            sprintf (buf, _FX("%.0f%% %.2f"), wi.humidity_percent, wi.pressure_hPa/33.8639);
+            snprintf (buf, sizeof(buf), _FX("%.0f%% %.2f"), wi.humidity_percent, wi.pressure_hPa/33.8639);
         w = maxStringW (buf, box.w-attr_w-PCHG_W-PCHG_LW-2*PCHG_LG);
         tft.setCursor (box.x+(box.w-attr_w-w-PCHG_W-PCHG_LW-2*PCHG_LG)/2, box.y+dy);
         tft.print (buf);
@@ -353,9 +358,9 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
 
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         if (useMetricUnits())
-            sprintf (buf, _FX("%.0f%% %.0f hPa"), wi.humidity_percent, wi.pressure_hPa);
+            snprintf (buf, sizeof(buf), _FX("%.0f%% %.0f hPa"), wi.humidity_percent, wi.pressure_hPa);
         else
-            sprintf (buf, _FX("%.0f%% %.2f in"), wi.humidity_percent, wi.pressure_hPa/33.8639);
+            snprintf (buf, sizeof(buf), _FX("%.0f%% %.2f in"), wi.humidity_percent, wi.pressure_hPa/33.8639);
         w = maxStringW (buf, box.w-attr_w);
         tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
         tft.print (buf);
@@ -366,11 +371,11 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     // wind
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     f = (useMetricUnits() ? 3.6 : 2.237) * wi.wind_speed_mps; // kph or mph
-    sprintf (buf, _FX("%s @ %.0f %s"), wi.wind_dir_name, f, useMetricUnits() ? "kph" : "mph");
+    snprintf (buf, sizeof(buf), _FX("%s @ %.0f %s"), wi.wind_dir_name, f, useMetricUnits() ? "kph" : "mph");
     w = maxStringW (buf, box.w-attr_w);
     if (buf[strlen(buf)-1] != 'h') {
         // try shorter string in case of huge speed
-        sprintf (buf, _FX("%s @ %.0f%s"), wi.wind_dir_name, f, useMetricUnits() ? "k/h" : "m/h");
+        snprintf (buf, sizeof(buf),_FX("%s @ %.0f%s"), wi.wind_dir_name, f, useMetricUnits() ? "k/h" : "m/h");
         w = maxStringW (buf, box.w-attr_w);
     }
     tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
@@ -407,7 +412,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
  * busy means <0 err, 0 idle, >0 active.
  * N.B. coordinate the layout geometry with checkBCTouch()
  */
-void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *cfg_str)
+void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, char *cfg_str)
 {
     resetWatchdog();
 
@@ -555,7 +560,7 @@ void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char 
         tft.drawLine (PLEFT_X, y, PRIGHT_X, y, GRID_COLOR);
     }
 
-    printFreeHeap (F("plotBandConditions"));
+    // printFreeHeap (F("plotBandConditions"));
 }
 
 /* print the NOAA RSG Space Weather Scales in the given box.

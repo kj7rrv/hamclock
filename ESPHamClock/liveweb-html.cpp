@@ -28,19 +28,22 @@ char live_html[] =  R"_raw_html_(
     <script>
 
         // config
-        const UPDATE_MS = 200;          // update interval
+        const UPDATE_MS = 100;          // update interval
+        const MOUSE_JITTER = 5;         // allow this much mouse motion for a touch
         const MOUSE_HOLD_MS = 3000;     // mouse down duration to implement hold action
         const APP_W = 800;              // app coord system width
         const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
 
         // state
+        var session_id = 0;             // unique id for this browser instance
         var drawing_verbose = 0;        // > 0 for more info about drawing
         var web_verbose = 0;            // > 0 for more info about web commands
         var event_verbose = 0;          // > 0 for more info about keyboard or pointer activity
         var prev_regnhdr;               // for erasing if drawing_verbose > 1
         var app_scale = 0;              // size factor -- set for real when get first whole image
-        var msec_corr;                  // msecs we should add to send to arrive at server at best time
         var pointerdown_ms = 0;         // Date.now when pointerdown event
+        var pointerdown_x = 0;          // location of pointerdown event
+        var pointerdown_y = 0;          // location of pointerdown event
         var pointermove_ms = 0;         // Date.now when pointermove event
         var cvs, ctx;                   // handy
 
@@ -51,16 +54,21 @@ char live_html[] =  R"_raw_html_(
 
             console.log ("* onLoad");
 
+            // create session id
+            session_id = Math.round(1000*(Date.now() + Math.random()));
+            console.log ("sid " + session_id);
+
             // handy access to canvas and drawing context
             cvs = document.getElementById('hamclock-cvs');
-            ctx = cvs.getContext('2d', { alpha: false });   // faster w/o alpha
+            ctx = cvs.getContext('2d', { alpha: false });       // faster w/o alpha
+            ctx.translate(0.5, 0.5);                            // a tiny bit less blurry?
 
             // request one full screen image then schedule incremental update if ok else reload page.
             // also use the image info to set overall size and scaling.
             function getFullImage() {
 
                 let update_sent = Date.now();
-                sendGetRequest ('get_live.png', 'blob')
+                sendGetRequest ('get_live.png?sid=' + session_id, 'blob')
                 .then (function (response) {
                     drawFullImage (response);
                     runSoon (getUpdate, 1);
@@ -80,7 +88,7 @@ char live_html[] =  R"_raw_html_(
             function getUpdate (repeat) {
 
                 let update_sent = Date.now();
-                sendGetRequest ('get_live.bin', 'arraybuffer')
+                sendGetRequest ('get_live.bin?sid=' + session_id, 'arraybuffer')
                 .then (function (response) {
                     drawUpdate (response);
                     if (repeat)
@@ -167,8 +175,7 @@ char live_html[] =  R"_raw_html_(
                 let aba = new Uint8Array(ab);
                 const blok_w = aba[0];                          // block width, pixels
                 const blok_h = aba[1];                          // block width, pixels
-                msec_corr = 10*aba[2];                          // send time correction, ms
-                const n_regn = (aba[3] << 8) | aba[4];          // n regns, MSB LSB
+                const n_regn = (aba[2] << 8) | aba[3];          // n regns, MSB LSB
 
                 if (drawing_verbose > 1) {
                     // erase, or at least unmark, previous marked regions
@@ -176,30 +183,30 @@ char live_html[] =  R"_raw_html_(
                         ctx.strokeStyle = "black";
                         ctx.beginPath();
                         for (let i = 0; i < prev_regnhdr.length; i++) {
-                            const cvs_x = prev_regnhdr[5+3*i] * blok_w;
-                            const cvs_y = prev_regnhdr[6+3*i] * blok_h;
-                            const cvs_w = prev_regnhdr[7+3*i] * blok_w;
+                            const cvs_x = prev_regnhdr[4+3*i] * blok_w;
+                            const cvs_y = prev_regnhdr[5+3*i] * blok_h;
+                            const cvs_w = prev_regnhdr[6+3*i] * blok_w;
                             ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
                         }
                         ctx.stroke();
                     }
                     // save for next time
-                    prev_regnhdr = aba.slice(0,5+3*n_regn);
+                    prev_regnhdr = aba.slice(0,4+3*n_regn);
                 }
 
                 // walk down remainder of header and draw each region
                 if (n_regn > 0) {
                     // remainder is one image blok_h hi of n_regns contiguous regions each variable width
-                    let pngb = new Blob([aba.slice(5+3*n_regn)], {type:"image/png"});
+                    let pngb = new Blob([aba.slice(4+3*n_regn)], {type:"image/png"});
                     createImageBitmap (pngb)
                     .then(function(ibm) {
                         // render each region.
                         let regn_x = 0;                         // walk region x along pngb
                         let n_draw = 0;                         // count n drawn regions just for stat
                         for (let i = 0; i < n_regn; i++) {
-                            const cvs_x = aba[5+3*i] * blok_w;  // ul corner x in canvas pixels
-                            const cvs_y = aba[6+3*i] * blok_h;  // ul corner y in canvas pixels
-                            const n_long = aba[7+3*i];          // n regions long
+                            const cvs_x = aba[4+3*i] * blok_w;  // ul corner x in canvas pixels
+                            const cvs_y = aba[5+3*i] * blok_h;  // ul corner y in canvas pixels
+                            const n_long = aba[6+3*i];          // n regions long
                             const cvs_w = n_long * blok_w;      // total region width in canvas pixels
                             ctx.drawImage (ibm, regn_x, 0, cvs_w, blok_h, cvs_x, cvs_y, cvs_w, blok_h);
 
@@ -260,7 +267,7 @@ char live_html[] =  R"_raw_html_(
             }
 
 
-            // send the given user event.
+            // send the given user event with our sid
             function sendUserEvent (get) {
 
                 if (event_verbose)
@@ -277,27 +284,42 @@ char live_html[] =  R"_raw_html_(
             }
 
 
-            // record time of pointerdown
+            // pointerdown: record time and position
             cvs.addEventListener ('pointerdown', function(event) {
-                pointerdown_ms = Date.now();
+                // all ours
                 event.preventDefault();
+
+                const m = getAppCoords (event);
+                if (!m) {
+                    console.log("pointermove: don't know app_scale yet");
+                    return;
+                }
+
+                pointerdown_ms = Date.now();
+                pointerdown_x = m.x;
+                pointerdown_y = m.y;
                 if (event_verbose)
                     console.log ('pointer down');
             });
 
             // pointerup: send touch, hold depending on duration since pointerdown
             cvs.addEventListener ('pointerup', function(event) {
+                // all ours
                 event.preventDefault();
 
+                // extract application coords
+                const m = getAppCoords (event);
+                if (!m) {
+                    console.log("pointermove: don't know app_scale yet");
+                    return;
+                }
+
                 // ignore if pointer moved
-                if (!pointerdown_ms) {
+                if (Math.abs(m.x-pointerdown_x) > MOUSE_JITTER || Math.abs(m.y-pointerdown_y) > MOUSE_JITTER){
                     if (event_verbose)
                         console.log ('cancel pointerup because pointer moved');
                     return;
                 }
-
-                // extract application coords
-                const m = getAppCoords (event);
 
                 // decide whether hold
                 let pointer_dt = pointerdown_ms ? Date.now() - pointerdown_ms : 0;
@@ -306,18 +328,19 @@ char live_html[] =  R"_raw_html_(
 
                 // compose and send
                 let get = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
+                get += '&sid=' + session_id;
                 sendUserEvent (get);
             });
 
 
-            // connect pointermove to send set_mouse to hamclock
+            // pointermove: send set_mouse to hamclock
             cvs.addEventListener ('pointermove', function(event) {
+                // all ours
                 event.preventDefault();
 
                 // not crazy fast
                 let now = Date.now();
-                let move_dt = now - pointermove_ms;
-                if (move_dt < UPDATE_MS)
+                if (pointermove_ms + UPDATE_MS > now)
                     return;
                 pointermove_ms = now;
 
@@ -328,11 +351,9 @@ char live_html[] =  R"_raw_html_(
                     return;
                 }
 
-                // cancel pointer down
-                pointerdown_ms = 0;
-
                 // compose and send
                 let get = 'set_mouse?x=' + m.x + '&y=' + m.y;
+                get += '&sid=' + session_id;
                 sendUserEvent (get);
             });
 
@@ -370,6 +391,7 @@ char live_html[] =  R"_raw_html_(
 
                 // compose and send
                 let get = 'set_char?char=' + k;
+                get += '&sid=' + session_id;
                 sendUserEvent (get);
             });
 
@@ -405,6 +427,7 @@ char live_html[] =  R"_raw_html_(
                         console.log ('sendGetRequest ' + url);
                     let xhr = new XMLHttpRequest();
                     xhr.open('GET', url);
+                    xhr.setRequestHeader("Connection", "close");
                     xhr.responseType = type;
                     xhr.addEventListener ('load', function () {
                         if (xhr.status >= 200 && xhr.status < 300) {

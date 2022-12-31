@@ -49,7 +49,8 @@ OBJS = \
 	gimbal.o \
 	gpsd.o \
         kd3tree.o \
-	live-html.o \
+	liveweb.o \
+	liveweb-html.o \
         magdecl.o \
 	maidenhead.o \
 	mapmanage.o \

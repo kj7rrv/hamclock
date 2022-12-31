@@ -609,7 +609,7 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
 
     Serial.println(hc_url);
     resetWatchdog();
-    if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
 
         // composite types
@@ -617,7 +617,7 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
         union { char c[2]; uint16_t x; } i16;
 
         // query web page
-        httpHCGET (client, svr_host, hc_url);
+        httpHCGET (client, backend_host, hc_url);
 
         // skip response header
         if (!httpSkipHeader (client)) {

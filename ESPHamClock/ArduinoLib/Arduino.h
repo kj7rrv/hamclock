@@ -57,6 +57,7 @@
 #define strcmp_P  strcmp
 #define strncmp_P  strncmp
 #define strspn_P  strspn
+#define strstr_P  strstr
 
 #define LSBFIRST 0
 #define MSBFIRST 1
@@ -92,8 +93,10 @@ extern void setX11FullScreen (bool);
 extern void setDemoMode(bool on);
 extern void setCenterLng (int16_t l);
 extern void fatalError (const char *fmt, ...);
-extern const char *svr_host;
-extern int svr_port;
+extern const char *backend_host;
+extern int liveweb_port;
+extern int restful_port;
+extern int backend_port;
 extern bool skip_skip;
 extern bool init_iploc;
 extern const char *init_locip;

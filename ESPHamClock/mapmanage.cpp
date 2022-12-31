@@ -449,15 +449,15 @@ static bool bmpHdrOk (char *buf, uint32_t w, uint32_t h, uint32_t *filesizep)
 static void buildMapNames (const char *style, char *dfile, char *nfile, char *dtitle, char *ntitle)
 {
         if (strcmp (style, "DRAP") == 0) {
-            sprintf (dfile, _FX("/map-D-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
-            sprintf (nfile, _FX("/map-N-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
+            snprintf (dfile, 32, _FX("/map-D-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
+            snprintf (nfile, 32, _FX("/map-N-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
         } else {
-            sprintf (dfile, _FX("/map-D-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
-            sprintf (nfile, _FX("/map-N-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
+            snprintf (dfile, 32, _FX("/map-D-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
+            snprintf (nfile, 32, _FX("/map-N-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
         }
 
-        sprintf (dtitle, _FX("%s D map"), style);
-        sprintf (ntitle, _FX("%s N map"), style);
+        snprintf (dtitle, NV_MAPSTYLE_LEN+10, _FX("%s D map"), style);
+        snprintf (ntitle, NV_MAPSTYLE_LEN+10, _FX("%s N map"), style);
 }
 
 /* qsort-style compare two FS_Info by name
@@ -597,9 +597,9 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         Serial.printf (_FX("%s: %s\n"), title, file);
 
         // start remote file download, even if only to check whether newer
-        if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
+        if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
             snprintf (hdr_buf, sizeof(hdr_buf), _FX("/maps/%s"), file);
-            httpHCGET (client, svr_host, hdr_buf);
+            httpHCGET (client, backend_host, hdr_buf);
             if (!httpSkipHeader (client, &remote_time) || remote_time == 0) {
                 mapMsg (1000, _FX("%s: err - try local"), title);
                 client.stop();
@@ -712,8 +712,8 @@ static bool installQueryMaps (const char *page, const char *style, const float M
         updateClocks(false);
         WiFiClient client;
         bool ok = false;
-        if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
-            httpHCGET (client, svr_host, query);
+        if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
+            httpHCGET (client, backend_host, query);
             ok = httpSkipHeader (client) && downloadMapFile (client, dfile, dtitle)
                                          && downloadMapFile (client, nfile, ntitle);
             client.stop();
@@ -917,8 +917,10 @@ const char *getMapStyle (char s[])
 {
         if (prop_map == PROP_MAP_OFF)
             NVReadString (NV_MAPSTYLE, s);
-        else
-            sprintf (s, "%dm/%dW", propMap2Band(prop_map), bc_power);
+        else {
+            // +1 to suppress warning that s might overflow since we know the %d lengths here
+            snprintf (s, NV_MAPSTYLE_LEN+1, "%dm/%dW", propMap2Band(prop_map), bc_power);
+        }
 
         return (s);
 }

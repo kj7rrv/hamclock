@@ -34,16 +34,27 @@ static bool lookforTime (const char *buf, void *arg)
             if (strncmp (classstr+9, "TPV", 3) == 0)
                 found_tpv = true;
         }
-        if (!found_tpv)
+        if (!found_tpv) {
+            Serial.print (_FX("GPSD: no TPV\n"));
             return (false);
+        }
 
         const char *modestr = strstr (classstr, "\"mode\":");
-        if (!modestr || atoi(modestr+7) < 2)
+        if (!modestr) {
+            Serial.print (_FX("GPSD: no mode\n"));
             return (false);
+        }
+        int mode = atoi(modestr+7);
+        if (mode < 2) {
+            Serial.printf (_FX("GPSD: bad mode '%s' %d\n"), modestr+7, mode);
+            return (false);
+        }
 
         const char *timestr = strstr (classstr, "\"time\":\"");
-        if (!timestr || strlen(timestr) < 8+19)
+        if (!timestr || strlen(timestr) < 8+19) {
+            Serial.print (_FX("GPSD: no time\n"));
             return(false);
+        }
 
         // crack time form: "time":"2012-04-05T15:00:01.501Z"
         int yr, mo, dy, hr, mn, sc;
@@ -128,7 +139,7 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
         bool look_ok = false;
         bool connect_ok = false;
         bool got_something = false;
-        #define MAXGLL 2000                 // max line length
+        #define MAXGLL 1000                 // max line length
         StackMalloc line_mem(MAXGLL);
         char *line = (char *) line_mem.getMem();
 
@@ -150,11 +161,20 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
                         !timesUp(&t0,GPSD_TO) && ll < MAXGLL && !look_ok && getChar(gpsd_client,&line[ll]);
                         /* none */ ) {
 
-                if (line[ll] == '\n') {
+                // hopeful?
+                got_something = true;
+
+                // add to line, crack when full or see nl
+                if (ll == MAXGLL-1 || line[ll] == '\n') {
+                    char line_covered = line[ll];
                     line[ll] = '\0';
-                    got_something = true;
                     look_ok = (*lookf)(line, arg);
-                    ll = 0;
+                    if (!look_ok) {
+                        // retain tail of previous in case keyword got split
+                        line[ll] = line_covered;
+                        ll = 100;
+                        memmove (line, line+(MAXGLL-ll), ll);
+                    }
                 } else
                     ll++;
             }

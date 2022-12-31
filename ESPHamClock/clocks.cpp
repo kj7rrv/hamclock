@@ -119,7 +119,7 @@ static void prHM (const uint32_t t)
     uint16_t mm = (t - hh*SECS_PER_HOUR)/SECS_PER_MIN;
 
     char buf[20];
-    sprintf (buf, "%d:%02d", hh, mm);
+    snprintf (buf, sizeof(buf), "%d:%02d", hh, mm);
     tft.print(buf);
 }
 
@@ -433,7 +433,7 @@ static void runAuxTimeMenu()
 static void drawAuxTime (bool all, const TimeParts &tp)
 {
     // mostly common prep
-    #define _UCHW       12                                              // approx char width
+    #define _UCHW       13                                              // approx char width
     #define _UCCD       8                                               // descent
     static int prev_day;                                                // note new day for many options
     int day = tp.t / (3600*24);
@@ -454,8 +454,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday, date month year
 
-                int l = sprintf (buf, "%s, ", dayShortStr(tp.wd));
-                sprintf (buf+l, "%2d %s %d", tp.dy, monthShortStr(tp.mo), tp.yr);
+                int l = snprintf (buf, sizeof(buf), "%s, ", dayShortStr(tp.wd));
+                snprintf (buf+l, sizeof(buf)-1, "%2d %s %d", tp.dy, monthShortStr(tp.mo), tp.yr);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -467,8 +467,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday month date, year
 
-                int l = sprintf (buf, "%s  ", dayShortStr(tp.wd));
-                sprintf (buf+l, "%s %2d, %d", monthShortStr(tp.mo), tp.dy, tp.yr);
+                int l = snprintf (buf, sizeof(buf), "%s  ", dayShortStr(tp.wd));
+                snprintf (buf+l, sizeof(buf)-l, "%s %2d, %d", monthShortStr(tp.mo), tp.dy, tp.yr);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -480,8 +480,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday, year month date
 
-                int l = sprintf (buf, "%s,  ", dayShortStr(tp.wd));
-                sprintf (buf+l, "%d %s %2d", tp.yr, monthShortStr(tp.mo), tp.dy);
+                int l = snprintf (buf, sizeof(buf), "%s,  ", dayShortStr(tp.wd));
+                snprintf (buf+l, sizeof(buf)-l, "%d %s %2d", tp.yr, monthShortStr(tp.mo), tp.dy);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -516,7 +516,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             time_t year0 = makeTime (tm);
             int doy = (tp.t - year0) / (24*3600) + 1;
 
-            sprintf (buf, "%s DOY %d  %d", dayShortStr(tp.wd), doy, tp.yr);
+            snprintf (buf, sizeof(buf), "%s DOY %d  %d", dayShortStr(tp.wd), doy, tp.yr);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
             if (x < 0)
@@ -550,9 +550,9 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             val -= thousands * 1000;                                    // now units
             int units = val;
             if (millions)
-                sprintf (buf, "JD %d,%03d,%03d", millions, thousands, units);
+                snprintf (buf, sizeof(buf), "JD %d,%03d,%03d", millions, thousands, units);
             else
-                sprintf (buf, "MJD %d,%03d", thousands, units);
+                snprintf (buf, sizeof(buf), "MJD %d,%03d", thousands, units);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw-(_JDNFRAC+1)*_UCHW)/2;
             tft.setCursor(x, y);
@@ -563,7 +563,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             tft.fillRect (prev_xdp, auxtime_b.y, (_JDNFRAC+1)*_UCHW, auxtime_b.h, RA8875_BLACK);
             tft.setCursor(prev_xdp, y);
         }
-        sprintf (buf, "%.*f", _JDNFRAC, d - whole);
+        snprintf (buf, sizeof(buf), "%.*f", _JDNFRAC, d - whole);
         tft.print (buf+1);                                              // skip the leading 0
 
         // persist
@@ -589,7 +589,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
         if (all || wholemn != prev_wholemn || prev_xcolon == 0) {
             // draw complete value but note location of 2nd colon
-            sprintf (buf, "LST  %02d:%02d:", lst_hr, lst_mn);
+            snprintf (buf, sizeof(buf), "LST  %02d:%02d:", lst_hr, lst_mn);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw-2*_UCHW)/2;       // center including secs
             tft.setCursor(x, y);
@@ -601,7 +601,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             tft.fillRect (prev_xcolon, auxtime_b.y, 2*_UCHW, auxtime_b.h, RA8875_BLACK);
             tft.setCursor(prev_xcolon, y);
         }
-        sprintf (buf, "%02d", lst_sc);
+        snprintf (buf, sizeof(buf), "%02d", lst_sc);
         tft.print (buf);
 
         // persist
@@ -628,7 +628,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
         // draw time
         if (all || wholemn != prev_wholemn || prev_xcolon == 0) {
             // draw complete value but note location of 2nd colon
-            sprintf (buf, "Solar  %02d:%02d:", solar_hr, solar_mn);
+            snprintf (buf, sizeof(buf), "Solar  %02d:%02d:", solar_hr, solar_mn);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw-2*_UCHW)/2;       // center including secs
             tft.setCursor(x, y);
@@ -640,7 +640,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             tft.fillRect (prev_xcolon, auxtime_b.y, 2*_UCHW, auxtime_b.h, RA8875_BLACK);
             tft.setCursor(prev_xcolon, y);
         }
-        sprintf (buf, "%02d", solar_sc);
+        snprintf (buf, sizeof(buf), "%02d", solar_sc);
         tft.print (buf);
 
         // persist
@@ -663,7 +663,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             int thousands = t0/1000;
             t0 -= thousands*1000;                                       // now units
             int tens = t0/10;
-            sprintf (buf, "Unix %d,%03d,%03d,%02d", billions, millions, thousands, tens);
+            snprintf (buf, sizeof(buf), "Unix %d,%03d,%03d,%02d", billions, millions, thousands, tens);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw-_UCHW)/2;         // center including units
             tft.setCursor(x, y);
@@ -895,7 +895,7 @@ void updateClocks(bool all)
         // Change in tens digit of seconds process normally W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3;          // right 1/3 for seconds
         selectFontStyle (BOLD_FONT, SMALL_FONT);
-        sprintf (buf, "%02d", tp.sc);                   // includes ones digit
+        snprintf (buf, sizeof(buf), "%02d", tp.sc);                   // includes ones digit
         tft.fillRect(sx, clock_b.y, 30, HMS_H/2+4, RA8875_BLACK);  // dont erase ? if present
         tft.setCursor(sx, clock_b.y+HMS_H-19);
         tft.setTextColor(HMS_C);
@@ -906,7 +906,7 @@ void updateClocks(bool all)
         // Change only in units digit of seconds - process only that digit  W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3+15;       // right 1/3 for seconds (15 by experiment) W2ROW
         selectFontStyle (BOLD_FONT, SMALL_FONT);        // W2ROW
-        sprintf (buf, "%01d", tp.sc%10);                // W2ROW
+        snprintf (buf, sizeof(buf), "%01d", tp.sc%10);                // W2ROW
         tft.fillRect(sx, clock_b.y, 15, HMS_H/2+4, RA8875_BLACK);  // dont erase ? W2ROW
         tft.setCursor(sx, clock_b.y+HMS_H-19);          // W2ROW
         tft.setTextColor(HMS_C);                        // W2ROW
@@ -950,7 +950,7 @@ void updateClocks(bool all)
 
         // draw H:M roughly right-justified in left 2/3
         selectFontStyle (BOLD_FONT, LARGE_FONT);
-        sprintf (buf, "%02d:%02d", tp.hr, tp.mn);
+        snprintf (buf, sizeof(buf), "%02d:%02d", tp.hr, tp.mn);
         uint16_t w = 135;
         int16_t x = clock_b.x+2*clock_b.w/3-w;
         tft.fillRect (x, clock_b.y, w, HMS_H+2, RA8875_BLACK);
@@ -1300,7 +1300,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
 
     // boxes
     SBox menu_b;
-    menu_b.x = tzi.box.x - 20;
+    menu_b.x = tzi.box.x - 5;
     menu_b.y = tzi.box.y + tzi.box.h+2;
     menu_b.w = 0;       // shrink to fit
 

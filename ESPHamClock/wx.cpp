@@ -19,14 +19,14 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
     resetWatchdog();
 
     // get
-    if (wifiOk() && wx_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && wx_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
         snprintf (line, sizeof(line), _FX("%s?is_de=%d&lat=%g&lng=%g"), wx_base, is_de, ll.lat_d, ll.lng_d);
         Serial.println (line);
-        httpHCGET (wx_client, svr_host, line);
+        httpHCGET (wx_client, backend_host, line);
 
         // skip response header
         if (!httpSkipHeader (wx_client)) {

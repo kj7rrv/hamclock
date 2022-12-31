@@ -15,8 +15,8 @@
 #include "Arduino.h"
 
 // max cpu usage, throttle with -t
-#define MAX_CPU_USAGE 0.8F
-static float max_cpu_usage = MAX_CPU_USAGE;
+#define DEF_CPU_USAGE 0.8F
+static float max_cpu_usage = DEF_CPU_USAGE;
 
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
@@ -190,17 +190,19 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, "Usage: %s [options]\n", me);
         fprintf (stderr, "Options:\n");
         fprintf (stderr, " -a l : set gimbal trace level\n");
-        fprintf (stderr, " -b h : set backend host to h instead of %s\n", svr_host);
-        fprintf (stderr, " -d d : set working directory to d instead of %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -f o : set display full screen initially to \"on\" or \"off\"\n");
+        fprintf (stderr, " -b h : set backend host to h; default is %s\n", backend_host);
+        fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
+        fprintf (stderr, " -e p : set RESTful web server port to p; default is %d\n", restful_port);
+        fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
         fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
+        fprintf (stderr, " -h   : print this help summary\n");
         fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
         fprintf (stderr, " -k   : don't offer Setup or wait for Skips\n");
         fprintf (stderr, " -l l : set Mercator center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
-        fprintf (stderr, " -o   : write diagnostic log to stdout instead of in working dir\n");
-        fprintf (stderr, " -t p : throttle max cpu to p percent; default %.0f\n", MAX_CPU_USAGE*100);
-        fprintf (stderr, " -w p : set web server port p instead of %d\n", svr_port);
+        fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
+        fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
+        fprintf (stderr, " -w p : set live web server port to p; default is %d\n", liveweb_port);
 
         exit(1);
 }
@@ -228,13 +230,21 @@ static void crackArgs (int ac, char *av[])
                 case 'b':
                     if (ac < 2)
                         usage ("missing host name for -b");
-                    svr_host = *++av;
+                    backend_host = *++av;
                     ac--;
                     break;
                 case 'd':
                     if (ac < 2)
                         usage ("missing directory path for -d");
                     new_appdir = *++av;
+                    ac--;
+                    break;
+                case 'e':
+                    if (ac < 2)
+                        usage ("missing port number for -e");
+                    restful_port = atoi(*++av);
+                    if (restful_port < 1 || restful_port > 65535)
+                        usage ("-e port must be 1 - 65535");
                     ac--;
                     break;
                 case 'f':
@@ -254,6 +264,9 @@ static void crackArgs (int ac, char *av[])
                     break;
                 case 'g':
                     init_iploc = true;
+                    break;
+                case 'h':
+                    usage (NULL);
                     break;
                 case 'i':
                     if (ac < 2)
@@ -288,18 +301,22 @@ static void crackArgs (int ac, char *av[])
                     break;
                 case 'w':
                     if (ac < 2)
-                        usage ("missing port number for -w");
-                    svr_port = atoi(*++av);
+                        usage ("missing RESTful port for -w");
+                    liveweb_port = atoi(*++av);
+                    if (liveweb_port < 1 || liveweb_port > 65535)
+                        usage ("-w port must be 1 - 65535");
                     ac--;
                     break;
                 case 'x':
-                    usage ("-x is no longer supported -- replaced with web make targets");
+                    usage ("-x is no longer supported -- replaced with direct web \"make\" targets");
                     break;
                 default:
                     usage ("unknown option: %c", *s);
                 }
             }
         }
+
+        // initial checks
         if (ac > 0)
             usage ("extra args");
         if (init_iploc && init_locip)
@@ -310,6 +327,9 @@ static void crackArgs (int ac, char *av[])
             usage ("-i requires -k");
         if (cl_set && !skip_skip)
             usage ("-l requires -k");
+        if (liveweb_port == restful_port)
+            usage ("Live web and RESTful ports may not be equal: %d %d", liveweb_port, restful_port);
+
 
         // prepare our working directory in our_dir
         mkAppDir (new_appdir);
@@ -342,9 +362,10 @@ int main (int ac, char *av[])
         for (int i = 0; i < ac; i++)
             printf ("  argv[%d] = %s\n", i, av[i]);
 
-        // log our working dir and euid
+        // log our make, working dir and uid
+        printf ("built as %s\n", our_make);
         printf ("working directory is %s\n", our_dir.c_str());
-        printf ("euid %d\n", geteuid());
+        printf ("ruid %d euid %d\n", getuid(), geteuid());
 
 	// call Arduino setup one time
         printf ("Calling Arduino setup()\n");
@@ -352,7 +373,7 @@ int main (int ac, char *av[])
 
         // performance measurements
         int cpu_us = 0, et_us = 0;      // cpu and elapsed time
-        int sleep_us = 100;             // sleep, usecs
+        int sleep_us = 100;             // initial sleep, usecs
 
 	// call Arduino loop forever
         // this loop by itself would run 100% CPU so try to be a better citizen and throttle back
@@ -368,36 +389,37 @@ int main (int ac, char *av[])
             // Ardino loop
 	    loop();
 
-            // cap cpu usage by sleeping based on a simple integral controller
-            if (cpu_us > et_us*max_cpu_usage) {
-                sleep_us += 10;
-                if (sleep_us > 10000)
-                    sleep_us = 10000;
-            } else {
-                if (sleep_us >= 10)
-                    sleep_us -= 10;
+            if (max_cpu_usage < 1) {
+                // cap cpu usage by sleeping based on a simple integral controller
+                if (cpu_us > et_us*max_cpu_usage) {
+                    sleep_us += 10;
+                    if (sleep_us > 10000)
+                        sleep_us = 10000;
+                } else {
+                    if (sleep_us >= 10)
+                        sleep_us -= 10;
+                }
+                usleep (sleep_us);
+
+                // get time and usage after running loop() and our usleep
+                struct rusage ru1;
+                getrusage (RUSAGE_SELF, &ru1);
+                struct timeval tv1;
+                gettimeofday (&tv1, NULL);
+
+                // find cpu time used
+                struct timeval *ut0 = &ru0.ru_utime;
+                struct timeval *ut1 = &ru1.ru_utime;
+                struct timeval *st0 = &ru0.ru_stime;
+                struct timeval *st1 = &ru1.ru_stime;
+                int ut_us = (ut1->tv_sec - ut0->tv_sec)*1000000 + (ut1->tv_usec - ut0->tv_usec);
+                int st_us = (st1->tv_sec - st0->tv_sec)*1000000 + (st1->tv_usec - st0->tv_usec);
+                cpu_us = ut_us + st_us;
+
+                // find elapsed time
+                et_us = (tv1.tv_sec - tv0.tv_sec)*1000000 + (tv1.tv_usec - tv0.tv_usec);
+
+                // printf ("sleep_us= %10d cpu= %10d et= %10d %g\n", sleep_us, cpu_us, et_us, fmin(100,100.0*cpu_us/et_us));
             }
-            usleep (sleep_us);
-
-            // get time and usage after running loop() and our usleep
-            struct rusage ru1;
-            getrusage (RUSAGE_SELF, &ru1);
-            struct timeval tv1;
-            gettimeofday (&tv1, NULL);
-
-            // find cpu time used
-            struct timeval *ut0 = &ru0.ru_utime;
-            struct timeval *ut1 = &ru1.ru_utime;
-            struct timeval *st0 = &ru0.ru_stime;
-            struct timeval *st1 = &ru1.ru_stime;
-            int ut_us = (ut1->tv_sec - ut0->tv_sec)*1000000 + (ut1->tv_usec - ut0->tv_usec);
-            int st_us = (st1->tv_sec - st0->tv_sec)*1000000 + (st1->tv_usec - st0->tv_usec);
-            cpu_us = ut_us + st_us;
-
-            // find elapsed time
-            et_us = (tv1.tv_sec - tv0.tv_sec)*1000000 + (tv1.tv_usec - tv0.tv_usec);
-
-            // printf ("sleep_us= %10d cpu= %10d et= %10d %g\n", sleep_us, cpu_us, et_us, fmin(100,100.0*cpu_us/et_us));
-
 	}
 }

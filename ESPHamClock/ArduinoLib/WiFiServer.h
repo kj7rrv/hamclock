@@ -12,10 +12,14 @@ class WiFiServer {
 	WiFiClient available();
         void stop();
 
+        // non-standard
+        WiFiClient next();
+
     private:
 
 	int port;
 	int socket;
+
 };
 
 

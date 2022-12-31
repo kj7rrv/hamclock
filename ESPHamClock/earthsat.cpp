@@ -831,7 +831,7 @@ static bool satLookup ()
     bool ok = false;
 
     resetWatchdog();
-    if (wifiOk() && tle_client.connect (svr_host, HTTPPORT)) {
+    if (wifiOk() && tle_client.connect (backend_host, BACKEND_PORT)) {
         resetWatchdog();
 
         // memory
@@ -842,7 +842,7 @@ static bool satLookup ()
 
         // query
         snprintf (name, name_mem.getSize(), sat_one_page, sat_name);
-        httpHCGET (tle_client, svr_host, name);
+        httpHCGET (tle_client, backend_host, name);
         if (!httpSkipHeader (tle_client)) {
             fatalSatError (_FX("Bad http header"));
             goto out;
@@ -955,12 +955,12 @@ static bool askSat()
     // open connection
     WiFiClient sat_client;
     resetWatchdog();
-    if (!wifiOk() || !sat_client.connect (svr_host, HTTPPORT))
+    if (!wifiOk() || !sat_client.connect (backend_host, BACKEND_PORT))
         goto out;
 
     // query page and skip header
     resetWatchdog();
-    httpHCPGET (sat_client, svr_host, sat_get_all);
+    httpHCPGET (sat_client, backend_host, sat_get_all);
     if (!httpSkipHeader (sat_client))
         goto out;
 
@@ -1372,7 +1372,7 @@ void updateSatPath()
 
         // 1/3rd are off screen to make a dashed line effect
         // N.B. hack knows MAX_PATH is 250 for UNIX and blanks 2/3 on ESP and 1/2 on UNIX
-        if (getSatPathDashed() && (p % (MAX_PATH*3/250)) < (MAX_PATH*2/250-1)) {
+        if (getColorDashed(SATPATH_CSPR) && (p % (MAX_PATH*3/250)) < (MAX_PATH*2/250-1)) {
             sat_path[n_path] = {1000, 1000};
         } else {
             // compute next point along path
@@ -1695,12 +1695,12 @@ const char **getAllSatNames()
     // open connection
     WiFiClient sat_client;
     resetWatchdog();
-    if (!wifiOk() || !sat_client.connect (svr_host, HTTPPORT))
+    if (!wifiOk() || !sat_client.connect (backend_host, BACKEND_PORT))
         return (NULL);
 
     // query page and skip header
     resetWatchdog();
-    httpHCPGET (sat_client, svr_host, sat_get_all);
+    httpHCPGET (sat_client, backend_host, sat_get_all);
     if (!httpSkipHeader (sat_client)) {
         sat_client.stop();
         return (NULL);

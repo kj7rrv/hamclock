@@ -299,7 +299,7 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
         // plot in plbox, showing a bit more precision for imperial pressure
         if (ch == PLOT_CH_PRESSURE && !useMetricUnits()) {
             char buf[32];
-            sprintf (buf, "%.2f", value_now);
+            snprintf (buf, sizeof(buf), "%.2f", value_now);
             plotXYstr (plbox, x, y, nxy, xlabel, title, color, 0, 0, buf);
         } else {
             plotXY (plbox, x, y, nxy, xlabel, title, color, 0, 0, value_now);

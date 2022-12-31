@@ -8,12 +8,6 @@
 // current version
 const char *hc_version = HC_VERSION;
 
-// default backend server
-const char *svr_host = "clearskyinstitute.com";
-
-// default web server port
-int svr_port = SERVERPORT;
-
 // clock, aux time and stopwatch boxes
 SBox clock_b = { 0, 65, 230, 49};
 SBox auxtime_b = { 0, 114, 205, 31};
@@ -360,9 +354,7 @@ void setup()
 
 #if defined(_IS_UNIX)
     // support live even in setup
-    char wsynot[100];
-    if (!initWebServer(wsynot))
-        Serial.printf ("Can not start web server: %s\n", wsynot);
+    initLiveWeb(false);
 #endif
 
     // set up brb_rotset and brb_mode
@@ -495,12 +487,7 @@ void setup()
     de_title_b.w = 30;
     de_title_b.h = 30;
 
-    // init dx info
-    if (!NVReadUInt8 (NV_DIST_KM, &show_km)) {
-        if (!NVReadUInt8 (NV_METRIC_ON, &show_km))
-            show_km = false;
-        NVWriteUInt8 (NV_DIST_KM, show_km);
-    }
+    // init dx unit
     if (!NVReadUInt8 (NV_LP, &show_lp)) {
         show_lp = false;
         NVWriteUInt8 (NV_LP, show_lp);
@@ -861,10 +848,6 @@ static void checkTouch()
         NVWriteUInt16 (NV_CALL_BG_COLOR, cs_info.bg_color);
         NVWriteUInt8 (NV_CALL_BG_RAINBOW, cs_info.bg_rainbow);
         drawCallsign (true);    // fg and bg
-    } else if (!dx_info_for_sat && checkDistTouch(s)) {
-        show_km = !show_km;
-        NVWriteUInt8 (NV_DIST_KM, show_km);
-        drawDXInfo ();
     } else if (!dx_info_for_sat && checkPathDirTouch(s)) {
         show_lp = !show_lp;
         NVWriteUInt8 (NV_LP, show_lp);
@@ -1074,6 +1057,7 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     scheduleNewBC();
     scheduleNewVOACAPMap(prop_map);
     sendDXClusterDELLGrid();
+    scheduleNewPSK();
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
 
@@ -1289,16 +1273,20 @@ void drawDXPath ()
     if (!gpath)
         fatalError ("gpath %d", MAX_GPATH); // no _FX if alloc failing
 
-    // walk great circle path from DE through DX, storing each point
+    // walk great circle path from DE through DX, storing each point allowing for optinally dashed
     float ca, B;
     SCoord s;
     n_gpath = 0;
     uint16_t short_col = getMapColor(SHORTPATH_CSPR);
     uint16_t long_col = getMapColor(LONGPATH_CSPR);
-    for (float b = 0; b < 2*M_PIF; b += 2*M_PIF/MAX_GPATH) {
+    bool sp_dashed = getColorDashed(SHORTPATH_CSPR);
+    bool lp_dashed = getColorDashed(LONGPATH_CSPR);
+    int pix_i = 0;
+    for (float b = 0; b < 2*M_PIF; b += 2*M_PIF/MAX_GPATH, pix_i++) {
         solveSphere (bear, b, sdelat, cdelat, &ca, &B);
         ll2s (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
-        if ((n_gpath == 0 || memcmp (&s, &gpath[n_gpath-1], sizeof(SCoord))) && overMap(s)) {
+        bool show = b < dist ? (!sp_dashed || (pix_i % 20) < 10) : (!lp_dashed || (pix_i % 20) < 10);
+        if (show && (n_gpath == 0 || memcmp (&s, &gpath[n_gpath-1], sizeof(SCoord))) && overMap(s)) {
             gpath[n_gpath++] = s;
             tft.drawPixel (s.x, s.y, b < dist ? short_col : long_col);
         }
@@ -1557,7 +1545,7 @@ static void drawWiFiInfo()
         IPAddress ip = WiFi.localIP();
         bool net_ok = ip[0] != '\0';
         if (net_ok) {
-            sprintf (str, _FX("IP %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
+            snprintf (str, sizeof(str), _FX("IP %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
             tft.setTextColor (GRAY);
         } else {
             strcpy (str, "    No Network");
@@ -1735,7 +1723,9 @@ bool overAnySymbol (const SCoord &s)
                 || (showDEAPMarker() && inCircle(s, deap_c))
                 || (showDEMarker() && inCircle(s, de_c))
                 || (showDXMarker() && inCircle(s, dx_c))
-                || inCircle (s, sun_c) || inCircle (s, moon_c) || overAnyBeacon(s)
+                || inCircle (s, sun_c) || inCircle (s, moon_c)
+                || overAnyBeacon(s)
+                || overAnyPSKSpots(s)
                 || overAnyDXClusterSpots(s) || inBox(s,santa_b)
                 || overMapScale(s));
 }
@@ -1762,6 +1752,7 @@ void drawAllSymbols(bool beacons_too)
     if (!overRSS(deap_c.s))
         drawDEAPMarker();
     drawDXClusterSpotsOnMap();
+    drawPSKSpots();
     drawSanta ();
 
     updateClocks(false);
@@ -1793,10 +1784,9 @@ bool overRSS (const SBox &b)
     return (true);
 }
 
-/* write another line to the initial screen if verbose, else just log.
- * advance screen row unless this and previous line ended with \r, furthermore
- *    NULL fmt forces return to normal row advancing for next call.
- * we now implement 2 columns.
+/* log for sure and write another line to the initial screen if verbose.
+ * verbose messages are arranged in two columns. screen row is advanced afterwards unless this and
+ *    previous line ended with \r, and fmt == NULL forces return to normal row advancing for next call.
  */
 void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...)
 {
@@ -2276,6 +2266,11 @@ void logState()
 {
     if (logUsageOk()) {
         // just use anything to cause a web transaction
+
+        // not crazy fast, and jitter so it doesn't sync with pane rotation
+        static uint32_t last_ver;
+        if (!timesUp (&last_ver, 60000 + random(30000)))
+            return;
         char ver[50];
         (void) newVersionIsAvailable (ver, sizeof(ver));
     }

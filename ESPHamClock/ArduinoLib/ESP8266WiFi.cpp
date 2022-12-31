@@ -150,12 +150,12 @@ IPAddress WiFi::localIP(void)
         memset (&hints, 0, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
-        sprintf (port_str, "%d", port);
+        snprintf (port_str, sizeof(port_str), "%d", port);
         int error = 1;
         for (time_t start_t = time(NULL); error && time(NULL) < start_t + 10; ) {
-            error = ::getaddrinfo (svr_host, port_str, &hints, &aip);
+            error = ::getaddrinfo (backend_host, port_str, &hints, &aip);
             if (error) {
-                printf ("getaddrinfo(%s:%d): %s\n", svr_host, port, gai_strerror(error));
+                printf ("getaddrinfo(%s:%d): %s\n", backend_host, port, gai_strerror(error));
                 usleep (1000000);
                 aip = NULL;
             }
@@ -168,13 +168,13 @@ IPAddress WiFi::localIP(void)
         sockfd = ::socket (aip->ai_family, aip->ai_socktype, aip->ai_protocol);
         if (sockfd < 0) {
             freeaddrinfo (aip);
-            printf ("socket(%s:%d): %s\n", svr_host, port, strerror(errno));
+            printf ("socket(%s:%d): %s\n", backend_host, port, strerror(errno));
             return (a);
         }
 
         // connect
         if (::connect (sockfd, aip->ai_addr, aip->ai_addrlen) < 0) {
-            printf ("connect(%s,%d): %s\n", svr_host, port, strerror(errno));
+            printf ("connect(%s,%d): %s\n", backend_host, port, strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (a);
@@ -187,7 +187,7 @@ IPAddress WiFi::localIP(void)
         struct sockaddr_in sa;
         socklen_t sl = sizeof(sa);
         if (::getsockname (sockfd, (struct sockaddr *)&sa, &sl) < 0) {
-            printf ("getsockname(%s,%d): %s\n", svr_host, port, strerror(errno));
+            printf ("getsockname(%s,%d): %s\n", backend_host, port, strerror(errno));
             close (sockfd);
             return (a);
         }

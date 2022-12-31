@@ -4,6 +4,8 @@
 #include "HamClock.h"
 
 
+// host name of backend server
+const char *backend_host = "clearskyinstitute.com";
 
 // RSS info
 #define RSS_MAXN        15                      // max number RSS entries to cache
@@ -14,7 +16,7 @@ static bool rss_local;                          // if set: don't poll server, as
 uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
 
 // kp historical and predicted info, new data posted every 3 hours
-#define KP_INTERVAL     3500                    // polling period, secs
+#define KP_INTERVAL     (3500+randIvl(300))     // polling period, secs
 #define KP_COLOR        RA8875_YELLOW           // loading message text color
 static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
 #define KP_VPD           8                      // number of values per day
@@ -23,31 +25,31 @@ static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
 #define KP_NV            ((KP_NHD+KP_NPD)*KP_VPD) // N total Kp values
 
 // xray info, new data posted every 10 minutes
-#define XRAY_INTERVAL   610                     // polling interval, secs
+#define XRAY_INTERVAL   (610+randIvl(30))       // polling interval, secs
 #define XRAY_LCOLOR     RGB565(255,50,50)       // long wavelength plot color, reddish
 #define XRAY_SCOLOR     RGB565(50,50,255)       // short wavelength plot color, blueish
 static const char xray_page[] PROGMEM = "/xray/xray.txt";
 #define XRAY_NV         150                     // n lines to collect = 25 hours @ 10 mins per line
 
 // sunspot info, new data posted daily
-#define SSPOT_INTERVAL  3400                    // polling interval, secs
+#define SSPOT_INTERVAL  (3400+randIvl(300))     // polling interval, secs
 #define SSPOT_COLOR     RA8875_CYAN             // loading message text color
 static const char ssn_page[] PROGMEM = "/ssn/ssn-31.txt";
 #define SSPOT_NV        31                      // n ssn to plot, 1 per day back 30 days, including 0
 
 // solar flux info, new data posted three times a day
-#define SFLUX_INTERVAL  3300                    // polling interval, secs
+#define SFLUX_INTERVAL  (3300+randIvl(300))     // polling interval, secs
 #define SFLUX_COLOR     RA8875_GREEN            // loading message text color
 static const char sf_page[] PROGMEM = "/solar-flux/solarflux-99.txt";
 #define SFLUX_NV        99                      // n solar flux values, three per day for 33 days
 
 // solar wind info, new data posted every five minutes
-#define SWIND_INTERVAL  340                     // polling interval, secs
+#define SWIND_INTERVAL  (340+randIvl(30))       // polling interval, secs
 #define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
 static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
 
 // STEREO A image and info, new data posted every few hours
-#define STEREO_A_INTERVAL  3800                 // polling interval, secs
+#define STEREO_A_INTERVAL  (3800+randIvl(300))  // polling interval, secs
 #define STEREO_A_COLOR     RA8875_BLUE          // loading message text color
 static const char stereo_a_sep_page[] PROGMEM = "/STEREO/sepangle.txt";
 static const char stereo_a_img_page[] = 
@@ -62,22 +64,23 @@ static const char stereo_a_img_page[] =
     #endif
 
 // band conditions and voacap map, models change each hour
-#define BC_INTERVAL     2400                    // polling interval, secs
-#define VOACAP_INTERVAL 2500                    // polling interval, secs
+#define BC_INTERVAL     (2400+randIvl(200))     // polling interval, secs
+#define VOACAP_INTERVAL (2500+randIvl(200))     // polling interval, secs
 static const char bc_page[] = "/fetchBandConditions.pl";
 static bool bc_reverting;                       // set while waiting for BC after WX
-static time_t bc_time;                          // effective time when BC was loaded
+static BandCdtnMatrix bc_matrix;                // percentage reliability for each band
+static time_t bc_time;                          // nowWO() when bc_matrix was loaded
 uint16_t bc_power;                              // VOACAP power setting
 uint8_t bc_utc_tl;                              // label band conditions timeline in utc else DE local
 static time_t map_time;                         // effective time when map was loaded
 
 // core map update intervals
 #if defined(_IS_ESP8266)
-#define DRAPMAP_INTERVAL     (15*60)            // polling interval, secs -- save FLASH writes
+#define DRAPMAP_INTERVAL    (900+randIvl(60))   // polling interval, secs -- save FLASH writes
 #else
-#define DRAPMAP_INTERVAL     (5*60)             // polling interval, secs
+#define DRAPMAP_INTERVAL    (300+randIvl(60))   // polling interval, secs
 #endif // _IS_ESP8266
-#define OTHER_MAPS_INTERVAL  (60*60)            // polling interval, secs
+#define OTHER_MAPS_INTERVAL (3600+randIvl(200)) // polling interval, secs
 
 // DRAP plot info, new data posted every few minutes
 #define DRAPPLOT_INTERVAL    (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
@@ -85,14 +88,14 @@ static time_t map_time;                         // effective time when map was l
 static const char drap_page[] PROGMEM = "/drap/stats.txt";
 
 // NOAA RSG space weather scales
-#define NOAASWX_INTERVAL     3700               // polling interval, secs
+#define NOAASWX_INTERVAL     (3700+randIvl(300))                // polling interval, secs
 static const char noaaswx_page[] PROGMEM = "/NOAASpaceWX/noaaswx.txt";
 
 // geolocation web page
 static const char locip_page[] = "/fetchIPGeoloc.pl";
 
 // SDO images
-#define SDO_INTERVAL    3200                    // polling interval, secs
+#define SDO_INTERVAL    (3200+randIvl(300))     // polling interval, secs
 #define SDO_COLOR       RA8875_MAGENTA          // loading message text color
 // N.B. files must match order in plot_names[]
 static const char *sdo_filename[4] = {
@@ -120,15 +123,15 @@ static const char *sdo_filename[4] = {
 };
 
 // weather displays
-#define DEWX_INTERVAL   1700                    // polling interval, secs
-#define DXWX_INTERVAL   1600                    // polling interval, secs
+#define DEWX_INTERVAL   (1700+randIvl(200))     // polling interval, secs
+#define DXWX_INTERVAL   (1600+randIvl(200))     // polling interval, secs
 
 // moon display
 #define MOON_INTERVAL   30                      // update interval, secs
 static bool moon_reverting;                     // flag for revertPlot1();
 
 // Live spots
-#define PSK_INTERVAL    69                      // polling period. secs
+#define PSK_INTERVAL    (69+randIvl(20))        // polling period. secs
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
@@ -143,12 +146,12 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 
 
 // web site retry interval, secs
-#define WIFI_RETRY      10
+#define WIFI_RETRY      (20+randIvl(5))
 
 // pane auto rotation period in seconds -- most are the same but wx is longer
-#define ROTATION_INTERVAL       30              // default pane rotation interval, s
-#define ROTATION_WX_INTERVAL    200             // default weather interval, s
-#define ROT_SLOW_DELTA          15              // seconds to defer for high server load
+#define ROTATION_INTERVAL       (30+randIvl(5))                 // default pane rotation interval, s
+#define ROTATION_WX_INTERVAL    (200+randIvl(20))               // default weather interval, s
+#define ROT_SLOW_DELTA          15                              // seconds to defer for high server load
 static const char sload_page[] PROGMEM = "/loadfactor.pl";      // page to query for server load
 
 
@@ -200,39 +203,50 @@ static bool updateDRAPPlot(const SBox &box);
 static bool updateRSS (void);
 static uint32_t crackBE32 (uint8_t bp[]);
 
+/* return a random number [-n,n] intended for randomizing update intervals
+ */
+static int randIvl(int n)
+{
+    return (random(2*n+1) - n);
+}
 
 /* retrieve server overload factor, with default if error.
  */
 static int queryServerOverLoad (void)
 {
+    // not crazy fast
+    static uint32_t last_lookup_time;
+    static int overload;
+    if (!timesUp (&last_lookup_time, 60000 + randIvl(30000)))
+        return (overload);
+
     WiFiClient sl_client;
-    int overload = 2;
     float load;
     int ncores;
     bool ok = false;
 
     resetWatchdog();
-    if (wifiOk() && sl_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && sl_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
 
         // query web page
-        httpHCPGET (sl_client, svr_host, sload_page);
+        httpHCPGET (sl_client, backend_host, sload_page);
 
         // skip response header
         if (!httpSkipHeader (sl_client)) {
-            Serial.print (F("server load header fail\n"));
+            Serial.print (F("SL: server load header fail\n"));
             goto out;
         }
 
         // next line is load and ncores
         char line[50];
         if (!getTCPLine (sl_client, line, sizeof(line), NULL)) {
-            Serial.print (F("missing server load line\n"));
+            Serial.print (F("SL: missing server load line\n"));
             goto out;
         }
         // Serial.println (line);
         if (sscanf (line, "%f %d", &load, &ncores) != 2) {
-            Serial.printf (_FX("bogus server load line: %s"), line);
+            Serial.printf (_FX("SL: bogus server load line: %s"), line);
             goto out;
         }
 
@@ -249,10 +263,11 @@ out:
     sl_client.stop();
     updateClocks(false);
     resetWatchdog();
-    printFreeHeap (F("queryServerOverLoad"));
 
-    if (!ok)
-        Serial.printf (_FX("SL: overload failed\n"));
+    if (!ok) {
+        overload = 2;
+        Serial.printf (_FX("SL: overload failed, defaulting to %d\n"), overload);
+    }
 
     return (overload);
 }
@@ -328,7 +343,7 @@ static void geolocateIP (const char *ip)
     int nlines = 0;
 
     resetWatchdog();
-    if (wifiOk() && iploc_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && iploc_client.connect(backend_host, BACKEND_PORT)) {
 
         // create proper query
         size_t l = snprintf (llline, sizeof(llline), "%s", locip_page);
@@ -337,7 +352,7 @@ static void geolocateIP (const char *ip)
         Serial.println(llline);
 
         // send
-        httpHCGET (iploc_client, svr_host, llline);
+        httpHCGET (iploc_client, backend_host, llline);
         if (!httpSkipHeader (iploc_client)) {
             Serial.println (F("geoIP header short"));
             goto out;
@@ -405,7 +420,7 @@ static NTPServer *findBestNTP()
     NTPServer *best_ntp = &ntp_list[0];
     int rsp_min = ntp_list[0].rsp_time;
 
-    for (unsigned i = 1; i < N_NTP; i++) {
+    for (int i = 1; i < N_NTP; i++) {
         NTPServer *np = &ntp_list[i];
         if (np->rsp_time < rsp_min) {
             best_ntp = np;
@@ -499,20 +514,6 @@ static void initWiFi (bool verbose)
         tftMsg (verbose, 0, _FX("S/N: %u"), ESP.getChipId());
     }
 
-    // start web server for remote commands
-    if (WiFi.status() == WL_CONNECTED || !strcmp (mac, mac_lh)) {
-        char buf[200];
-        if (!initWebServer(buf)) {
-            Serial.printf (_FX("Web server on port %d failed: %s\n"), svr_port, buf);
-            strcpy (buf, _FX("Web server failed"));
-        } else {
-            snprintf (buf, sizeof(buf), _FX("Start web server on port %d"), svr_port);
-        }
-        tftMsg (verbose, 0, buf);
-    } else {
-        tftMsg (verbose, 0, _FX("No network for server"));
-    }
-
     // retrieve cities
     readCities();
 }
@@ -524,6 +525,12 @@ void initSys()
 {
     // start/check WLAN
     initWiFi(true);
+
+    // start web servers
+    initWebServer();
+#if defined (_IS_UNIX)
+    initLiveWeb(true);
+#endif
 
     // init location if desired
     if (useGeoIP() || init_iploc || init_locip) {
@@ -585,7 +592,7 @@ void initSys()
             drainTouch();
             tftMsg (true, 0, _FX("Finding best NTP ..."));
             NTPServer *best_ntp = NULL;
-            for (unsigned i = 0; i < N_NTP; i++) {
+            for (int i = 0; i < N_NTP; i++) {
                 NTPServer *np = &ntp_list[i];
 
                 // measure the next. N.B. assumes we stay in sync
@@ -657,7 +664,7 @@ void initSys()
             if ((TO_DS - (millis() - t0)/100)/10 < s_left) {
                 // just printing every ds_left/10 is too slow due to overhead
                 char buf[30];
-                sprintf (buf, _FX("Ready ... %d\r"), s_left--);
+                snprintf (buf, sizeof(buf), _FX("Ready ... %d\r"), s_left--);
                 tftMsg (true, 0, buf);
             }
             wdDelay(100);
@@ -785,7 +792,7 @@ static char *xrayLevel (float xray, char *buf)
             power = -4;
         float mantissa = xray*powf(10.0F,-power);
         char alevel = levels[8+power];
-        sprintf (buf, _FX("%c%.1f"), alevel, mantissa);
+        snprintf (buf, 10, _FX("%c%.1f"), alevel, mantissa);
     }
     return (buf);
 }
@@ -806,11 +813,11 @@ static bool retrieveSunSpots (float x[SSPOT_NV], float ssn[SSPOT_NV])
 
     Serial.println(ssn_page);
     resetWatchdog();
-    if (wifiOk() && ss_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && ss_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
 
         // query web page
-        httpHCPGET (ss_client, svr_host, ssn_page);
+        httpHCPGET (ss_client, backend_host, ssn_page);
 
         // skip response header
         if (!httpSkipHeader (ss_client)) {
@@ -895,12 +902,12 @@ static bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
 
     Serial.println (sf_page);
     resetWatchdog();
-    if (wifiOk() && sf_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && sf_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCPGET (sf_client, svr_host, sf_page);
+        httpHCPGET (sf_client, backend_host, sf_page);
 
         // skip response header
         if (!httpSkipHeader (sf_client)) {
@@ -983,12 +990,12 @@ static bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
 
     Serial.println(kp_page);
     resetWatchdog();
-    if (wifiOk() && kp_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && kp_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCPGET (kp_client, svr_host, kp_page);
+        httpHCPGET (kp_client, backend_host, kp_page);
 
         // skip response header
         if (!httpSkipHeader (kp_client)) {
@@ -1070,11 +1077,11 @@ static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XR
 
     Serial.println(xray_page);
     resetWatchdog();
-    if (wifiOk() && xray_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && xray_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
 
         // query web page
-        httpHCPGET (xray_client, svr_host, xray_page);
+        httpHCPGET (xray_client, backend_host, xray_page);
 
         // soak up remaining header
         if (!httpSkipHeader (xray_client)) {
@@ -1087,10 +1094,6 @@ static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XR
         float raw_lxray = 0;
         while (xray_i < XRAY_NV && getTCPLine (xray_client, line, sizeof(line), &ll)) {
             // Serial.println(line);
-
-            // for some unknown reason this delay eliminates all xray short lists on ESP.
-            // it was discovered because the above print also eliminates them.
-            delay(10);
 
             if (line[0] == '2' && ll >= 56) {
 
@@ -1852,14 +1855,10 @@ void updateWiFi(void)
 
         case PLOT_CH_PSK:
             if (t0 >= next_psk) { 
-                if (updatePSKReporter()) {
-                    // paths are drawn by drawAllSymbols()
+                if (updatePSKReporter(box))
                     next_psk = now() + PSK_INTERVAL;
-                } else {
+                else
                     next_psk = nextWiFiRetry();
-                }
-                // draw pane even if error to reset displated counts
-                drawPSKPane(box);
             }
             break;
 
@@ -1878,15 +1877,6 @@ void updateWiFi(void)
 
     // freshen NCDXF_b
     checkBRB(t0);
-
-    // always check on psk if in rotation set but not up now
-    if (t0 >= next_psk && findPaneForChoice(PLOT_CH_PSK) != PANE_NONE
-                       && findPaneChoiceNow(PLOT_CH_PSK) == PANE_NONE) {
-        if (updatePSKReporter())
-            next_psk = now() + PSK_INTERVAL;
-        else
-            next_psk = nextWiFiRetry();
-    }
 
     // freshen RSS
     if (t0 >= next_rss) {
@@ -2165,6 +2155,11 @@ void sendUserAgent (WiFiClient &client)
         if (useGPSDLoc())
             gpsd |= 2;
 
+        // date formatting
+        int dayf = (int)getDateFormat();
+        if (weekStartsOnMonday())                       // added in 286
+            dayf |= 4;
+
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
@@ -2175,7 +2170,7 @@ void sendUserAgent (WiFiClient &client)
             // new for LV5:
             (int)as, getCenterLng(), (int)auxtime /* getDoy() before 2.80 */, names_on, getDemoMode(),
             (int)getSWEngineState(NULL,NULL), (int)getBigClockBits(), utcOffset(), gpsd,
-            rss_interval, (int)getDateFormat(), rr_score);
+            rss_interval, dayf, rr_score);
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
@@ -2294,10 +2289,8 @@ static bool updateKp(SBox &box)
         updateClocks(false);
         resetWatchdog();
 
-        // Kp value should be shown as int
-        char value_str[10];
-        snprintf (value_str, sizeof(value_str), "%d", (int)kp_spw);
-        plotXYstr (box, kpx, kp, KP_NV, _FX("Days"), _FX("Planetary Kp"), KP_COLOR, 0, 9, value_str);
+        // current Kp value 
+        plotXY (box, kpx, kp, KP_NV, _FX("Days"), _FX("Planetary Kp"), KP_COLOR, 0, 9, kp_spw);
 
         // show
         drawSpaceStats();
@@ -2417,12 +2410,12 @@ static bool updateSolarWind(const SBox &box)
 
     Serial.println (swind_page);
     resetWatchdog();
-    if (wifiOk() && swind_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && swind_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCPGET (swind_client, svr_host, swind_page);
+        httpHCPGET (swind_client, backend_host, swind_page);
 
         // skip response header
         if (!httpSkipHeader (swind_client)) {
@@ -2524,12 +2517,12 @@ static bool updateDRAPPlot(const SBox &box)
 
     Serial.println (drap_page);
     resetWatchdog();
-    if (wifiOk() && drap_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && drap_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCPGET (drap_client, svr_host, drap_page);
+        httpHCPGET (drap_client, backend_host, drap_page);
 
         // skip response header
         if (!httpSkipHeader (drap_client)) {
@@ -2550,6 +2543,7 @@ static bool updateDRAPPlot(const SBox &box)
             float min, max, mean;
             if (sscanf (line, _FX("%ld : %f %f %f"), &utime, &min, &max, &mean) != 4) {
                 plotMessage (box, DRAPPLOT_COLOR, _FX("DRAP: data garbled"));
+                Serial.printf (_FX("DRAP: garbled: %s\n"), line);
                 goto out;
             }
             // Serial.printf (_FX("DRAP: %ld %g %g %g\n", utime, min, max, mean);
@@ -2655,29 +2649,29 @@ static bool updateBandConditions(const SBox &box)
 
     Serial.println (query);
     resetWatchdog();
-    if (wifiOk() && bc_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && bc_client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCGET (bc_client, svr_host, query);
+        httpHCGET (bc_client, backend_host, query);
 
         // skip header
         if (!httpSkipHeader (bc_client)) {
-            plotMessage (box, RA8875_RED, _FX("No BC header"));
+            plotMessage (box, RA8875_RED, _FX("BC: no header"));
             goto out;
         }
 
         // next line is CSV path reliability for the requested time between DX and DE, 9 bands 80-10m
         if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
-            plotMessage (box, RA8875_RED, _FX("No BC response"));
+            plotMessage (box, RA8875_RED, _FX("BC: No response"));
             goto out;
         }
 
         // next line is configuration summary
         if (!getTCPLine (bc_client, config, config_mem.getSize(), NULL)) {
             Serial.println(response);
-            plotMessage (box, RA8875_RED, _FX("No BC config"));
+            plotMessage (box, RA8875_RED, _FX("BC: No config"));
             goto out;
         }
 
@@ -2693,16 +2687,15 @@ static bool updateBandConditions(const SBox &box)
 
         // next 24 lines are reliability matrix.
         // N.B. col 1 is UTC but runs from 1 .. 24, 24 is really 0
-        // lines include data for 9 bands, 80-10, but we drop 60 for BandMatrix
+        // lines include data for 9 bands, 80-10, but we drop 60 for BandCdtnMatrix
         float rel[PROP_MAP_N];          // value are path reliability 0 .. 1
-        BandMatrix bm;
+        memset (&bc_matrix, 0, sizeof(bc_matrix));
         for (int i = 0; i < BMTRX_ROWS; i++) {
 
-            // read next row -- not sure why but second attempt needed about 1/5 times on ESP
-            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)
-                        && !getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
+            // read next row
+            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
                 Serial.printf (_FX("Matrix fail row %d\n"), i);
-                plotMessage (box, RA8875_RED, _FX("No matrix"));
+                plotMessage (box, RA8875_RED, _FX("BC: No matrix"));
                 goto out;
             }
 
@@ -2713,16 +2706,16 @@ static bool updateBandConditions(const SBox &box)
                         &rel[PROP_MAP_17M], &rel[PROP_MAP_15M], &rel[PROP_MAP_12M], &rel[PROP_MAP_10M])
                             != BMTRX_COLS + 1) {
                 Serial.println(response);
-                plotMessage (box, RA8875_RED, _FX("Bad matrix"));
+                plotMessage (box, RA8875_RED, _FX("BC: Bad matrix"));
                 goto out;
             }
 
             // correct utc
             utc_hr %= 24;
 
-            // add to bm as integer percent
+            // add to bc_matrix as integer percent
             for (int j = 0; j < BMTRX_COLS; j++)
-                bm[utc_hr][j] = 100*rel[j];
+                bc_matrix[utc_hr][j] = (uint8_t)(100*rel[j]);
 
             // copy to path_spw for getSpaceWeather() if correct time
             if (utc_hr == t_hr) {
@@ -2735,16 +2728,16 @@ static bool updateBandConditions(const SBox &box)
         #if defined(_TEST_BAND_MATRIX)
             for (int r = 0; r < BMTRX_ROWS; r++)                    // time 0 .. 23
                 for (int c = 0; c < BMTRX_COLS; c++)                // band 80 .. 10
-                    bm[r][c] = 100*r*c/BMTRX_ROWS/BMTRX_COLS;
+                    bc_matrix[r][c] = 100*r*c/BMTRX_ROWS/BMTRX_COLS;
                     // (*mp)[r][c] = (float)r/BMTRX_ROWS;
         #endif
 
         // ok!
-        plotBandConditions (box, 0, &bm, config);
+        plotBandConditions (box, 0, &bc_matrix, config);
         ok = true;
 
     } else {
-        plotMessage (box, RA8875_RED, _FX("VOACAP connection failed"));
+        plotMessage (box, RA8875_RED, _FX("BC: connection failed"));
     }
 
     // clean up
@@ -2790,11 +2783,11 @@ static bool updateSTEREO_A (const SBox &box)
     float sep = 0;
     Serial.println(stereo_a_sep_page);
     resetWatchdog();
-    if (wifiOk() && client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
         updateClocks(false);
 
         // query and skip header
-        httpHCPGET (client, svr_host, stereo_a_sep_page);
+        httpHCPGET (client, backend_host, stereo_a_sep_page);
 
         char buf[20];
         if (httpSkipHeader(client) && getTCPLine (client, buf, sizeof(buf), NULL)) {
@@ -2871,13 +2864,13 @@ static bool updateNOAASWx(const SBox &box)
     // read scales
     Serial.println(noaaswx_page);
     resetWatchdog();
-    if (wifiOk() && noaaswx_client.connect(svr_host, HTTPPORT)) {
+    if (wifiOk() && noaaswx_client.connect(backend_host, BACKEND_PORT)) {
 
         resetWatchdog();
         updateClocks(false);
 
         // fetch page
-        httpHCPGET (noaaswx_client, svr_host, noaaswx_page);
+        httpHCPGET (noaaswx_client, backend_host, noaaswx_page);
 
         // skip header then read the data lines
         if (httpSkipHeader (noaaswx_client)) {
@@ -2955,13 +2948,13 @@ static bool updateRSS ()
         
         Serial.println(rss_page);
         resetWatchdog();
-        if (wifiOk() && rss_client.connect(svr_host, HTTPPORT)) {
+        if (wifiOk() && rss_client.connect(backend_host, BACKEND_PORT)) {
 
             resetWatchdog();
             updateClocks(false);
 
             // fetch feed page
-            httpHCPGET (rss_client, svr_host, rss_page);
+            httpHCPGET (rss_client, backend_host, rss_page);
 
             // skip response header
             if (!httpSkipHeader (rss_client)) {
@@ -3074,6 +3067,9 @@ static bool updateRSS ()
  */
 bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll)
 {
+    // update network stack
+    yield();
+
     // decrement available length so there's always room to add '\0'
     line_len -= 1;
 
@@ -3304,6 +3300,15 @@ int getNTPServers (const NTPServer **listp)
     return (N_NTP);
 }
 
+/* get the current BandCdtnMatrix conditions.
+ * return whether values are less than an hour old.
+ */
+bool getBCMatrix (BandCdtnMatrix &bm)
+{
+    memcpy (&bm, &bc_matrix, sizeof(bm));
+    return (tdiff(bc_time,nowWO()) < 3600);
+}
+
 /* used by web server to control local RSS title list.
  * if title == NULL
  *   restore normal network operation
@@ -3442,7 +3447,7 @@ void drawSpaceStats()
     if (kp_spw == SPW_ERR)
         strcpy (values[i], err);
     else
-        snprintf (values[i], sizeof(values[i]), "%.0f", kp_spw);
+        snprintf (values[i], sizeof(values[i]), "%.1f", kp_spw);
     colors[i] = KP_COLOR;
     i++;
 

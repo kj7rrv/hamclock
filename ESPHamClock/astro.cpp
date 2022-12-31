@@ -898,7 +898,7 @@ static char *prradhexa (double rad)
         double deg = rad2deg(fabs(rad));
         int d = deg;
         int m = (deg - d)*60;
-        sprintf (prradhexa_str, "%3d:%02d", d*sign, m);
+        snprintf (prradhexa_str, sizeof(prradhexa_str), "%3d:%02d", d*sign, m);
         return (prradhexa_str);
 }
 

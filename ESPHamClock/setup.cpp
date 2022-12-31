@@ -94,7 +94,7 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 // color selector constants
 #define CSEL_SCX        435                     // all color control scales x coord
 #define CSEL_COL1X      2                       // tick boxes in column 1 x
-#define CSEL_COL2X      400                     // tick boxes in column 2 x
+#define CSEL_COL2X      415                     // tick boxes in column 2 x
 #define CSEL_SCY        45                      // top scale y coord
 #define CSEL_SCW        256                     // scale width -- lt this causes roundoff at end
 #define CSEL_SCH        30                      // scale height
@@ -102,15 +102,17 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define CSEL_VDX        20                      // gap dx to value number
 #define CSEL_SCM_C      RA8875_WHITE            // scale marker color
 #define CSEL_SCB_C      GRAY                    // scale slider border color
-#define CSEL_PDX        28                      // prompt dx from tick box x
+#define CSEL_PDX        60                      // prompt dx from tick box x
 #define CSEL_PW         140                     // width
-#define CSEL_DDX        218                     // demo strip dx from tick box x
+#define CSEL_DDX        195                     // demo strip dx from tick box x
 #define CSEL_DW         150                     // demo strip width
 #define CSEL_DH         6                       // demo strip height
 #define CSEL_TBCOL      RA8875_RED              // tick box active color
 #define CSEL_TBSZ       20                      // tick box size
-#define CSEL_TBDY       4                       // tick box y offset from R2Y
-#define CSEL_NDASH      10                      // n segments in dashed color sample
+#define CSEL_TBDY       5                       // tick box y offset from R2Y
+#define CSEL_NDASH      11                      // n segments in dashed color sample
+#define CSEL_DDY        12                      // demo strip dy down from rot top
+#define CSEL_ADX        32                      // dashed tick box dx from tick box x
 
 // OnOff layout constants
 #define OO_Y0           150                     // top y
@@ -441,99 +443,130 @@ typedef struct {
     uint16_t def_c;                             // default color -- NOT the current color
     NV_Name nv;                                 // nvram location
     const char *p_str;                          // prompt string
+    SBox a_box;                                 // dashed control tick box, .x == 0 if not used
+    bool a_state;                               // whether dashed is enabled
     uint8_t r, g, b;                            // current color in full precision color
 } ColSelPrompt;
 
-/* SATPATH_CSPR dashed box
- */
-static SBox csel_satpath_b = {CSEL_COL1X+CSEL_DDX+CSEL_DW+15, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ};
-static bool csel_satpath_state = true;
+#define DASHOK(p)       (p.a_box.x > 0)         // test whether this color has a dash control option
 
-/* color selector prompts.
- *   N.B. must match CSIds order
+/* color selector controls and prompts.
+ * N.B. must match ColorSelection order
  */
 static ColSelPrompt csel_pr[N_CSPR] = {
     {{CSEL_COL1X+CSEL_PDX, R2Y(0), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(0)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            true, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(0)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, DE_COLOR, NV_SHORTPATHCOLOR, "Short path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(1), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(1)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(1)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(229,191,131), NV_LONGPATHCOLOR, "Long path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(2), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(2)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, DE_COLOR, NV_SHORTPATHCOLOR, "Short prop path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(2)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            true, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(3), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(3)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(3)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(229,191,131), NV_LONGPATHCOLOR, "Long prop path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(3)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(4), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(4)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(4)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
+            {CSEL_COL1X+CSEL_DDX, R2Y(4)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid"},
+
 #if !defined(_SUPPORT_PSKESP)
 
     // ESP does not draw paths so doesn't need band colors
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, GRAY, NV_160M_COLOR, "160 m path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(128,0,0), NV_160M_COLOR, "160 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(200,20,140), NV_80M_COLOR, "80 m path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(128,128,0), NV_80M_COLOR, "80 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(140,200,20), NV_60M_COLOR, "60 m path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(230,25,75), NV_60M_COLOR, "60 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(140,20,200), NV_40M_COLOR, "40 m path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(245,130,48), NV_40M_COLOR, "40 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(20,200,255), NV_30M_COLOR, "30 m path"},
+            {CSEL_COL1X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(200,176,20), NV_30M_COLOR, "30 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RA8875_RED, NV_20M_COLOR, "20 m path"},   // match NCDXF
+            {CSEL_COL1X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(250,250,0), NV_20M_COLOR, "20 m path",
+            {CSEL_COL1X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(6)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RA8875_GREEN, NV_17M_COLOR, "17 m path"},   // match NCDXF
+            {CSEL_COL2X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(60,180,75), NV_17M_COLOR, "17 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(7)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(100,100,255), NV_15M_COLOR, "15 m path"},      // match NCDXF
+            {CSEL_COL2X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(70,240,240), NV_15M_COLOR, "15 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(8)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RA8875_YELLOW, NV_12M_COLOR, "12 m path"},     // match NCDXF
+            {CSEL_COL2X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(0,130,200), NV_12M_COLOR, "12 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(9)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(255,125,0), NV_10M_COLOR, "10 m path"}, // match NCDXF
+            {CSEL_COL2X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(250,190,212), NV_10M_COLOR, "10 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(10)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RGB565(20,140,200), NV_6M_COLOR, "6 m path"},
+            {CSEL_COL2X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(200,150,100), NV_6M_COLOR, "6 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+
     {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL2X+CSEL_DDX, R2Y(11)+PR_H/2-CSEL_DH/2, CSEL_DW, CSEL_DH},
-            false, RA8875_WHITE, NV_2M_COLOR, "2 m path"},
+            {CSEL_COL2X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
+            false, RGB565(100,100,100), NV_2M_COLOR, "2 m path",
+            {CSEL_COL2X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
 #endif
 };
 
-// overall color selector box, easier than 3 separate boxes, and current values
+
+
+// overall color selector box, easier than 3 separate boxes
 static SBox csel_ctl_b = {CSEL_SCX, CSEL_SCY, CSEL_SCW, 3*CSEL_SCH + 3*CSEL_SCYG};
 
-// handy conversions between x and value 0..255.
-// only valid when dx ranges from 0 .. CSEL_SCW-1
+// handy conversions between x coord and value 0..255.
+// N.B. only valid when x-CSEL_SCX ranges from 0 .. CSEL_SCW-1
 #define X2V(x)  (255*((x)-CSEL_SCX)/(CSEL_SCW-1))
 #define V2X(v)  (CSEL_SCX+(CSEL_SCW-1)*(v)/255)
 
@@ -1320,34 +1353,37 @@ static void getCSelBoxColor (const SCoord &s, uint8_t &r, uint8_t &g, uint8_t &b
 
 /* draw a color selector demo
  */
-static void drawCSelDemoSwatch (const ColSelPrompt *p)
+static void drawCSelDemoSwatch (const ColSelPrompt &p)
 {
-    uint16_t c = RGB565(p->r, p->g, p->b);
+    uint16_t c = RGB565(p.r, p.g, p.b);
 
-    if (p == &csel_pr[SATPATH_CSPR] && csel_satpath_state) {
+    // check for dashed, else solid
+    if (DASHOK(p) > 0 && p.a_state) {
         // dashed
         for (int i = 0; i < CSEL_NDASH; i++) {
-            uint16_t dx = i * p->d_box.w / CSEL_NDASH;
-            tft.fillRect (p->d_box.x + dx, p->d_box.y, p->d_box.w/CSEL_NDASH, p->d_box.h,
+            uint16_t dx = i * p.d_box.w / CSEL_NDASH;
+            tft.fillRect (p.d_box.x + dx, p.d_box.y, p.d_box.w/CSEL_NDASH, p.d_box.h,
                         (i&1) ? RA8875_BLACK : c);
         }
     } else {
-        fillSBox (p->d_box, c);
+        // solid
+        fillSBox (p.d_box, c);
     }
 }
 
-/* draw the csel_satpath tick box
+/* draw the dash control tick box, if used
  */
-static void drawCSelSatPathTickBox()
+static void drawCSelDashTickBox(const ColSelPrompt &p)
 {
-    uint16_t dash_y = csel_satpath_b.y + csel_satpath_b.h/2;
-    fillSBox (csel_satpath_b, csel_satpath_state ? CSEL_TBCOL : RA8875_BLACK);
-    for (int i = 0; i < CSEL_NDASH; i++) {
-        uint16_t dx = i * csel_satpath_b.w / CSEL_NDASH;
-        tft.drawLine (csel_satpath_b.x + dx, dash_y, csel_satpath_b.x + dx + csel_satpath_b.w / CSEL_NDASH, 
-                        dash_y, (i&1) ? RA8875_BLACK : CSEL_TBCOL);
-    }
-    drawSBox (csel_satpath_b, RA8875_WHITE);
+    if (!DASHOK(p))
+        return;
+
+    uint16_t fg = p.a_state ? CSEL_TBCOL : RA8875_BLACK;
+    uint16_t bg = p.a_state ? RA8875_BLACK : CSEL_TBCOL;
+    fillSBox (p.a_box, fg);
+    tft.fillRect (p.a_box.x, p.d_box.y, p.a_box.w/3, p.d_box.h, bg);
+    tft.fillRect (p.a_box.x + 4*p.a_box.w/6, p.d_box.y, p.a_box.w/3, p.d_box.h, bg);
+    drawSBox (p.a_box, RA8875_WHITE);
 }
 
 /* draw a color selector prompt tick box, on or off depending on state.
@@ -1401,6 +1437,7 @@ static void drawCSelPromptColor (const ColSelPrompt &p)
 }
 
 /* draw the one-time color selector GUI features
+ * N.B. we assume screen is already erased.
  */
 static void drawCSelInitGUI()
 {
@@ -1423,19 +1460,17 @@ static void drawCSelInitGUI()
 
     // draw prompts and set sliders from one that is set
     resetWatchdog();
-    tft.setTextColor (PR_C);
     for (int i = 0; i < N_CSPR; i++) {
         ColSelPrompt &p = csel_pr[i];
+        tft.setTextColor (TX_C);
         tft.setCursor (p.p_box.x, p.p_box.y+p.p_box.h-PR_D);
         tft.printf ("%s:", p.p_str);
         drawCSelTickBox (p);
-        drawCSelDemoSwatch (&p);
+        drawCSelDemoSwatch (p);
+        drawCSelDashTickBox(p);
         if (p.state)
             drawCSelPromptColor (p);
     }
-
-    // satpath
-    drawCSelSatPathTickBox();
 }
 
 /* handle a possible touch event while on the color selection page.
@@ -1452,21 +1487,30 @@ static bool handleCSelTouch (SCoord &s)
             if (p.state) {
                 getCSelBoxColor(s, p.r, p.g, p.b);
                 drawCSelPromptColor(p);
-                drawCSelDemoSwatch (&p);
+                drawCSelDemoSwatch (p);
                 break;
             }
         }
         ours = true;
+    }
 
-    // else check for changing satpath dashed
-    } else if (inBox (s, csel_satpath_b)) {
-        csel_satpath_state = !csel_satpath_state;
-        drawCSelDemoSwatch (&csel_pr[SATPATH_CSPR]);
-        drawCSelSatPathTickBox();
-        ours = true;
+    // else check for changing dashed state
+    if (!ours) {
+        for (int i = 0; i < N_CSPR; i++) {
+            ColSelPrompt &p = csel_pr[i];
+            if (inBox (s, p.a_box)) {
+                // toggle and redraw
+                p.a_state = !p.a_state;
+                drawCSelDemoSwatch (p);
+                drawCSelDashTickBox(p);
+                ours = true;
+                break;
+            }
+        }
+    }
 
     // else check for changing the current selection
-    } else {
+    if (!ours) {
         for (int i = 0; i < N_CSPR; i++) {
             ColSelPrompt &pi = csel_pr[i];
             if (inBox (s, pi.t_box) && !pi.state) {
@@ -1526,7 +1570,7 @@ static void drawOnOffTimeCell (int dow, uint16_t y, uint16_t thm)
     char buf[20];
 
     tft.setTextColor(TX_C);
-    sprintf (buf, "%02d:%02d", thm/60, thm%60);
+    snprintf (buf, sizeof(buf), "%02d:%02d", thm/60, thm%60);
     tft.setCursor (OO_DHX(dow)+(OO_CW-getTextWidth(buf))/2, y);
     tft.fillRect (OO_DHX(dow)+1, y-OO_RH+1, OO_CW-2, OO_RH, RA8875_BLACK);
     tft.print (buf);
@@ -2289,13 +2333,14 @@ static void initSetup()
         p.b = RGB565_B(c);
     }
 
-    // dashed
+    // dashed settings
     uint32_t dashed;
     if (!NVReadUInt32 (NV_DASHED, &dashed)) {
         dashed = 0;
         NVWriteUInt32 (NV_DASHED, dashed);
     }
-    csel_satpath_state = (dashed & (1 << SATPATH_CSPR)) ? true : false;
+    for (int i = 0; i < N_CSPR; i++)
+        csel_pr[i].a_state = (dashed & (1 << i)) ? true : false;
 
     // X11 flags, engage immediately if defined or sensible thing to do
     uint16_t x11flags;
@@ -2986,8 +3031,12 @@ static void finishSettingUp()
         NVWriteUInt16 (p.nv, c);
     }
 
-    // save which colors are dashed -- N.B. just satpath for now
-    NVWriteUInt32 (NV_DASHED, csel_satpath_state ? (1 << SATPATH_CSPR) : 0);
+    // save which colors are dashed
+    uint32_t dashed = 0;
+    for (int i = 0; i < N_CSPR; i++)
+        if (csel_pr[i].a_state)
+            dashed |= (1 << i);
+    NVWriteUInt32 (NV_DASHED, dashed);
 
     // set DE tz and grid only if ll was edited and op is not using some other method to set location
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state && ll_edited) {
@@ -3511,9 +3560,9 @@ bool setDXCluster (char *host, const char *port_str, char ynot[])
     return(true);
 }
 
-/* return color for the given CSid
+/* return current rgb565 color for the given ColorSelection
  */
-uint16_t getMapColor (CSIds id)
+uint16_t getMapColor (ColorSelection id)
 {
     uint16_t c;
     if (id >= 0 && id < N_CSPR) {
@@ -3524,9 +3573,9 @@ uint16_t getMapColor (CSIds id)
     return (c);
 }
 
-/* return name of the given CSid
+/* return name of the given color
  */
-const char* getMapColorName (CSIds id)
+const char* getMapColorName (ColorSelection id)
 {
     const char *n;
     if (id >= 0 && id < N_CSPR)
@@ -3560,11 +3609,11 @@ bool setMapColor (const char *name, uint16_t rgb565)
     return (false);
 }
 
-/* return whether satpath should be dashed
+/* return whether the given color line should be dashed
  */
-bool getSatPathDashed()
+bool getColorDashed (ColorSelection id)
 {
-    return (csel_satpath_state);
+    return (csel_pr[id].a_state);
 }
 
 /* return whether receiving a WSTX spot also sets DX

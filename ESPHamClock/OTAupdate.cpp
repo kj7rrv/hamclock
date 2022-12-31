@@ -73,12 +73,12 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
     char line[100];
     bool found_newer = false;
 
-    Serial.print (svr_host); Serial.println (v_page);
-    if (wifiOk() && v_client.connect (svr_host, HTTPPORT)) {
+    Serial.print (backend_host); Serial.println (v_page);
+    if (wifiOk() && v_client.connect (backend_host, BACKEND_PORT)) {
         resetWatchdog();
 
         // query page
-        httpHCPGET (v_client, svr_host, v_page);
+        httpHCPGET (v_client, backend_host, v_page);
 
         // skip header
         if (!httpSkipHeader (v_client)) {
@@ -131,7 +131,7 @@ bool askOTAupdate(char *new_ver)
 
     // ask whether to install
     tft.setCursor (INDENT, Q_Y);
-    sprintf (line, _FX("New version %s is available. Update now?  ... "), new_ver);
+    snprintf (line, sizeof(line), _FX("New version %s is available. Update now?  ... "), new_ver);
     tft.print (line);
     uint16_t count_x = tft.getCursorX();
     uint16_t count_y = tft.getCursorY();
@@ -152,11 +152,11 @@ bool askOTAupdate(char *new_ver)
     WiFiClient v_client;
     uint16_t liney = INFO_Y+LH;
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    if (wifiOk() && v_client.connect (svr_host, HTTPPORT)) {
+    if (wifiOk() && v_client.connect (backend_host, BACKEND_PORT)) {
         resetWatchdog();
 
         // query page
-        httpHCPGET (v_client, svr_host, v_page);
+        httpHCPGET (v_client, backend_host, v_page);
 
         // skip header
         if (!httpSkipHeader (v_client)) {
@@ -247,14 +247,14 @@ void doOTAupdate(const char *newver)
     char url[200];
   #if defined(_IS_ESP8266)
     if (strstr(hc_version, "rc") && strstr (newver, "rc"))
-        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.ino.bin"), svr_host, newver);
+        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.ino.bin"), backend_host, newver);
     else
-        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock.ino.bin"), svr_host);
+        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock.ino.bin"), backend_host);
   #else
     if (strstr(hc_version, "rc") && strstr (newver, "rc"))
-        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.zip"), svr_host, newver);
+        snprintf (url, sizeof(url), _FX("http://%s/ham/HamClock/ESPHamClock-V%s.zip"), backend_host, newver);
     else
-        snprintf (url, sizeof(url), _FX("https://%s/ham/HamClock/ESPHamClock.zip"), svr_host);
+        snprintf (url, sizeof(url), _FX("https://%s/ham/HamClock/ESPHamClock.zip"), backend_host);
   #endif
 
     // go

@@ -163,11 +163,11 @@ bool GPIO::mapGPIOAddress(char ynot[])
         static const char gpiofilefile[] = "/dev/gpiomem";
         int fd = ::open (gpiofilefile, O_RDWR|O_SYNC);
         if (fd < 0) {
-            sprintf (ynot, "%s: %s", gpiofilefile, strerror(errno));
+            snprintf (ynot, 50, "%s: %s", gpiofilefile, strerror(errno));
             return (false);
         }
         if (::flock (fd, LOCK_EX|LOCK_NB) < 0) {
-            sprintf (ynot, "%s: file in use", gpiofilefile);
+            snprintf (ynot, 50, "%s: file in use", gpiofilefile);
             close (fd);
             return(false);
         }
@@ -181,7 +181,7 @@ bool GPIO::mapGPIOAddress(char ynot[])
         // check for error, leave gbase 0 if so
         if (gbase == MAP_FAILED) {
             gbase = NULL;
-            sprintf (ynot, "mmap: %s", strerror(errno));
+            snprintf (ynot, 50, "mmap: %s", strerror(errno));
             return (false);
         }
 

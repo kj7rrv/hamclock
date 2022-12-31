@@ -38,7 +38,7 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_CALL_FG_COLOR
     2,                          // NV_CALL_BG_COLOR
     1,                          // NV_CALL_BG_RAINBOW
-    1,                          // NV_DIST_KM
+    1,                          // NV_PSK_SHOWDIST
     4,                          // NV_UTC_OFFSET
     1,                          // NV_PLOT_1
     1,                          // NV_PLOT_2

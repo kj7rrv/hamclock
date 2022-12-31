@@ -169,7 +169,7 @@ static void setFlrigFreq (float kHz)
  */
 static char cleanup_cmds[] = ";SB0;FR0;FT0;RT0;XT0;RC;";
 
-/* sprintf format to set new frequency, requires float in Hz
+/* snprintf format to set new frequency, requires float in Hz
  */
 static char setfreq_fmt[] = ";FA%011.0f;";
 
@@ -265,7 +265,7 @@ void setRadioSpot (float kHz)
 
     // format and send command to change frequency
     char buf[30];
-    (void) sprintf (buf, setfreq_fmt, kHz*1e3);
+    (void) snprintf (buf, sizeof(buf), setfreq_fmt, kHz*1e3);
     sendOneMessage (buf);
 }
 
@@ -440,7 +440,7 @@ void setRadioSpot (float kHz)
 
     // format and send command to change frequency
     char buf[30];
-    (void) sprintf (buf, setfreq_fmt, kHz*1e3);
+    (void) snprintf (buf, sizeof(buf), setfreq_fmt, kHz*1e3);
     sendOneMessage (buf);
 }
 

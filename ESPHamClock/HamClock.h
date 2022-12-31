@@ -84,6 +84,8 @@
 // PSKReporter only partially supported on ESP because can't draw raster paths or spare mem for lists
 #if defined(_IS_ESP8266)
     #define _SUPPORT_PSKESP
+#else
+    #define _SUPPORT_PSKUNIX
 #endif
 
 // roaming cities is not supported on ESP because it is touch only
@@ -225,7 +227,10 @@ extern void radioResetIO(void);
 
 // handy nelements in array
 // N.B. call with real array, not a pointer
-#define NARRAY(a)       (sizeof(a)/sizeof(a[0]))
+#define NARRAY(a)       ((int)(sizeof(a)/sizeof(a[0])))
+
+// handy microseconds difference in two struct timeval: t1 - t0
+#define TVDELUS(t0,t1)    ((t1.tv_sec-t0.tv_sec)*1000000 + (t1.tv_usec-t0.tv_usec))
 
 // float versions
 #define M_PIF   3.14159265F
@@ -239,8 +244,9 @@ extern void radioResetIO(void);
 #define DXPATH_LINGER   20000   
 
 // tcp ports
-#define HTTPPORT        80
-#define SERVERPORT      8080
+#define BACKEND_PORT    80
+#define RESTFUL_PORT    8080
+#define LIVEWEB_PORT    8081
 
 // default menu timeout, millis
 #define MENU_TO         30000
@@ -367,8 +373,6 @@ typedef struct {
 } SPWxValue;
 
 
-extern const char *svr_host;    // backend server name
-extern int svr_port;            // web server port
 
 // screen coords of box ul and size
 typedef struct {
@@ -827,9 +831,10 @@ extern uint16_t map_x0, map_y0;
 extern uint16_t map_w, map_h;
 
 extern bool mapmenu_pending;            // draw map menu at next opportunity
-extern uint8_t show_km;                 // show prop path distance in km, else miles
 extern uint8_t show_lp;                 // show prop long path, else short path
-#define ERAD_M  3959.0F                 // earth radius, miles
+#define ERAD_M          3959.0F         // earth radius, miles
+#define MI_PER_KM       0.621371F
+#define KM_PER_MI       1.609344F
 
 #define DE_R 6                          // radius of DE marker   (erases better if even)
 #define DEAP_R 6                        // radius of DE antipodal marker (erases better if even)
@@ -877,7 +882,6 @@ extern void ll2s (float lat, float lng, SCoord &s, uint8_t edge);
 extern bool s2ll (uint16_t x, uint16_t y, LatLong &ll);
 extern bool s2ll (const SCoord &s, LatLong &ll);
 extern void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp);
-extern bool checkDistTouch (const SCoord &s);
 extern bool checkPathDirTouch (const SCoord &s);
 extern void propDEPath (bool long_path, const LatLong &to_ll, float *distp, float *bearp);
 extern void propPath (bool long_path, const LatLong &from_ll, float sflat, float cflat, const LatLong &to_ll,
@@ -1052,9 +1056,35 @@ typedef struct kd_node_t KD3Node;
 extern KD3Node* mkKD3NodeTree (KD3Node *t, int len, int idx);
 extern void nearestKD3Node (KD3Node *root, KD3Node *nd, int idx, KD3Node **best, float *best_dist,
     int *n_visited);
-extern void ll2KD3Node (const LatLong &ll, KD3Node &n);
-extern void KD3Node2ll (const KD3Node &n, LatLong &ll);
+extern void ll2KD3Node (const LatLong &ll, KD3Node *kp);
+extern void KD3Node2ll (const KD3Node &n, LatLong *llp);
 extern float nearestKD3Dist2Miles(float d);
+
+
+
+
+
+/*********************************************************************************************
+ *
+ * live-help.cpp
+ *
+ */
+
+extern char live_html[];
+
+
+
+/*********************************************************************************************
+ *
+ * live.cpp
+ *
+ */
+
+
+extern void initLiveWeb(bool verbose);
+extern time_t last_live;
+extern int liveweb_port;
+
 
 
 
@@ -1069,7 +1099,8 @@ extern float nearestKD3Dist2Miles(float d);
 typedef enum {
     DF_MDY,
     DF_DMY,
-    DF_YMD
+    DF_YMD,
+    DF_N
 } DateFormat;
 
 #define N_DXCLCMDS              4               // n dx cluster commands
@@ -1077,12 +1108,12 @@ typedef enum {
 
 // N.B. must match colsel_pr[] order
 typedef enum {
-    SATPATH_CSPR,
-    SATFOOT_CSPR,
     SHORTPATH_CSPR,
     LONGPATH_CSPR,
+    SATPATH_CSPR,
+    SATFOOT_CSPR,
     GRID_CSPR,
-#if !defined(_SUPPORT_PSKESP)
+#if defined(_SUPPORT_PSKUNIX)
     BAND160_CSPR,
     BAND80_CSPR,
     BAND60_CSPR,
@@ -1097,7 +1128,7 @@ typedef enum {
     BAND2_CSPR,
 #endif
     N_CSPR
-} CSIds;
+} ColorSelection;
 
 
 extern void clockSetup(void);
@@ -1127,8 +1158,8 @@ extern bool useDXCluster(void);
 extern uint32_t getKX3Baud(void);
 extern void drawStringInBox (const char str[], const SBox &b, bool inverted, uint16_t color);
 extern bool logUsageOk(void);
-extern uint16_t getMapColor (CSIds cid);
-extern const char* getMapColorName (CSIds cid);
+extern uint16_t getMapColor (ColorSelection cid);
+extern const char* getMapColorName (ColorSelection cid);
 extern uint8_t getBrMax(void);
 extern uint8_t getBrMin(void);
 extern bool getX11FullScreen(void);
@@ -1146,7 +1177,7 @@ extern const char *getDXClusterLogin(void);
 extern bool getDXSpotPaths(void);
 extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
-extern bool getSatPathDashed(void);
+extern bool getColorDashed(ColorSelection id);
 extern bool useMagBearing(void);
 extern bool setWSJTDX(void);
 extern bool useWSJTX(void);
@@ -1359,7 +1390,7 @@ typedef enum {
     NV_CALL_FG_COLOR,           // Call foreground color as RGB 565
     NV_CALL_BG_COLOR,           // Call background color as RGB 565 unless...
     NV_CALL_BG_RAINBOW,         // set if Call background to be rainbow
-    NV_DIST_KM,                 // whether DE-DX distance to be km or miles
+    NV_PSK_SHOWDIST,            // Live spots shows max distance, else counts
 
     NV_UTC_OFFSET,              // offset from UTC, seconds
     NV_PLOT_1,                  // Pane 1 PlotChoice
@@ -1482,7 +1513,7 @@ typedef enum {
     NV_6M_COLOR,                // 6 m path color as RGB 565
 
     NV_2M_COLOR,                // 2 m path color as RGB 565
-    NV_DASHED,                  // CSIds bitmask set for dashed
+    NV_DASHED,                  // ColorSelection bitmask set for dashed
     NV_BEAR_MAG,                // show magnetic bearings, else true
     NV_WSJT_SETSDX,             // whether WSJT-X spots set DX
     NV_WSJT_DX,                 // whether dx cluster is WSJT-X
@@ -1558,9 +1589,10 @@ extern void getNVMaidenhead (NV_Name nv, char maid[MAID_CHARLEN]);
 
 #define BMTRX_ROWS      24                              // time: UTC 0 .. 23
 #define BMTRX_COLS      PROP_MAP_N                      // bands: 80-40-30-20-17-15-12-10
-typedef uint8_t BandMatrix[BMTRX_ROWS][BMTRX_COLS];     // percent circuit reliability
+typedef uint8_t BandCdtnMatrix[BMTRX_ROWS][BMTRX_COLS]; // percent circuit reliability as matrix of 24 rows
+                                                        // UTC 0 .. 23, 8 band cols 80-40-30-20-17-15-12-10.
 
-extern void plotBandConditions (const SBox &box, int busy, const BandMatrix *bmp, char *config_str);
+extern void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, char *config_str);
 extern bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
         const char *ylabel, uint16_t color, float y_min, float y_max, float big_value);
 extern bool plotXYstr (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
@@ -1668,17 +1700,29 @@ typedef struct {
     int snr;
 } PSKReport;
 
+// current stats
+typedef struct {
+    int count;                          // spots count
+    float maxkm;                        // max distance, km
+    float maxlat;                       // lat of farthest spot, rads +N
+    float maxlng;                       // longitude of farthest spot, rads +E
+    SCoord maxs;                        // screen coord of farthest spot
+} PSKBandStats;
+
 extern uint8_t psk_mask;                // bitmask of PSKModeBits
 
-extern bool updatePSKReporter (void);
+extern bool updatePSKReporter (const SBox &box);
 extern bool checkPSKTouch (const SCoord &s, const SBox &box);
 extern void drawPSKPane (const SBox &box);
 extern void initPSKState(void);
 extern void savePSKState(void);
+extern bool overAnyPSKSpots (const SCoord &s);
+extern void drawPSKSpots(void);
+extern bool getPSKBandStats (PSKBandStats stats[PSKBAND_N], const char *names[PSKBAND_N]);
 
-#if !defined(_SUPPORT_PSKESP)
+#if defined(_SUPPORT_PSKUNIX)
 
-// only UNIX adds the followsing:
+// only UNIX adds the following:
 
 
 #define PSK_DOTR       2                // end point marker radius (also use by dxcluster)
@@ -1691,7 +1735,7 @@ extern bool getClosestPSK (const LatLong &ll, const PSKReport **rpp);
 
 
 
-#endif // !_SUPPORT_PSKESP
+#endif // _SUPPORT_PSKUNIX
 
 
 
@@ -1761,6 +1805,8 @@ extern void selectFontStyle (FontWeight w, FontSize s);
  */
 
 extern void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp);
+extern float simpleSphereDist (const LatLong &ll1, const LatLong &ll2);
+
 
 
 
@@ -1858,8 +1904,21 @@ extern int32_t getTZ (const LatLong &ll);
  *
  */
 
+// handy tool to parse web command arguments
+#define MAX_WEBARGS     10
+typedef struct {
+    const char *name[MAX_WEBARGS];              // name to look for
+    const char *value[MAX_WEBARGS];             // ptr to its value, or NULL
+    bool found[MAX_WEBARGS];                    // whether this name was found in the original GET command
+    int nargs;
+} WebArgs;
+extern bool parseWebCommand (WebArgs &wa, char line[], size_t line_len);
+
+
 extern char *trim (char *str);
-extern bool initWebServer(char ynot[]);
+extern void startPlainText (WiFiClient &client);
+extern void sendHTTPError (WiFiClient &client, const char *fmt, ...);
+extern void initWebServer(void);
 extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
@@ -1911,10 +1970,13 @@ extern bool setRSSTitle (const char *title, int &n_titles, int &max_titles);
 extern bool checkSpaceStats (time_t t0);
 extern void doSpaceStatsTouch (const SCoord &s);
 extern void drawSpaceStats(void);
+extern bool getBCMatrix (BandCdtnMatrix &bm);
 
 extern uint16_t bc_power;
 extern uint8_t bc_utc_tl;
 extern uint8_t rss_interval;
+extern int restful_port;
+extern const char *backend_host;
 
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, 
     SPWxValue &drap, NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,

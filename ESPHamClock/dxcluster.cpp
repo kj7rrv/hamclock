@@ -195,7 +195,7 @@ static void drawSpotOnList (const SBox &box, int spot_i)
 
         // pretty freq, fixed 8 chars
         const char *f_fmt = spot.kHz < 1e6F ? "%8.1f" : "%8.0f";
-        (void) sprintf (line, f_fmt, spot.kHz);
+        (void) snprintf (line, sizeof(line), f_fmt, spot.kHz);
 
         // add remaining fields
         snprintf (line+8, sizeof(line)-8, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs);
@@ -1390,26 +1390,23 @@ bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
         DXClusterSpot *min_sp = NULL;
         bool min_is_de = false;
         for (int i = 0; i < n_spots; i++) {
-            DXClusterSpot *sp = &spots[i];
 
-            float dlat = fabsf(sp->de_lat - ll.lat);
-            float dlng = fabsf(sp->de_lng - ll.lng);
-            if (dlng > M_PIF)
-                dlng = 2*M_PIF - dlng;
-            dlng *= cosf ((sp->de_lat - ll.lat)/2);
-            float d = dlat + dlng;
+            DXClusterSpot *sp = &spots[i];
+            LatLong spot_ll;
+            float d;
+
+            spot_ll.lat = sp->de_lat;
+            spot_ll.lng = sp->de_lng;
+            d = simpleSphereDist (spot_ll, ll);
             if (d < min_d) {
                 min_d = d;
                 min_sp = sp;
                 min_is_de = true;
             }
 
-            dlat = fabsf(sp->dx_lat - ll.lat);
-            dlng = fabsf(sp->dx_lng - ll.lng);
-            if (dlng > M_PIF)
-                dlng = 2*M_PIF - dlng;
-            dlng *= cosf ((sp->dx_lat - ll.lat)/2);
-            d = dlat + dlng;
+            spot_ll.lat = sp->dx_lat;
+            spot_ll.lng = sp->dx_lng;
+            d = simpleSphereDist (spot_ll, ll);
             if (d < min_d) {
                 min_d = d;
                 min_sp = sp;
@@ -1417,7 +1414,7 @@ bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
             }
         }
 
-        if (min_sp && min_d < deg2rad(2*MAX_CSR_DIST/69)) {      // roughly 69 mi/deg, 2* from dlat+dlng
+        if (min_sp && min_d*ERAD_M < MAX_CSR_DIST) {
 
             // reply with fully formed ll depending on end
             if (min_is_de) {

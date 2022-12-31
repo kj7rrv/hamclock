@@ -691,9 +691,9 @@ static void drawCDTimeRemaining(bool force)
         // format
         char buf[32];
         if (hr == 0)
-            sprintf (buf, "%d:%02d", mn, sc);
+            snprintf (buf, sizeof(buf), "%d:%02d", mn, sc);
         else
-            sprintf (buf, "%dh%02d", hr, mn);
+            snprintf (buf, sizeof(buf), "%dh%02d", hr, mn);
 
         if (sws_display == SWD_NONE) {
 
@@ -1263,14 +1263,17 @@ static void drawAnalogBigClock (bool all)
         // hour points
         for (int i = 0; i < 12; i++) {
             float a = deg2rad(360.0F*i/12.0F);
-            uint16_t x0 = roundf(BAC_X0 + (bac_fr-bac_htr) * cosf(a));
-            uint16_t y0 = roundf(bac_y0 + (bac_fr-bac_htr) * sinf(a));
-            uint16_t x1 = roundf(BAC_X0 + bac_fr * cosf(a-BAC_HTTH));
-            uint16_t y1 = roundf(bac_y0 + bac_fr * sinf(a-BAC_HTTH));
-            uint16_t x2 = roundf(BAC_X0 + bac_fr * cosf(a+BAC_HTTH));
-            uint16_t y2 = roundf(bac_y0 + bac_fr * sinf(a+BAC_HTTH));
-            tft.drawLine (x0, y0, x1, y1, 1, BAC_FCOL);
-            tft.drawLine (x0, y0, x2, y2, 1, BAC_FCOL);
+            SCoord hpt[3];
+            hpt[0].x = roundf(BAC_X0 + bac_fr * cosf(a-BAC_HTTH));
+            hpt[0].y = roundf(bac_y0 + bac_fr * sinf(a-BAC_HTTH));
+            hpt[1].x = roundf(BAC_X0 + (bac_fr-bac_htr) * cosf(a));
+            hpt[1].y = roundf(bac_y0 + (bac_fr-bac_htr) * sinf(a));
+            hpt[2].x = roundf(BAC_X0 + bac_fr * cosf(a+BAC_HTTH));
+            hpt[2].y = roundf(bac_y0 + bac_fr * sinf(a+BAC_HTTH));
+            if (color_hands)
+                tft.fillPolygon (hpt, NARRAY(hpt), BAC_FCOL);
+            else
+                tft.drawPolygon (hpt, NARRAY(hpt), BAC_FCOL);
         }
 
         // minute ticks

@@ -28144,7 +28144,7 @@ void drawZone (ZoneID id, uint16_t color, int n_only)
             SBox label_b;
             if (overMap(zp->s_lbl) && !overAnySymbol(zp->s_lbl)) {
                 char zn[20];
-                sprintf (zn, "%d", zp->zone_n);
+                snprintf (zn, sizeof(zn), "%d", zp->zone_n);
                 setMapTagBox (zn, zp->s_lbl, 0, label_b);
                 drawMapTag (zn, label_b);
             }
