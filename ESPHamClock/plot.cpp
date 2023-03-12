@@ -417,14 +417,15 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
     resetWatchdog();
 
     // layout
-    #define PFONT_H 6                                   // plot labels font height
+    #define PFONT_H 7                                   // plot labels font height
+    #define PFONT_W 7                                   // plot labels font width
     #define PLOT_ROWS BMTRX_COLS                        // plot rows
     #define PLOT_COLS BMTRX_ROWS                        // plot columns
     #define TOP_B 27                                    // top border -- match VOACAP
     #define PGAP 5                                      // gap between title and plot
     #define PBOT_B 20                                   // plot bottom border -- room for config and time
-    #define PLEFT_B 16                                  // left border -- room for band
-    #define PRIGHT_B 16                                 // right border -- room for freq
+    #define PLEFT_B 22                                  // left border -- room for band
+    #define PRIGHT_B 2                                  // right border
     #define PTOP_Y (box.y + TOP_B + PGAP)               // plot top y
     #define PBOT_Y (box.y+box.h-PBOT_B)                 // plot bottom y
     #define PLEFT_X (box.x + PLEFT_B)                   // plot left x
@@ -443,7 +444,7 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
     if (draw_all)
         prepPlotBox (box);
 
-    // label band names and freqs -- indicate current voacap map, if any
+    // label band names and indicate current voacap map, if any
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(GRAY);
     for (int p_row = 0; p_row < PLOT_ROWS; p_row++) {
@@ -453,15 +454,10 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
         uint16_t rect_col = p_row == prop_map ? (busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE))
                                               : RA8875_BLACK;
 
-        // background
-        tft.fillRect (box.x+1, y+1, PLEFT_B-2, PFONT_H+4, rect_col);
-        tft.fillRect (box.x+box.w-PRIGHT_B, y+1, PRIGHT_B-2, PFONT_H+4, rect_col);
-
-        // text
+        // show
+        tft.fillRect (box.x+1, y+1, 2*PFONT_W, PFONT_H+3, rect_col);
         tft.setCursor (box.x+2, y + 2);
         tft.print (propMap2Band((PropMapSetting)p_row));
-        tft.setCursor (box.x+box.w-PRIGHT_B+1, y + 2);
-        tft.printf ("%2.0f", propMap2MHz((PropMapSetting)p_row));
     }
 
     // find utc and DE hour now. these will be the matrix row in plot column 0.
@@ -472,21 +468,15 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
     // erase timeline if not drawing all (because prepPlotBox() already erased everything if draw_all)
     uint16_t timeline_y = PBOT_Y+1;
     if (!draw_all)
-        tft.fillRect (box.x + 1, timeline_y, box.w-2, PFONT_H+1, RA8875_BLACK);
+        tft.fillRect (box.x + 1, timeline_y, box.w-2, PFONT_H, RA8875_BLACK);
 
     // label timeline local or utc wth local DE now always on left end
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setCursor (box.x+2, timeline_y);
     if (bc_utc_tl) {
-        // squeeze UTC label
         tft.setTextColor(GRAY);
-        tft.print ((char)'U');
-        tft.setCursor (box.x+6, timeline_y);
-        tft.print ((char)'T');
-        tft.setCursor (box.x+10, timeline_y);
-        tft.print ((char)'C');
+        tft.print ("UTC");
     } else {
-        // normal DE label fits ok
         tft.setTextColor(DE_COLOR);
         tft.print ("DE");
     }

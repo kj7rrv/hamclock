@@ -35,15 +35,13 @@ const char *plot_names[PLOT_CH_N] = {
     "ENV_Press",        // PLOT_CH_PRESSURE,
     "ENV_Humid",        // PLOT_CH_HUMIDITY,
     "ENV_DewPt",        // PLOT_CH_DEWPOINT,
-    "SDO_Comp",         // PLOT_CH_SDO_1,
-    "SDO_6173A",        // PLOT_CH_SDO_2,
-    "SDO_Magneto",      // PLOT_CH_SDO_3,
-    "SDO_193A",         // PLOT_CH_SDO_4,
+    "SDO",              // PLOT_CH_SDO,
     "Solar_Wind",       // PLOT_CH_SOLWIND,
     "DRAP",             // PLOT_CH_DRAP,
     "Countdown",        // PLOT_CH_COUNTDOWN,
-    "STEREO_A",         // PLOT_CH_STEREO_A,
-    "Live_spots"        // PLOT_CH_PSK,
+    "Contests",         // PLOT_CH_CONTESTS,
+    "Live_spots",       // PLOT_CH_PSK,
+    "On_The_Air",       // PLOT_CH_OTA
 };
 
 /* retrieve the plot choice for the given pane from NV, if set
@@ -90,7 +88,7 @@ static void setDefaultPaneChoice (PlotPane pp)
             }
         }
     } else {
-        const PlotChoice ch_defaults[PANE_N] = {PLOT_CH_SSN, PLOT_CH_XRAY, PLOT_CH_SDO_1};
+        const PlotChoice ch_defaults[PANE_N] = {PLOT_CH_SSN, PLOT_CH_XRAY, PLOT_CH_SDO};
         plot_ch[pp] = ch_defaults[pp];
         plot_rotset[pp] = (1 << plot_ch[pp]);
         Serial.printf (_FX("PANE: Setting pane %d to default %s\n"), (int)pp+1, plot_names[plot_ch[pp]]);
@@ -128,14 +126,12 @@ bool plotChoiceIsAvailable (PlotChoice ch)
     case PLOT_CH_NOAASWX:       // fallthru
     case PLOT_CH_SSN:           // fallthru
     case PLOT_CH_XRAY:          // fallthru
-    case PLOT_CH_SDO_1:         // fallthru
-    case PLOT_CH_SDO_2:         // fallthru
-    case PLOT_CH_SDO_3:         // fallthru
-    case PLOT_CH_SDO_4:         // fallthru
+    case PLOT_CH_SDO:           // fallthru
     case PLOT_CH_SOLWIND:       // fallthru
     case PLOT_CH_DRAP:          // fallthru
-    case PLOT_CH_STEREO_A:      // fallthru
+    case PLOT_CH_CONTESTS:      // fallthru
     case PLOT_CH_PSK:           // fallthru
+    case PLOT_CH_OTA:           // fallthru
         return (true);
         break;
 
@@ -385,7 +381,7 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         return (false);
 
     // reserve top 20% for bringing up choice menu
-    bool in_top = s.y < box.y + box.h/5;
+    bool in_top = s.y < box.y + PANETITLE_H;
 
     // check a few choices that have their own active areas
     switch (plot_ch[pp]) {
@@ -396,6 +392,16 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         break;
     case PLOT_CH_BC:
         if (checkBCTouch (s, box))
+            return (true);
+        in_top = true;
+        break;
+    case PLOT_CH_CONTESTS:
+        if (checkContestsTouch (s, box))
+            return (true);
+        in_top = true;
+        break;
+    case PLOT_CH_SDO:
+        if (checkSDOTouch (s, box))
             return (true);
         in_top = true;
         break;
@@ -419,6 +425,11 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         break;
     case PLOT_CH_PSK:
         if (checkPSKTouch (s, box))
+            return (true);
+        in_top = true;
+        break;
+    case PLOT_CH_OTA:
+        if (checkOnTheAirTouch (s, box))
             return (true);
         in_top = true;
         break;
@@ -501,6 +512,7 @@ void initPlotPanes()
 
     // rm any choice not available, including dx cluster in pane 1
     for (int i = 0; i < PANE_N; i++) {
+        plot_rotset[i] &= ((1 << PLOT_CH_N) - 1);        // reset any bits too high
         for (int j = 0; j < PLOT_CH_N; j++) {
             if (plot_rotset[i] & (1 << j)) {
                 if (i == PANE_1 && j == PLOT_CH_DXCLUSTER) {
@@ -516,7 +528,8 @@ void initPlotPanes()
 
     // if current selection not yet defined or not in rotset pick one from rotset or set a default
     for (int i = 0; i < PANE_N; i++) {
-        if (!getPlotChoiceNV ((PlotPane)i, &plot_ch[i]) || !(plot_rotset[i] & (1 << plot_ch[i])))
+        if (!getPlotChoiceNV ((PlotPane)i, &plot_ch[i]) || plot_ch[i] >= PLOT_CH_N
+                                                        || !(plot_rotset[i] & (1 << plot_ch[i])))
             setDefaultPaneChoice ((PlotPane)i);
     }
 

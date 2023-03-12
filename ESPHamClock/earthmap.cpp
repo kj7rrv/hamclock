@@ -560,7 +560,7 @@ static void drawMouseLoc()
     uint16_t tx = view_btn_b.x;                         // current text x coord
     uint16_t ty = view_btn_b.y + view_btn_b.h;          // current text y coord
     const int LINE_DY = 9;                              // line height, pixels
-    const int N_LINES = 9;                              // n lines
+    const int N_LINES = 11;                             // allow this many lines in box
     const int MAX_CHARS = 9;                            // max chars wide
     const int TEXT_INDENT = 2;                          // nominal indentation
 
@@ -628,6 +628,8 @@ static void drawMouseLoc()
     LatLong dxc_ll;
     if (getClosestPSK (ll, &psk_rp)) {
 
+        // PSK, WSPR or RBN spot
+
         // adjust for text 
         char buf[MAX_CHARS+1];
         uint16_t tw;
@@ -672,11 +674,9 @@ static void drawMouseLoc()
         else
             tft.printf ("Age %4.1fh", age/3600.0F);             // hours
 
-#if 0
         // show snr
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("SNR %5d", psk_rp->snr);
-#endif
 
         // show distance and bearing
         drawMLDB (psk_rp->ll, tx+TEXT_INDENT, LINE_DY, ty);
@@ -685,7 +685,9 @@ static void drawMouseLoc()
         tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
                         getBandColor(psk_rp->Hz));
 
-    } else if (getClosestDXCluster (ll, &dxc_s, &dxc_ll)) {
+    } else if (getClosestDXCluster (ll, &dxc_s, &dxc_ll) || getClosestOnTheAirSpot (ll, &dxc_s, &dxc_ll)) {
+
+        // DX Cluster or POTA/SOTA spot
 
         // adjust for text 
         char buf[MAX_CHARS+1];
@@ -702,23 +704,33 @@ static void drawMouseLoc()
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
         tft.printf (buf);
 
-        // show rx info
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.de_call);
-        tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
-        tft.printf (buf);
-        snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.de_grid);
-        tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
-        tft.printf (buf);
+        // show rx info -- blanks if from OnTheAir
+        if (strlen (dxc_s.de_call) > 0) {
+            snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.de_call);
+            tw = getTextWidth(buf);
+            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+            tft.printf (buf);
+            snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.de_grid);
+            tw = getTextWidth(buf);
+            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+            tft.printf (buf);
+        }
 
-        // show spot time
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("Time %04d", dxc_s.utcs);
+        // show mode
+        if (strlen (dxc_s.mode) > 0) {
+            snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.mode);
+            tw = getTextWidth(buf);
+            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+            tft.printf (buf);
+        }
 
         // show freq
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("kHz%6.0f", dxc_s.kHz);
+
+        // show spot time
+        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.printf ("UTC  %04d", dxc_s.utcs);
 
         // show distance and bearing
         drawMLDB (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
@@ -728,6 +740,8 @@ static void drawMouseLoc()
                         getBandColor(1000*dxc_s.kHz));
 
     } else {
+
+        // arbitrary cursor location, not a spot
 
         // adjust for text 
         ty += 1;
@@ -750,26 +764,23 @@ static void drawMouseLoc()
         tft.printf ("LMT %02d:%02d", hour(lt), minute(lt));
 
         // zones
-        ty += LINE_DY;
         if (cqzone_n) {
-            tft.setCursor (tx+TEXT_INDENT, ty);
+            tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
             tft.printf (_FX("CQ  %5d"), cqzone_n);
         }
-        ty += LINE_DY;
         if (ituzone_n) {
-            tft.setCursor (tx+TEXT_INDENT, ty);
+            tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
             tft.printf (_FX("ITU %5d"), ituzone_n);
         }
 
-        // age else prefix, if known
+        // prefix, if known
         char prefix[MAX_PREF_LEN+1];
-        ty += LINE_DY;
         if (nearestPrefix (city ? city_ll : ll, prefix)) {
-            tft.setCursor (tx+TEXT_INDENT, ty);
+            tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
             tft.printf ("Pfx %5s", prefix);
         }
 
-        // show distance and bearing
+        // distance and bearing
         drawMLDB (ll, tx+TEXT_INDENT, LINE_DY, ty);
 
         // border
@@ -1184,6 +1195,7 @@ void initEarthMap()
     // insure NCDXF and DX spots screen coords match current map type
     updateBeaconScreenLocations();
     updateDXClusterSpotScreenLocations();
+    updateOnTheAirSpotScreenLocations();
 
     #if defined (_SUPPORT_ZONES)
         // update zone screen boundaries

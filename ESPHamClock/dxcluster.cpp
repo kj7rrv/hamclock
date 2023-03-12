@@ -118,10 +118,9 @@
 #define LISTING_COLOR   RA8875_WHITE
 #define CLUSTER_TIMEOUT 30000                   // send line feed if idle this long, millis
 #define MAX_AGE         300000                  // max age to restore spot in list, millis
-#define TITLE_Y0        27                      // title dy, match VOACAP title position
 #define HOSTNM_Y0       32                      // host name y down from box top
 #define LISTING_Y0      47                      // first spot y down from box top
-#define LISTING_DY      16                      // listing row separation
+#define LISTING_DY      14                      // listing row separation
 #define FONT_H          7                       // listing font height
 #define FONT_W          6                       // listing font width
 #define DWELL_MS        5000                    // period to show non-fatal message, ms
@@ -142,8 +141,8 @@ static WiFiUDP wsjtx_server;                    // or persistent UDP "connection
 static uint32_t last_action;                    // time of most recent spot or user activity, millis()
 
 // spots
-#if defined(_IS_ESP)
-#define N_MORESP          3                     // use less precious ESP mem
+#if defined(_IS_ESP8266)
+#define N_MORESP          0                     // use less precious ESP mem
 #else
 #define N_MORESP          10                    // n more than N_VISSPOTS spots
 #endif
@@ -205,7 +204,7 @@ static void drawSpotOnList (const SBox &box, int spot_i)
 
 /* draw, else erase, the up scroll control;
  */
-static void drawScrollUp (const SBox &box, bool draw)
+static void drawDXCScrollUp (const SBox &box, bool draw)
 {
         uint16_t x0 = box.x + SCR_DX;
         uint16_t y0 = box.y + SCRUP_DY - SCR_R;
@@ -219,7 +218,7 @@ static void drawScrollUp (const SBox &box, bool draw)
 
 /* draw, else erase, the down scroll control.
  */
-static void drawScrollDown (const SBox &box, bool draw)
+static void drawDXCScrollDown (const SBox &box, bool draw)
 {
         uint16_t x0 = box.x + SCR_DX - SCR_R;
         uint16_t y0 = box.y + SCRDW_DY - SCR_R;
@@ -247,33 +246,33 @@ static void drawClearListBtn (const SBox &box, bool draw)
 
 /* draw all currently visible spots then update scroll markers
  */
-static void drawAllVisSpots (const SBox &box)
+static void drawAlldrawAllVisDXCSpotsSpots (const SBox &box)
 {
         for (int i = top_vis; i < n_spots; i++)
             drawSpotOnList (box, i);
 
-        drawScrollUp (box, top_vis > 0);
-        drawScrollDown (box, top_vis < n_spots-N_VISSPOTS);
+        drawDXCScrollUp (box, top_vis > 0);
+        drawDXCScrollDown (box, top_vis < n_spots-N_VISSPOTS);
         drawClearListBtn (box, n_spots > 0);
 }
 
 
 /* shift the visible list to show one older spot, if any
  */
-static void scrollUp (const SBox &box)
+static void scrollDXCUp (const SBox &box)
 {
         if (top_vis > 0)
             top_vis -= 1;
-        drawAllVisSpots (box);
+        drawAlldrawAllVisDXCSpotsSpots (box);
 }
 
 /* shift the visible list to show one newer spot, if any
  */
-static void scrollDown (const SBox &box)
+static void scrollDXCDown (const SBox &box)
 {
         if (top_vis < n_spots-N_VISSPOTS)
             top_vis += 1;
-        drawAllVisSpots (box);
+        drawAlldrawAllVisDXCSpotsSpots (box);
 }
 
 /* convert any upper case letter in str to lower case IN PLACE
@@ -461,7 +460,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
 /* set radio and DX from given row, known to be defined
  */
-static void engageRow (DXClusterSpot &s)
+static void engageDXCRow (DXClusterSpot &s)
 {
         setRadioSpot(s.kHz);
 
@@ -471,35 +470,15 @@ static void engageRow (DXClusterSpot &s)
         newDX (ll, NULL, s.dx_call);       // normalizes
 }
 
-static void setDXClusterSpotMapPosition (DXClusterSpot &s)
+
+/* draw spot and/or path on map
+ */
+static void drawDXSpotOnMap (const DXClusterSpot &spot)
 {
-        char prefix[MAX_PREF_LEN];
-        char *tag;
-
-        if (plotSpotCallsigns())
-            tag = s.dx_call;
-        else {
-            call2Prefix (s.dx_call, prefix);
-            tag = prefix;
-        }
-
-        SCoord center;
-        LatLong ll;
-        ll.lat = s.dx_lat;
-        ll.lat_d = rad2deg(ll.lat);
-        ll.lng = s.dx_lng;
-        ll.lng_d = rad2deg(ll.lng);
-        ll2s (ll, center, 0);
-        setMapTagBox (tag, center, 0, s.map_b);
-}
-
-static void drawSpotOnMap (DXClusterSpot &spot)
-{
-
-      #if defined(_SUPPORT_CLPATH)
+    #if defined(_SUPPORT_SPOTPATH)
 
         // draw connecting path if desired
-        if (getDXSpotPaths()) {
+        if (getSpotPaths()) {
             LatLong from_ll, to_ll;
             from_ll.lat = spot.de_lat;
             from_ll.lat_d = rad2deg(from_ll.lat);
@@ -543,29 +522,15 @@ static void drawSpotOnMap (DXClusterSpot &spot)
                 tft.fillRect (de_s.x-PSK_DOTR, de_s.y-PSK_DOTR, 2*PSK_DOTR, 2*PSK_DOTR, color); // not +1
 
             // mark the DX end as TX only if not also labeling
-            if (!labelDXClusterSpots() && overMap(dx_s))
+            if (!labelSpots() && overMap(dx_s))
                 tft.fillCircle (dx_s.x, dx_s.y, PSK_DOTR, color);
         }
 
-      #endif // _SUPPORT_CLPATH
+    #endif // _SUPPORT_SPOTPATH
 
-        // label the DX end, if desired (we don't care who the DE side is :-))
-        if (labelDXClusterSpots()) {
-            // label, if over map
-            SCoord s;
-            s.x = spot.map_b.x + spot.map_b.w/2;
-            s.y = spot.map_b.y + spot.map_b.h/2;
-            if (overMap(s)) {
-                if (plotSpotCallsigns()) {
-                    drawMapTag (spot.dx_call, spot.map_b);
-                } else {
-                    char prefix[MAX_PREF_LEN];
-                    call2Prefix (spot.dx_call, prefix);
-                    drawMapTag (prefix, spot.map_b);
-                }
-            }
-        }
+    drawDXCOnMap (spot);
 }
+
 
 /* add a new spot both on map and in list, scrolling list if already full.
  * return whether ok
@@ -604,11 +569,11 @@ static bool addDXClusterSpot (const SBox &box, DXClusterSpot &new_spot)
         // printf (" -> %2d %2d\n", n_spots, top_vis);
 
         // update visible list
-        drawAllVisSpots(box);
+        drawAlldrawAllVisDXCSpotsSpots(box);
 
         // show on map
-        setDXClusterSpotMapPosition (list_spot);
-        drawSpotOnMap (list_spot);
+        setDXCMapPosition (list_spot);
+        drawDXSpotOnMap (list_spot);
 
         // ok
         return (true);
@@ -770,7 +735,7 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 
         // add to list and set dx if desired
         if (addDXClusterSpot (box, new_spot) && setWSJTDX())
-            engageRow (spots[n_spots-1]);
+            engageDXCRow (spots[n_spots-1]);
 
         // printFreeHeap(F("wsjtxParseStatusMsg"));
 }
@@ -952,7 +917,7 @@ static bool connectDXCluster (const SBox &box)
 
                 // restore known spots if not too old else reset list
                 if (millis() - last_action < MAX_AGE) {
-                    drawAllVisSpots(box);
+                    drawAlldrawAllVisDXCSpotsSpots(box);
                 } else {
                     n_spots = 0;
                     top_vis = 0;
@@ -1083,7 +1048,7 @@ static void initDXGUI (const SBox &box)
         // title
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         tft.setTextColor(TITLE_COLOR);
-        tft.setCursor (box.x + 27, box.y + TITLE_Y0);
+        tft.setCursor (box.x + 27, box.y + PANETITLE_H);
         tft.print (F("DX Cluster"));
 }
 
@@ -1281,14 +1246,14 @@ bool checkDXClusterTouch (const SCoord &s, const SBox &box)
         // scroll control? N.B. use a fairly wide region to reduce false menus
         if (s.x >= box.x + 3*box.w/4) { 
             if (s.y >= box.y + SCRUP_DY - SCR_R && s.y <= box.y + SCRUP_DY + SCR_R) {
-                scrollUp (box);
+                scrollDXCUp (box);
                 return (true);
             }
             if (s.y >= box.y + SCRDW_DY - SCR_R && s.y <= box.y + SCRDW_DY + SCR_R) {
-                scrollDown (box);
+                scrollDXCDown (box);
                 return (true);
             }
-            if (s.y < box.y + TITLE_Y0)
+            if (s.y < box.y + PANETITLE_H)
                 return (true);
         }
 
@@ -1302,7 +1267,7 @@ bool checkDXClusterTouch (const SCoord &s, const SBox &box)
         }
 
         // tapping title always leaves this pane -- we've already tested for the scroll and clear controls
-        if (s.y < box.y + TITLE_Y0) {
+        if (s.y < box.y + PANETITLE_H) {
             closeDXCluster();             // insure disconnected
             last_action = millis();       // in case op wants to come back soon
             return (false);
@@ -1313,7 +1278,7 @@ bool checkDXClusterTouch (const SCoord &s, const SBox &box)
         int spot_row = top_vis + vis_row;
         if (spot_row >= 0 && spot_row < n_spots &&
                                         spots[spot_row].dx_call[0] != '\0' && isDXClusterConnected())
-            engageRow (spots[spot_row]);
+            engageDXCRow (spots[spot_row]);
 
         // ours
         return (true);
@@ -1338,7 +1303,7 @@ bool getDXClusterSpots (DXClusterSpot **spp, uint8_t *nspotsp)
 void updateDXClusterSpotScreenLocations()
 {
         for (uint8_t i = 0; i < n_spots; i++)
-            setDXClusterSpotMapPosition (spots[i]);
+            setDXCMapPosition (spots[i]);
 }
 
 /* draw all spots on map, if desired
@@ -1347,11 +1312,11 @@ void drawDXClusterSpotsOnMap ()
 {
         // skip if we are not up or don't want spots on map
         if (!useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE
-                    || (!labelDXClusterSpots() && !getDXSpotPaths()))
+                    || (!labelSpots() && !getSpotPaths()))
             return;
 
         for (uint8_t i = 0; i < n_spots; i++)
-            drawSpotOnMap (spots[i]);
+            drawDXSpotOnMap (spots[i]);
 }
 
 /* return whether the given screen coord lies over any spot label.
@@ -1359,8 +1324,8 @@ void drawDXClusterSpotsOnMap ()
  */
 bool overAnyDXClusterSpots(const SCoord &s)
 {
-        // false for sure if spots are not on
-        if (!useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE)
+        // false for sure if not labeling or spots are not on
+        if (!labelSpots() || !useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE)
             return (false);
 
         for (uint8_t i = 0; i < n_spots; i++)
@@ -1381,19 +1346,53 @@ bool isDXClusterConnected()
  */
 bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
 {
-        // out fast if not on
-        if (!useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE)
-            return (false);
+        return (getClosestDXC (spots, n_spots, ll, sp, llp));
+}
 
+
+
+
+
+/***********************************
+ * misc tools that use DXClusterSpot
+ ***********************************/
+
+
+void drawDXCOnMap (const DXClusterSpot &spot)
+{
+        // label the DX end, if desired (we don't care who the DE side is :-))
+        if (labelSpots()) {
+            // label, if over map
+            SCoord s;
+            s.x = spot.map_b.x + spot.map_b.w/2;
+            s.y = spot.map_b.y + spot.map_b.h/2;
+            if (overMap(s)) {
+                if (plotSpotCallsigns()) {
+                    drawMapTag (spot.dx_call, spot.map_b);
+                } else {
+                    char prefix[MAX_PREF_LEN];
+                    call2Prefix (spot.dx_call, prefix);
+                    drawMapTag (prefix, spot.map_b);
+                }
+            }
+        }
+}
+
+
+
+/* find closest spot and location on either end to given ll, if any.
+ */
+bool getClosestDXC (const DXClusterSpot *list, int n_list, const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
+{
         // linear search -- not worth kdtree etc
         float min_d = 1e10;
-        DXClusterSpot *min_sp = NULL;
-        bool min_is_de = false;
-        for (int i = 0; i < n_spots; i++) {
+        const DXClusterSpot *min_sp = NULL;   
+        bool min_is_de = false;         
+        for (int i = 0; i < n_list; i++) {
 
-            DXClusterSpot *sp = &spots[i];
+            const DXClusterSpot *sp = &list[i];
             LatLong spot_ll;
-            float d;
+            float d;                    
 
             spot_ll.lat = sp->de_lat;
             spot_ll.lng = sp->de_lng;
@@ -1432,4 +1431,27 @@ bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
         }
 
         return (false);
+}
+
+
+void setDXCMapPosition (DXClusterSpot &s)
+{
+        char prefix[MAX_PREF_LEN];
+        char *tag;
+
+        if (plotSpotCallsigns())
+            tag = s.dx_call;
+        else {
+            call2Prefix (s.dx_call, prefix);
+            tag = prefix;
+        }
+
+        SCoord center;
+        LatLong ll;
+        ll.lat = s.dx_lat;
+        ll.lat_d = rad2deg(ll.lat);
+        ll.lng = s.dx_lng;
+        ll.lng_d = rad2deg(ll.lng);
+        ll2s (ll, center, 0);
+        setMapTagBox (tag, center, 0, s.map_b);
 }

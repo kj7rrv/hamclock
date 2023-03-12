@@ -617,8 +617,8 @@ static void drawAlarmIndicator (bool label_too)
 static bool checkAlarm()
 {
     // get de time hrmn
-    time_t de_t0 = nowWO() + de_tz.tz_secs;
-    uint16_t de_hrmn = hour(de_t0)*60U + minute(de_t0);
+    time_t de_lt0 = nowWO() + de_tz.tz_secs;
+    uint16_t de_hrmn = hour(de_lt0)*60U + minute(de_lt0);
 
     // wentoff unless still in same minute
     static uint16_t prev_de_hrmn = 24*60;       // init to impossible hrmn
@@ -925,7 +925,7 @@ static void drawBCSpaceWxInfo(bool all)
     if (kp.value == SPW_ERR) {
         strcpy (buf, err);
     } else {
-        snprintf (buf, sizeof(buf), "%.0f", kp.value);
+        snprintf (buf, sizeof(buf), "%.1f", kp.value);
     }
     tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
     tft.print (buf);
@@ -952,13 +952,13 @@ static void drawBCSpaceWxInfo(bool all)
 static void drawDigitalBigClock (bool all)
 {
     // persist to avoid drawing the same digits again
-    static time_t prev_t0;                                      // previous report time
+    static time_t prev_am, prev_t0;                             // previous am/pm and report time
     static uint8_t prev_mnten, prev_mnunit;                     // previous mins tens and unit
     static uint8_t prev_scten;                                  // previous seconds tens and unit
     static uint8_t prev_hr, prev_mo, prev_dy;                   // previous drawn date info
     static bool prev_leadhr;                                    // previous whether leading hours tens digit
 
-    // get time now, including any user offset
+    // get UTC time now, including any user offset
     time_t t0 = nowWO();
 
     // done if same second unless all
@@ -969,7 +969,7 @@ static void drawDigitalBigClock (bool all)
     // time components
     int hr, mn, sc, mo, dy, wd;
 
-    // get utc, local or lst hr/mn/sc
+    // break out hr, mn and sec as utc, local or lst
     if (bc_bits & SW_LSTBIT) {
         double lst;                                             // hours
         double astro_mjd = t0/86400.0 + 2440587.5 - 2415020.0;  // just for now_lst()
@@ -992,6 +992,7 @@ static void drawDigitalBigClock (bool all)
     mo = month(t0);
     dy = day(t0);
     wd = weekday(t0);
+    bool am = hr < 12;
 
     // decadal ranges to optimize drawing
     int hrten = hr/10;
@@ -1035,11 +1036,12 @@ static void drawDigitalBigClock (bool all)
     prev_leadhr = leadhr;
 
     // initial erase or showing date and it's a new day
-    if (all || ((bc_bits & SW_BCDATEBIT) && (dy != prev_dy || mo != prev_mo))) {
+    if (all || ((bc_bits & SW_BCDATEBIT) && (am != prev_am || dy != prev_dy || mo != prev_mo))) {
         eraseScreen();
         all = true;     // insure everything gets redrawn
         if (bc_bits & SW_BCDATEBIT)
             drawBCDateInfo (hr, dy, wd, mo);
+        prev_am = am;
         prev_dy = dy;
         prev_mo = mo;
     }
@@ -1200,24 +1202,23 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
  */
 static void drawAnalogBigClock (bool all)
 {
-    // points 1 and 2 are the fat positions part way out, point 3 is the far tip, "point" 0 is the center
-
     // persistent time measures
-    static time_t prev_t0;                              // detect change of secs
+    static time_t prev_am, prev_lt0;                    // detect change of am/pm and secs
     static uint8_t prev_mo, prev_dy;                    // previously drawn date info
 
     // previous hand positions for motion detection and exact erasing
+    // hand point 0 is the face center; 1 and 2 are the fat positions part way out; 3 is the far tip.
     static int16_t prev_hrdx1, prev_hrdx2, prev_hrdx3, prev_hrdy1, prev_hrdy2, prev_hrdy3;
     static int16_t prev_mndx1, prev_mndx2, prev_mndx3, prev_mndy1, prev_mndy2, prev_mndy3;
     static int16_t prev_scdx3, prev_scdy3;
 
     // get local time now, including any user offset
-    time_t t0 = nowWO() + de_tz.tz_secs;
+    time_t lt0 = nowWO() + de_tz.tz_secs;
 
     // wait for second to change unless all
-    if (!all && t0 == prev_t0)
+    if (!all && lt0 == prev_lt0)
         return;
-    prev_t0 = t0;
+    prev_lt0 = lt0;
 
     // handy
     bool want_numbers = (bc_bits & SW_ANNUMBIT) != 0;
@@ -1225,11 +1226,12 @@ static void drawAnalogBigClock (bool all)
     bool color_hands = (bc_bits & SW_ANCOLHBIT) != 0;
 
     // crack open
-    int hr = hour(t0);
-    int mn = minute(t0);
-    int sc = second(t0);
-    int dy = day(t0);
-    int mo = month(t0);
+    int hr = hour(lt0);
+    int mn = minute(lt0);
+    int sc = second(lt0);
+    int dy = day(lt0);
+    int mo = month(lt0);
+    bool am = hr < 12;
 
     // face geometry, scale down if showing digital too
     bool add_digital = (bc_bits & SW_ANWDBIT) != 0;
@@ -1243,7 +1245,7 @@ static void drawAnalogBigClock (bool all)
     int bac_mtr   = add_digital ? BACD_MTR  : BAC_MTR;
 
     // refresh if desired or new date (since we never erase the date)
-    if (all || ((bc_bits & SW_BCDATEBIT) && (dy != prev_dy || mo != prev_mo))) {
+    if (all || ((bc_bits & SW_BCDATEBIT) && (am != prev_am || dy != prev_dy || mo != prev_mo))) {
 
         // fresh face
         eraseScreen();
@@ -1299,7 +1301,8 @@ static void drawAnalogBigClock (bool all)
 
         // date
         if ((bc_bits & SW_BCDATEBIT)) {
-            drawBCDateInfo (hr, dy, weekday(t0), mo);
+            drawBCDateInfo (hr, dy, weekday(lt0), mo);
+            prev_am = am;
             prev_dy = dy;
             prev_mo = mo;
         }

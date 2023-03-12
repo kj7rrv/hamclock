@@ -31,7 +31,7 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define ALARM_DT        (1.0F/1440.0F)  // flash this many days before an event
 #define RISING_RATE     1               // flash at this rate when sat about to rise
 #define SETTING_RATE    10              // flash at this rate when sat about to set
-#define MAX_TLE_AGE     7.0F            // max age to use a TLE, days (except moon)
+#define MAX_TLE_AGE     7.0F            // max age to use a TLE in LEO, scaled by period, days (except moon)
 #define TLE_REFRESH     (3600*6)        // freshen TLEs this often, seconds
 #define SAT_TOUCH_R     20U             // touch radius, pixels
 #define SAT_UP_R        2               // dot radius when up
@@ -1139,16 +1139,15 @@ static bool satEpochOk(time_t t)
 
     DateTime t_now = userDateTime(t);
     DateTime t_sat = sat->epoch();
+    float period = sat->period();       // days
+    float max_age = isSatMoon() ? 1.5F : (MAX_TLE_AGE * period/(1.5F/24.0F));
 
-    bool ok;
-    if (isSatMoon())
-        ok = t_sat + 1.5F > t_now && t_now + 1.5F > t_sat;
-    else
-        ok = t_sat + MAX_TLE_AGE > t_now && t_now + MAX_TLE_AGE > t_sat;
+    bool ok = t_sat + max_age > t_now && t_now + max_age > t_sat;
 
     if (!ok) {
         int year;
         uint8_t mon, day, h, m, s;
+        Serial.printf (_FX("%s age %g > %g days:\n"), sat_name, t_now - t_sat, max_age);
         t_now.gettime (year, mon, day, h, m, s);
         Serial.printf (_FX("Ep: now = %d-%02d-%02d  %02d:%02d:%02d\n"), year, mon, day, h, m, s);
         t_sat.gettime (year, mon, day, h, m, s);

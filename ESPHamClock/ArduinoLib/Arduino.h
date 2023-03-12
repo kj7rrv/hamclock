@@ -86,6 +86,7 @@ extern std::string our_dir;
 
 #include "ESP.h"
 #include "Serial.h"
+#include "TimeLib.h"
 
 
 // glue with parent program
@@ -101,6 +102,7 @@ extern bool skip_skip;
 extern bool init_iploc;
 extern const char *init_locip;
 extern int gimbal_trace_level;
+extern time_t usr_datetime;
 
 
 

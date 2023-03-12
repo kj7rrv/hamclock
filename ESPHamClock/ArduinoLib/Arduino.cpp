@@ -81,7 +81,7 @@ void delay (uint32_t ms)
 
 long random(int max)
 {
-        return (::random() / (RAND_MAX / max + 1));
+        return ((::random() >> 3) % max);
 }
 
 uint16_t analogRead(int pin)
@@ -169,6 +169,30 @@ static void mkAppDir(const char *user_dir)
         umask(old_um);
 }
 
+/* convert the given ISO 8601 date-time string to UNIX seconds in usr_datetime.
+ * bale if bad format.
+ */
+static void setUsrDateTime (const char *iso8601)
+{
+        int yr, mo, dy, hr, mn, sc;
+        if (sscanf (iso8601, "%d-%d-%dT%d:%d:%d", &yr, &mo, &dy, &hr, &mn, &sc) != 6) {
+            fprintf (stderr, "-s format not recognized\n");
+            exit(1);
+        }
+
+        struct tm tms;
+        memset (&tms, 0, sizeof(tms));
+        tms.tm_year = yr - 1900;                // wants year - 1900
+        tms.tm_mon = mo - 1;                    // wants month 0..11
+        tms.tm_mday = dy;
+        tms.tm_hour = hr;
+        tms.tm_min = mn;
+        tms.tm_sec = sc;
+        setenv ("TZ", "UTC0", 1);               // UTC
+        tzset();
+        usr_datetime = mktime (&tms);
+}
+
 /* show usage and exit(1)
  */
 static void usage (const char *errfmt, ...)
@@ -201,6 +225,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -l l : set Mercator center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
+        fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
         fprintf (stderr, " -w p : set live web server port to p; default is %d\n", liveweb_port);
 
@@ -290,6 +315,12 @@ static void crackArgs (int ac, char *av[])
                 case 'o':
                     diag_to_file = false;
                     break;
+                    break;
+                case 's':
+                    if (ac < 2)
+                        usage ("missing date/time for -s");
+                    setUsrDateTime(*++av);
+                    ac--;
                     break;
                 case 't':
                     if (ac < 2)

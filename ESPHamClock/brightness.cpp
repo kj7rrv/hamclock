@@ -30,6 +30,10 @@
 
 #include "HamClock.h"
 
+#if defined(_IS_UNIX)
+#include <sys/wait.h>
+#endif
+
 bool found_phot;                                // set if initial read > 1, else manual clock settings
 
 // NCDXF_b or "BRB" public state
@@ -150,9 +154,19 @@ static void setDisplayBrightness(bool log)
                         Serial.printf (" %s", *ap);
                     Serial.printf ("\n");
                 }
-                if (fork() == 0)
+                int child_pid = fork();
+                if (child_pid < 0)
+                    fatalError ("fork() failed: %s", strerror(errno));
+                if (child_pid == 0) {
+                    // new child process
                     execvp (argv[0], (char**)argv);
-                sleep (1);
+                    printf ("execvp(%s) failed: %s\n", argv[0], strerror(errno));
+                    exit(1);
+                } else {
+                    // parent waits for child
+                    int ws;
+                    (void) wait (&ws);
+                }
             }
         }
 
@@ -1058,7 +1072,7 @@ void doNCDXFBoxTouch (const SCoord &s)
             logBRBRotSet();
 
             // match beacons to new state
-            updateBeacons (true);
+            updateBeacons (true, true);
 
             // update on/off times if now used
             if (brb_mode == BRB_SHOW_ONOFF)

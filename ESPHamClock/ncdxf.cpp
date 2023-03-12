@@ -172,8 +172,9 @@ static bool overBeacon (const SCoord &s, const NCDXFBeacon &nb)
 
 
 /* update beacon display, typically on each 10 second period unless immediate.
+ * if erase_too then erase all beacons even if known to be off.
  */
-void updateBeacons (bool immediate)
+void updateBeacons (bool immediate, bool erase_too)
 {
     // counts as on as long as in rotation set, need not be in front now
     bool beacons_on = brb_rotset & (1 << BRB_SHOW_BEACONS);
@@ -192,8 +193,10 @@ void updateBeacons (bool immediate)
     setBeaconStates();
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
         if (bp->c == BCOL_S || !beacons_on) {
-            eraseBeacon (*bp);
-            erased_any = true;
+            if (erase_too) {
+                eraseBeacon (*bp);
+                erased_any = true;
+            }
         } else if (overMap(bp->s) && !overRSS (bp->call_b)) {
             drawBeacon (*bp);
         }

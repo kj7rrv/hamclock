@@ -230,7 +230,7 @@ void doOTAupdate(const char *newver)
     selectFontStyle (BOLD_FONT, SMALL_FONT);
     tft.setCursor (0, 100);
     tft.setTextColor (RA8875_WHITE);
-    tft.println (F("Beginning remote update..."));
+    tft.println (F("  Performing remote update..."));
     tft.println (F("  Do not interrupt power or network during this process."));
     tft.println();
 

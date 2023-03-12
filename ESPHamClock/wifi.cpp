@@ -7,6 +7,9 @@
 // host name of backend server
 const char *backend_host = "clearskyinstitute.com";
 
+// user's date and time, UNIX only
+time_t usr_datetime;
+
 // RSS info
 #define RSS_MAXN        15                      // max number RSS entries to cache
 static const char rss_page[] PROGMEM = "/RSS/web15rss.pl";
@@ -31,6 +34,12 @@ static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
 static const char xray_page[] PROGMEM = "/xray/xray.txt";
 #define XRAY_NV         150                     // n lines to collect = 25 hours @ 10 mins per line
 
+// contest info, new data posted every Monday
+#define CONTESTS_INTERVAL (3600+randIvl(1000))  // polling interval, secs
+
+// OnTheAir posts can be very rapid
+#define OTA_INTERVAL    (60+randIvl(15))        // polling interval, secs
+
 // sunspot info, new data posted daily
 #define SSPOT_INTERVAL  (3400+randIvl(300))     // polling interval, secs
 #define SSPOT_COLOR     RA8875_CYAN             // loading message text color
@@ -48,21 +57,6 @@ static const char sf_page[] PROGMEM = "/solar-flux/solarflux-99.txt";
 #define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
 static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
 
-// STEREO A image and info, new data posted every few hours
-#define STEREO_A_INTERVAL  (3800+randIvl(300))  // polling interval, secs
-#define STEREO_A_COLOR     RA8875_BLUE          // loading message text color
-static const char stereo_a_sep_page[] PROGMEM = "/STEREO/sepangle.txt";
-static const char stereo_a_img_page[] = 
-    #if defined(_CLOCK_1600x960) 
-        "/STEREO/STEREO-A-195-320.bmp";
-    #elif defined(_CLOCK_2400x1440)
-        "/STEREO/STEREO-A-195-480.bmp";
-    #elif defined(_CLOCK_3200x1920)
-        "/STEREO/STEREO-A-195-640.bmp";
-    #else
-        "/STEREO/STEREO-A-195-160.bmp";
-    #endif
-
 // band conditions and voacap map, models change each hour
 #define BC_INTERVAL     (2400+randIvl(200))     // polling interval, secs
 #define VOACAP_INTERVAL (2500+randIvl(200))     // polling interval, secs
@@ -73,6 +67,23 @@ static time_t bc_time;                          // nowWO() when bc_matrix was lo
 uint16_t bc_power;                              // VOACAP power setting
 uint8_t bc_utc_tl;                              // label band conditions timeline in utc else DE local
 static time_t map_time;                         // effective time when map was loaded
+
+uint8_t bc_modevalue;                           // VOACAP sensitivity value
+const BCModeSetting bc_modes[N_BCMODES] {
+    {"CW",  19},
+    {"SSB", 38},
+    {"AM",  49},
+    {"WSPR", 3},
+    {"FT8", 13},
+    {"FT4", 17}
+};
+uint8_t findBCModeValue (const char *name)
+{
+    for (int i = 0; i < N_BCMODES; i++)
+        if (strcmp (name, bc_modes[i].name) == 0)
+            return (bc_modes[i].value);
+    return (0);
+}
 
 // core map update intervals
 #if defined(_IS_ESP8266)
@@ -88,39 +99,15 @@ static time_t map_time;                         // effective time when map was l
 static const char drap_page[] PROGMEM = "/drap/stats.txt";
 
 // NOAA RSG space weather scales
-#define NOAASWX_INTERVAL     (3700+randIvl(300))                // polling interval, secs
+#define NOAASWX_INTERVAL    (3700+randIvl(300)) // polling interval, secs
 static const char noaaswx_page[] PROGMEM = "/NOAASpaceWX/noaaswx.txt";
 
 // geolocation web page
 static const char locip_page[] = "/fetchIPGeoloc.pl";
 
 // SDO images
-#define SDO_INTERVAL    (3200+randIvl(300))     // polling interval, secs
-#define SDO_COLOR       RA8875_MAGENTA          // loading message text color
-// N.B. files must match order in plot_names[]
-static const char *sdo_filename[4] = {
-    #if defined(_CLOCK_1600x960) 
-        "/SDO/f_211_193_171_340.bmp",
-        "/SDO/latest_340_HMIIC.bmp",
-        "/SDO/latest_340_HMIB.bmp",
-        "/SDO/f_193_340.bmp",
-    #elif defined(_CLOCK_2400x1440)
-        "/SDO/f_211_193_171_510.bmp",
-        "/SDO/latest_510_HMIIC.bmp",
-        "/SDO/latest_510_HMIB.bmp",
-        "/SDO/f_193_510.bmp",
-    #elif defined(_CLOCK_3200x1920)
-        "/SDO/f_211_193_171_680.bmp",
-        "/SDO/latest_680_HMIIC.bmp",
-        "/SDO/latest_680_HMIB.bmp",
-        "/SDO/f_193_680.bmp",
-    #else
-        "/SDO/f_211_193_171_170.bmp",
-        "/SDO/latest_170_HMIIC.bmp",
-        "/SDO/latest_170_HMIB.bmp",
-        "/SDO/f_193_170.bmp",
-    #endif
-};
+#define SDO_INTERVAL     (3200+randIvl(300))    // normal polling interval, secs
+#define SDO_ROT_INTERVAL (90+randIvl(20))       // polling interval when rotating, secs
 
 // weather displays
 #define DEWX_INTERVAL   (1700+randIvl(200))     // polling interval, secs
@@ -131,7 +118,7 @@ static const char *sdo_filename[4] = {
 static bool moon_reverting;                     // flag for revertPlot1();
 
 // Live spots
-#define PSK_INTERVAL    (69+randIvl(20))        // polling period. secs
+#define PSK_INTERVAL    (90+randIvl(20))        // polling period. secs
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
@@ -161,10 +148,7 @@ static time_t next_ssn;
 static time_t next_xray;
 static time_t next_kp;
 static time_t next_rss;
-static time_t next_sdo_1;
-static time_t next_sdo_2;
-static time_t next_sdo_3;
-static time_t next_sdo_4;
+static time_t next_sdo;
 static time_t next_noaaswx;
 static time_t next_dewx;
 static time_t next_dxwx;
@@ -179,8 +163,9 @@ static time_t next_bme280_h;
 static time_t next_bme280_d;
 static time_t next_swind;
 static time_t next_drap;
-static time_t next_stereo_a;
+static time_t next_contests;
 static time_t next_psk;
+static time_t next_ota;
 
 // persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
 static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update;
@@ -192,8 +177,6 @@ static NOAASpaceWx noaa_spw;
 // local funcs
 static bool updateKp(SBox &box);
 static bool updateXRay(const SBox &box);
-static bool updateSDO (const SBox &box, PlotChoice ch);
-static bool updateSTEREO_A (const SBox &box);
 static bool updateSunSpots(const SBox &box);
 static bool updateSolarFlux(const SBox &box);
 static bool updateBandConditions(const SBox &box);
@@ -217,7 +200,7 @@ static int queryServerOverLoad (void)
     // not crazy fast
     static uint32_t last_lookup_time;
     static int overload;
-    if (!timesUp (&last_lookup_time, 60000 + randIvl(30000)))
+    if (!timesUp (&last_lookup_time, 90000 + randIvl(30000)))
         return (overload);
 
     WiFiClient sl_client;
@@ -630,12 +613,16 @@ void initSys()
         tftMsg (true, 0, _FX("No time"));
     }
 
+    // track from user's time if set
+    if (usr_datetime > 0)
+        setTime (usr_datetime);
+
 
     // init fs
     LittleFS.begin();
     LittleFS.setTimeCallback(now);
 
-    // init bc_power and bc_utc_tl
+    // init bc_power, bc_utc_tl and bc_modevalue
     if (!NVReadUInt16 (NV_BCPOWER, &bc_power)) {
         bc_power = 100;
         NVWriteUInt16 (NV_BCPOWER, bc_power);
@@ -643,6 +630,10 @@ void initSys()
     if (!NVReadUInt8 (NV_BC_UTCTIMELINE, &bc_utc_tl)) {
         bc_utc_tl = 0;  // default to local time line
         NVWriteUInt8 (NV_BC_UTCTIMELINE, bc_utc_tl);
+    }
+    if (!NVReadUInt8 (NV_BCMODE, &bc_modevalue)) {
+        bc_modevalue = findBCModeValue("CW");           // default to CW
+        NVWriteUInt8 (NV_BCMODE, bc_modevalue);
     }
 
     // insure core_map is defined
@@ -1182,10 +1173,10 @@ static bool checkXRay (time_t t)
 bool checkBCTouch (const SCoord &s, const SBox &b)
 {
     // done if tap title
-    if (s.y < b.y+b.h/5)
+    if (s.y < b.y+PANETITLE_H)
         return (false);
 
-    // ll corner for power cycle
+    // tap area for power cycle
     SBox power_b;
     power_b.x = b.x + 1;
     power_b.y = b.y + 13*b.h/14;
@@ -1193,15 +1184,23 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
     power_b.h = b.h/12;
     // drawSBox (power_b, RA8875_WHITE);
 
-    // lr corner for SP/LP
+    // tap area for mode choice
+    SBox mode_b;
+    mode_b.x = power_b.x + power_b.w + 1;
+    mode_b.y = power_b.y;
+    mode_b.w = power_b.w;
+    mode_b.h = power_b.h;
+    // drawSBox (mode_b, RA8875_WHITE);
+
+    // tap area for SP/LP
     SBox splp_b;
-    splp_b.x = b.x + 2*b.w/3;
+    splp_b.x = b.x + b.w/2;
     splp_b.y = b.y + 13*b.h/14;
     splp_b.w = b.w/4;
     splp_b.h = b.h/12;
     // drawSBox (splp_b, RA8875_WHITE);
 
-    // timeline strip
+    // tap area for timeline strip
     SBox tl_b;
     tl_b.x = b.x + 1;
     tl_b.y = b.y + 12*b.h/14;
@@ -1221,7 +1220,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         };
 
         SBox menu_b;
-        menu_b.x = b.x + 5;
+        menu_b.x = power_b.x + 5;
         menu_b.y = b.y + b.h/2;
         menu_b.w = 0;           // shrink to fit
 
@@ -1245,6 +1244,39 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         checkBandConditions (b, true);
         if (power_changed)
             scheduleNewVOACAPMap(prop_map);
+
+    } else if (inBox (s, mode_b)) {
+
+        // show menu of available mode choices
+        MenuItem mitems[N_BCMODES];
+        for (int i = 0; i < N_BCMODES; i++)
+            mitems[i] = {MENU_1OFN, bc_modevalue == bc_modes[i].value, 1, 5, bc_modes[i].name};
+
+        SBox menu_b;
+        menu_b.x = mode_b.x + 5;
+        menu_b.y = b.y + b.h/3;
+        menu_b.w = 0;           // shrink to fit
+
+        // run menu, find selection
+        SBox ok_b;
+        MenuInfo menu = {menu_b, ok_b, true, false, 1, N_BCMODES, mitems};
+        uint16_t new_mode = bc_modevalue;
+        if (runMenu (menu)) {
+            for (int i = 0; i < N_BCMODES; i++) {
+                if (menu.items[i].set) {
+                    new_mode = bc_modes[i].value;
+                    break;
+                }
+            }
+        }
+
+        // always redo BC if nothing else to erase menu but only update voacap if mode changed
+        if (new_mode != bc_modevalue) {
+            bc_modevalue = new_mode;
+            NVWriteUInt8 (NV_BCMODE, bc_modevalue);
+            scheduleNewVOACAPMap(prop_map);
+        }
+        checkBandConditions (b, true);
 
     } else if (inBox (s, splp_b)) {
 
@@ -1299,7 +1331,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 static void checkBRB (time_t t)
 {
     // routine update of NCFDX beacons
-    updateBeacons(false);
+    updateBeacons(false, false);
 
     // see if it's time to rotate
     if (BRBIsRotating() && t > brb_rotationT) {
@@ -1410,17 +1442,8 @@ static void revertPlot1 (uint32_t dt)
         closeGimbal();          // reopen after revert
         next_gimbal = revert_t;
         break;
-    case PLOT_CH_SDO_1:
-        next_sdo_1 = revert_t;
-        break;
-    case PLOT_CH_SDO_2:
-        next_sdo_2 = revert_t;
-        break;
-    case PLOT_CH_SDO_3:
-        next_sdo_3 = revert_t;
-        break;
-    case PLOT_CH_SDO_4:
-        next_sdo_4 = revert_t;
+    case PLOT_CH_SDO:
+        next_sdo = revert_t;
         break;
     case PLOT_CH_TEMPERATURE:
         next_bme280_t = revert_t;
@@ -1443,11 +1466,14 @@ static void revertPlot1 (uint32_t dt)
     case PLOT_CH_COUNTDOWN:
         // TODO?
         break;
-    case PLOT_CH_STEREO_A:
-        next_stereo_a = revert_t;
+    case PLOT_CH_CONTESTS:
+        next_contests = revert_t;
         break;
     case PLOT_CH_PSK:
         next_psk = revert_t;
+        break;
+    case PLOT_CH_OTA:
+        next_ota = revert_t;
         break;
     default:
         fatalError(_FX("revertPlot1() choice %d"), plot_ch[PANE_1]);
@@ -1564,24 +1590,9 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
         next_bme280_d = 0;
         break;
 
-    case PLOT_CH_SDO_1:
+    case PLOT_CH_SDO:
         plot_ch[pp] = ch;
-        next_sdo_1 = 0;
-        break;
-
-    case PLOT_CH_SDO_2:
-        plot_ch[pp] = ch;
-        next_sdo_2 = 0;
-        break;
-
-    case PLOT_CH_SDO_3:
-        plot_ch[pp] = ch;
-        next_sdo_3 = 0;
-        break;
-
-    case PLOT_CH_SDO_4:
-        plot_ch[pp] = ch;
-        next_sdo_4 = 0;
+        next_sdo = 0;
         break;
 
     case PLOT_CH_SOLWIND:
@@ -1602,14 +1613,19 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
             drawMainPageStopwatch(true);
         break;
 
-    case PLOT_CH_STEREO_A:
+    case PLOT_CH_CONTESTS:
         plot_ch[pp] = ch;
-        next_stereo_a = 0;
+        next_contests = 0;
         break;
 
     case PLOT_CH_PSK:
         plot_ch[pp] = ch;
         next_psk = 0;
+        break;
+
+    case PLOT_CH_OTA:
+        plot_ch[pp] = ch;
+        next_ota = 0;
         break;
 
     default:
@@ -1786,39 +1802,14 @@ void updateWiFi(void)
             break;
 
 
-        case PLOT_CH_SDO_1:
-            if (t0 >= next_sdo_1) {
-                if (updateSDO(box, ch))
-                    next_sdo_1 = now() + SDO_INTERVAL;
-                else
-                    next_sdo_1 = nextWiFiRetry();
-            }
-            break;
-
-        case PLOT_CH_SDO_2:
-            if (t0 >= next_sdo_2) {
-                if (updateSDO(box, ch))
-                    next_sdo_2 = now() + SDO_INTERVAL;
-                else
-                    next_sdo_2 = nextWiFiRetry();
-            }
-            break;
-
-        case PLOT_CH_SDO_3:
-            if (t0 >= next_sdo_3) {
-                if (updateSDO(box, ch))
-                    next_sdo_3 = now() + SDO_INTERVAL;
-                else
-                    next_sdo_3 = nextWiFiRetry();
-            }
-            break;
-
-        case PLOT_CH_SDO_4:
-            if (t0 >= next_sdo_4) {
-                if (updateSDO(box, ch))
-                    next_sdo_4 = now() + SDO_INTERVAL;
-                else
-                    next_sdo_4 = nextWiFiRetry();
+        case PLOT_CH_SDO:
+            if (t0 >= next_sdo) {
+                if (updateSDO(box)) {
+                    uint8_t sdo_ch, sdo_rot;
+                    getSDOChoice (sdo_ch, sdo_rot);
+                    next_sdo = now() + (sdo_rot ? SDO_ROT_INTERVAL : SDO_INTERVAL);
+                } else
+                    next_sdo = nextWiFiRetry();
             }
             break;
 
@@ -1844,12 +1835,12 @@ void updateWiFi(void)
             // handled by stopwatch system
             break;
 
-        case PLOT_CH_STEREO_A:
-            if (t0 >= next_stereo_a) {
-                if (updateSTEREO_A(box))
-                    next_stereo_a = now() + STEREO_A_INTERVAL;
+        case PLOT_CH_CONTESTS:
+            if (t0 >= next_contests) {
+                if (updateContests(box))
+                    next_contests = now() + CONTESTS_INTERVAL;
                 else
-                    next_stereo_a = nextWiFiRetry();
+                    next_contests = nextWiFiRetry();
             }
             break;
 
@@ -1859,6 +1850,15 @@ void updateWiFi(void)
                     next_psk = now() + PSK_INTERVAL;
                 else
                     next_psk = nextWiFiRetry();
+            }
+            break;
+
+        case PLOT_CH_OTA:
+            if (t0 >= next_ota) { 
+                if (updateOnTheAir(box))
+                    next_ota = now() + OTA_INTERVAL;
+                else
+                    next_ota = nextWiFiRetry();
             }
             break;
 
@@ -2643,9 +2643,9 @@ static bool updateBandConditions(const SBox &box)
     char *query = (char *) query_mem.getMem();
     time_t t = nowWO();
     snprintf (query, qsize,
-                _FX("%s?YEAR=%d&MONTH=%d&RXLAT=%.3f&RXLNG=%.3f&TXLAT=%.3f&TXLNG=%.3f&UTC=%d&PATH=%d&POW=%d"),
-                bc_page, year(t), month(t), dx_ll.lat_d, dx_ll.lng_d, de_ll.lat_d, de_ll.lng_d,
-                hour(t), show_lp, bc_power);
+        _FX("%s?YEAR=%d&MONTH=%d&RXLAT=%.3f&RXLNG=%.3f&TXLAT=%.3f&TXLNG=%.3f&UTC=%d&PATH=%d&POW=%d&MODE=%d"),
+        bc_page, year(t), month(t), dx_ll.lat_d, dx_ll.lng_d, de_ll.lat_d, de_ll.lng_d,
+        hour(t), show_lp, bc_power, bc_modevalue);
 
     Serial.println (query);
     resetWatchdog();
@@ -2747,102 +2747,6 @@ out:
     resetWatchdog();
     printFreeHeap (F("updateBandConditions"));
     return (ok);
-}
-
-/* read given SDO image choice and display in the given box
- */
-static bool updateSDO (const SBox &box, PlotChoice ch)
-{
-    // choose file
-    const char *sdo_fn;
-    switch (ch) {
-    case PLOT_CH_SDO_1: sdo_fn = sdo_filename[0]; break;
-    case PLOT_CH_SDO_2: sdo_fn = sdo_filename[1]; break;
-    case PLOT_CH_SDO_3: sdo_fn = sdo_filename[2]; break;
-    case PLOT_CH_SDO_4: sdo_fn = sdo_filename[3]; break;
-    default:
-        fatalError (_FX("updateSDO() bad choice: %d"), (int)ch);
-        return (false);
-    }
-
-    bool ok = drawHTTPBMP (sdo_fn, box, SDO_COLOR);
-
-    printFreeHeap(F("updateSDO"));
-    return (ok);
-}
-
-/* read STEREO image and display in the given box
- */
-static bool updateSTEREO_A (const SBox &box)
-{
-    WiFiClient client;
-    bool sep_ok = false;
-    bool file_ok = false;
-
-    // get separation 
-    float sep = 0;
-    Serial.println(stereo_a_sep_page);
-    resetWatchdog();
-    if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
-        updateClocks(false);
-
-        // query and skip header
-        httpHCPGET (client, backend_host, stereo_a_sep_page);
-
-        char buf[20];
-        if (httpSkipHeader(client) && getTCPLine (client, buf, sizeof(buf), NULL)) {
-            sep = atof (buf);
-            Serial.printf (_FX("STEREO_A ahead %g\n"), sep);
-            sep_ok = true;
-        } else {
-            plotMessage (box, STEREO_A_COLOR, _FX("ahead failed"));
-        }
-
-        client.stop();
-    }
-
-    // read and display image if sep ok
-    if (sep_ok)
-        file_ok = drawHTTPBMP (stereo_a_img_page, box, STEREO_A_COLOR);
-
-    // overlay rotation terminator
-    if (file_ok) {
-        #define SASEP_NSEGS 30          // number of line segments
-        #define SASEP_COLOR RA8875_RED
-        const float csep = cosf (deg2rad(sep));                 // cos angle past limb
-        const uint16_t img_w = box.w - 10;                      // apparent image width
-        const uint16_t img_r2 = img_w*img_w/4;                  // " sqr radius
-        uint16_t prev_x = 0, prev_y = 0;
-        bool prev_ok = false;
-        for (int i = 0; i <= SASEP_NSEGS; i++) {                // inclusive
-            int dy = img_w/2 - i*img_w/SASEP_NSEGS;             // pixels up from center
-            if (dy < -box.h/2 || dy > box.h/2)                  // box is wider than high
-                continue;
-            int dx = csep * sqrtf (img_r2 - dy*dy);             // pixels right from center
-            uint16_t y = box.y + box.h/2 - dy;
-            uint16_t x = box.x + box.w/2 - dx;
-            if (prev_ok)
-                tft.drawLine (prev_x, prev_y, x, y, SASEP_COLOR);
-            prev_x = x;
-            prev_y = y;
-            prev_ok = true;
-        }
-
-        // helpful arrow?
-        #define SASEP_ARROWH 5          // half-height
-        #define SASEP_ARROWL 25         // length
-        #define SASEP_ARROWB 9          // back from tip
-        #define SASEP_ARROWX0 (box.x+box.w/2-SASEP_ARROWL/2)
-        #define SASEP_ARROWY0 (box.y+box.h/2)
-        tft.drawLine (SASEP_ARROWX0, SASEP_ARROWY0, SASEP_ARROWX0+SASEP_ARROWL, SASEP_ARROWY0, SASEP_COLOR);
-        tft.drawLine (SASEP_ARROWX0+SASEP_ARROWL, SASEP_ARROWY0, SASEP_ARROWX0+SASEP_ARROWL-SASEP_ARROWB,
-                SASEP_ARROWY0-SASEP_ARROWH, SASEP_COLOR);
-        tft.drawLine (SASEP_ARROWX0+SASEP_ARROWL, SASEP_ARROWY0, SASEP_ARROWX0+SASEP_ARROWL-SASEP_ARROWB,
-                SASEP_ARROWY0+SASEP_ARROWH, SASEP_COLOR);
-    }
-
-    printFreeHeap(F("updateSTEREO_A"));
-    return (sep_ok && file_ok);
 }
 
 /* display the RSG NOAA solar environment scale values.
@@ -3155,10 +3059,7 @@ void initWiFiRetry()
     next_xray = 0;
     next_kp = 0;
     next_rss = 0;
-    next_sdo_1 = 0;
-    next_sdo_2 = 0;
-    next_sdo_3 = 0;
-    next_sdo_4 = 0;
+    next_sdo = 0;
     next_noaaswx = 0;
     next_dewx = 0;
     next_dxwx = 0;
@@ -3172,11 +3073,22 @@ void initWiFiRetry()
     next_bme280_h = 0;
     next_swind = 0;
     next_drap = 0;
-    next_stereo_a = 0;
+    next_contests = 0;
     next_psk = 0;
+    next_ota = 0;
 
     // map is in memory
     // next_map = 0;
+}
+
+/* called to schedule an update to the moon pane if in rotation
+ * if moon is on PANE_1 wait for a revert in progress otherwise schedule immediately.
+ */
+void scheduleMoonPane()
+{
+    PlotPane moon_pp = findPaneForChoice (PLOT_CH_MOON);
+    if (moon_pp != PANE_NONE && (moon_pp != PANE_1 || !moon_reverting))
+        next_moon = 0;
 }
 
 /* called to schedule an update to the live spots pane if in rotation
@@ -3188,8 +3100,17 @@ void scheduleNewPSK()
         next_psk = 0;
 }
 
+/* called to schedule an update to the SDO spots pane if in rotation
+ */
+void scheduleNewSDO()
+{
+    PlotPane psk_pp = findPaneForChoice (PLOT_CH_SDO);
+    if (psk_pp != PANE_NONE)
+        next_sdo = 0;
+}
+
 /* called to schedule an update to the band conditions pane if up.
- * if BC is on PANE_1 wait for a revert in progress otherwie update immediately.
+ * if BC is on PANE_1 wait for a revert in progress otherwise schedule immediately.
  */
 void scheduleNewBC()
 {

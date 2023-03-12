@@ -146,7 +146,7 @@ static void eraseNPChar (const SBox &b, NPField &f)
         eraseNPFocus (b, f);
         f.str[--l] = '\0';
         uint16_t x = f.x + getTextWidth(f.str);
-        tft.fillRect (x, ROW2FY(b,f.r), NP_FONTW, NP_FONTH, RA8875_BLACK);
+        tft.fillRect (x, ROW2FY(b,f.r)-1, NP_FONTW, NP_FONTH+2, RA8875_BLACK);
         drawNPFocus (b, f);
     }
 }

@@ -13,6 +13,10 @@ char live_html[] =  R"_raw_html_(
 
 <head>
 
+    <!-- this might help iOS safari run full screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
     <title>
         HamClock Live!
     </title>
@@ -53,7 +57,7 @@ char live_html[] =  R"_raw_html_(
         function onLoad() {
 
             console.log ("* onLoad");
-
+            
             // create session id
             session_id = Math.round(1000*(Date.now() + Math.random()));
             console.log ("sid " + session_id);
@@ -291,7 +295,7 @@ char live_html[] =  R"_raw_html_(
 
                 const m = getAppCoords (event);
                 if (!m) {
-                    console.log("pointermove: don't know app_scale yet");
+                    console.log("pointerdown: don't know app_scale yet");
                     return;
                 }
 
@@ -302,6 +306,18 @@ char live_html[] =  R"_raw_html_(
                     console.log ('pointer down');
             });
 
+            // pointerleave: send illegal mouse location 
+            cvs.addEventListener ('pointerleave', function(event) {
+                // all ours
+                event.preventDefault();
+
+                // compose and send event well outside app
+                let get = 'set_mouse?x=-1&y=-1';
+                get += '&sid=' + session_id;
+                sendUserEvent (get);
+
+            });
+
             // pointerup: send touch, hold depending on duration since pointerdown
             cvs.addEventListener ('pointerup', function(event) {
                 // all ours
@@ -310,7 +326,7 @@ char live_html[] =  R"_raw_html_(
                 // extract application coords
                 const m = getAppCoords (event);
                 if (!m) {
-                    console.log("pointermove: don't know app_scale yet");
+                    console.log("pointerup: don't know app_scale yet");
                     return;
                 }
 
@@ -333,7 +349,7 @@ char live_html[] =  R"_raw_html_(
             });
 
 
-            // pointermove: send set_mouse to hamclock
+            // pointermove: send set_mouse
             cvs.addEventListener ('pointermove', function(event) {
                 // all ours
                 event.preventDefault();
@@ -395,7 +411,7 @@ char live_html[] =  R"_raw_html_(
                 sendUserEvent (get);
             });
 
-            // respond to mobile device being rotated
+            // respond to mobile device being rotated. resize seems to work better than orientationchange
             // window.addEventListener("orientationchange", function(event) {
             window.addEventListener("resize", function(event) {
                 if (event_verbose)
@@ -427,7 +443,6 @@ char live_html[] =  R"_raw_html_(
                         console.log ('sendGetRequest ' + url);
                     let xhr = new XMLHttpRequest();
                     xhr.open('GET', url);
-                    xhr.setRequestHeader("Connection", "close");
                     xhr.responseType = type;
                     xhr.addEventListener ('load', function () {
                         if (xhr.status >= 200 && xhr.status < 300) {

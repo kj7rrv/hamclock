@@ -181,7 +181,6 @@ typedef enum {
     WIFIPASS_SPR,
 
     // page "2"
-    NTPHOST_SPR,
     DXPORT_SPR,
     DXHOST_SPR,
     DXLOGIN_SPR,
@@ -197,6 +196,7 @@ typedef enum {
     ROTHOST_SPR,
     FLRIGPORT_SPR,
     FLRIGHOST_SPR,
+    NTPHOST_SPR,
 
     // page "4"
     CENTERLNG_SPR,
@@ -225,16 +225,14 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 2" -- index 1
 
-    {1, {100, R2Y(0), 60, PR_H}, {180, R2Y(0), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
+    {1, { 20, R2Y(2), 60, PR_H}, { 80, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, { 20, R2Y(3), 60, PR_H}, { 80, R2Y(3), 260, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
+    {1, { 20, R2Y(4), 60, PR_H}, { 80, R2Y(4), 260, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
 
-    {1, { 20, R2Y(3), 70, PR_H}, {100, R2Y(3),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {1, { 20, R2Y(4), 70, PR_H}, {100, R2Y(4), 250, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
-    {1, { 20, R2Y(5), 70, PR_H}, {100, R2Y(5), 250, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
-
-    {1, {350, R2Y(2), 50, PR_H}, {400, R2Y(2), 400, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(3), 50, PR_H}, {400, R2Y(3), 400, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(4), 50, PR_H}, {400, R2Y(4), 400, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(5), 50, PR_H}, {400, R2Y(5), 400, PR_H}, NULL, dxcl_cmds[3], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 410, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 410, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 410, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 410, PR_H}, NULL, dxcl_cmds[3], NV_DXCLCMD_LEN, 0},
 
 
     // "page 3" -- index 2
@@ -245,6 +243,9 @@ static StringPrompt string_pr[N_SPR] = {
     {2, {320, R2Y(1), 60, PR_H}, {380, R2Y(1), 400, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
     {2, {160, R2Y(2), 60, PR_H}, {220, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
     {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
+
+    {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
+
 
     // "page 4" -- index 3
 
@@ -294,12 +295,9 @@ typedef enum {
     WIFI_BPR,
 
     // page "2"
-    NTPSET_BPR,
     CLUSTER_BPR,
     CLISWSJTX_BPR,
-    CLLBL_BPR,
-    CLLBLCALL_BPR,
-    CLPATH_BPR,
+    SPOTPATH_BPR,
     SETDX_BPR,
     DXCLCMD0_BPR,
     DXCLCMD1_BPR,
@@ -310,6 +308,7 @@ typedef enum {
     RIGUSE_BPR,
     ROTUSE_BPR,
     FLRIGUSE_BPR,
+    NTPSET_BPR,
 
     // page "4"
     GPIOOK_BPR,
@@ -319,11 +318,13 @@ typedef enum {
     // page "5"
     DATEFMT_MDY_BPR,
     DATEFMT_DMYYMD_BPR,
+    LOGUSAGE_BPR,
     WEEKDAY1MON_BPR,
+    DEMO_BPR,
     UNITS_BPR,
     BEARING_BPR,
-    LOGUSAGE_BPR,
-    DEMO_BPR,
+    SPOTLBL_BPR,
+    SPOTLBLCALL_BPR,
     X11_FULLSCRN_BPR,
     FLIP_BPR,
 
@@ -331,7 +332,7 @@ typedef enum {
 } BPIds;
 
 /* bool prompts. N.B. must match BPIds order
- * N.B. date format, cluster map, kx3 and date format use two "entangled" bools to create 3 states
+ * N.B. some fields use two "entangled" bools to create 3 states
  */
 static BoolPrompt bool_pr[N_BPR] = {
 
@@ -344,27 +345,25 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 2" -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 300, PR_H}, false, "NTP?", "Use default set of servers", 0},
+    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes"},
+    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes"},
 
-    {1, {10,  R2Y(1),  90, PR_H},  {100, R2Y(1), 60,  PR_H}, false, "Cluster?", "No", "Yes"},
-    {1, {200, R2Y(1),  90, PR_H},  {290, R2Y(1), 60,  PR_H}, false, "WSJT-X?", "No", "Yes"},
+    {1, {20,  R2Y(1),  60, PR_H},  { 80, R2Y(1), 50,  PR_H}, false, "Path?", "No", "Yes"},
 
-    {1, { 20, R2Y(2),  70, PR_H},  {100, R2Y(2), 60,  PR_H}, false, "Label?", "No", NULL},
-    {1, {100, R2Y(2),   0, PR_H},  {100, R2Y(2), 60,  PR_H}, false, NULL, "Prefix", "Call"},
-                                                        // entangled: None: F X  Prefix: T F  Call: T T
-    {1, {200, R2Y(2),  90, PR_H},  {290, R2Y(2), 50,  PR_H}, false, "Path?", "No", "Yes"},
-    {1, {200, R2Y(3),  90, PR_H},  {290, R2Y(3), 50,  PR_H}, false, "Set DX?", "No", "Yes"},
+    {1, {200, R2Y(2),  90, PR_H},  {290, R2Y(2), 50,  PR_H}, false, "Set DX?", "No", "Yes"},
 
-    {1, {350, R2Y(2),   0, PR_H},   {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(3),   0, PR_H},   {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(4),   0, PR_H},   {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(5),   0, PR_H},   {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:"},
+    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
+    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
+    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:"},
+    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:"},
 
     // "page 3" -- index 2
 
     {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes"},
     {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes"},
     {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes"},
+
+    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers", 0},
 
 
     // "page 4" -- index 3
@@ -381,16 +380,25 @@ static BoolPrompt bool_pr[N_BPR] = {
     {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL},
     {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
                                                         // entangled: MDY: F X   DMY: T F  YMD:  T T
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H},  false, "Week starts?", "Sunday", "Monday"},
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H},  false, "Units?", "Imperial", "Metric"},
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H},  false, "Bearings?", "True N", "Magnetic N"},
+
+    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
+
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday", "Monday"},
+    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes"},
+
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric"},
+    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N"},
+
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot label?", "No", NULL},
+    {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call"},
+                                                        // entangled: None: F X  Prefix: T F  Call: T T
 
 
-    {4, {400,  R2Y(0), 140, PR_H}, {540, R2Y(0),   90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
-    {4, {400,  R2Y(1), 140, PR_H}, {540, R2Y(1),   40, PR_H}, false, "Demo mode?", "No", "Yes"},
-    {4, {400,  R2Y(2), 140, PR_H}, {540, R2Y(2),   40, PR_H}, false, "Full scrn?", "No", "Yes"},
+    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Full scrn?", "No", "Yes"},
                                                                 // state box wide enough for "Won't fit"
-    {4, {400,  R2Y(3), 140, PR_H}, {540, R2Y(3),   40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+
 
     // "page 6" -- index 5
 
@@ -419,13 +427,17 @@ typedef struct {
 #endif
 
 // current focus and page names
+#define SPIDER_PAGE     1                       // 0-based counting
 #define ALLBOOLS_PAGE   4                       // 0-based counting
 #define COLOR_PAGE      5                       // 0-based counting
 #define ONOFF_PAGE      6                       // 0-based counting
 #define N_PAGES         (HAVE_ONOFF() ? 7 : 6)  // last page is on/off
-#define SPIDER_PAGE     1
-#define SPIDER_X        480
-#define SPIDER_Y        (R2Y(2) - PR_D)
+#define SPIDER_PX       480                     // prompt x
+#define SPIDER_PY       (R2Y(2) - PR_D)         // prompt y
+#define SPIDER_BX       340                     // border x
+#define SPIDER_BY       (SPIDER_PY - PR_A)      // border y
+#define SPIDER_BRX      799                     // border right x
+#define SPIDER_BBY      (R2Y(6))                // border bottom y
 static Focus cur_focus;
 static int cur_page;
 
@@ -458,31 +470,33 @@ static ColSelPrompt csel_pr[N_CSPR] = {
             {CSEL_COL1X, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(0)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, DE_COLOR, NV_SHORTPATHCOLOR, "Short path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(1), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(1)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(229,191,131), NV_LONGPATHCOLOR, "Long path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(1)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(2), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(2)+CSEL_DDY, CSEL_DW, CSEL_DH},
             true, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(3), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(3)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(3)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint"},
+            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint",
+            {0, 0, 0, 0}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(4), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(4)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(4)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid"},
+            false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid",
+            {0, 0, 0, 0}, false, 0, 0, 0},
 
-#if !defined(_SUPPORT_PSKESP)
+#if defined(_SUPPORT_PSKUNIX)
 
     // ESP does not draw paths so doesn't need band colors
 
@@ -490,73 +504,73 @@ static ColSelPrompt csel_pr[N_CSPR] = {
             {CSEL_COL1X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(128,0,0), NV_160M_COLOR, "160 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(128,128,0), NV_80M_COLOR, "80 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(230,25,75), NV_60M_COLOR, "60 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(245,130,48), NV_40M_COLOR, "40 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(200,176,20), NV_30M_COLOR, "30 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(250,250,0), NV_20M_COLOR, "20 m path",
-            {CSEL_COL1X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL1X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(60,180,75), NV_17M_COLOR, "17 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(70,240,240), NV_15M_COLOR, "15 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(0,130,200), NV_12M_COLOR, "12 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(250,190,212), NV_10M_COLOR, "10 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(200,150,100), NV_6M_COLOR, "6 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RGB565(100,100,100), NV_2M_COLOR, "2 m path",
-            {CSEL_COL2X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false},
+            {CSEL_COL2X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 #endif
 };
 
@@ -629,12 +643,19 @@ static void noBlanks (char *s)
     *s_to = '\0';
 }
 
-/* draw, or erase, the Spider commands table header
+/* draw the Spider commands table header
  */
-static void drawSpiderCommandsHeader (bool draw)
+static void drawSpiderCommandsHeader()
 {
-    tft.setTextColor (draw ? PR_C : BG_C);
-    tft.setCursor (SPIDER_X, SPIDER_Y);
+    // border
+    tft.drawLine (SPIDER_BX, SPIDER_BY, SPIDER_BRX, SPIDER_BY, GRAY);
+    tft.drawLine (SPIDER_BX, SPIDER_BBY, SPIDER_BRX, SPIDER_BBY, GRAY);
+    tft.drawLine (SPIDER_BX, SPIDER_BY, SPIDER_BX, SPIDER_BBY, GRAY);
+    tft.drawLine (SPIDER_BRX, SPIDER_BY, SPIDER_BRX, SPIDER_BBY, GRAY);
+
+    // labels
+    tft.setTextColor (PR_C);
+    tft.setCursor (SPIDER_PX, SPIDER_PY);
     tft.print ("Spider Commands:");
 }
 
@@ -672,24 +693,13 @@ static bool boolIsRelevant (BoolPrompt *bp)
         #endif
     }
 
-    if (bp == &bool_pr[CLLBL_BPR]) {
-        if (!bool_pr[CLUSTER_BPR].state)
-            return (false);
-    }
-
     if (bp == &bool_pr[CLISWSJTX_BPR]) {
         if (!bool_pr[CLUSTER_BPR].state)
             return (false);
     }
 
-    if (bp == &bool_pr[CLLBLCALL_BPR]) {
-        if (!bool_pr[CLUSTER_BPR].state || !bool_pr[CLLBL_BPR].state)
-            return (false);
-    }
-
-    if (bp == &bool_pr[CLPATH_BPR]) {
-        #if defined(_SUPPORT_CLPATH)
-            // always false if no support
+    if (bp == &bool_pr[SPOTPATH_BPR]) {
+        #if defined(_SUPPORT_SPOTPATH)
             if (!bool_pr[CLUSTER_BPR].state)
         #endif
                 return (false);
@@ -857,23 +867,19 @@ static void nextTabFocus()
 
         // page 2
 
-        { NULL, &bool_pr[NTPSET_BPR] },
-        {       &string_pr[NTPHOST_SPR], NULL},
         { NULL, &bool_pr[CLUSTER_BPR] },
         { NULL, &bool_pr[CLISWSJTX_BPR] },
-        { NULL, &bool_pr[CLLBL_BPR] },
-        { NULL, &bool_pr[CLLBLCALL_BPR] },
-        { NULL, &bool_pr[CLPATH_BPR] },
-        { NULL, &bool_pr[DXCLCMD0_BPR] },
-        {       &string_pr[DXCLCMD0_SPR], NULL},
+        { NULL, &bool_pr[SPOTPATH_BPR] },
         {       &string_pr[DXPORT_SPR], NULL},
         { NULL, &bool_pr[SETDX_BPR] },
+        {       &string_pr[DXHOST_SPR], NULL},
+        {       &string_pr[DXLOGIN_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD0_BPR] },
+        {       &string_pr[DXCLCMD0_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD1_BPR] },
         {       &string_pr[DXCLCMD1_SPR], NULL},
-        {       &string_pr[DXHOST_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD2_BPR] },
         {       &string_pr[DXCLCMD2_SPR], NULL},
-        {       &string_pr[DXLOGIN_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD3_BPR] },
         {       &string_pr[DXCLCMD3_SPR], NULL},
 
@@ -888,6 +894,8 @@ static void nextTabFocus()
         { NULL, &bool_pr[FLRIGUSE_BPR] },
         {       &string_pr[FLRIGPORT_SPR], NULL},
         {       &string_pr[FLRIGHOST_SPR], NULL},
+        { NULL, &bool_pr[NTPSET_BPR] },
+        {       &string_pr[NTPHOST_SPR], NULL},
 
         // page 4
 
@@ -910,8 +918,10 @@ static void nextTabFocus()
         { NULL, &bool_pr[WEEKDAY1MON_BPR] },
         { NULL, &bool_pr[DEMO_BPR] },
         { NULL, &bool_pr[UNITS_BPR] },
-        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[BEARING_BPR] },
+        { NULL, &bool_pr[SPOTLBL_BPR] },
+        { NULL, &bool_pr[SPOTLBLCALL_BPR] },
+        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
 
         // page 3
@@ -1213,6 +1223,16 @@ static void eraseBPPromptState (BoolPrompt *bp)
     eraseBPState (bp);
 }
 
+
+/* display an entangled pair of bools states: show A state if off else B state
+ */
+static void drawEntangledBools (BPIds A, BPIds B)
+{
+    if (bool_pr[A].state)
+        drawBPState (&bool_pr[B]);
+    else
+        drawBPState (&bool_pr[A]);
+}
 
 /* draw the virtual keyboard
  */
@@ -1731,9 +1751,17 @@ static void drawCurrentPageFields()
             drawBPPromptState (bp);
     }
 
+    // draw the entangled pairs
+    if (boolIsRelevant(&bool_pr[DATEFMT_MDY_BPR]))
+        drawEntangledBools(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
+    if (boolIsRelevant(&bool_pr[KX3ON_BPR]))
+        drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
+    if (boolIsRelevant(&bool_pr[SPOTLBL_BPR]))
+        drawEntangledBools (SPOTLBL_BPR, SPOTLBLCALL_BPR);
+
     // draw spider header if appropriate
     if (cur_page == SPIDER_PAGE && bool_pr[CLUSTER_BPR].state && !bool_pr[CLISWSJTX_BPR].state)
-        drawSpiderCommandsHeader(true);
+        drawSpiderCommandsHeader();
 
     #if defined(_WIFI_ALWAYS)
         // show prompt but otherwise is not relevant
@@ -2236,11 +2264,14 @@ static void initSetup()
     }
     bool_pr[CLUSTER_BPR].state = (nv_dx != 0);
 
-    uint8_t clmap;
-    if (!NVReadUInt8 (NV_MAPSPOTS, &clmap)) {
-        clmap = NVMS_NONE;
-        NVWriteUInt8 (NV_MAPSPOTS, clmap);
+    uint8_t spotops;
+    if (!NVReadUInt8 (NV_MAPSPOTS, &spotops)) {
+        spotops = NVMS_PREFIX;
+        NVWriteUInt8 (NV_MAPSPOTS, spotops);
     }
+    bool_pr[SPOTLBL_BPR].state = ((spotops & NVMS_PCMASK) != NVMS_NONE);
+    bool_pr[SPOTLBLCALL_BPR].state = ((spotops & NVMS_PCMASK) == NVMS_CALL);
+    bool_pr[SPOTPATH_BPR].state = (spotops & NVMS_PATH) != 0;
 
     uint8_t nv_setdx;
     if (!NVReadUInt8 (NV_WSJT_SETSDX, &nv_setdx)) {
@@ -2249,18 +2280,15 @@ static void initSetup()
     }
     bool_pr[SETDX_BPR].state = (nv_setdx != 0);
 
-    bool_pr[CLLBL_BPR].state = ((clmap & NVMS_PCMASK) != NVMS_NONE);
-    bool_pr[CLLBLCALL_BPR].state = ((clmap & NVMS_PCMASK) == NVMS_CALL);
-    bool_pr[CLPATH_BPR].state = (clmap & NVMS_PATH) != 0;
-    uint8_t dx_use_mask;
-    if (!NVReadUInt8 (NV_DXCMDUSED, &dx_use_mask)) {
-        dx_use_mask = 0;
-        NVWriteUInt8 (NV_DXCMDUSED, dx_use_mask);
+    uint8_t dx_cmdmask;
+    if (!NVReadUInt8 (NV_DXCMDUSED, &dx_cmdmask)) {
+        dx_cmdmask = 0;
+        NVWriteUInt8 (NV_DXCMDUSED, dx_cmdmask);
     }
-    bool_pr[DXCLCMD0_BPR].state = (dx_use_mask & 1) != 0;
-    bool_pr[DXCLCMD1_BPR].state = (dx_use_mask & 2) != 0;
-    bool_pr[DXCLCMD2_BPR].state = (dx_use_mask & 4) != 0;
-    bool_pr[DXCLCMD3_BPR].state = (dx_use_mask & 8) != 0;
+    bool_pr[DXCLCMD0_BPR].state = (dx_cmdmask & 1) != 0;
+    bool_pr[DXCLCMD1_BPR].state = (dx_cmdmask & 2) != 0;
+    bool_pr[DXCLCMD2_BPR].state = (dx_cmdmask & 4) != 0;
+    bool_pr[DXCLCMD3_BPR].state = (dx_cmdmask & 8) != 0;
 
 
 
@@ -2586,17 +2614,6 @@ static void initDisplay()
     changePage(0);
 }
 
-/* display an entangled pair of bools states: show A state if off else B state
- */
-static void drawBoolPairState (BPIds A, BPIds B)
-{
-    if (bool_pr[A].state) {
-        drawBPState (&bool_pr[B]);
-    } else {
-        drawBPState (&bool_pr[A]);
-    }
-}
-
 /* run the setup screen until all fields check ok and user wants to exit
  */
 static void runSetup()
@@ -2734,7 +2751,7 @@ static void runSetup()
             // check for possible secondary implications
 
             if (bp == &bool_pr[DATEFMT_MDY_BPR]) {
-                drawBoolPairState(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
+                drawEntangledBools(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
 
             } else if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
 
@@ -2873,9 +2890,9 @@ static void runSetup()
                 }
             }
 
-            else if (bp == &bool_pr[CLLBL_BPR]) {
+            else if (bp == &bool_pr[SPOTLBL_BPR]) {
                 // show cluster label type, or none
-                drawBoolPairState (CLLBL_BPR, CLLBLCALL_BPR);
+                drawEntangledBools (SPOTLBL_BPR, SPOTLBLCALL_BPR);
             }
 
           #if defined(_SUPPORT_GPIO) && defined(_SUPPORT_ENVSENSOR)
@@ -2884,7 +2901,7 @@ static void runSetup()
                 if (bp->state) {
                     // retain kx3 state but draw prompt
                     drawBPPrompt (&bool_pr[KX3ON_BPR]);
-                    drawBoolPairState(KX3ON_BPR, KX3BAUD_BPR);
+                    drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
                     drawSPPromptValue (&string_pr[TEMPCORR_SPR]);
                     drawSPPromptValue (&string_pr[PRESCORR_SPR]);
                     drawSPPromptValue (&string_pr[TEMPCORR2_SPR]);
@@ -2921,7 +2938,7 @@ static void runSetup()
             else if (bp == &bool_pr[KX3ON_BPR]) {
                 // show/hide baud rate but honor GPIOOK
                 if (bool_pr[GPIOOK_BPR].state) {
-                    drawBoolPairState(KX3ON_BPR, KX3BAUD_BPR);
+                    drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
                 } else if (bool_pr[KX3ON_BPR].state) {
                     // maintain off if no GPIO
                     bool_pr[KX3ON_BPR].state = false;
@@ -2984,23 +3001,24 @@ static void finishSettingUp()
     NVWriteString (NV_DXCMD2, dxcl_cmds[2]);
     NVWriteString (NV_DXCMD3, dxcl_cmds[3]);
 
-    uint8_t dx_use_mask = 0;
+    uint8_t dx_cmdmask = 0;
     if (bool_pr[DXCLCMD0_BPR].state)
-        dx_use_mask |= 1;
+        dx_cmdmask |= 1;
     if (bool_pr[DXCLCMD1_BPR].state)
-        dx_use_mask |= 2;
+        dx_cmdmask |= 2;
     if (bool_pr[DXCLCMD2_BPR].state)
-        dx_use_mask |= 4;
+        dx_cmdmask |= 4;
     if (bool_pr[DXCLCMD3_BPR].state)
-        dx_use_mask |= 8;
-    NVWriteUInt8 (NV_DXCMDUSED, dx_use_mask);
+        dx_cmdmask |= 8;
+    NVWriteUInt8 (NV_DXCMDUSED, dx_cmdmask);
 
     NVWriteUInt16 (NV_DXPORT, dxport);
     NVWriteString (NV_DXLOGIN, dxlogin);
     NVWriteUInt8 (NV_LOGUSAGE, bool_pr[LOGUSAGE_BPR].state);
     NVWriteUInt8 (NV_MAPSPOTS,
-            (bool_pr[CLLBL_BPR].state ? (bool_pr[CLLBLCALL_BPR].state ? NVMS_CALL : NVMS_PREFIX) : NVMS_NONE)
-            | (bool_pr[CLPATH_BPR].state ? NVMS_PATH : 0));
+            (bool_pr[SPOTLBL_BPR].state ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_PREFIX)
+                                        : NVMS_NONE)
+            | (bool_pr[SPOTPATH_BPR].state ? NVMS_PATH : 0));
     NVWriteUInt8 (NV_NTPSET, bool_pr[NTPSET_BPR].state);
     NVWriteString(NV_NTPHOST, ntphost);
     NVWriteUInt8 (NV_DATEMDY, bool_pr[DATEFMT_MDY_BPR].state);
@@ -3279,28 +3297,28 @@ bool useMagBearing()
 
 /* return whether to draw dx paths
  */
-bool getDXSpotPaths()
+bool getSpotPaths()
 {
-#if defined(_SUPPORT_CLPATH)
-    return (bool_pr[CLPATH_BPR].state);
+#if defined(_SUPPORT_SPOTPATH)
+    return (bool_pr[SPOTPATH_BPR].state);
 #else
     return (false);
 #endif
 }
 
-/* return whether to label dx spots
+/* return whether to label spots
  */
-bool labelDXClusterSpots()
+bool labelSpots()
 {
-    return (bool_pr[CLLBL_BPR].state);
+    return (bool_pr[SPOTLBL_BPR].state);
 }
 
-/* return whether to label dx spots as whole callsigns, else just prefix.
- * N.B. only sensible if labelDXClusterSpots() is true
+/* return whether to label spots as whole callsigns, else just prefix.
+ * N.B. only sensible if labelSpots() is true
  */
 bool plotSpotCallsigns()
 {
-    return (bool_pr[CLLBLCALL_BPR].state);
+    return (bool_pr[SPOTLBLCALL_BPR].state);
 }
 
 /* return whether to use IP geolocation

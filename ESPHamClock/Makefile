@@ -42,6 +42,7 @@ OBJS = \
 	clocks.o \
 	cities.o \
 	color.o \
+        contests.o \
 	dxcluster.o \
 	earthmap.o \
 	earthsat.o \
@@ -59,6 +60,7 @@ OBJS = \
 	moonpane.o \
 	ncdxf.o \
 	nvram.o \
+	ontheair.o \
 	plot.o \
 	plotmgmnt.o \
 	prefixes.o \
@@ -66,6 +68,7 @@ OBJS = \
 	radio.o \
 	runner.o \
 	santa.o \
+	sdo.o \
 	selectFont.o \
 	setup.o \
 	sphere.o \

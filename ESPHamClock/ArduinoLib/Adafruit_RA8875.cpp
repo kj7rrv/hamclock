@@ -869,16 +869,13 @@ bool Adafruit_RA8875::getMouse (uint16_t *x, uint16_t *y)
  */
 void Adafruit_RA8875::setMouse (int x, int y)
 {
-        if (x >= 0 && x < APP_WIDTH && y >= 0 && y < APP_HEIGHT) {
+        pthread_mutex_lock(&mouse_lock);
 
-            pthread_mutex_lock(&mouse_lock);
+            mouse_x = x*SCALESZ + FB_X0;
+            mouse_y = y*SCALESZ + FB_Y0;
+            gettimeofday (&mouse_tv, NULL);
 
-                mouse_x = x*SCALESZ + FB_X0;
-                mouse_y = y*SCALESZ + FB_Y0;
-                gettimeofday (&mouse_tv, NULL);
-
-            pthread_mutex_unlock(&mouse_lock);
-        }
+        pthread_mutex_unlock(&mouse_lock);
 }
 
 

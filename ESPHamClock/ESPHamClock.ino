@@ -197,7 +197,7 @@ void onSig (int signo)
     defaultState();
 
     // gone
-    exit(1);
+    abort();
 }
 
 /* connect onSig to several interesting signals
@@ -831,7 +831,7 @@ static void checkTouch()
         if (TZMenu (de_tz, de_ll)) {
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
-            updateMoonPane(true);
+            scheduleMoonPane();
             scheduleNewBC();
         }
         drawDEInfo();   // erase regardless
@@ -978,8 +978,8 @@ void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
         drawDXCursorPrefix();
 
     // show DX weather and update band conditions if showing
-    showDXWX();
     scheduleNewBC();
+    showDXWX();                 // after schedules to accommodate reverts
 
     // persist
     NVWriteFloat (NV_DX_LAT, dx_ll.lat_d);
@@ -1051,13 +1051,12 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     NVWriteFloat (NV_DE_LNG, de_ll.lng_d);
 
     // more updates that depend on DE regardless of projection
-    showDEWX();                         // schedules moon update after linger if assigned to plot1
-    if (findPaneChoiceNow(PLOT_CH_MOON) != PANE_NONE)
-        updateMoonPane(true);           // only if not scheduled by showDEWX
+    scheduleMoonPane();
     scheduleNewBC();
     scheduleNewVOACAPMap(prop_map);
     sendDXClusterDELLGrid();
     scheduleNewPSK();
+    showDEWX();                 // after schedules to accommodate reverts
     setSatObserver (de_ll.lat_d, de_ll.lng_d);
     displaySatInfo();
 
@@ -1726,7 +1725,9 @@ bool overAnySymbol (const SCoord &s)
                 || inCircle (s, sun_c) || inCircle (s, moon_c)
                 || overAnyBeacon(s)
                 || overAnyPSKSpots(s)
-                || overAnyDXClusterSpots(s) || inBox(s,santa_b)
+                || overAnyDXClusterSpots(s)
+                || overAnyOnTheAirSpots(s)
+                || inBox(s,santa_b)
                 || overMapScale(s));
 }
 
@@ -1746,12 +1747,13 @@ void drawAllSymbols(bool beacons_too)
     if (overMap(moon_c.s))
         drawMoon();
     if (beacons_too)
-        updateBeacons(true);
+        updateBeacons(true, false);
     drawDEMarker(false);
     drawDXMarker(false);
     if (!overRSS(deap_c.s))
         drawDEAPMarker();
     drawDXClusterSpotsOnMap();
+    drawOnTheAirSpotsOnMap();
     drawPSKSpots();
     drawSanta ();
 
@@ -2122,7 +2124,7 @@ void setMapTagBox (const char *tag, const SCoord &s, uint16_t r, SBox &box)
  * still, knowing the box has been positioned well allows for this masking.
  * N.B. coordinate with setMapTagBox()
  */
-void drawMapTag (const char *tag, SBox &box)
+void drawMapTag (const char *tag, const SBox &box)
 {
     // small font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
@@ -2216,17 +2218,17 @@ void resetWatchdog()
     // record longest wd feed interval so far in max_wd_dt
     static uint32_t prev_ms;
     uint32_t ms = millis();
-    uint32_t dt = ms - prev_ms;
-    if (dt < 100)
-        return;         // ignore crazy fast
-    if ((dt > max_wd_dt || dt > 5000) && prev_ms > 0) {
-        // Serial.printf (_FX("max WD %u\n"), dt);
-        max_wd_dt = dt;
-    }
-    prev_ms = ms;
+    uint32_t dt = ms - prev_ms;         // works ok if millis rolls over
+    if (dt > 1000) { // ignore crazy fast
+        if ((dt > max_wd_dt || dt > 5000) && prev_ms > 0) {
+            // Serial.printf (_FX("max WD %u\n"), dt);
+            max_wd_dt = dt;
+        }
+        prev_ms = ms;
 
-    ESP.wdtFeed();
-    yield();
+        ESP.wdtFeed();
+        yield();
+    }
 }
 
 /* like delay() but breaks into small chunks so we can call resetWatchdog() and update live web
@@ -2246,18 +2248,19 @@ void wdDelay(int ms)
     }
 }
 
-/* handy utility to return whether now is dt later than prev.
+/* handy utility to return whether now is atleast_dt later than prev.
  * if so, update *prev and return true, else return false.
  */
-bool timesUp (uint32_t *prev, uint32_t dt)
+bool timesUp (uint32_t *prev, uint32_t atleast_dt)
 {
     uint32_t ms = millis();
-    if (ms < *prev || ms - *prev < dt) {        // allow for ms < prev
-        resetWatchdog();
-        return (false);
+    uint32_t dt = ms - *prev;   // works ok if millis rolls over
+    if (dt > atleast_dt) {
+        *prev = ms;
+        return (true);
     }
-    *prev = ms;
-    return (true);
+    resetWatchdog();
+    return (false);
 }
 
 /* log our state, if ok with user

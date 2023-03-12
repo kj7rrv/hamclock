@@ -146,6 +146,10 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_WSJT_DX
     2,                          // NV_PSK_MAXAGE
     1,                          // NV_WEEKMON
+    1,                          // NV_BCMODE
+    1,                          // NV_SDO
+    1,                          // NV_SDOROT
+    1,                          // NV_ONTHEAIR
 
 };
 

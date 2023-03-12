@@ -33,7 +33,6 @@ int gimbal_trace_level = 1;
 
 // GUI configuration
 #define CHAR_H          25                              // large character height
-#define TITLE_Y         (box.y+PLOTBOX_H/5-2)           // title y coord, match VOCAP
 #define VALU_INDENT     55                              // az or el value indent
 #define STATE_INDENT    120                             // az or el state indent
 #define LDIRBOX_SZ      10                              // large direction control box size
@@ -772,7 +771,7 @@ static void initGimbalGUI(const SBox &box)
             title[strlen(title)-1] = '\0';
         tw = getTextWidth (title);
     }
-    tft.setCursor (box.x+(box.w-tw)/2, TITLE_Y);
+    tft.setCursor (box.x+(box.w-tw)/2, box.y + PANETITLE_H);
     tft.print(title);
 
     // label az for sure
@@ -971,7 +970,7 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
         return (false);
 
     // our box but disavow and stop if leaving by tapping title
-    if (s.y < TITLE_Y + 10) {
+    if (s.y < box.y + PANETITLE_H) {
         stopGimbalNow();
         closeGimbal();
         return (false);

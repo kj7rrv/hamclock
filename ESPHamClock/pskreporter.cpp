@@ -1,4 +1,4 @@
-/* manage PSKReporter and WSPR records and drawing.
+/* manage RBN, PSKReporter and WSPR records and drawing.
  * ESP does not draw paths nor support cursor search for nearest spot.
  */
 
@@ -9,12 +9,16 @@
 // common global state
 uint8_t psk_mask;                               // one of PSKModeBits
 uint32_t psk_bands;                             // bitmask of PSKBandSetting
+uint16_t psk_maxage_mins;                       // query period, minutes
+
+// handy
 #define SET_PSKBAND(b)  (psk_bands |= (1 << (b)))
 #define TST_PSKBAND(b)  ((psk_bands & (1 << (b))) != 0)
 
 // common query urls
 static const char psk_page[] PROGMEM = "/fetchPSKReporter.pl";
 static const char wspr_page[] PROGMEM = "/fetchWSPR.pl";
+static const char rbn_page[] PROGMEM = "/fetchRBN.pl";
 
 // common config
 #define LIVE_COLOR      (RGB565(100,100,255))   // title color
@@ -22,7 +26,6 @@ static const char wspr_page[] PROGMEM = "/fetchWSPR.pl";
 
 // common private state
 static uint8_t show_maxdist;                    // show max distances, else count
-static uint16_t maxage_mins;                    // query period, minutes
 static int n_reports;                           // count of reports in psk_bands
 
 // band stats
@@ -138,15 +141,15 @@ static int findBand (long Hz)
     int max_i = PSKBAND_N-1;
     while (min_i <= max_i) {
         int mid = (min_i + max_i)/2;
-        if (pgm_read_dword(&bands[mid].max_kHz) < kHz)
+        if ((long)pgm_read_dword(&bands[mid].max_kHz) < kHz)
             min_i = mid+1;
-        else if (pgm_read_dword(&bands[mid].min_kHz) > kHz)
+        else if ((long)pgm_read_dword(&bands[mid].min_kHz) > kHz)
             max_i = mid-1;
         else
             return (mid);
     }
 
-    Serial.printf (_FX("PSK: %ld Hz unsupported band\n"), Hz);
+    // Serial.printf (_FX("%ld Hz unsupported band\n"), Hz);
     return (-1);
 }
 
@@ -228,10 +231,10 @@ void initPSKState()
             SET_PSKBAND(i);
         NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
     }
-    if (!NVReadUInt16 (NV_PSK_MAXAGE, &maxage_mins)) {
+    if (!NVReadUInt16 (NV_PSK_MAXAGE, &psk_maxage_mins)) {
         // default 30 minutes
-        maxage_mins = 30;
-        NVWriteUInt16 (NV_PSK_MAXAGE, maxage_mins);
+        psk_maxage_mins = 30;
+        NVWriteUInt16 (NV_PSK_MAXAGE, psk_maxage_mins);
     }
     if (!NVReadUInt8 (NV_PSK_SHOWDIST, &show_maxdist)) {
         show_maxdist = 0;
@@ -246,7 +249,7 @@ void savePSKState()
 {
     NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
     NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
-    NVWriteUInt16 (NV_PSK_MAXAGE, maxage_mins);
+    NVWriteUInt16 (NV_PSK_MAXAGE, psk_maxage_mins);
     NVWriteUInt8 (NV_PSK_SHOWDIST, show_maxdist);
 }
 
@@ -294,12 +297,14 @@ void drawPSKPane (const SBox &box)
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
     char where_how[100];
+    bool ispsk = (psk_mask & PSKMB_SRCMASK) == PSKMB_PSK;
+    bool iswspr = (psk_mask & PSKMB_SRCMASK) == PSKMB_WSPR;
     snprintf (where_how, sizeof(where_how), "%s %s - %s %d %s",
                 psk_mask & PSKMB_OFDE ? "of" : "by",
                 psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
-                psk_mask & PSKMB_PSK ? "PSK" : "WSPR",
-                maxage_mins == 30 ? maxage_mins : maxage_mins/60,
-                maxage_mins == 30 ? "mins" : (maxage_mins == 60 ? "hour" : "hrs"));
+                (ispsk ? "PSK" : (iswspr ? "WSPR" : "RBN")),
+                psk_maxage_mins == 30 ? psk_maxage_mins : psk_maxage_mins/60,
+                psk_maxage_mins == 30 ? "mins" : (psk_maxage_mins == 60 ? "hour" : "hrs"));
     uint16_t whw = getTextWidth(where_how);
     tft.setCursor (box.x + (box.w-whw)/2, box.y + box.h/4);
     tft.print (where_how);
@@ -378,16 +383,24 @@ bool updatePSKReporter (const SBox &box)
 
     // build query
     char query[100];
-    bool data_psk = (psk_mask & PSKMB_PSK) != 0;
+    bool ispsk = (psk_mask & PSKMB_SRCMASK) == PSKMB_PSK;
+    bool iswspr = (psk_mask & PSKMB_SRCMASK) == PSKMB_WSPR;
+    bool isrbn = (psk_mask & PSKMB_SRCMASK) == PSKMB_RBN;
     bool use_call = (psk_mask & PSKMB_CALL) != 0;
     bool of_de = (psk_mask & PSKMB_OFDE) != 0;
-    snprintf (query, sizeof(query), "%s?%s%s=%s&maxage=%d",
-                                        data_psk ? psk_page : wspr_page,
+    if (ispsk)
+        strcpy_P (query, psk_page);
+    else if (iswspr)
+        strcpy_P (query, wspr_page);
+    else
+        strcpy_P (query, rbn_page);
+    int qlen = strlen (query);
+    snprintf (query+qlen, sizeof(query)-qlen, "?%s%s=%s&maxage=%d",
                                         of_de ? "of" : "by",
                                         use_call ? "call" : "grid",
                                         use_call ? getCallsign() : de_maid,
-                                        maxage_mins*60 /* wants seconds */);
-    Serial.printf ("PSK: query: %s\n", query);
+                                        psk_maxage_mins*60 /* wants seconds */);
+    Serial.printf (_FX("PSK: query: %s\n"), query);
 
     // fetch and fill reports[]
     resetWatchdog();
@@ -400,7 +413,7 @@ bool updatePSKReporter (const SBox &box)
 
         // skip header
         if (!httpSkipHeader (psk_client)) {
-            Serial.print ("PSK: no header\n");
+            Serial.print (F("PSK: no header\n"));
             goto out;
         }
 
@@ -423,9 +436,13 @@ bool updatePSKReporter (const SBox &box)
             if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
                             &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
                             new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
-                Serial.printf ("PSK: %s\n", line);
+                Serial.printf (_FX("PSK: %s\n"), line);
                 goto out;
             }
+
+            // RBN does not provide txgrid but it must be us -- TODO really?
+            if (isrbn)
+                strcpy (new_r.txgrid, de_maid);
 
             // count each line
             n_totspots++;
@@ -456,7 +473,7 @@ bool updatePSKReporter (const SBox &box)
                     if (n_reports + 1 > n_malloced) {
                         reports = (PSKReport *) realloc (reports, (n_malloced += 100) * sizeof(PSKReport));
                         if (!reports)
-                            fatalError ("Live Spots: no mem %d", n_malloced);
+                            fatalError (_FX("Live Spots: no mem %d"), n_malloced);
                     }
 
                     // save new spot
@@ -499,7 +516,7 @@ bool updatePSKReporter (const SBox &box)
         // N.B. can't build incrementally because left/right pointers can move with each realloc
         kd3tree = (KD3Node *) realloc (kd3tree, n_reports * sizeof(KD3Node));
         if (!kd3tree && n_reports > 0)
-            fatalError ("Live Spots tree: %d", n_reports);
+            fatalError (_FX("Live Spots tree: %d"), n_reports);
         memset (kd3tree, 0, n_reports * sizeof(KD3Node));
         for (int i = 0; i < n_reports; i++) {
             KD3Node *kp = &kd3tree[i];
@@ -515,7 +532,7 @@ bool updatePSKReporter (const SBox &box)
         ok = true;
 
     } else
-        Serial.print ("PSK: Spots connection failed\n");
+        Serial.print (F("PSK: Spots connection failed\n"));
 
 out:
     // reset counts if trouble
@@ -536,8 +553,9 @@ out:
 
     // finish up
     psk_client.stop();
-    Serial.printf ("PSK: found %d %s reports %s %s\n", n_totspots,
-                        data_psk ? "PSK" : "WSPR",
+    Serial.printf (_FX("PSK: found %d %s reports %s %s\n"),
+                        n_totspots,
+                        (ispsk ? "PSK" : (iswspr ? "WSPR" : "RBN")),
                         of_de ? "of" : "by",
                         use_call ? getCallsign() : de_maid);
 
@@ -556,7 +574,9 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
         return (false);
 
     // handy current state
-    bool data_psk = (psk_mask & PSKMB_PSK) != 0;
+    bool ispsk = (psk_mask & PSKMB_SRCMASK) == PSKMB_PSK;
+    bool iswspr = (psk_mask & PSKMB_SRCMASK) == PSKMB_WSPR;
+    bool isrbn = (psk_mask & PSKMB_SRCMASK) == PSKMB_RBN;
     bool use_call = (psk_mask & PSKMB_CALL) != 0;
     bool of_de = (psk_mask & PSKMB_OFDE) != 0;
     bool sh_dist = show_maxdist != 0;
@@ -569,7 +589,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
 
     // runMenu() expects column-major entries
 
-    mitems[0] = {MENU_LABEL, false, 0, PRI_INDENT, "Data:"};
+    mitems[0] = {MENU_1OFN,  isrbn, 1, PRI_INDENT, "RBN"};
     mitems[1] = {MENU_LABEL, false, 0, PRI_INDENT, "Spot:"};
     mitems[2] = {MENU_LABEL, false, 0, PRI_INDENT, "What:"};
     mitems[3] = {MENU_LABEL, false, 0, PRI_INDENT, "Show:"};
@@ -580,7 +600,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[8] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_60M),  4, SEC_INDENT, bands[PSKBAND_60M].name};
     mitems[9] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_40M),  4, SEC_INDENT, bands[PSKBAND_40M].name};
 
-    mitems[10] = {MENU_1OFN, data_psk,  1, PRI_INDENT, "PSK"};
+    mitems[10] = {MENU_1OFN, ispsk,     1, PRI_INDENT, "PSK"};
     mitems[11] = {MENU_1OFN, of_de,     2, PRI_INDENT, "of DE"};
     mitems[12] = {MENU_1OFN, use_call,  3, PRI_INDENT, "Call"};
     mitems[13] = {MENU_1OFN, sh_dist,   7, PRI_INDENT, "MaxDst"};
@@ -591,7 +611,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[18] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_17M),  4, SEC_INDENT, bands[PSKBAND_17M].name};
     mitems[19] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_15M),  4, SEC_INDENT, bands[PSKBAND_15M].name};
 
-    mitems[20] = {MENU_1OFN, !data_psk, 1, PRI_INDENT, "WSPR"};
+    mitems[20] = {MENU_1OFN, iswspr,    1, PRI_INDENT, "WSPR"};
     mitems[21] = {MENU_1OFN, !of_de,    2, PRI_INDENT, "by DE"};
     mitems[22] = {MENU_1OFN, !use_call, 3, PRI_INDENT, "Grid"};
     mitems[23] = {MENU_1OFN, !sh_dist,  7, PRI_INDENT, "Count"};
@@ -603,13 +623,13 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[29] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_2M),   4, SEC_INDENT, bands[PSKBAND_2M].name};
 
     // set age
-    switch (maxage_mins) {
+    switch (psk_maxage_mins) {
     case 30:   mitems[14].set = true; break;
     case 60:   mitems[24].set = true; break;
     case 120:  mitems[5].set  = true; break;
     case 360:  mitems[15].set = true; break;
     case 1440: mitems[25].set = true; break;
-    default:   fatalError ("Bad maxage_mins: %d", maxage_mins);
+    default:   fatalError (_FX("Bad psk_maxage_mins: %d"), psk_maxage_mins);
     }
 
     // create a box for the menu
@@ -623,53 +643,69 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     MenuInfo menu = {menu_b, ok_b, true, false, 3, MI_N, mitems};
     if (runMenu (menu)) {
 
-        // set new mode
-        psk_mask = 0;
-        if (mitems[10].set)
-            psk_mask |= PSKMB_PSK;
-        if (mitems[11].set)
-            psk_mask |= PSKMB_OFDE;
-        if (mitems[12].set)
-            psk_mask |= PSKMB_CALL;
+        // handy
+        bool psk_set = mitems[10].set;
+        bool wspr_set = mitems[20].set;
+        bool rbn_set = mitems[0].set;
+        bool ofDE_set = mitems[11].set;
+        bool call_set = mitems[12].set;
 
-        // set new bands
-        psk_bands = 0;
-        if (mitems[6].set)  SET_PSKBAND(PSKBAND_160M);
-        if (mitems[7].set)  SET_PSKBAND(PSKBAND_80M);
-        if (mitems[8].set)  SET_PSKBAND(PSKBAND_60M);
-        if (mitems[9].set)  SET_PSKBAND(PSKBAND_40M);
-        if (mitems[16].set) SET_PSKBAND(PSKBAND_30M);
-        if (mitems[17].set) SET_PSKBAND(PSKBAND_20M);
-        if (mitems[18].set) SET_PSKBAND(PSKBAND_17M);
-        if (mitems[19].set) SET_PSKBAND(PSKBAND_15M);
-        if (mitems[26].set) SET_PSKBAND(PSKBAND_12M);
-        if (mitems[27].set) SET_PSKBAND(PSKBAND_10M);
-        if (mitems[28].set) SET_PSKBAND(PSKBAND_6M);
-        if (mitems[29].set) SET_PSKBAND(PSKBAND_2M);
-        Serial.printf (_FX("PSK: new bands mask 0x%x\n"), psk_bands);
+        // RBN only works with ofcall
+        if (rbn_set && (!ofDE_set || !call_set)) {
 
-        // get new age
-        if (mitems[14].set)
-            maxage_mins = 30;
-        else if (mitems[24].set)
-            maxage_mins = 60;
-        else if (mitems[5].set)
-            maxage_mins = 120;
-        else if (mitems[15].set)
-            maxage_mins = 360;
-        else if (mitems[25].set)
-            maxage_mins = 1440;
-        else
-            fatalError ("No menu age");
+            // show error briefly then restore existing settings
+            plotMessage (box, RA8875_RED, "RBN requires of DE Call");
+            wdDelay (5000);
+            drawPSKPane(box);
 
-        // get how to show
-        show_maxdist = mitems[13].set;
+        } else {
 
-        // persist
-        savePSKState();
+            // set new mode mask;
+            psk_mask = psk_set ? PSKMB_PSK : (wspr_set ? PSKMB_WSPR : PSKMB_RBN);
+            if (ofDE_set)
+                psk_mask |= PSKMB_OFDE;
+            if (call_set)
+                psk_mask |= PSKMB_CALL;
 
-        // refresh with new criteria
-        updatePSKReporter (box);
+            // set new bands
+            psk_bands = 0;
+            if (mitems[6].set)  SET_PSKBAND(PSKBAND_160M);
+            if (mitems[7].set)  SET_PSKBAND(PSKBAND_80M);
+            if (mitems[8].set)  SET_PSKBAND(PSKBAND_60M);
+            if (mitems[9].set)  SET_PSKBAND(PSKBAND_40M);
+            if (mitems[16].set) SET_PSKBAND(PSKBAND_30M);
+            if (mitems[17].set) SET_PSKBAND(PSKBAND_20M);
+            if (mitems[18].set) SET_PSKBAND(PSKBAND_17M);
+            if (mitems[19].set) SET_PSKBAND(PSKBAND_15M);
+            if (mitems[26].set) SET_PSKBAND(PSKBAND_12M);
+            if (mitems[27].set) SET_PSKBAND(PSKBAND_10M);
+            if (mitems[28].set) SET_PSKBAND(PSKBAND_6M);
+            if (mitems[29].set) SET_PSKBAND(PSKBAND_2M);
+            Serial.printf (_FX("PSK: new bands mask 0x%x\n"), psk_bands);
+
+            // get new age
+            if (mitems[14].set)
+                psk_maxage_mins = 30;
+            else if (mitems[24].set)
+                psk_maxage_mins = 60;
+            else if (mitems[5].set)
+                psk_maxage_mins = 120;
+            else if (mitems[15].set)
+                psk_maxage_mins = 360;
+            else if (mitems[25].set)
+                psk_maxage_mins = 1440;
+            else
+                fatalError (_FX("PSK: No menu age"));
+
+            // get how to show
+            show_maxdist = mitems[13].set;
+
+            // persist
+            savePSKState();
+
+            // refresh with new criteria
+            updatePSKReporter (box);
+        }
 
     } else  {
 
@@ -833,5 +869,14 @@ bool getClosestPSK (const LatLong &ll, const PSKReport **rpp)
     // nope
     return (false);
 }
+
+/* return PSKReports list
+ */
+extern void getPSKSpots (const PSKReport* &rp, int &n_rep)
+{
+    rp = reports;
+    n_rep = n_reports;
+}
+
 
 #endif // _SUPPORT_PSKUNIX

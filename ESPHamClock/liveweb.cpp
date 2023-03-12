@@ -129,10 +129,10 @@ static void addNewSI (const sid_t &sid)
         } else if (sip->pixels) {
             if (age_s > MAX_SI_AGE) {
                 if (!new_sip) {
-                    printf ("  %12ld reassigning after %d secs idle to %ld\n", sip->sid, age_s, sid);
+                    printf ("  %12ld %d secs idle => reassigning to %ld\n", sip->sid, age_s, sid);
                     new_sip = sip;
                 } else {
-                    printf ("  %12ld freeing after idle %d secs\n", sip->sid, age_s);
+                    printf ("  %12ld idle %d secs => freeing\n", sip->sid, age_s);
                     free (sip->pixels);
                     sip->pixels = NULL;
                     sip->last_used = 0;
@@ -145,7 +145,7 @@ static void addNewSI (const sid_t &sid)
             }
         } else {
             if (!new_sip) {
-                printf ("  %12ld reassigning unused to %ld\n", sip->sid, sid);
+                printf ("  %12ld unused => reassigning to %ld\n", sip->sid, sid);
                 new_sip = sip;
             } else {
                 n_unused++;
@@ -803,23 +803,37 @@ static void *liveServerThread (void *unused)
 
         // wait for new browser connection
         WiFiClient client = liveweb_server->next();
+        if (!client) {
+            printf ("LIVE: server accept failed\n");
+            return(NULL);
+        }
+        // printf ("LIVE: new browser connection\n");
 
         // read first line to capture what it wants
         char line[200];
-        getTCPLine (client, line, sizeof(line), NULL);
+        if (!getTCPLine (client, line, sizeof(line), NULL)) {
+            printf ("LIVE: initial line timed out\n");
+            client.stop();
+            continue;
+        }
+        // printf ("LIVE: browser sent: %s\n", line);
 
         // discard remainder of http header
         httpSkipHeader (client);
 
-        // find parts assuming line is of the form "GET /<cmd> HTTP"
-        char *http;
-        if (strncmp (line, "GET /", 5) != 0 || (http = strstr (line, " HTTP")) == NULL) {
-            printf ("LIVE: bogus http header: %s\n", line);
+        // expect first line of the form "GET /<cmd>"
+        if (strncmp (line, "GET /", 5) != 0) {
+            printf ("LIVE: expecting GET http header but got: '%s'\n", line);
             client.stop();
             continue;
         }
         char *cmd = line + 5;
-        *http = '\0';
+
+        // chop off trailing http version, if present; seems it might no longer be required?
+        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/GET
+        char *http = strstr (line, " HTTP");
+        if (http)
+            *http = '\0';
 
         // dispatch according to GET command
         // N.B. each handling function must (eventually) close client.

@@ -691,9 +691,9 @@ static bool installQueryMaps (const char *page, const char *style, const float M
         StackMalloc query_mem(300);
         char *query = (char *) query_mem.getMem();
         snprintf (query, query_mem.getSize(),
-            _FX("%s?YEAR=%d&MONTH=%d&UTC=%d&TXLAT=%.3f&TXLNG=%.3f&PATH=%d&WATTS=%d&WIDTH=%d&HEIGHT=%d&MHZ=%.2f&TOA=%.1f"),
+            _FX("%s?YEAR=%d&MONTH=%d&UTC=%d&TXLAT=%.3f&TXLNG=%.3f&PATH=%d&WATTS=%d&WIDTH=%d&HEIGHT=%d&MHZ=%.2f&TOA=%.1f&MODE=%d"),
             page, yr, mo, hr, de_ll.lat_d, de_ll.lng_d, show_lp, bc_power, HC_MAP_W, HC_MAP_H,
-            MHz, DEF_TOA);
+            MHz, DEF_TOA, bc_modevalue);
 
         Serial.printf (_FX("%s query: %s\n"), style, query);
 

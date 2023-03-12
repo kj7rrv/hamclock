@@ -42,16 +42,15 @@ uint32_t ESP::getChipId()
         if (sn)
             return (sn);
 
-#if defined(_IS_LINUX)
-
         // try cpu serial number
 
-        FILE *fp = popen ("awk -F: '/Serial/{print $2}' /proc/cpuinfo", "r");
+        FILE *fp = fopen ("/proc/cpuinfo", "r");
         if (fp) {
+            static const char serial[] = "Serial";
             char buf[1024];
             while (fgets (buf, sizeof(buf), fp)) {
-                int l = strlen(buf);                            // includes nl
-                if (l >= 9) {                                   // 8 + nl
+                if (strncmp (buf, serial, sizeof(serial)-1) == 0) {
+                    int l = strlen(buf);                        // includes nl
                     sn = strtoul (&buf[l-9], NULL, 16);         // 8 LSB
                     if (sn) {
                         printf ("Found ChipId '%.*s' -> 0x%X = %u\n", l-1, buf, sn, sn);
@@ -59,12 +58,10 @@ uint32_t ESP::getChipId()
                     }
                 }
             }
-            pclose (fp);
+            fclose (fp);
             if (sn)
                 return (sn);
         }
-
-#endif // _IS_LINUX
 
         // try MAC address
 
