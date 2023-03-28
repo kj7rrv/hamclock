@@ -46,7 +46,6 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define CB_SIZE         20              // size of selection check box
 #define CELL_H          32              // display cell height
 #define N_COLS          4               // n cols in name table
-#define Q_TO            5               // question timeout
 #define CELL_W          (tft.width()/N_COLS)                    // display cell width
 #define N_ROWS          ((tft.height()-TBORDER)/CELL_H)         // n rows in name table
 #define MAX_NSAT        (N_ROWS*N_COLS)                         // max names we can display

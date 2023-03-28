@@ -295,16 +295,22 @@ class StackMalloc
 
 /* time styles in auxtime_b
  */
+#define AUXTIMES                        \
+    X(AUXT_DATE,        "Date")         \
+    X(AUXT_DOY,         "Day of Year")  \
+    X(AUXT_JD,          "Julian Date")  \
+    X(AUXT_MJD,         "Modified JD")  \
+    X(AUXT_SIDEREAL,    "Sidereal")     \
+    X(AUXT_SOLAR,       "Solar")        \
+    X(AUXT_UNIX,        "UNIX seconds")
+
+#define X(a,b) a,               // expands AUXTIME to each enum and comma
 typedef enum {
-    AUXT_DATE,                  // as per NV_DATEMDY and NV_DATEDMYYMD
-    AUXT_DOY,                   // day of year
-    AUXT_JD,                    // Julian date
-    AUXT_MJD,                   // modified Julian date
-    AUXT_SIDEREAL,              // local sidereal time
-    AUXT_SOLAR,                 // local solar time
-    AUXT_UNIX,                  // unix seconds
-    AUXT_N,                     // number of options
+    AUXTIMES
+    AUXT_N
 } AuxTimeFormat;
+#undef X
+
 extern AuxTimeFormat auxtime;
 extern const char *auxtime_names[AUXT_N];
 
@@ -312,36 +318,38 @@ extern const char *auxtime_names[AUXT_N];
 /* plot choices and pane locations
  */
 
+// N.B. take care that names will fit in menu built by askPaneChoice()
+// N.B. names should not include blanks, but _ are changed to blanks for prettier printing
+#define PLOTNAMES \
+    X(PLOT_CH_BC,           "VOACAP")           \
+    X(PLOT_CH_DEWX,         "DE_Wx")            \
+    X(PLOT_CH_DXCLUSTER,    "DX_Cluster")       \
+    X(PLOT_CH_DXWX,         "DX_Wx")            \
+    X(PLOT_CH_FLUX,         "Solar_Flux")       \
+    X(PLOT_CH_KP,           "Planetary_K")      \
+    X(PLOT_CH_MOON,         "Moon")             \
+    X(PLOT_CH_NOAASWX,      "Space_Wx")         \
+    X(PLOT_CH_SSN,          "Sunspot_N")        \
+    X(PLOT_CH_XRAY,         "X-Ray")            \
+    X(PLOT_CH_GIMBAL,       "Rotator")          \
+    X(PLOT_CH_TEMPERATURE,  "ENV_Temp")         \
+    X(PLOT_CH_PRESSURE,     "ENV_Press")        \
+    X(PLOT_CH_HUMIDITY,     "ENV_Humid")        \
+    X(PLOT_CH_DEWPOINT,     "ENV_DewPt")        \
+    X(PLOT_CH_SDO,          "SDO")              \
+    X(PLOT_CH_SOLWIND,      "Solar_Wind")       \
+    X(PLOT_CH_DRAP,         "DRAP")             \
+    X(PLOT_CH_COUNTDOWN,    "Countdown")        \
+    X(PLOT_CH_CONTESTS,     "Contests")         \
+    X(PLOT_CH_PSK,          "Live_Spots")       \
+    X(PLOT_CH_OTA,          "On_The_Air")
+
+#define X(a,b)  a,              // expands PLOTNAMES to each enum and comma
 typedef enum {
-    PLOT_CH_BC,
-    PLOT_CH_DEWX,
-    PLOT_CH_DXCLUSTER,
-    PLOT_CH_DXWX,
-    PLOT_CH_FLUX,
-
-    PLOT_CH_KP,
-    PLOT_CH_MOON,
-    PLOT_CH_NOAASWX,
-    PLOT_CH_SSN,
-    PLOT_CH_XRAY,
-
-    PLOT_CH_GIMBAL,
-    PLOT_CH_TEMPERATURE,
-    PLOT_CH_PRESSURE,
-    PLOT_CH_HUMIDITY,
-    PLOT_CH_DEWPOINT,
-
-    PLOT_CH_SDO,
-    PLOT_CH_SOLWIND,
-    PLOT_CH_DRAP,
-    PLOT_CH_COUNTDOWN,
-    PLOT_CH_CONTESTS,
-
-    PLOT_CH_PSK,
-    PLOT_CH_OTA,
-
+    PLOTNAMES
     PLOT_CH_N
 } PlotChoice;
+#undef X
 
 // reuse count also handy flag for not found
 #define PLOT_CH_NONE    PLOT_CH_N
@@ -441,17 +449,22 @@ enum {
 };
 
 // show NCDXF beacons or one of other controls
+// N.B. names must fit within NCDXF_b
+#define BRBMODES                  \
+    X(BRB_SHOW_BEACONS, "NCDXF")  \
+    X(BRB_SHOW_ONOFF,   "On/Off") \
+    X(BRB_SHOW_PHOT,    "PhotoR") \
+    X(BRB_SHOW_BR,      "Brite")  \
+    X(BRB_SHOW_SWSTATS, "SpcWx")  \
+    X(BRB_SHOW_BME76,   "BME@76") \
+    X(BRB_SHOW_BME77,   "BME@77")
 
+#define X(a,b)  a,                      // expands BRBMODES to enum and comma
 typedef enum {
-    BRB_SHOW_BEACONS,                   // NCDXF beacons
-    BRB_SHOW_ONOFF,                     // on/off/idle times
-    BRB_SHOW_PHOT,                      // brightness and phot controls
-    BRB_SHOW_BR,                        // just brightness control
-    BRB_SHOW_SWSTATS,                   // space weather stats
-    BRB_SHOW_BME76,                     // sensor I2C 76
-    BRB_SHOW_BME77,                     // sensor I2C 77
-    BRB_N,                              // count
+    BRBMODES
+    BRB_N                               // count
 } BRB_MODE;
+#undef X
 
 extern uint8_t brb_mode;                // one of BRB_MODE
 extern time_t brb_rotationT;            // time at which to rotate, if more than 1 bit in rotset
@@ -462,12 +475,19 @@ extern const char *brb_names[BRB_N];    // menu names -- must be in same order a
 
 // map projection styles
 extern uint8_t map_proj;
+
+#define MAPPROJS \
+    X(MAPP_MERCATOR,  "Mercator")  \
+    X(MAPP_AZIMUTHAL, "Azimuthal") \
+    X(MAPP_AZIM1,     "Azim One")
+
+#define X(a,b)  a,                      // expands MAPPROJS to enum plus comma
 typedef enum {
-    MAPP_MERCATOR,                      // 2D
-    MAPP_AZIMUTHAL,                     // two hemispheres, left centered on DE
-    MAPP_AZIM1,                         // full sphere centered on DE
+    MAPPROJS
     MAPP_N
 } MapProjection;
+#undef X
+
 extern const char *map_projnames[MAPP_N];   // projection names
 #define AZIM1_ZOOM       1.1F           // horizon will be 180/AZIM1_ZOOM degrees from DE
 #define AZIM1_FISHEYE    1.15F          // center zoom -- 1 is natural
@@ -588,6 +608,7 @@ extern bool overMap (const SCoord &s);
 extern bool overAnySymbol (const SCoord &s);
 extern bool overRSS (const SCoord &s);
 extern bool overRSS (const SBox &b);
+extern void setScreenLock (bool on);
 extern bool checkCallsignTouchFG (SCoord &b);
 extern bool checkCallsignTouchBG (SCoord &b);
 extern void newDE (LatLong &ll, const char grid[MAID_CHARLEN]);
@@ -748,7 +769,6 @@ extern bool clockTimeOk(void);
 extern void changeTime (time_t t);
 extern bool checkClockTouch (SCoord &s);
 extern bool TZMenu (TZInfo &tzi, const LatLong &ll);
-extern void enableSyncProvider(void);
 extern void drawDESunRiseSetInfo(void);
 extern void drawCalendar(bool force);
 extern void hideClocks(void);
@@ -809,7 +829,7 @@ typedef struct {
     char mode[MAX_SPOTMODE_LEN];        // operating mode
     float kHz;                          // freq
     SBox map_b;                         // map label location
-    uint16_t utcs;                      // UTC spotted 100*hr+min
+    time_t spotted;                     // UTC when spotted
 } DXClusterSpot;
 
 extern bool updateDXCluster(const SBox &box);
@@ -827,6 +847,7 @@ extern void drawDXCOnMap (const DXClusterSpot &spot);
 extern bool getClosestDXC (const DXClusterSpot *list, int n_list, const LatLong &ll,
     DXClusterSpot *sp, LatLong *llp);
 extern void setDXCMapPosition (DXClusterSpot &s);
+extern int spotAgeMinutes (const DXClusterSpot &s);
 
 
 
@@ -1023,7 +1044,7 @@ extern void drawDXSatMenu(const SCoord &s);
 
 #if defined(_IS_UNIX)
 
-extern void writeFavicon (WiFiClient &client);
+extern void writeFavicon (FILE *fp);
 
 #endif // _IS_UNIX
 
@@ -1058,6 +1079,8 @@ extern bool getGimbalState (bool &vis_now, bool &has_el, bool &tracking, float &
 extern bool getGPSDLatLong(LatLong *llp);
 extern time_t getGPSDUTC(const char **server);
 extern void updateGPSDLoc(void);
+extern time_t crackISO8601 (const char *iso);
+
 
 
 
@@ -1106,9 +1129,24 @@ extern char live_html[];
 
 extern void initLiveWeb(bool verbose);
 extern time_t last_live;
+extern bool no_web_touch;
 extern int liveweb_port;
 
 
+
+
+
+/*********************************************************************************************
+ *
+ * scroll.cpp
+ *
+ */
+
+
+extern void drawScrollUp (const SBox &box, uint16_t color, int n, bool draw);
+extern void drawScrollDown (const SBox &box, uint16_t color, int n, bool draw);
+extern bool checkScrollUpTouch (const SCoord &s, const SBox &b);
+extern bool checkScrollDownTouch (const SCoord &s, const SBox &b);
 
 
 
@@ -1202,9 +1240,11 @@ extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 extern bool getColorDashed(ColorSelection id);
 extern bool useMagBearing(void);
-extern bool setWSJTDX(void);
 extern bool useWSJTX(void);
 extern bool weekStartsOnMonday(void);
+extern void formatLat (float lat_d, char s[], int s_len);
+extern void formatLng (float lng_d, char s[], int s_len);
+
 
 
 
@@ -1249,15 +1289,22 @@ typedef enum {
 extern PropMapSetting prop_map;
 
 
-// N.B. must be in same order as map_styles[]
+// CoreMaps and map_styles
+#define COREMAPS                 \
+    X(CM_COUNTRIES, "Countries") \
+    X(CM_TERRAIN,   "Terrain")   \
+    X(CM_DRAP,      "DRAP")      \
+    X(CM_MUF,       "MUF")       \
+    X(CM_AURORA,    "Aurora")    \
+    X(CM_WX,        "Weather")
+
+#define X(a,b)  a,                      // expands COREMAPS to each enum followed by comma
 typedef enum {
-    CM_COUNTRIES,
-    CM_TERRAIN,
-    CM_DRAP,
-    CM_MUF,
-    CM_AURORA,
+    COREMAPS
     CM_N
 } CoreMaps;
+#undef X
+
 #define CM_NONE CM_N                    // handy alias meaning none active
 
 extern CoreMaps core_map;               // current map, if any
@@ -1538,7 +1585,7 @@ typedef enum {
     NV_2M_COLOR,                // 2 m path color as RGB 565
     NV_DASHED,                  // ColorSelection bitmask set for dashed
     NV_BEAR_MAG,                // show magnetic bearings, else true
-    NV_WSJT_SETSDX,             // whether WSJT-X spots set DX
+    NV_WSJT_SETSDX,             // deprecated
     NV_WSJT_DX,                 // whether dx cluster is WSJT-X
 
     NV_PSK_MAXAGE,              // live spots max age, minutes
@@ -1547,7 +1594,8 @@ typedef enum {
     NV_SDO,                     // sdo pane choice 0..6
     NV_SDOROT,                  // whether SDO pane is rotating
 
-    NV_ONTHEAIR,                // 0=POTA or 1=SOTA
+    NV_OTALIST,                 // 0=POTA or 1=SOTA
+    NV_OTASORT,                 // 0-3 Band Call ID Age
 
     NV_N
 
@@ -1664,7 +1712,7 @@ extern time_t plot_rotationT[PANE_N];           // time of next rotation, iff > 
 extern uint32_t plot_rotset[PANE_N];            // bitmask of all PlotChoice rotation choices
                                                 // N.B. plot_rotset[i] must always include plot_ch[i]
 
-#define PLOT_ROT_WARNING        5               // show rotation about to occur, secs
+#define PLOT_ROT_WARNING        4               // show rotation about to occur, secs
 
 #define paneIsRotating(pp)    ((plot_rotset[pp] & ~(1 << plot_ch[pp])) != 0)   // any bit other than plot_ch
 
@@ -1683,6 +1731,8 @@ extern void initPlotPanes(void);
 extern void savePlotOps(void);
 extern bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color);
 extern bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap);
+extern int tickmarks (float min, float max, int numdiv, float ticks[]);
+
 
 
 
@@ -1763,6 +1813,7 @@ typedef struct {
 extern uint8_t psk_mask;                // bitmask of PSKModeBits
 extern uint32_t psk_bands;              // bitmask of 1 << PSKBandSetting
 extern uint16_t psk_maxage_mins;        // max age, minutes
+extern uint8_t psk_showdist;
 
 extern bool updatePSKReporter (const SBox &box);
 extern bool checkPSKTouch (const SCoord &s, const SBox &box);
@@ -1989,7 +2040,6 @@ extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
 extern void runNextDemoCommand(void);
-extern time_t last_live;
 
 
 

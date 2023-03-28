@@ -14,8 +14,8 @@ class ESPhttpUpdate ESPhttpUpdate;
 
 
 // approximate number of lines generated when running unzip and make, used for progress meter.
-#define N_UNZIP_LINES   108
-#define N_MAKE_LINES    83
+#define N_UNZIP_LINES   140
+#define N_MAKE_LINES    100
 
 
 ESPhttpUpdate::ESPhttpUpdate()
@@ -310,7 +310,7 @@ t_httpUpdate_return ESPhttpUpdate::update(WiFiClient &client, const char *url)
 	}
 
         // replace current program file with new one, we already think we can remove it if we are euid
-	if (!runCommand (true, 95, 98, 1, "rm -f %s && mv %s/%s/%s %s", our_path,
+	if (!runCommand (true, 95, 99, 1, "rm -f %s && mv %s/%s/%s %s", our_path,
                                                 tmp_dir, make_dir, our_make, our_path)) {
             cleanupDir (tmp_dir);
 	    return (HTTP_UPDATE_FAILED);

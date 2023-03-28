@@ -1,111 +1,191 @@
-/* manage the On The Air activation Pane, such as OTA and SOTA.
+/* manage the On The Air activation Pane, for now POTA and SOTA.
+ * provide sorting option by age, band and id code.
  */
 
 #include "HamClock.h"
 
 
-#define OTA_COLOR       RGB565(100,150,250)      // title color
+#define OTA_COLOR       RGB565(100,150,250)     // title color
 #define ORG_DY          32                      // dy of organization name row
 #define START_DY        47                      // dy of first row
 #define OTA_DY          14                      // dy of each successive row
-#define OTA_INDENT      4                       // l-r border
+#define OTA_INDENT      1                       // l-r border
+#define MAX_LINE        27                      // max line length, including EOS
 #define MAX_VIS         ((PLOTBOX_H - START_DY)/OTA_DY)   // max visible rows
-#define OK2SCDW         (top_vis < n_otaspots - MAX_VIS)  // whether it is ok to scroll down (fwd in time)
-#define OK2SCUP         (top_vis > 0)                     // whether it is ok to scroll up (backward in time)
-#define SCR_DX          (PLOTBOX_W-15)          // scroll control dx center within box
-#define SCRUP_DY        9                       // up " dy down "
-#define SCRDW_DY        23                      // down " dy down "
-#define SCR_R           5                       // " radius
+#define OK2SCDW         (top_vis < n_otaspots - MAX_VIS)  // whether it is ok to scroll down (fwd in sort)
+#define OK2SCUP         (top_vis > 0)                     // whether it is ok to scroll up (backward in sort)
 
 
+// current collection of ota spots
+#if defined(_IS_ESP8266)
+#define MAX_SPOTS       MAX_VIS                 // limit ram use on ESP
+#else
+#define MAX_SPOTS       50                      // even UNIX has limit so scrolling isn't crazy long
+#endif
+static DXClusterSpot otaspots[MAX_SPOTS];       // smallest sort field first
+static int n_otaspots;                          // otaspots in use, newest at n_otaspots - 1
+static int top_vis;                             // otaspots[] index showing at top of pane
+
+
+// menu names and backend queries for each type of On The Air
 typedef enum {
     OTAT_POTA,
     OTAT_SOTA,
     OTAT_N,
 } OTAType;
 
+#define MAX_MENUNAME_LEN        5
+#define MAX_FILENAME_LEN        26
 typedef struct {
-    const char menu_name[5];
-    const char file_name[26];
-} OTAName;
-
-// N.B. files must match order in OTAType
-static const OTAName ota_names[OTAT_N] PROGMEM = {
+    const char menu_name[MAX_MENUNAME_LEN];
+    const char file_name[MAX_FILENAME_LEN];
+} OTATypeInfo;
+static const OTATypeInfo ota_names[OTAT_N] PROGMEM = {
     {"POTA", "/POTA/pota-activators.txt"},
     {"SOTA", "/SOTA/sota-activators.txt"},
 };
 
-// current collection of otaspots
-#if defined(_IS_ESP8266)
-#define N_MORESP          0                     // use less precious ESP mem
-#else
-#define N_MORESP          10                    // n more than MAX_VIS spots
-#endif
-#define MAX_SPOTS         (MAX_VIS+N_MORESP)   // total number of spots retained
-static DXClusterSpot otaspots[MAX_SPOTS];
-static int n_otaspots;                          // otaspots in use, newest at n_otaspots - 1
-static int top_vis;                             // otaspots[] index showing at top of pane
+static uint8_t ota_type;                        // one of OTAType
+static char ota_name[MAX_MENUNAME_LEN];         // handy text name of ota_type
 
 
-/* save new OTA choice
+
+
+
+/* qsort-style function to compare two DXClusterSpot by freq
  */
-static void saveOTAChoice (uint8_t c)
+static int qsDXCFreq (const void *v1, const void *v2)
 {
-    NVWriteUInt8 (NV_ONTHEAIR, c);
+    DXClusterSpot *s1 = (DXClusterSpot *)v1;
+    DXClusterSpot *s2 = (DXClusterSpot *)v2;
+    return (s1->kHz - s2->kHz);
 }
 
-/* return current OTA choice
+/* qsort-style function to compare two DXClusterSpot by de_call AKA id
  */
-static uint8_t getOTAChoice (void)
+static int qsDXCDECall (const void *v1, const void *v2)
 {
-    uint8_t c;
-    if (!NVReadUInt8 (NV_ONTHEAIR, &c) || c >= OTAT_N) {
-        c = OTAT_POTA;
-        NVWriteUInt8 (NV_ONTHEAIR, c);
+    DXClusterSpot *s1 = (DXClusterSpot *)v1;
+    DXClusterSpot *s2 = (DXClusterSpot *)v2;
+    return (strcmp (s1->de_call, s2->de_call));
+}
+
+/* qsort-style function to compare two DXClusterSpot by dx_grid
+ */
+static int qsDXCDXCall (const void *v1, const void *v2)
+{
+    DXClusterSpot *s1 = (DXClusterSpot *)v1;
+    DXClusterSpot *s2 = (DXClusterSpot *)v2;
+    return (strcmp (s1->dx_call, s2->dx_call));
+}
+
+/* qsort-style function to compare two DXClusterSpot by spotted
+ */
+static int qsDXCSpotted (const void *v1, const void *v2)
+{
+    DXClusterSpot *s1 = (DXClusterSpot *)v1;
+    DXClusterSpot *s2 = (DXClusterSpot *)v2;
+    return (s1->spotted - s2->spotted);
+}
+
+
+// menu names and functions for each sort type
+typedef enum {
+    OTAS_BAND,
+    OTAS_CALL,
+    OTAS_ID,
+    OTAS_AGE,
+    OTAS_N,
+} OTASort;
+
+typedef struct {
+    const char *menu_name;                      // menu name for this sort
+    int (*qsf)(const void *v1, const void *v2); // matching qsort compare func, if any
+} OTASortInfo;
+static const OTASortInfo ota_sorts[OTAS_N] = {
+    {"Band", qsDXCFreq},
+    {"Call", qsDXCDXCall},
+    {"Id",   qsDXCDECall},
+    {"Age",  qsDXCSpotted},
+};
+
+static uint8_t ota_sortby;                      // one of OTASort
+
+
+
+
+/* save OTA choices
+ */
+static void saveOTAChoices(void)
+{
+    NVWriteUInt8 (NV_OTALIST, ota_type);
+    NVWriteUInt8 (NV_OTASORT, ota_sortby);
+}
+
+/* init OTA choices from NV
+ */
+static void initOTAChoices(void)
+{
+    if (!NVReadUInt8 (NV_OTALIST, &ota_type) || ota_type >= OTAT_N) {
+        ota_type = OTAT_POTA;
+        NVWriteUInt8 (NV_OTALIST, ota_type);
     }
-    return (c);
+    strcpy_P (ota_name, ota_names[ota_type].menu_name);
+
+    if (!NVReadUInt8 (NV_OTASORT, &ota_sortby) || ota_sortby >= OTAS_N) {
+        ota_sortby = OTAS_AGE;
+        NVWriteUInt8 (NV_OTASORT, ota_sortby);
+    }
 }
 
-
-/* draw, else erase, the up scroll control;
- */
-static void drawOTAScrollUp (const SBox &box, bool draw)
-{
-        uint16_t x0 = box.x + SCR_DX;
-        uint16_t y0 = box.y + SCRUP_DY - SCR_R;
-        uint16_t x1 = box.x + SCR_DX - SCR_R;
-        uint16_t y1 = box.y + SCRUP_DY + SCR_R;
-        uint16_t x2 = box.x + SCR_DX + SCR_R;
-        uint16_t y2 = box.y + SCRUP_DY + SCR_R;
-
-        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? OTA_COLOR : RA8875_BLACK);
-}
-
-/* draw, else erase, the down scroll control.
- */
-static void drawOTAScrollDown (const SBox &box, bool draw)
-{
-        uint16_t x0 = box.x + SCR_DX - SCR_R;
-        uint16_t y0 = box.y + SCRDW_DY - SCR_R;
-        uint16_t x1 = box.x + SCR_DX + SCR_R;
-        uint16_t y1 = box.y + SCRDW_DY - SCR_R;
-        uint16_t x2 = box.x + SCR_DX;
-        uint16_t y2 = box.y + SCRDW_DY + SCR_R;
-
-        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? OTA_COLOR : RA8875_BLACK);
-}
 
 /* create a line of info for the given spot.
- * best if similar to dxcluster etc
  */
-static void formatOTASpot (const DXClusterSpot &spot, char line[], int line_len)
+static void formatOTASpot (const DXClusterSpot &spot, char line[MAX_LINE])
 {
-    // pretty freq, fixed 8 chars
-    const char *f_fmt = spot.kHz < 1e6F ? _FX("%8.1f") : _FX("%8.0f");
-    int l = snprintf (line, line_len, f_fmt, spot.kHz);
+    // n chars in each field, ie, all lengths are sans EOS and intervening gaps
+    const unsigned ID_LEN = ota_type == OTAT_POTA ? 7 : 10;
+    const unsigned AGE_LEN = ota_type == OTAT_POTA ? 3 : 1;
+    #define FREQ_LEN        6
+    #define CALL_LEN        (MAX_LINE - FREQ_LEN - AGE_LEN - ID_LEN - 4) // -EOS and -3 spaces
 
-    // add remaining fields
-    snprintf (line+l, line_len-l, _FX(" %-*s %04u"), MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs);
+    // printf ("*********************** ID %d AGE %d FREQ %d CALL %d\n", ID_LEN, AGE_LEN, FREQ_LEN, CALL_LEN);
+
+    // pretty freq + trailing space
+    int l = snprintf (line, MAX_LINE, _FX("%*.0f "), FREQ_LEN, spot.kHz);
+
+    // add dx call; truncate if too long or look for / and use longest side
+    if (strlen (spot.dx_call) > CALL_LEN) {
+        const char *slash = strchr (spot.dx_call, '/');
+        if (slash) {
+            // use longest section
+            int left_len = slash - spot.dx_call;
+            int rite_len = strlen (slash+1);
+            if (left_len > rite_len)
+                l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"), CALL_LEN, left_len, spot.dx_call);
+            else
+                l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"),CALL_LEN, CALL_LEN, spot.dx_call+left_len+1);
+        } else {
+            // no choice but to truncate
+            l += snprintf (line+l, MAX_LINE-l, _FX("%.*s"), CALL_LEN, spot.dx_call);
+        }
+    } else {
+        // fits ok as-is
+        l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"), CALL_LEN, CALL_LEN, spot.dx_call);
+    }
+
+    // leading space then spot id
+    l += snprintf (line+l, MAX_LINE-l, _FX(" %*.*s"), ID_LEN, ID_LEN, spot.de_call);
+
+    // squeeze in age
+    int age = spotAgeMinutes(spot);
+    if (ota_type == OTAT_SOTA) {
+        if (age < 10)
+            snprintf (line+l, MAX_LINE-l, _FX(" %d"), age);
+        else
+            snprintf (line+l, MAX_LINE-l, _FX(" +"));
+    } else
+        snprintf (line+l, MAX_LINE-l, _FX(" %2dm"), age);
 }
 
 /* redraw all visible otaspots in the given box.
@@ -113,7 +193,7 @@ static void formatOTASpot (const DXClusterSpot &spot, char line[], int line_len)
  */
 static void drawOTAVisSpots (const SBox &box)
 {
-    tft.fillRect (box.x+1, box.y + START_DY+1, box.w-2, box.h - START_DY-2, RA8875_BLACK);
+    tft.fillRect (box.x+1, box.y + START_DY-1, box.w-2, box.h - START_DY - 1, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(RA8875_WHITE);
     uint16_t x = box.x + OTA_INDENT;
@@ -122,8 +202,8 @@ static void drawOTAVisSpots (const SBox &box)
     // draw otaspots top_vis on top
     int n_shown = 0;
     for (int i = top_vis; i < n_otaspots && n_shown < MAX_VIS; i++) {
-        char line[100];
-        formatOTASpot (otaspots[i], line, sizeof(line));
+        char line[MAX_LINE];
+        formatOTASpot (otaspots[i], line);
         tft.setCursor (x, y);
         tft.print (line);
         y += OTA_DY;
@@ -131,11 +211,12 @@ static void drawOTAVisSpots (const SBox &box)
     }
 
     // draw scroll controls, as needed
-    drawOTAScrollDown (box, OK2SCDW);
-    drawOTAScrollUp (box, OK2SCUP);
+    drawScrollDown (box, OTA_COLOR, n_otaspots - top_vis - MAX_VIS, OK2SCDW);
+    drawScrollUp (box, OTA_COLOR, top_vis, OK2SCUP);
 }
 
-/* draw otaspots[] in the given pane box
+/* draw otaspots[] in the given pane box from scratch.
+ * use drawOTAVisSpots() if want to redraw just the spots.
  */
 static void drawOTA (const SBox &box)
 {
@@ -153,19 +234,12 @@ static void drawOTA (const SBox &box)
     // label count and which organization
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(OTA_COLOR);
-    const char *org = getOTAChoice() == OTAT_POTA ? "POTA" : "SOTA";
-    uint16_t ow = getTextWidth(org);
+    uint16_t ow = getTextWidth(ota_name);
     tft.setCursor (box.x + (box.w-ow)/2, box.y + ORG_DY);
-    tft.print (org);
-
-    // start scrolled all the way down
-    top_vis = n_otaspots - MAX_VIS;
-    if (top_vis < 0)
-        top_vis = 0;
+    tft.print (ota_name);
 
     // show each spot starting with top_vis, up to max
     drawOTAVisSpots (box);
-
 }
 
 /* scroll up, if appropriate to do so now.
@@ -173,7 +247,9 @@ static void drawOTA (const SBox &box)
 static void scrollOTAUp (const SBox &box)
 {
     if (OK2SCUP) {
-        top_vis -= 1;
+        top_vis -= (MAX_VIS - 1);               // retain 1 for context
+        if (top_vis < 0)
+            top_vis = 0;
         drawOTAVisSpots (box);
     }
 }
@@ -183,7 +259,9 @@ static void scrollOTAUp (const SBox &box)
 static void scrollOTADown (const SBox &box)
 {
     if (OK2SCDW) {
-        top_vis += 1;
+        top_vis += (MAX_VIS - 1);               // retain 1 for context
+        if (top_vis > n_otaspots - MAX_VIS)
+            top_vis = n_otaspots - MAX_VIS;
         drawOTAVisSpots (box);
     }
 }
@@ -202,49 +280,80 @@ static void engageOTARow (DXClusterSpot &s)
 
 
 /* show menu to let op change organization
+ * Program:
+ *   (*) SOTA   ( ) POTA
+ * Sort:
+ *   ( ) Age    ( ) Band
+ *   (*) Call   ( ) ID
  */
 static void runOTAOrgMenu (const SBox &box)
 {
-    #define OTA_MINDENT 4
-    uint8_t ota_choice = getOTAChoice();
-    MenuItem mitems[OTAT_N];
-    char names[OTAT_N][sizeof(ota_names[0].menu_name)]; // really only for ESP
-    for (int i = 0; i < OTAT_N; i++) {
+
+    // copy menu names, really only for ESP
+    char names[OTAT_N][MAX_MENUNAME_LEN];
+    for (int i = 0; i < OTAT_N; i++)
         strcpy_P (names[i], ota_names[i].menu_name);
-        mitems[i] = { MENU_1OFN, ota_choice == i, 1, OTA_MINDENT, names[i] };
-    }
-    SBox menu_b = box;
-    menu_b.x = box.x + 3*box.w/8;
+
+    #define OTA_LINDENT 3
+    #define OTA_MINDENT 7
+    bool is_pota = ota_type == OTAT_POTA;
+    MenuItem mitems[] = {
+        // first column
+        {MENU_LABEL, false,                  0, OTA_LINDENT, "Program:"},
+        {MENU_1OFN, is_pota,                 1, OTA_MINDENT, names[OTAT_POTA]},
+        {MENU_LABEL, false,                  0, OTA_LINDENT, "Sort by:"},
+        {MENU_1OFN, ota_sortby == OTAS_AGE,  2, OTA_MINDENT, ota_sorts[OTAS_AGE].menu_name},
+        {MENU_1OFN, ota_sortby == OTAS_BAND, 2, OTA_MINDENT, ota_sorts[OTAS_BAND].menu_name},
+
+        // second column
+        {MENU_BLANK, false,                  0, OTA_MINDENT, NULL },
+        {MENU_1OFN, !is_pota,                1, OTA_MINDENT, names[OTAT_SOTA]},
+        {MENU_BLANK, false,                  0, OTA_MINDENT, NULL },
+        {MENU_1OFN, ota_sortby == OTAS_CALL, 2, OTA_MINDENT, ota_sorts[OTAS_CALL].menu_name},
+        {MENU_1OFN, ota_sortby == OTAS_ID,   2, OTA_MINDENT, ota_sorts[OTAS_ID].menu_name},
+    };
+    #define OTAMENU_N   NARRAY(mitems)
+
+    SBox menu_b = box;                  // copy, not ref
+    menu_b.x = box.x + box.w/8;
     menu_b.y = box.y + ORG_DY;
     menu_b.w = 0;       // shrink to fit
     SBox ok_b;
-    MenuInfo menu = {menu_b, ok_b, true, true, 1, OTAT_N, mitems};
+    MenuInfo menu = {menu_b, ok_b, true, false, 2, OTAMENU_N, mitems};
     if (runMenu (menu)) {
 
-        // find new selection
-        uint8_t new_choice = 0;
-        for (int i = 0; i < OTAT_N; i++) {
-            if (mitems[i].set) {
-                new_choice = i;
-                break;
-            }
-        }
-
-        // update if changed else just redraw pane to erase menu
-        if (new_choice != ota_choice) {
-            ota_choice = new_choice;
-            saveOTAChoice (ota_choice);
-            updateOnTheAir (box);
+        // find desired list source and note whether changed for ESP
 #if defined(_IS_ESP8266)
+        uint8_t old_type = ota_type;
+#endif // _IS_ESP8266
+        if (mitems[1].set)
+            ota_type = OTAT_POTA;
+        else
+            ota_type = OTAT_SOTA;
+
+        // find new sort field
+        if (mitems[3].set)
+            ota_sortby = OTAS_AGE;
+        else if (mitems[4].set)
+            ota_sortby = OTAS_BAND;
+        else if (mitems[8].set)
+            ota_sortby = OTAS_CALL;
+        else
+            ota_sortby = OTAS_ID;
+
+        // update
+        saveOTAChoices();
+        updateOnTheAir(box);
+#if defined(_IS_ESP8266)
+        if (ota_type != old_type) {
             // too lazy to erase old then redraw fresh map spots
             initEarthMap();
-#endif
-        } else {
-            drawOTA (box);
         }
+#endif // _IS_ESP8266
 
     } else {
-        // refresh to erase menu
+
+        // just simple refresh to erase menu
         drawOTA (box);
     }
 }
@@ -254,13 +363,13 @@ static void runOTAOrgMenu (const SBox &box)
  */
 bool updateOnTheAir (const SBox &box)
 {
+    initOTAChoices();
+    const char *page = ota_names[ota_type].file_name;
+    int n_read = 0;
+
     WiFiClient ota_client;
     char line[100];
     bool ok = false;
-
-    uint8_t ota_choice = getOTAChoice();
-    const char *page = ota_names[ota_choice].file_name;
-    int n_read = 0;
 
     Serial.println (page);
     if (wifiOk() && ota_client.connect(backend_host, BACKEND_PORT)) {
@@ -287,30 +396,40 @@ bool updateOnTheAir (const SBox &box)
                 continue;
 
             // parse
-            char dxcall[12], iso[20], dxgrid[7], mode[8];               // N.B. match sscanf field lengths
+            char dxcall[12], iso[20], dxgrid[7], mode[8], id[12];       // N.B. match sscanf field lengths
             float lat, lng;
-            int hz;
-            // JI1ORE,430510000,2023-02-19T07:00:14,CW,QM05,35.7566,140.189
-            if (sscanf (line, "%11[^,],%d,%19[^,],%7[^,],%6[^,],%f,%f",
-                                dxcall, &hz, iso, mode, dxgrid, &lat, &lng) != 7) {
+            unsigned long hz;
+            // JI1ORE,430510000,2023-02-19T07:00:14,CW,QM05,35.7566,140.189,JA-1234
+            if (sscanf (line, _FX("%11[^,],%lu,%19[^,],%7[^,],%6[^,],%f,%f,%11s"),
+                                dxcall, &hz, iso, mode, dxgrid, &lat, &lng, id) != 8) {
                 // maybe a blank mode?
-                if (sscanf (line, "%11[^,],%d,%19[^,],,%6[^,],%f,%f",
-                                dxcall, &hz, iso, dxgrid, &lat, &lng) != 6) {
-                    Serial.printf (_FX("Bad OTA line: %s\n"), line);
-                    goto out;
+                if (sscanf (line, _FX("%11[^,],%lu,%19[^,],,%6[^,],%f,%f,%11s"),
+                                dxcall, &hz, iso, dxgrid, &lat, &lng, id) != 7) {
+                    Serial.printf (_FX("OTA: bogus line: %s\n"), line);
+                    continue;
                 }
-                // yup
+                // .. yup
                 mode[0] = '\0';
             }
 
-            // save next spot, shift out oldest if already full
+            // ignore GHz spots because they are too wide to print
+            if (hz >= 1000000000) {
+                Serial.printf (_FX("OTA: ignoring freq >= 1 GHz: %s\n"), line);
+                continue;
+            }
+
+            // add to list
             if (n_otaspots == MAX_SPOTS) {
+                // shift out the oldest
                 memmove (otaspots, &otaspots[1], (MAX_SPOTS-1) * sizeof(DXClusterSpot));
                 n_otaspots = MAX_SPOTS - 1;
             }
             DXClusterSpot *sp = &otaspots[n_otaspots++];
             memset (sp, 0, sizeof(*sp));
-            // leave de_call and de_grid blank; de not really known but use our DE for dist and bearing
+
+            // use de_call for id, de_grid for list name
+            strncpy (sp->de_call, id, sizeof(sp->de_call));
+            strncpy (sp->de_grid, ota_name, sizeof(sp->de_grid));
             strncpy (sp->dx_call, dxcall, sizeof(sp->dx_call));
             strncpy (sp->dx_grid, dxgrid, sizeof(sp->dx_grid));
             strncpy (sp->mode, mode, sizeof(sp->mode));
@@ -319,7 +438,7 @@ bool updateOnTheAir (const SBox &box)
             sp->de_lat = de_ll.lat;
             sp->de_lng = de_ll.lng;
             sp->kHz = hz / 1000.0F;
-            sp->utcs = 100*atoi(iso+11) + atoi(iso+14); // 100*hr + min
+            sp->spotted = crackISO8601 (iso);
 
             // count
             n_read++;
@@ -334,8 +453,14 @@ bool updateOnTheAir (const SBox &box)
 
 out:
 
+    // restart scrolled all the way down
+    top_vis = n_otaspots - MAX_VIS;
+    if (top_vis < 0)
+        top_vis = 0;
+
     if (ok) {
-        Serial.printf (_FX("OTA: saved %d of %d\n"), n_otaspots, n_read);
+        Serial.printf (_FX("OTA: using %d of %d\n"), n_otaspots, n_read);
+        qsort (otaspots, n_otaspots, sizeof(DXClusterSpot), ota_sorts[ota_sortby].qsf);
         drawOTA (box);
     } else {
         plotMessage (box, OTA_COLOR, _FX("On The Air error"));
@@ -351,14 +476,16 @@ out:
  */
 bool checkOnTheAirTouch (const SCoord &s, const SBox &box)
 {
-    // check for title tap -- allow a fairly wide region for the scroll controls to reduce false menus
+    // check for title or scroll
     if (s.y < box.y + PANETITLE_H) {
 
-        if (s.x >= box.x + 3*box.w/4) {
-            if (s.y < box.y + PANETITLE_H/2)
-                scrollOTAUp (box);
-            else
-                scrollOTADown (box);
+        if (checkScrollUpTouch (s, box)) {
+            scrollOTAUp (box);
+            return (true);
+        }
+
+        if (checkScrollDownTouch (s, box)) {
+            scrollOTADown (box);
             return (true);
         }
 
@@ -383,7 +510,7 @@ bool checkOnTheAirTouch (const SCoord &s, const SBox &box)
 
 }
 
-/* return a list of the current OTA spots
+/* return a list of the current OTA spots, if any
  */
 bool getOnTheAirSpots (DXClusterSpot **spp, uint8_t *nspotsp)
 {
@@ -436,4 +563,3 @@ bool getClosestOnTheAirSpot (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
 {
         return (getClosestDXC (otaspots, n_otaspots, ll, sp, llp));
 }
-

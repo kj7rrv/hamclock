@@ -69,7 +69,7 @@ uint32_t millis(void)
 	if (t0.tv_sec == 0 && t0.tv_usec == 0)
 	    t0 = t;
 
-	int32_t dt_ms = (t.tv_sec - t0.tv_sec)*1000 + (t.tv_usec - t0.tv_usec)/1000;
+	uint32_t dt_ms = (t.tv_sec - t0.tv_sec)*1000 + (t.tv_usec - t0.tv_usec)/1000;
 	// printf ("millis %u: %ld.%06ld - %ld.%06ld\n", dt_ms, t.tv_sec, t.tv_usec, t0.tv_sec, t0.tv_usec);
 	return (dt_ms);
 }
@@ -215,6 +215,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, "Options:\n");
         fprintf (stderr, " -a l : set gimbal trace level\n");
         fprintf (stderr, " -b h : set backend host to h; default is %s\n", backend_host);
+        fprintf (stderr, " -c   : disable all touch events from web interface\n");
         fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
         fprintf (stderr, " -e p : set RESTful web server port to p; default is %d\n", restful_port);
         fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
@@ -257,6 +258,9 @@ static void crackArgs (int ac, char *av[])
                         usage ("missing host name for -b");
                     backend_host = *++av;
                     ac--;
+                    break;
+                case 'c':
+                    no_web_touch = true;
                     break;
                 case 'd':
                     if (ac < 2)

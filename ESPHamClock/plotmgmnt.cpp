@@ -14,35 +14,12 @@ SBox plot_b[PANE_N] = {
 PlotChoice plot_ch[PANE_N];
 time_t plot_rotationT[PANE_N];
 uint32_t plot_rotset[PANE_N];
+
+#define X(a,b)  b,                      // expands PLOTNAMES to name and comma
 const char *plot_names[PLOT_CH_N] = {
-
-    // N.B. must be in same order as PLOT_CH_* 
-    // N.B. take care that names will fit in menu built by askPaneChoice()
-    // N.B. names should not include blanks, but _ are changed to blanks for prettier printing
-
-    "VOACAP",           // PLOT_CH_BC,
-    "DE_Wx",            // PLOT_CH_DEWX,
-    "DX_Cluster",       // PLOT_CH_DXCLUSTER,
-    "DX_Wx",            // PLOT_CH_DXWX,
-    "Solar_Flux",       // PLOT_CH_FLUX,
-    "Planetary_K",      // PLOT_CH_KP,
-    "Moon",             // PLOT_CH_MOON,
-    "Space_Wx",         // PLOT_CH_NOAASWX,
-    "Sunspot_N",        // PLOT_CH_SSN,
-    "X-Ray",            // PLOT_CH_XRAY,
-    "Rotator",          // PLOT_CH_GIMBAL,
-    "ENV_Temp",         // PLOT_CH_TEMPERATURE,
-    "ENV_Press",        // PLOT_CH_PRESSURE,
-    "ENV_Humid",        // PLOT_CH_HUMIDITY,
-    "ENV_DewPt",        // PLOT_CH_DEWPOINT,
-    "SDO",              // PLOT_CH_SDO,
-    "Solar_Wind",       // PLOT_CH_SOLWIND,
-    "DRAP",             // PLOT_CH_DRAP,
-    "Countdown",        // PLOT_CH_COUNTDOWN,
-    "Contests",         // PLOT_CH_CONTESTS,
-    "Live_spots",       // PLOT_CH_PSK,
-    "On_The_Air",       // PLOT_CH_OTA
+    PLOTNAMES
 };
+#undef X
 
 /* retrieve the plot choice for the given pane from NV, if set
  */
@@ -865,4 +842,44 @@ bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool updat
         // refresh protected region in case X11 window is moved
         tft.drawPR();
     }
+}
+
+/* given min and max and an approximate number of divisions desired,
+ * fill in ticks[] with nicely spaced values and return how many.
+ * N.B. return value, and hence number of entries to ticks[], might be as
+ *   much as 2 more than numdiv.
+ */
+int tickmarks (float min, float max, int numdiv, float ticks[])
+{
+    static int factor[] = { 1, 2, 5 };
+    #define NFACTOR    NARRAY(factor)
+    float minscale;
+    float delta;
+    float lo;
+    float v;
+    int n;
+
+    minscale = fabsf (max - min);
+
+    if (minscale == 0) {
+        /* null range: return ticks in range min-1 .. min+1 */
+        for (n = 0; n < numdiv; n++)
+            ticks[n] = min - 1.0 + n*2.0/numdiv;
+        return (numdiv);
+    }
+
+    delta = minscale/numdiv;
+    for (n=0; n < (int)NFACTOR; n++) {
+        float scale;
+        float x = delta/factor[n];
+        if ((scale = (powf(10.0F, ceilf(log10f(x)))*factor[n])) < minscale)
+            minscale = scale;
+    }
+    delta = minscale;
+
+    lo = floor(min/delta);
+    for (n = 0; (v = delta*(lo+n)) < max+delta; )
+        ticks[n++] = v;
+
+    return (n);
 }

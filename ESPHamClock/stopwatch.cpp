@@ -230,7 +230,6 @@ static void setAlarmPin (bool set) { (void) set; }
 #define BAC_HRCOL       sw_col                  // hour hand color
 #define BAC_MNCOL       sw_col                  // minute hand color
 #define BAC_SCCOL       GRAY                    // second hand color
-#define BAC_BKCOL       RA8875_BLUE             // Back button color
 #define BAC_BEZCOL      GRAY                    // bezel color
 #define BAC_DATEX       2                       // date box X -- just to anchor text
 #define BAC_DATEY       2                       // date box Y -- just to anchor text
@@ -1813,7 +1812,7 @@ static void checkSWPageTouch()
 {
     // check for touch at all
     SCoord s;
-    if (readCalTouchWS(s) == TT_NONE)
+    if (readCalTouchWS(s) == TT_NONE || screenIsLocked())
         return;
 
     // update idle timer, ignore if this tap is restoring full brightness

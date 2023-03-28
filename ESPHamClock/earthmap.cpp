@@ -669,10 +669,7 @@ static void drawMouseLoc()
         time_t t0 = now();
         int age = t0 >= psk_rp->posting ? t0 - psk_rp->posting : 0;
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        if (age < 3600)
-            tft.printf ("Age %4dm", age/60);                    // minutes
-        else
-            tft.printf ("Age %4.1fh", age/3600.0F);             // hours
+        tft.printf ("Age %4dm", age/60);                    // minutes
 
         // show snr
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
@@ -704,19 +701,17 @@ static void drawMouseLoc()
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
         tft.printf (buf);
 
-        // show rx info -- blanks if from OnTheAir
-        if (strlen (dxc_s.de_call) > 0) {
-            snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.de_call);
-            tw = getTextWidth(buf);
-            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
-            tft.printf (buf);
-            snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.de_grid);
-            tw = getTextWidth(buf);
-            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
-            tft.printf (buf);
-        }
+        // show rx info -- list info if from OnTheAir
+        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.de_call);
+        tw = getTextWidth(buf);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.printf (buf);
+        snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.de_grid);
+        tw = getTextWidth(buf);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.printf (buf);
 
-        // show mode
+        // show mode if known
         if (strlen (dxc_s.mode) > 0) {
             snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.mode);
             tw = getTextWidth(buf);
@@ -728,9 +723,9 @@ static void drawMouseLoc()
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
         tft.printf ("kHz%6.0f", dxc_s.kHz);
 
-        // show spot time
+        // show spot age
         tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("UTC  %04d", dxc_s.utcs);
+        tft.printf ("Age %4dm", spotAgeMinutes(dxc_s));
 
         // show distance and bearing
         drawMLDB (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
@@ -932,7 +927,7 @@ void drawMapMenu()
 {
 
     enum MIName {     // menu items -- N.B. must be in same order as mitems[]
-        MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_AUR, MI_STY_PRP,
+        MI_STY_TTL, MI_STR_CRY, MI_STY_TER, MI_STY_DRA, MI_STY_MUF, MI_STY_AUR, MI_STY_WXX, MI_STY_PRP,
         MI_GRD_TTL, MI_GRD_NON, MI_GRD_TRO, MI_GRD_LLG, MI_GRD_MAI, MI_GRD_AZM,
     #if defined(_SUPPORT_ZONES)
                     MI_GRD_CQZ, MI_GRD_ITU,
@@ -954,6 +949,7 @@ void drawMapMenu()
             {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_DRAP]},
             {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_MUF]},
             {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_AURORA]},
+            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_WX]},
             {MENU_IGNORE, false, 1, SEC_INDENT, NULL},     // MI_STY_PRP: see below
         {MENU_LABEL, false, 0, PRI_INDENT, "Grid:"},
             {MENU_1OFN, false, 2, SEC_INDENT, "None"},
@@ -987,6 +983,7 @@ void drawMapMenu()
         mitems[MI_STY_DRA].set = core_map == CM_DRAP;
         mitems[MI_STY_MUF].set = core_map == CM_MUF;
         mitems[MI_STY_AUR].set = core_map == CM_AURORA;
+        mitems[MI_STY_WXX].set = core_map == CM_WX;
     } else {
         // add propmap item and select
         mitems[MI_STY_PRP].type = MENU_1OFN;
@@ -1016,7 +1013,7 @@ void drawMapMenu()
 
     // create a box for the menu
     SBox menu_b;
-    menu_b.x = view_btn_b.x;                    // left edge matches view button
+    menu_b.x = view_btn_b.x + 1;                // left edge matches view button with slight indent
     menu_b.y = view_btn_b.y+view_btn_b.h;       // top just below view button
     menu_b.w = 0;                               // shrink to fit
 
@@ -1045,6 +1042,8 @@ void drawMapMenu()
             scheduleNewCoreMap (CM_MUF);
         else if (mitems[MI_STY_AUR].set && (prop_turned_off || core_map != CM_AURORA))
             scheduleNewCoreMap (CM_AURORA);
+        else if (mitems[MI_STY_WXX].set && (prop_turned_off || core_map != CM_WX))
+            scheduleNewCoreMap (CM_WX);
 
         // check for different grid
         if (mitems[MI_GRD_NON].set && mapgrid_choice != MAPGRID_OFF) {
@@ -1125,11 +1124,9 @@ void drawMapMenu()
             }
         }
 
-        // restart map if enough has changed else just erase erase ok
+        // restart map if enough has changed
         if (full_redraw)
             initEarthMap();
-        else
-            fillSBox (ok_b, RA8875_BLACK);
 
         // update state
         logState();
@@ -1141,6 +1138,8 @@ void drawMapMenu()
         for (uint16_t dy = 0; dy < menu_b.h; dy++)
             for (uint16_t dx = 0; dx < menu_b.w; dx++)
                 drawMapCoord (menu_b.x+dx, menu_b.y+dy);
+        if (rss_on)
+            drawRSSBox();
     }
 
     tft.drawPR();

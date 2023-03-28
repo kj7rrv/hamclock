@@ -91,7 +91,7 @@ uint8_t findBCModeValue (const char *name)
 #else
 #define DRAPMAP_INTERVAL    (300+randIvl(60))   // polling interval, secs
 #endif // _IS_ESP8266
-#define OTHER_MAPS_INTERVAL (3600+randIvl(200)) // polling interval, secs
+#define OTHER_MAPS_INTERVAL (1900+randIvl(200)) // polling interval, secs
 
 // DRAP plot info, new data posted every few minutes
 #define DRAPPLOT_INTERVAL    (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
@@ -2157,11 +2157,17 @@ void sendUserAgent (WiFiClient &client)
 
         // date formatting
         int dayf = (int)getDateFormat();
-        if (weekStartsOnMonday())                       // added in 286
+        if (weekStartsOnMonday())                       // added in 2.86
             dayf |= 4;
 
+        // number of dashed colors                      // added to first LV6 in 2.90
+        int n_dashed = 0;
+        for (int i = 0; i < N_CSPR; i++)
+            if (getColorDashed((ColorSelection)i))
+                n_dashed++;
+
         snprintf (ua, ual,
-            _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV5 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
+            _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV6 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb, dx_info_for_sat, rss_code, useMetricUnits(),
@@ -2170,7 +2176,10 @@ void sendUserAgent (WiFiClient &client)
             // new for LV5:
             (int)as, getCenterLng(), (int)auxtime /* getDoy() before 2.80 */, names_on, getDemoMode(),
             (int)getSWEngineState(NULL,NULL), (int)getBigClockBits(), utcOffset(), gpsd,
-            rss_interval, dayf, rr_score);
+            rss_interval, dayf, rr_score,
+            // new for LV6:
+            useMagBearing(), n_dashed, useLocalNTPHost(), 
+            0, 0, 0, 0, 0);       // TBD
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);

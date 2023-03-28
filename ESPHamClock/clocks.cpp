@@ -8,17 +8,13 @@
 uint8_t de_time_fmt;                            // one of DETIME_*
 uint8_t desrss, dxsrss;                         // show actual de/dx sun rise/set else time to
 
-// menu names for each AuxTimeFormat -- must be in same order!
+// menu names for each AuxTimeFormat
 AuxTimeFormat auxtime;
+#define X(a,b)  b,                              // expands AUXTIME to each name plus comma
 const char *auxtime_names[AUXT_N] = {
-    "Date",
-    "Day of Year",
-    "Julian Date",
-    "Modified JD",
-    "Sidereal",
-    "Solar",
-    "UNIX seconds"
+    AUXTIMES
 };
+#undef X
 
 // time update interval, seconds
 #define TIME_INTERVAL   (30*60)                 // normal resync interval when working ok, seconds
@@ -30,7 +26,6 @@ const char *gpsd_server, *ntp_server;           // at most one set to static sto
 // run flag and progression
 static bool hide_clocks;                        // run but don't display
 static int prev_yr, prev_mo, prev_dy, prev_hr, prev_mn, prev_sc, prev_wd;
-static bool time_was_bad = true;                // used to erase ? when confirmed ok again
 
 // TimeLib's now() stays at real UTC, but user can adjust time offset
 static int32_t utc_offset;                      // nowWO() offset from UTC, secs
@@ -44,18 +39,6 @@ static int32_t utc_offset;                      // nowWO() offset from UTC, secs
 #define FFONT_H         8                       // fixed font height
 #define HMS_C           RA8875_WHITE            // HMS color
 #define AUX_C           RA8875_WHITE            // auxtime color
-
-// handy time parts
-typedef struct {
-    time_t t;
-    int sc;
-    int hr;
-    int mn;
-    int wd;
-    int mo;
-    int dy;
-    int yr;
-} TimeParts;
 
 /* draw the UTC "button" in clock_b depending on whether utc_offset is 0.
  * if offset is not 0 show red/black depending on even/odd second
@@ -427,16 +410,25 @@ static void runAuxTimeMenu()
     }
 }
 
+/* use NTP or GPSD to update time
+ */
+static void enableSyncProvider()
+{
+    setSyncInterval (TIME_INTERVAL);
+    setSyncProvider (getTime);
+}
+
 /* given UTC + user offset draw auxtime_b depending on auxtime setting.
  * we are called every second so do the minimum required.
  */
-static void drawAuxTime (bool all, const TimeParts &tp)
+static void drawAuxTime (bool all, time_t t_wo, const tmElements_t &tm_wo)
 {
     // mostly common prep
     #define _UCHW       13                                              // approx char width
     #define _UCCD       8                                               // descent
     static int prev_day;                                                // note new day for many options
-    int day = tp.t / (3600*24);
+    int day = t_wo / (3600*24);
+    int year = tm_wo.Year + 1970;
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor(AUX_C);
     uint16_t y = auxtime_b.y + auxtime_b.h - _UCCD;
@@ -454,8 +446,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday, date month year
 
-                int l = snprintf (buf, sizeof(buf), "%s, ", dayShortStr(tp.wd));
-                snprintf (buf+l, sizeof(buf)-1, "%2d %s %d", tp.dy, monthShortStr(tp.mo), tp.yr);
+                int l = snprintf (buf, sizeof(buf), "%s, ", dayShortStr(tm_wo.Wday));
+                snprintf (buf+l, sizeof(buf)-1, "%2d %s %d", tm_wo.Day, monthShortStr(tm_wo.Month), year);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -467,8 +459,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday month date, year
 
-                int l = snprintf (buf, sizeof(buf), "%s  ", dayShortStr(tp.wd));
-                snprintf (buf+l, sizeof(buf)-l, "%s %2d, %d", monthShortStr(tp.mo), tp.dy, tp.yr);
+                int l = snprintf (buf, sizeof(buf), "%s  ", dayShortStr(tm_wo.Wday));
+                snprintf (buf+l, sizeof(buf)-l, "%s %2d, %d", monthShortStr(tm_wo.Month), tm_wo.Day, year);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -480,8 +472,8 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
                 // Weekday, year month date
 
-                int l = snprintf (buf, sizeof(buf), "%s,  ", dayShortStr(tp.wd));
-                snprintf (buf+l, sizeof(buf)-l, "%d %s %2d", tp.yr, monthShortStr(tp.mo), tp.dy);
+                int l = snprintf (buf, sizeof(buf), "%s,  ", dayShortStr(tm_wo.Wday));
+                snprintf (buf+l, sizeof(buf)-l, "%d %s %2d", year, monthShortStr(tm_wo.Month), tm_wo.Day);
                 uint16_t bw = getTextWidth (buf);
                 int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
                 if (x < 0)
@@ -509,14 +501,13 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             // Weekday DOY <doy> year
 
             // find day of year
-            tmElements_t tm;
-            breakTime (tp.t, tm);
-            tm.Second = tm.Minute = tm.Hour = 0;
-            tm.Month = tm.Day = 1;
-            time_t year0 = makeTime (tm);
-            int doy = (tp.t - year0) / (24*3600) + 1;
+            tmElements_t tm_doy = tm_wo;
+            tm_doy.Second = tm_doy.Minute = tm_doy.Hour = 0;
+            tm_doy.Month = tm_doy.Day = 1;
+            time_t year0 = makeTime (tm_doy);
+            int doy = (t_wo - year0) / (24*3600) + 1;
 
-            snprintf (buf, sizeof(buf), "%s DOY %d  %d", dayShortStr(tp.wd), doy, tp.yr);
+            snprintf (buf, sizeof(buf), "%s DOY %d  %d", dayShortStr(tm_wo.Wday), doy, year);
             uint16_t bw = getTextWidth (buf);
             int16_t x = auxtime_b.x + (auxtime_b.w-bw)/2;
             if (x < 0)
@@ -534,7 +525,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
         #define _JDNFRAC   5                                            // n fractional digits
 
         // find value
-        double d = tp.t / 86400.0 + 2440587.5;                          // JD
+        double d = t_wo / 86400.0 + 2440587.5;                          // JD
         if (auxtime == AUXT_MJD)
             d -= 2400000.5;                                             // MJD
 
@@ -576,7 +567,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
         // find lst at DE
         double lst;                                                     // hours
-        double astro_mjd = tp.t/86400.0 + 2440587.5 - 2415020.0;        // just for now_lst()
+        double astro_mjd = t_wo/86400.0 + 2440587.5 - 2415020.0;        // just for now_lst()
         now_lst (astro_mjd, de_ll.lng, &lst);
         int wholemn = floor(lst*60);
 
@@ -614,7 +605,7 @@ static void drawAuxTime (bool all, const TimeParts &tp)
 
         // find solar time at DE in hours -- requires fresh solar gha each second
         AstroCir cir;
-        getSolarCir (tp.t, de_ll, cir);
+        getSolarCir (t_wo, de_ll, cir);
         float solar = fmodf (12 + (de_ll.lng_d + rad2deg(cir.gha))/15 + 48, 24);
         int wholemn = floorf(solar*60);
 
@@ -652,11 +643,11 @@ static void drawAuxTime (bool all, const TimeParts &tp)
         static uint16_t prev_xend;                                      // x coord of last digit
 
         // draw time
-        if (all || tp.t/10 != prev_t/10 || prev_xend == 0) {
+        if (all || t_wo/10 != prev_t/10 || prev_xend == 0) {
             // draw complete time but note location of last digit
             fillSBox (auxtime_b, RA8875_BLACK);
-            time_t t0 = tp.t;
-            int billions = tp.t/1000000000UL;
+            time_t t0 = t_wo;
+            int billions = t_wo/1000000000UL;
             t0 -= billions * 1000000000UL;                              // now millions
             int millions = t0/1000000UL;
             t0 -= millions * 1000000UL;                                 // now thousands
@@ -674,10 +665,10 @@ static void drawAuxTime (bool all, const TimeParts &tp)
             tft.fillRect (prev_xend, auxtime_b.y, _UCHW, auxtime_b.h, RA8875_BLACK);
             tft.setCursor(prev_xend, y);
         }
-        tft.print ((int)(tp.t % 10));
+        tft.print ((int)(t_wo % 10));
 
         // persist
-        prev_t = tp.t;
+        prev_t = t_wo;
     }
 }
 
@@ -819,14 +810,6 @@ void showClocks()
     drawUTCButton();
 }
 
-/* use NTP or GPSD to update time
- */
-void enableSyncProvider()
-{
-    setSyncInterval (TIME_INTERVAL);
-    setSyncProvider (getTime);
-}
-
 /* like now() but with current user offset
  */
 time_t nowWO()
@@ -848,7 +831,7 @@ int32_t utcOffset()
  */
 bool clockTimeOk()
 {
-    bool time_ok = timeStatus() == timeSet;
+    bool time_ok = timeStatus() == timeSet;             // timeStatus() calls now()
     if (!time_ok) {
         static uint32_t prev_timeok;
         if (timesUp(&prev_timeok, TIME_RETRY))
@@ -869,20 +852,14 @@ void updateClocks(bool all)
     if (hide_clocks)
         return;
 
-    // get Clock's UTC time now, get out fast if still same second
-    TimeParts tp;
-    tp.t = nowWO();
-    tp.sc = second(tp.t);
-    if (tp.sc == prev_sc && !all)
+    // get user's UTC time now, get out fast if still same second
+    time_t t_wo = nowWO();
+    if ((t_wo%60) == prev_sc && !all)
         return;
 
-    // pull apart rest of the time
-    tp.hr = hour(tp.t);
-    tp.mn = minute(tp.t);
-    tp.wd = weekday(tp.t);
-    tp.mo = month(tp.t);
-    tp.dy = day(tp.t);
-    tp.yr = year(tp.t);
+    // break into components
+    tmElements_t tm_wo;
+    breakTime (t_wo, tm_wo);
 
     // set to update other times as well
     bool draw_other_times = false;
@@ -890,12 +867,12 @@ void updateClocks(bool all)
     resetWatchdog();
 
     // always draw seconds because we know it has changed
-    if (all || (tp.sc/10) != (prev_sc/10)) {
+    if (all || (tm_wo.Second/10) != (prev_sc/10)) {
 
         // Change in tens digit of seconds process normally W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3;          // right 1/3 for seconds
         selectFontStyle (BOLD_FONT, SMALL_FONT);
-        snprintf (buf, sizeof(buf), "%02d", tp.sc);                   // includes ones digit
+        snprintf (buf, sizeof(buf), "%02d", tm_wo.Second);      // includes ones digit
         tft.fillRect(sx, clock_b.y, 30, HMS_H/2+4, RA8875_BLACK);  // dont erase ? if present
         tft.setCursor(sx, clock_b.y+HMS_H-19);
         tft.setTextColor(HMS_C);
@@ -906,7 +883,7 @@ void updateClocks(bool all)
         // Change only in units digit of seconds - process only that digit  W2ROW
         uint16_t sx = clock_b.x+2*clock_b.w/3+15;       // right 1/3 for seconds (15 by experiment) W2ROW
         selectFontStyle (BOLD_FONT, SMALL_FONT);        // W2ROW
-        snprintf (buf, sizeof(buf), "%01d", tp.sc%10);                // W2ROW
+        snprintf (buf, sizeof(buf), "%01d", tm_wo.Second%10);   // W2ROW
         tft.fillRect(sx, clock_b.y, 15, HMS_H/2+4, RA8875_BLACK);  // dont erase ? W2ROW
         tft.setCursor(sx, clock_b.y+HMS_H-19);          // W2ROW
         tft.setTextColor(HMS_C);                        // W2ROW
@@ -915,14 +892,13 @@ void updateClocks(bool all)
     }
 
     // check time
+    static bool time_was_bad = true;                    // used to erase ? when confirmed ok again
     if (clockTimeOk()) {
         if (time_was_bad) {
 
             // just came back on, show and update state
             drawUTCButton();
             tft.fillRect(clock_b.x+2*clock_b.w/3+34, clock_b.y, 25, HMS_H+4, RA8875_BLACK); // erase ?
-            Serial.printf (_FX("Time ok Z = %04d-%02d-%02d %02d:%02d:%02d %+d s\n"),
-                                tp.yr, tp.mo, tp.dy, tp.hr, tp.mn, tp.sc, -utc_offset);
 
             time_was_bad = false;
         }
@@ -941,16 +917,16 @@ void updateClocks(bool all)
     }
 
     // persist
-    prev_sc = tp.sc;
+    prev_sc = tm_wo.Second;
 
     // draw H:M if either changes
-    if (all || tp.mn != prev_mn || tp.hr != prev_hr) {
+    if (all || tm_wo.Minute != prev_mn || tm_wo.Hour != prev_hr) {
 
         resetWatchdog();
 
         // draw H:M roughly right-justified in left 2/3
         selectFontStyle (BOLD_FONT, LARGE_FONT);
-        snprintf (buf, sizeof(buf), "%02d:%02d", tp.hr, tp.mn);
+        snprintf (buf, sizeof(buf), "%02d:%02d", tm_wo.Hour, tm_wo.Minute);
         uint16_t w = 135;
         int16_t x = clock_b.x+2*clock_b.w/3-w;
         tft.fillRect (x, clock_b.y, w, HMS_H+2, RA8875_BLACK);
@@ -959,7 +935,7 @@ void updateClocks(bool all)
         tft.print(buf);
 
         // update BC time marker if new hour and up
-        if (prev_hr != tp.hr) {
+        if (prev_hr != tm_wo.Hour) {
             PlotPane bc_pane = findPaneChoiceNow(PLOT_CH_BC);
             if (bc_pane != PANE_NONE)
                 plotBandConditions (plot_b[bc_pane], 0, NULL, NULL);
@@ -969,12 +945,12 @@ void updateClocks(bool all)
         draw_other_times = true;
 
         // persist
-        prev_mn = tp.mn;
-        prev_hr = tp.hr;
+        prev_mn = tm_wo.Minute;
+        prev_hr = tm_wo.Hour;
     }
 
     // draw date if new day
-    if (all || tp.dy != prev_dy || tp.wd != prev_wd || tp.mo != prev_mo || tp.yr != prev_yr) {
+    if (all || tm_wo.Day != prev_dy || tm_wo.Wday != prev_wd || tm_wo.Month != prev_mo || tm_wo.Year != prev_yr) {
 
         resetWatchdog();
 
@@ -982,13 +958,13 @@ void updateClocks(bool all)
         draw_other_times = true;
 
         // persist
-        prev_yr = tp.yr;
-        prev_mo = tp.mo;
-        prev_dy = tp.dy;
-        prev_wd = tp.wd;
+        prev_yr = tm_wo.Year;
+        prev_mo = tm_wo.Month;
+        prev_dy = tm_wo.Day;
+        prev_wd = tm_wo.Wday;
     }
 
-    drawAuxTime (all, tp);
+    drawAuxTime (all, t_wo, tm_wo);
 
     if (draw_other_times) {
 
@@ -1000,7 +976,7 @@ void updateClocks(bool all)
             break;
         case DETIME_ANALOG:     // fallthru
         case DETIME_ANALOG_DTTM:
-            drawAnalogClock (tp.t + de_tz.tz_secs);
+            drawAnalogClock (t_wo + de_tz.tz_secs);
             break;
         case DETIME_INFO:
             drawDECalTime(false);
@@ -1008,7 +984,7 @@ void updateClocks(bool all)
             break;
         case DETIME_DIGITAL_12: // fallthru
         case DETIME_DIGITAL_24: // fallthru
-            drawDigitalClock (tp.t + de_tz.tz_secs);
+            drawDigitalClock (t_wo + de_tz.tz_secs);
             break;
         default:
             fatalError (_FX("unknown de fmt %d"), de_time_fmt);

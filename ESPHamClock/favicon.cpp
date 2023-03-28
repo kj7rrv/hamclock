@@ -265,9 +265,9 @@ static uint8_t favicon[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-void writeFavicon (WiFiClient &client)
+void writeFavicon (FILE *fp)
 {
-    client.write (favicon, sizeof(favicon));
+    fwrite (favicon, 1, sizeof(favicon), fp);
 }
 
 #endif

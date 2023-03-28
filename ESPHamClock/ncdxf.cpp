@@ -15,7 +15,6 @@
 #define BEACONR         9                       // beacon symbol radius, pixels
 #define BLEG            (BEACONR-4)             // beacon symbol leg length
 #define BEACONCW        6                       // beacon char width
-#define BORDER_COL      RGB565(127,127,127)     // control box border color
 
 typedef struct {
     int16_t lat, lng;                           // location, degs north and east

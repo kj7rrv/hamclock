@@ -64,7 +64,6 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 // layout constants
 #define NQR             4                       // number of virtual keyboard rows
 #define NQC             13                      // max number of keyboard columns
-#define KB_NCOLS        14                      // n cols in keyboard layout
 #define KB_CHAR_H       56                      // height of box containing 1 keyboard character
 #define KB_CHAR_W       59                      // width "
 #define KB_SPC_Y        (KB_Y0+NQR*KB_CHAR_H)   // top edge of special keyboard chars
@@ -176,6 +175,7 @@ typedef enum {
     CALL_SPR,
     LAT_SPR,
     LNG_SPR,
+    GRID_SPR,
     GPSDHOST_SPR,
     WIFISSID_SPR,
     WIFIPASS_SPR,
@@ -216,11 +216,12 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 1" -- index 0
 
-    {0, {10,  R2Y(0), 70, PR_H}, {100, R2Y(0), 270, PR_H}, "Call:",   callsign, NV_CALLSIGN_LEN, 0}, 
-    {0, {100, R2Y(1),180, PR_H}, {280, R2Y(1), 110, PR_H}, "Enter DE Lat:", NULL, 0, 0},       // shadowed
-    {0, {390, R2Y(1), 70, PR_H}, {480, R2Y(1), 110, PR_H}, "Lng:", NULL, 0, 0},                // shadowed
-    {0, {450, R2Y(2), 60, PR_H}, {510, R2Y(2), 290, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
-    {0, {100, R2Y(4), 65, PR_H}, {180, R2Y(4), 480, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
+    {0, { 10, R2Y(0), 70, PR_H}, { 90, R2Y(0), 270, PR_H}, "Call:",   callsign, NV_CALLSIGN_LEN, 0}, 
+    {0, { 90, R2Y(1),180, PR_H}, {270, R2Y(1), 110, PR_H}, "Enter DE Lat:", NULL, 0, 0},       // shadowed
+    {0, {380, R2Y(1), 50, PR_H}, {430, R2Y(1), 120, PR_H}, "Lng:", NULL, 0, 0},                // shadowed
+    {0, {560, R2Y(1), 60, PR_H}, {620, R2Y(1), 130, PR_H}, "Grid:", NULL, 0, 0},               // shadowed
+    {0, {460, R2Y(2), 60, PR_H}, {520, R2Y(2), 290, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
+    {0, { 90, R2Y(4), 60, PR_H}, {160, R2Y(4), 500, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
     {0, {670, R2Y(4),110, PR_H}, { 10, R2Y(5), 789, PR_H}, "Password:", wifipw, NV_WIFI_PW_LEN, 0},
 
     // "page 2" -- index 1
@@ -298,7 +299,6 @@ typedef enum {
     CLUSTER_BPR,
     CLISWSJTX_BPR,
     SPOTPATH_BPR,
-    SETDX_BPR,
     DXCLCMD0_BPR,
     DXCLCMD1_BPR,
     DXCLCMD2_BPR,
@@ -338,19 +338,16 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 1" -- index 0
 
-    {0, {100, R2Y(2), 180, PR_H}, {280, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes"},
+    {0, { 90, R2Y(2), 180, PR_H}, {270, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes"},
     {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes"},
-    {0, {100, R2Y(3), 180, PR_H}, {280, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes"},
+    {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes"},
     {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL},
 
     // "page 2" -- index 1
 
     {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes"},
     {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes"},
-
     {1, {20,  R2Y(1),  60, PR_H},  { 80, R2Y(1), 50,  PR_H}, false, "Path?", "No", "Yes"},
-
-    {1, {200, R2Y(2),  90, PR_H},  {290, R2Y(2), 50,  PR_H}, false, "Set DX?", "No", "Yes"},
 
     {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
     {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
@@ -623,12 +620,75 @@ static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 2, PAGE_W, PAGE_H};
 // note whether ll edited
 static bool ll_edited;
 
-/* set ll_edited if sp is LAT_SPR or LNG_SPR
+
+// a few forward decls topo sort couldn't fix
+static void eraseSPValue (const StringPrompt *sp);
+static void drawSPValue (StringPrompt *sp);
+
+
+
+/* set the given StringPrompt to a brief error message
  */
-static void checkLLEdit(const StringPrompt *sp)
+static void flagErrField (const StringPrompt *sp)
 {
-    if (sp == &string_pr[LAT_SPR] || sp == &string_pr[LNG_SPR])
+    eraseSPValue (sp);
+    tft.setTextColor (ERR_C);
+    tft.setCursor (sp->v_box.x, sp->v_box.y+sp->v_box.h-PR_D);
+    tft.print (F("Err"));
+}
+
+/* format latitude into s[].
+ */
+void formatLat (float lat_d, char s[], int s_len)
+{
+    snprintf (s, s_len, _FX("%.3f%c"), fabsf(lat_d), lat_d < 0 ? 'S' : 'N');
+}
+
+/* format longitude into s[].
+ */
+void formatLng (float lng_d, char s[], int s_len)
+{
+    snprintf (s, s_len, _FX("%.3f%c"), fabsf(lng_d), lng_d < 0 ? 'W' : 'E');
+}
+
+/* update interaction if sp is one of LAT/LNG/GRID_SPR.
+ * also set ll_edited.
+ */
+static void checkLLGEdit(const StringPrompt *sp)
+{
+    if (sp == &string_pr[LAT_SPR] || sp == &string_pr[LNG_SPR]) {
+
+        // convert to grid if possible
+        LatLong ll;
+        if (latSpecIsValid (string_pr[LAT_SPR].v_str, ll.lat_d)
+                        && lngSpecIsValid (string_pr[LNG_SPR].v_str, ll.lng_d)) {
+            normalizeLL (ll);
+            ll2maidenhead (string_pr[GRID_SPR].v_str, ll);
+            eraseSPValue (&string_pr[GRID_SPR]);
+            drawSPValue (&string_pr[GRID_SPR]);
+        } else {
+            flagErrField (&string_pr[GRID_SPR]);
+        }
+
         ll_edited = true;
+
+    } else if (sp == &string_pr[GRID_SPR]) {
+
+        LatLong ll;
+        if (maidenhead2ll (ll, sp->v_str)) {
+            formatLat (ll.lat_d, string_pr[LAT_SPR].v_str, string_pr[LAT_SPR].v_len);
+            eraseSPValue (&string_pr[LAT_SPR]);
+            drawSPValue (&string_pr[LAT_SPR]);
+            formatLng (ll.lng_d, string_pr[LNG_SPR].v_str, string_pr[LNG_SPR].v_len);
+            eraseSPValue (&string_pr[LNG_SPR]);
+            drawSPValue (&string_pr[LNG_SPR]);
+        } else {
+            flagErrField (&string_pr[LAT_SPR]);
+            flagErrField (&string_pr[LNG_SPR]);
+        }
+
+        ll_edited = true;
+    }
 }
 
 
@@ -705,11 +765,6 @@ static bool boolIsRelevant (BoolPrompt *bp)
                 return (false);
     }
 
-    if (bp == &bool_pr[SETDX_BPR]) {
-        // only show if enabled and host is WSJT
-        if (!bool_pr[CLUSTER_BPR].state || !bool_pr[CLISWSJTX_BPR].state)
-            return (false);
-    }
 
     if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
                     || bp == &bool_pr[DXCLCMD2_BPR] || bp == &bool_pr[DXCLCMD3_BPR]) {
@@ -816,7 +871,7 @@ static bool stringIsRelevant (StringPrompt *sp)
             return (false);
     }
 
-    if (sp == &string_pr[LAT_SPR] || sp == &string_pr[LNG_SPR]) {
+    if (sp == &string_pr[LAT_SPR] || sp == &string_pr[LNG_SPR] || sp == &string_pr[GRID_SPR]) {
         if (bool_pr[GEOIP_BPR].state || bool_pr[GPSDON_BPR].state)
             return (false);
     }
@@ -857,6 +912,7 @@ static void nextTabFocus()
         {       &string_pr[CALL_SPR], NULL},
         {       &string_pr[LAT_SPR], NULL},
         {       &string_pr[LNG_SPR], NULL},
+        {       &string_pr[GRID_SPR], NULL},
         { NULL, &bool_pr[GPSDON_BPR] },
         { NULL, &bool_pr[GPSDFOLLOW_BPR] },
         {       &string_pr[GPSDHOST_SPR], NULL},
@@ -871,7 +927,6 @@ static void nextTabFocus()
         { NULL, &bool_pr[CLISWSJTX_BPR] },
         { NULL, &bool_pr[SPOTPATH_BPR] },
         {       &string_pr[DXPORT_SPR], NULL},
-        { NULL, &bool_pr[SETDX_BPR] },
         {       &string_pr[DXHOST_SPR], NULL},
         {       &string_pr[DXLOGIN_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD0_BPR] },
@@ -1076,14 +1131,14 @@ static void drawSPPrompt (StringPrompt *sp)
 
 /* erase the prompt of the given StringPrompt
  */
-static void eraseSPPrompt (StringPrompt *sp)
+static void eraseSPPrompt (const StringPrompt *sp)
 {
     fillSBox (sp->p_box, BG_C);
 }
 
 /* erase the value of the given StringPrompt
  */
-static void eraseSPValue (StringPrompt *sp)
+static void eraseSPValue (const StringPrompt *sp)
 {
     fillSBox (sp->v_box, BG_C);
 }
@@ -1866,13 +1921,15 @@ static bool validateStringPrompts()
     // check lat/long unless using something else
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state) {
 
-        char *lat_str = string_pr[LAT_SPR].v_str;
-        if (!latSpecIsValid (lat_str, de_ll.lat_d))
+        if (!latSpecIsValid (string_pr[LAT_SPR].v_str, de_ll.lat_d))
             badsid[n_badsid++] = LAT_SPR;
 
-        char *lng_str = string_pr[LNG_SPR].v_str;
-        if (!lngSpecIsValid (lng_str, de_ll.lng_d))
+        if (!lngSpecIsValid (string_pr[LNG_SPR].v_str, de_ll.lng_d))
             badsid[n_badsid++] = LNG_SPR;
+
+        LatLong ll;
+        if (!maidenhead2ll (ll, string_pr[GRID_SPR].v_str))
+            badsid[n_badsid++] = GRID_SPR;
     }
 
     // check cluster info if used
@@ -2014,15 +2071,11 @@ static bool validateStringPrompts()
             if (bad_page != cur_page)
                 changePage(bad_page);
 
-            // flag each erroneous value
+            // flag each erroneous value on this page
             for (int i = 0; i < n_badsid; i++) {
                 StringPrompt *sp = &string_pr[badsid[i]];
-                if (sp->page == cur_page) {
-                    eraseSPValue (sp);
-                    tft.setTextColor (ERR_C);
-                    tft.setCursor (sp->v_box.x, sp->v_box.y+sp->v_box.h-PR_D);
-                    tft.print (F("Err"));
-                }
+                if (sp->page == cur_page) 
+                    flagErrField (sp);
             }
 
             // dwell error flag(s)
@@ -2272,13 +2325,6 @@ static void initSetup()
     bool_pr[SPOTLBL_BPR].state = ((spotops & NVMS_PCMASK) != NVMS_NONE);
     bool_pr[SPOTLBLCALL_BPR].state = ((spotops & NVMS_PCMASK) == NVMS_CALL);
     bool_pr[SPOTPATH_BPR].state = (spotops & NVMS_PATH) != 0;
-
-    uint8_t nv_setdx;
-    if (!NVReadUInt8 (NV_WSJT_SETSDX, &nv_setdx)) {
-        nv_setdx = false;
-        NVWriteUInt8 (NV_WSJT_SETSDX, nv_setdx);
-    }
-    bool_pr[SETDX_BPR].state = (nv_setdx != 0);
 
     uint8_t dx_cmdmask;
     if (!NVReadUInt8 (NV_DXCMDUSED, &dx_cmdmask)) {
@@ -2575,33 +2621,36 @@ static void initDisplay()
     cur_page = -1;
 
     // init shadow strings. N.B. free() before leaving
-    snprintf (string_pr[LAT_SPR].v_str = (char*)malloc(8), string_pr[LAT_SPR].v_len = 8,
-                                        "%.2f%c", fabsf(de_ll.lat_d), de_ll.lat_d < 0 ? 'S' : 'N');
-    snprintf (string_pr[LNG_SPR].v_str = (char*)malloc(9), string_pr[LNG_SPR].v_len = 9,
-                                        "%.2f%c", fabsf(de_ll.lng_d), de_ll.lng_d < 0 ? 'W' : 'E');
+
+    string_pr[LAT_SPR].v_str = (char*)malloc(string_pr[LAT_SPR].v_len = 9);
+                                formatLat (de_ll.lat_d, string_pr[LAT_SPR].v_str, string_pr[LAT_SPR].v_len);
+    string_pr[LNG_SPR].v_str = (char*)malloc(string_pr[LNG_SPR].v_len = 9);
+                                formatLng (de_ll.lng_d, string_pr[LNG_SPR].v_str, string_pr[LNG_SPR].v_len);
+    string_pr[GRID_SPR].v_str = (char*)malloc(string_pr[GRID_SPR].v_len = MAID_CHARLEN);
+                                getNVMaidenhead (NV_DE_GRID, string_pr[GRID_SPR].v_str);
     snprintf (string_pr[DXPORT_SPR].v_str = (char*)malloc(8), string_pr[DXPORT_SPR].v_len = 8,
-                                        "%u", dxport);
+                                "%u", dxport);
     snprintf (string_pr[RIGPORT_SPR].v_str = (char*)malloc(8), string_pr[RIGPORT_SPR].v_len = 8,
-                                        "%u", rigport);
+                                "%u", rigport);
     snprintf (string_pr[ROTPORT_SPR].v_str = (char*)malloc(8), string_pr[ROTPORT_SPR].v_len = 8,
-                                        "%u", rotport);
+                                "%u", rotport);
     snprintf (string_pr[FLRIGPORT_SPR].v_str = (char*)malloc(8), string_pr[FLRIGPORT_SPR].v_len = 8,
-                                        "%u", flrigport);
+                                "%u", flrigport);
     snprintf (string_pr[TEMPCORR_SPR].v_str = (char*)malloc(8), string_pr[TEMPCORR_SPR].v_len = 8,
-                                        "%.2f", temp_corr[BME_76]);
+                                "%.2f", temp_corr[BME_76]);
     snprintf (string_pr[PRESCORR_SPR].v_str = (char*)malloc(8), string_pr[PRESCORR_SPR].v_len = 8,
-                                        "%.3f", pres_corr[BME_76]);
+                                "%.3f", pres_corr[BME_76]);
     snprintf (string_pr[TEMPCORR2_SPR].v_str = (char*)malloc(8), string_pr[TEMPCORR2_SPR].v_len = 8,
-                                        "%.2f", temp_corr[BME_77]);
+                                "%.2f", temp_corr[BME_77]);
     snprintf (string_pr[PRESCORR2_SPR].v_str = (char*)malloc(8), string_pr[PRESCORR2_SPR].v_len = 8,
-                                        "%.3f", pres_corr[BME_77]);
+                                "%.3f", pres_corr[BME_77]);
     snprintf (string_pr[BRMIN_SPR].v_str = (char*)malloc(8), string_pr[BRMIN_SPR].v_len = 8,
-                                        "%u", bright_min);
+                                "%u", bright_min);
     snprintf (string_pr[BRMAX_SPR].v_str = (char*)malloc(8), string_pr[BRMAX_SPR].v_len = 8,
-                                        "%u", bright_max);
+                                "%u", bright_max);
     snprintf (string_pr[CENTERLNG_SPR].v_str = (char*)malloc(5), string_pr[CENTERLNG_SPR].v_len = 5,
-                                        "%.0f%c", fabsf((float)center_lng), center_lng < 0 ? 'W' : 'E');
-                                        // conversion to float just to avoid g++ snprintf size warning
+                                "%.0f%c", fabsf((float)center_lng), center_lng < 0 ? 'W' : 'E');
+                                // conversion to float just to avoid g++ snprintf size warning
 
 #if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
     // don't show my creds when testing
@@ -2696,6 +2745,7 @@ static void runSetup()
             StringPrompt *sp = cur_focus.sp;
             size_t vl = strlen (sp->v_str);
             if (vl > 0) {
+
                 // erase cursor, shorten string, find new width, erase to end, redraw
                 eraseCursor ();
                 sp->v_str[vl-1] = '\0';
@@ -2704,7 +2754,7 @@ static void runSetup()
                 drawSPValue (sp);
                 drawCursor ();
 
-                checkLLEdit(sp);
+                checkLLGEdit(sp);
             }
 
 
@@ -2726,7 +2776,7 @@ static void runSetup()
                 drawSPValue (sp);
                 drawCursor ();
 
-                checkLLEdit(sp);
+                checkLLGEdit(sp);
             }
 
         } else if (tappedBool (s, &bp) || (c == ' ' && cur_focus.bp)) {
@@ -2772,20 +2822,22 @@ static void runSetup()
             }
 
             else if (bp == &bool_pr[GEOIP_BPR]) {
-                // show/hide lat/lng prompts, gpsd
+                // show/hide lat/lng/grid/gpsd prompts
                 if (bp->state) {
                     // no gpsd
                     eraseSPPromptValue (&string_pr[GPSDHOST_SPR]);
                     eraseBPPromptState (&bool_pr[GPSDFOLLOW_BPR]);
                     bool_pr[GPSDON_BPR].state = false;
                     drawBPState (&bool_pr[GPSDON_BPR]);
-                    // no lat/long
+                    // no lat/long/grid
                     eraseSPPromptValue (&string_pr[LAT_SPR]);
                     eraseSPPromptValue (&string_pr[LNG_SPR]);
+                    eraseSPPromptValue (&string_pr[GRID_SPR]);
                 } else {
-                    // show lat/long
+                    // show lat/long/grid
                     drawSPPromptValue (&string_pr[LAT_SPR]);
                     drawSPPromptValue (&string_pr[LNG_SPR]);
+                    drawSPPromptValue (&string_pr[GRID_SPR]);
                 }
             }
 
@@ -2868,11 +2920,12 @@ static void runSetup()
             }
 
             else if (bp == &bool_pr[GPSDON_BPR]) {
-                // show/hide gpsd host, geolocate, lat/long
+                // show/hide gpsd host, geolocate, lat/long/grid
                 if (bp->state) {
-                    // no lat/long
+                    // no lat/long/grid
                     eraseSPPromptValue (&string_pr[LAT_SPR]);
                     eraseSPPromptValue (&string_pr[LNG_SPR]);
+                    eraseSPPromptValue (&string_pr[GRID_SPR]);
                     // no geolocate
                     bool_pr[GEOIP_BPR].state = false;
                     drawBPState (&bool_pr[GEOIP_BPR]);
@@ -2884,9 +2937,10 @@ static void runSetup()
                     eraseSPPromptValue (&string_pr[GPSDHOST_SPR]);
                     eraseBPPromptState (&bool_pr[GPSDFOLLOW_BPR]);
                     drawBPState (&bool_pr[GPSDON_BPR]);
-                    // show lat/long
+                    // show lat/long/grid
                     drawSPPromptValue (&string_pr[LAT_SPR]);
                     drawSPPromptValue (&string_pr[LNG_SPR]);
+                    drawSPPromptValue (&string_pr[GRID_SPR]);
                 }
             }
 
@@ -2993,7 +3047,6 @@ static void finishSettingUp()
                 | (bool_pr[GPSDON_BPR].state && bool_pr[GPSDFOLLOW_BPR].state ? USEGPSD_FORLOC_BIT : 0));
     NVWriteString (NV_GPSDHOST, gpsdhost);
     NVWriteUInt8 (NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
-    NVWriteUInt8 (NV_WSJT_SETSDX, bool_pr[SETDX_BPR].state);
     NVWriteUInt8 (NV_WSJT_DX, bool_pr[CLISWSJTX_BPR].state);
     NVWriteString (NV_DXHOST, dxhost);
     NVWriteString (NV_DXCMD0, dxcl_cmds[0]);
@@ -3069,6 +3122,7 @@ static void finishSettingUp()
     // clean up shadow strings
     free (string_pr[LAT_SPR].v_str);
     free (string_pr[LNG_SPR].v_str);
+    free (string_pr[GRID_SPR].v_str);
     free (string_pr[DXPORT_SPR].v_str);
     free (string_pr[RIGPORT_SPR].v_str);
     free (string_pr[ROTPORT_SPR].v_str);
@@ -3140,7 +3194,7 @@ void clockSetup()
 
 }
 
-/* return whether the given string is a valid latitude specification, set lat if so
+/* return whether the given string is a valid latitude specification, if so set lat in degrees
  */
 bool latSpecIsValid (const char *lat_spec, float &lat)
 {
@@ -3159,7 +3213,7 @@ bool latSpecIsValid (const char *lat_spec, float &lat)
     return (true);
 }
 
-/* return whether the given string is a valid longitude specification, set lng if so.
+/* return whether the given string is a valid longitude specification, if so set lng in degrees
  * N.B. we allow 180 east in spec but return lng as 180 west.
  */
 bool lngSpecIsValid (const char *lng_spec, float &lng)
@@ -3632,13 +3686,6 @@ bool setMapColor (const char *name, uint16_t rgb565)
 bool getColorDashed (ColorSelection id)
 {
     return (csel_pr[id].a_state);
-}
-
-/* return whether receiving a WSTX spot also sets DX
- */
-bool setWSJTDX(void)
-{
-    return (bool_pr[SETDX_BPR].state);
 }
 
 /* return whether dx host is actually WSJT-X, else 

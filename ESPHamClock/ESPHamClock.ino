@@ -76,11 +76,11 @@ const char *grid_styles[MAPGRID_N] = {
 
 // map projections
 uint8_t map_proj;
+#define X(a,b)  b,                              // expands MAPPROJS to name plus comma
 const char *map_projnames[MAPP_N] = {
-    "Mercator",
-    "Azimuthal",
-    "Azim One"
+    MAPPROJS
 };
+#undef X
 
 // info to display in the call sign GUI location -- the real call sign is always getCallsign()
 CallsignInfo cs_info;
@@ -110,7 +110,6 @@ Adafruit_RA8875_R tft(RA8875_CS, RA8875_RESET);
 static SCoord *gpath;                   // malloced path points
 static uint16_t n_gpath;                // actual number in use
 static uint32_t gpath_time;             // millis() when great path was drawn
-#define GPATH_COLOR     RA8875_WHITE    // path color
 static SBox prefix_b;                   // where to show DX prefix text
 
 // manage using DX cluster prefix or one from nearestPrefix()
@@ -1446,6 +1445,20 @@ void drawCallsign (bool all)
     int cy = cs_info.box.y + ch + (cs_info.box.h-ch)/2 - 3;
     if (fast_font)
         cy -= ch;               // FAST_FONT y is on top, other are on the bottom
+
+    // draw shadow if text is other than black and bg is rainbox
+    if (cs_info.fg_color != RA8875_BLACK && cs_info.bg_rainbow) {
+        tft.setTextColor (RA8875_BLACK);
+        for (int dx = -1; dx <= 1; dx += 1) {
+            for (int dy = -1; dy <= 1; dy += 1) {
+                if (dx != 0 || dy != 0) {
+                    tft.setCursor (cx+dx, cy+dy);
+                    tft.print(call);
+                }
+            }
+        }
+    }
+
     tft.setCursor (cx, cy);
     tft.setTextColor (cs_info.fg_color);
     tft.print(call);
@@ -1867,6 +1880,19 @@ static void toggleLockScreen()
     uint8_t lock_on = !screenIsLocked();
     Serial.printf (_FX("Screen lock is now %s\n"), lock_on ? "On" : "Off");
     NVWriteUInt8 (NV_LKSCRN_ON, lock_on);
+}
+
+/* set the lock screen state.
+ * then draw iff showing main display.
+ */
+void setScreenLock (bool on)
+{
+    if (on != screenIsLocked()) {
+        toggleLockScreen();
+        // ?? setDemoMode (false);
+        if (getSWDisplayState() == SWD_NONE)
+            drawScreenLock();
+    }
 }
 
 /* draw the lock screen symbol according to demo and/or NV_LKSCRN_ON.

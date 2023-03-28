@@ -30,58 +30,64 @@ Lunar position data and EME planning tool
 .IP \(bu
 NCDXF beacon schedule
 .IP \(bu
-Big Clock, stopwatch and station ID count-down timer
+Big Clock, stopwatch, alarm clock and station ID count-down timer
 .IP \(bu
 rig and rotator control using flrig or hamlib
 .IP \(bu
-list and plot DX Spider cluster spots
+list and plot DX Spider cluster, RBN, WSPR, PSK, POTA and SOTA spots
 .IP \(bu
 read and display local weather data from one or two connected BME280 I2C sensors
 .RE
 
 .SH OPTIONS
-The following list of options is current as of this writing.
+The following list of command line options is current as of this writing.
 To see all options, run hamclock with any illegal option such as -help.
 .RS 5
 .TP 10
 -a l
-set gimbal trace level to l
+set gimbal trace level
 .TP
 -b h
-set backend host to h instead of clearskyinstitute.com
+set backend host to h; default is clearskyinstitute.com
 .TP
 -d d
-set working directory to d instead of $HOME/.hamclock/
+set working directory to d; default is $HOME/.hamclock/
+.TP
+-e p
+set RESTful web server port to p; default is 8080
 .TP
 -f o
-set display full screen initially to "on" or "off"
+force display full screen initially to "on" or "off"
 .TP
--g
+-g  
 init DE using geolocation with current public IP; requires -k
+.TP
+-h  
+print this help summary
 .TP
 -i i
 init DE using geolocation with IP i; requires -k
 .TP
--k
+-k  
 don't offer Setup or wait for Skips
 .TP
 -l l
 set Mercator center longitude to l degrees, +E; requires -k
 .TP
--m
+-m  
 enable demo mode
 .TP
--o
-write diagnostic log to stdout instead of in working dir
+-o  
+write diagnostic log to stdout instead of in /Users/ecdowney/.hamclock/
+.TP
+-s d
+start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS
 .TP
 -t p
-throttle max cpu to p percent; default 80
+throttle max cpu to p percent; default is 80
 .TP
 -w p
-set web server port p instead of 8080
-.TP
--x
-run headless without X11 or FB0 -- run only the web server
+set live web server port to p; default is 8081
 .RE
 
 

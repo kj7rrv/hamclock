@@ -1,0 +1,893 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+A0	Arduino.h	/^#define	A0	/;"	d
+APP_HEIGHT	Adafruit_RA8875.h	/^        #define APP_HEIGHT /;"	d
+APP_WIDTH	Adafruit_RA8875.h	/^        #define APP_WIDTH /;"	d
+Adafruit_BME280	Adafruit_BME280.cpp	/^Adafruit_BME280::Adafruit_BME280() : _cs(-1), _mosi(-1), _miso(-1), _sck(-1) {}$/;"	f	class:Adafruit_BME280
+Adafruit_BME280	Adafruit_BME280.cpp	/^Adafruit_BME280::Adafruit_BME280(int8_t cspin, SPIClass *theSPI) {$/;"	f	class:Adafruit_BME280
+Adafruit_BME280	Adafruit_BME280.cpp	/^Adafruit_BME280::Adafruit_BME280(int8_t cspin, int8_t mosipin, int8_t misopin,$/;"	f	class:Adafruit_BME280
+Adafruit_BME280	Adafruit_BME280.h	/^class Adafruit_BME280 {$/;"	c
+Adafruit_RA8875	Adafruit_RA8875.cpp	/^Adafruit_RA8875::Adafruit_RA8875(uint8_t CS, uint8_t RST)$/;"	f	class:Adafruit_RA8875
+Adafruit_RA8875	Adafruit_RA8875.h	/^class Adafruit_RA8875 {$/;"	c
+Adafruit_Sensor	Adafruit_Sensor.h	/^  Adafruit_Sensor() {}$/;"	f	class:Adafruit_Sensor
+Adafruit_Sensor	Adafruit_Sensor.h	/^class Adafruit_Sensor {$/;"	c
+BIT	Adafruit_RA8875.cpp	/^            #define BIT(/;"	d	file:
+BITSPFBPIX	Adafruit_RA8875.h	/^#define BITSPFBPIX /;"	d
+BITS_PER_LONG	Adafruit_RA8875.cpp	/^            #define BITS_PER_LONG /;"	d	file:
+BME280_ADDRESS	Adafruit_BME280.h	/^#define BME280_ADDRESS /;"	d
+BME280_ADDRESS_ALTERNATE	Adafruit_BME280.h	/^#define BME280_ADDRESS_ALTERNATE /;"	d
+BME280_REGISTER_CAL26	Adafruit_BME280.h	/^  BME280_REGISTER_CAL26 = 0xE1, \/\/ R calibration stored in 0xE1-0xF0$/;"	e	enum:__anon1
+BME280_REGISTER_CHIPID	Adafruit_BME280.h	/^  BME280_REGISTER_CHIPID = 0xD0,$/;"	e	enum:__anon1
+BME280_REGISTER_CONFIG	Adafruit_BME280.h	/^  BME280_REGISTER_CONFIG = 0xF5,$/;"	e	enum:__anon1
+BME280_REGISTER_CONTROL	Adafruit_BME280.h	/^  BME280_REGISTER_CONTROL = 0xF4,$/;"	e	enum:__anon1
+BME280_REGISTER_CONTROLHUMID	Adafruit_BME280.h	/^  BME280_REGISTER_CONTROLHUMID = 0xF2,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H1	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H1 = 0xA1,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H2	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H2 = 0xE1,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H3	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H3 = 0xE3,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H4	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H4 = 0xE4,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H5	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H5 = 0xE5,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_H6	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_H6 = 0xE7,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P1	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P1 = 0x8E,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P2	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P2 = 0x90,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P3	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P3 = 0x92,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P4	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P4 = 0x94,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P5	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P5 = 0x96,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P6	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P6 = 0x98,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P7	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P7 = 0x9A,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P8	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P8 = 0x9C,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_P9	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_P9 = 0x9E,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_T1	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_T1 = 0x88,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_T2	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_T2 = 0x8A,$/;"	e	enum:__anon1
+BME280_REGISTER_DIG_T3	Adafruit_BME280.h	/^  BME280_REGISTER_DIG_T3 = 0x8C,$/;"	e	enum:__anon1
+BME280_REGISTER_HUMIDDATA	Adafruit_BME280.h	/^  BME280_REGISTER_HUMIDDATA = 0xFD$/;"	e	enum:__anon1
+BME280_REGISTER_PRESSUREDATA	Adafruit_BME280.h	/^  BME280_REGISTER_PRESSUREDATA = 0xF7,$/;"	e	enum:__anon1
+BME280_REGISTER_SOFTRESET	Adafruit_BME280.h	/^  BME280_REGISTER_SOFTRESET = 0xE0,$/;"	e	enum:__anon1
+BME280_REGISTER_STATUS	Adafruit_BME280.h	/^  BME280_REGISTER_STATUS = 0XF3,$/;"	e	enum:__anon1
+BME280_REGISTER_TEMPDATA	Adafruit_BME280.h	/^  BME280_REGISTER_TEMPDATA = 0xFA,$/;"	e	enum:__anon1
+BME280_REGISTER_VERSION	Adafruit_BME280.h	/^  BME280_REGISTER_VERSION = 0xD1,$/;"	e	enum:__anon1
+BYTESPFBPIX	Adafruit_RA8875.h	/^#define BYTESPFBPIX /;"	d
+CalendarYrToTm	TimeLib.h	/^#define  CalendarYrToTm(/;"	d
+DAYS_PER_WEEK	TimeLib.h	/^#define DAYS_PER_WEEK /;"	d
+DEARTH_BIG	Adafruit_RA8875.h	/^        uint16_t (*DEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];$/;"	m	class:Adafruit_RA8875
+DLOverlap	Adafruit_RA8875.h	/^        } DLOverlap;$/;"	t	class:Adafruit_RA8875	typeref:enum:Adafruit_RA8875::__anon3
+Day	TimeLib.h	/^  uint8_t Day;$/;"	m	struct:__anon23
+Dir	LittleFS.cpp	/^Dir::Dir()$/;"	f	class:Dir
+Dir	LittleFS.h	/^class Dir {$/;"	c
+EARTH_BIG_H	Adafruit_RA8875.h	/^	#define EARTH_BIG_H /;"	d
+EARTH_BIG_W	Adafruit_RA8875.h	/^	#define EARTH_BIG_W /;"	d
+EEPROM	EEPROM.cpp	/^EEPROM::EEPROM()$/;"	f	class:EEPROM
+EEPROM	EEPROM.cpp	/^class EEPROM EEPROM;$/;"	v	typeref:class:EEPROM
+EEPROM	EEPROM.h	/^class EEPROM$/;"	c
+ESP	ESP.cpp	/^ESP::ESP()$/;"	f	class:ESP
+ESP	ESP.cpp	/^class ESP ESP;$/;"	v	typeref:class:ESP
+ESP	ESP.h	/^class ESP {$/;"	c
+ESPhttpUpdate	ESP8266httpUpdate.cpp	/^ESPhttpUpdate::ESPhttpUpdate()$/;"	f	class:ESPhttpUpdate
+ESPhttpUpdate	ESP8266httpUpdate.cpp	/^class ESPhttpUpdate ESPhttpUpdate;$/;"	v	typeref:class:ESPhttpUpdate
+ESPhttpUpdate	ESP8266httpUpdate.h	/^class ESPhttpUpdate$/;"	c
+F	Arduino.h	/^#define	F(/;"	d
+FBPIXTORGB16	Adafruit_RA8875.h	/^#define FBPIXTORGB16(/;"	d
+FBPIXTORGB32	Adafruit_RA8875.h	/^#define FBPIXTORGB32(/;"	d
+FB_CURSOR_SZ	Adafruit_RA8875.h	/^	int FB_CURSOR_SZ;$/;"	m	class:Adafruit_RA8875
+FB_CURSOR_W	Adafruit_RA8875.h	/^	#define FB_CURSOR_W /;"	d
+FB_X0	Adafruit_RA8875.h	/^	int FB_X0;$/;"	m	class:Adafruit_RA8875
+FB_XRES	Adafruit_RA8875.h	/^	#define FB_XRES /;"	d
+FB_Y0	Adafruit_RA8875.h	/^	int FB_Y0;$/;"	m	class:Adafruit_RA8875
+FB_YRES	Adafruit_RA8875.h	/^	#define FB_YRES /;"	d
+FILTER_OFF	Adafruit_BME280.h	/^    FILTER_OFF = 0b000,$/;"	e	enum:Adafruit_BME280::sensor_filter
+FILTER_X16	Adafruit_BME280.h	/^    FILTER_X16 = 0b100$/;"	e	enum:Adafruit_BME280::sensor_filter
+FILTER_X2	Adafruit_BME280.h	/^    FILTER_X2 = 0b001,$/;"	e	enum:Adafruit_BME280::sensor_filter
+FILTER_X4	Adafruit_BME280.h	/^    FILTER_X4 = 0b010,$/;"	e	enum:Adafruit_BME280::sensor_filter
+FILTER_X8	Adafruit_BME280.h	/^    FILTER_X8 = 0b011,$/;"	e	enum:Adafruit_BME280::sensor_filter
+FLASH_SECTOR_SIZE	Arduino.h	/^#define FLASH_SECTOR_SIZE /;"	d
+FPSTR	Arduino.h	/^#define FPSTR(/;"	d
+FSInfo	LittleFS.h	/^} FSInfo;$/;"	t	typeref:struct:__anon19
+File	LittleFS.cpp	/^File::File()$/;"	f	class:File
+File	LittleFS.h	/^class File {$/;"	c
+GFXfont	gfxfont.h	/^} GFXfont;$/;"	t	typeref:struct:__anon25
+GFXglyph	gfxfont.h	/^} GFXglyph;$/;"	t	typeref:struct:__anon24
+GPIO	GPIO.cpp	/^GPIO::GPIO() { }$/;"	f	class:GPIO
+GPIO	GPIO.cpp	/^GPIO::GPIO()$/;"	f	class:GPIO
+GPIO	GPIO.h	/^class GPIO {$/;"	c
+GPIOX	Adafruit_RA8875.h	/^	void GPIOX (int x)$/;"	f	class:Adafruit_RA8875
+GPIO_SEL_MASK	GPIO.h	/^        inline uint32_t GPIO_SEL_MASK (uint8_t p, uint32_t m) {$/;"	f	class:GPIO
+HIGH	Arduino.h	/^#define	HIGH	/;"	d
+HTTP_UPDATE_FAILED	ESP8266httpUpdate.h	/^	HTTP_UPDATE_FAILED,$/;"	e	enum:__anon17
+HTTP_UPDATE_NO_UPDATES	ESP8266httpUpdate.h	/^	HTTP_UPDATE_NO_UPDATES,$/;"	e	enum:__anon17
+HTTP_UPDATE_OK	ESP8266httpUpdate.h	/^	HTTP_UPDATE_OK,$/;"	e	enum:__anon17
+Hour	TimeLib.h	/^  uint8_t Hour; $/;"	m	struct:__anon23
+IPAddress	IPAddress.h	/^        IPAddress (uint8_t a, uint8_t b, uint8_t c, uint8_t d)$/;"	f	class:IPAddress
+IPAddress	IPAddress.h	/^        IPAddress(void) { }$/;"	f	class:IPAddress
+IPAddress	IPAddress.h	/^class IPAddress {$/;"	c
+LEAP_YEAR	Time.cpp	/^#define LEAP_YEAR(/;"	d	file:
+LFS_NAME_MAX	LittleFS.h	/^#define LFS_NAME_MAX /;"	d
+LINE_OVERLAP_BOTH	Adafruit_RA8875.h	/^            LINE_OVERLAP_BOTH   \/\/ Overlap - both$/;"	e	enum:Adafruit_RA8875::__anon3
+LINE_OVERLAP_MAJOR	Adafruit_RA8875.h	/^            LINE_OVERLAP_MAJOR, \/\/ Overlap - first go major then minor direction. Pixel is drawn as extension after actual line$/;"	e	enum:Adafruit_RA8875::__anon3
+LINE_OVERLAP_MINOR	Adafruit_RA8875.h	/^            LINE_OVERLAP_MINOR, \/\/ Overlap - first go minor then major direction. Pixel is drawn as extension before next line$/;"	e	enum:Adafruit_RA8875::__anon3
+LINE_OVERLAP_NONE	Adafruit_RA8875.h	/^            LINE_OVERLAP_NONE,  \/\/ No line overlap, like in standard Bresenham$/;"	e	enum:Adafruit_RA8875::__anon3
+LONG	Adafruit_RA8875.cpp	/^            #define LONG(/;"	d	file:
+LSBFIRST	Arduino.h	/^#define LSBFIRST /;"	d
+LittleFS	LittleFS.cpp	/^LittleFS::LittleFS()$/;"	f	class:LittleFS
+LittleFS	LittleFS.cpp	/^class LittleFS LittleFS;$/;"	v	typeref:class:LittleFS
+LittleFS	LittleFS.h	/^class LittleFS {$/;"	c
+MAXERRLINES	ESP8266httpUpdate.h	/^        #define MAXERRLINES /;"	d
+MAX_CPU_USAGE	Arduino.cpp	/^#define MAX_CPU_USAGE /;"	d	file:
+MAX_RXBUF	Wire.h	/^#define MAX_RXBUF /;"	d
+MAX_TXBUF	Wire.h	/^#define MAX_TXBUF /;"	d
+MODE_FORCED	Adafruit_BME280.h	/^    MODE_FORCED = 0b01,$/;"	e	enum:Adafruit_BME280::sensor_mode
+MODE_NORMAL	Adafruit_BME280.h	/^    MODE_NORMAL = 0b11$/;"	e	enum:Adafruit_BME280::sensor_mode
+MODE_SLEEP	Adafruit_BME280.h	/^    MODE_SLEEP = 0b00,$/;"	e	enum:Adafruit_BME280::sensor_mode
+MOUSE_FADE	Adafruit_RA8875.h	/^        #define MOUSE_FADE /;"	d
+MSBFIRST	Arduino.h	/^#define MSBFIRST /;"	d
+Minute	TimeLib.h	/^  uint8_t Minute; $/;"	m	struct:__anon23
+Month	TimeLib.h	/^  uint8_t Month; $/;"	m	struct:__anon23
+NBITS	Adafruit_RA8875.cpp	/^            #define NBITS(/;"	d	file:
+NEARTH_BIG	Adafruit_RA8875.h	/^        uint16_t (*NEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];$/;"	m	class:Adafruit_RA8875
+N_MAKE_LINES	ESP8266httpUpdate.cpp	/^#define N_MAKE_LINES /;"	d	file:
+N_UNZIP_LINES	ESP8266httpUpdate.cpp	/^#define N_UNZIP_LINES /;"	d	file:
+OFF	Adafruit_RA8875.cpp	/^            #define OFF(/;"	d	file:
+OUTPUT	Arduino.h	/^#define	OUTPUT	/;"	d
+PGM_P	Arduino.h	/^#define PGM_P /;"	d
+PGM_P	DateStrings.cpp	/^#define PGM_P /;"	d	file:
+PROGMEM	Adafruit_RA8875.h	/^#define	PROGMEM$/;"	d
+PROGMEM	Arduino.h	/^#define	PROGMEM	/;"	d
+PROGMEM	CourierPrimeSans6.cpp	/^const GFXfont Courier_Prime_Sans6pt7b PROGMEM = {$/;"	v
+PROGMEM	CourierPrimeSans6.cpp	/^const GFXglyph Courier_Prime_Sans6pt7bGlyphs[] PROGMEM = {$/;"	v
+PROGMEM	CourierPrimeSans6.cpp	/^const uint8_t Courier_Prime_Sans6pt7bBitmaps[] PROGMEM = {$/;"	v
+PROGMEM	DateStrings.cpp	/^#define PROGMEM$/;"	d	file:
+PROGMEM	DateStrings.cpp	/^const char dayShortNames_P[] PROGMEM = "ErrSunMonTueWedThuFriSat";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr0[] PROGMEM = "Err";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr1[] PROGMEM = "Sunday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr2[] PROGMEM = "Monday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr3[] PROGMEM = "Tuesday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr4[] PROGMEM = "Wednesday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr5[] PROGMEM = "Thursday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr6[] PROGMEM = "Friday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char dayStr7[] PROGMEM = "Saturday";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthShortNames_P[] PROGMEM = "ErrJanFebMarAprMayJunJulAugSepOctNovDec";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr0[] PROGMEM = "";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr10[] PROGMEM = "October";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr11[] PROGMEM = "November";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr12[] PROGMEM = "December";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr1[] PROGMEM = "January";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr2[] PROGMEM = "February";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr3[] PROGMEM = "March";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr4[] PROGMEM = "April";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr5[] PROGMEM = "May";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr6[] PROGMEM = "June";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr7[] PROGMEM = "July";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr8[] PROGMEM = "August";$/;"	v
+PROGMEM	DateStrings.cpp	/^const char monthStr9[] PROGMEM = "September";$/;"	v
+PSTR	Arduino.h	/^#define	PSTR(/;"	d
+PWM1config	Adafruit_RA8875.h	/^	void PWM1config(bool t, int x)$/;"	f	class:Adafruit_RA8875
+PWM1out	Adafruit_RA8875.h	/^	void PWM1out(uint16_t bpwm)$/;"	f	class:Adafruit_RA8875
+RA8875_800x480	Adafruit_RA8875.h	/^#define	RA8875_800x480 /;"	d
+RA8875_BLACK	Adafruit_RA8875.h	/^#define	RA8875_BLACK	/;"	d
+RA8875_BLUE	Adafruit_RA8875.h	/^#define	RA8875_BLUE	/;"	d
+RA8875_CYAN	Adafruit_RA8875.h	/^#define	RA8875_CYAN	/;"	d
+RA8875_GREEN	Adafruit_RA8875.h	/^#define	RA8875_GREEN	/;"	d
+RA8875_MAGENTA	Adafruit_RA8875.h	/^#define	RA8875_MAGENTA	/;"	d
+RA8875_MRWC	Adafruit_RA8875.h	/^#define	RA8875_MRWC /;"	d
+RA8875_PWM_CLK_DIV1024	Adafruit_RA8875.h	/^#define RA8875_PWM_CLK_DIV1024 /;"	d
+RA8875_RED	Adafruit_RA8875.h	/^#define RA8875_RED	/;"	d
+RA8875_WHITE	Adafruit_RA8875.h	/^#define	RA8875_WHITE	/;"	d
+RA8875_YELLOW	Adafruit_RA8875.h	/^#define	RA8875_YELLOW	/;"	d
+REFRESH_US	Adafruit_RA8875.h	/^#define REFRESH_US /;"	d
+RGB1632	Adafruit_RA8875.h	/^#define	RGB1632(/;"	d
+RGB16TOFBPIX	Adafruit_RA8875.h	/^#define RGB16TOFBPIX(/;"	d
+RGB3216	Adafruit_RA8875.h	/^#define	RGB3216(/;"	d
+RGB565	Adafruit_RA8875.h	/^#define RGB565(/;"	d
+RGB565_B	Adafruit_RA8875.h	/^#define RGB565_B(/;"	d
+RGB565_G	Adafruit_RA8875.h	/^#define RGB565_G(/;"	d
+RGB565_R	Adafruit_RA8875.h	/^#define RGB565_R(/;"	d
+RSSI	ESP8266WiFi.cpp	/^int WiFi::RSSI(void)$/;"	f	class:WiFi
+SAMPLING_NONE	Adafruit_BME280.h	/^    SAMPLING_NONE = 0b000,$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SAMPLING_X1	Adafruit_BME280.h	/^    SAMPLING_X1 = 0b001,$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SAMPLING_X16	Adafruit_BME280.h	/^    SAMPLING_X16 = 0b101$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SAMPLING_X2	Adafruit_BME280.h	/^    SAMPLING_X2 = 0b010,$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SAMPLING_X4	Adafruit_BME280.h	/^    SAMPLING_X4 = 0b011,$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SAMPLING_X8	Adafruit_BME280.h	/^    SAMPLING_X8 = 0b100,$/;"	e	enum:Adafruit_BME280::sensor_sampling
+SCALESZ	Adafruit_RA8875.h	/^	int SCALESZ;$/;"	m	class:Adafruit_RA8875
+SECS_PER_DAY	TimeLib.h	/^#define SECS_PER_DAY /;"	d
+SECS_PER_HOUR	TimeLib.h	/^#define SECS_PER_HOUR /;"	d
+SECS_PER_MIN	TimeLib.h	/^#define SECS_PER_MIN /;"	d
+SECS_PER_WEEK	TimeLib.h	/^#define SECS_PER_WEEK /;"	d
+SECS_PER_YEAR	TimeLib.h	/^#define SECS_PER_YEAR /;"	d
+SECS_YR_2000	TimeLib.h	/^#define SECS_YR_2000 /;"	d
+SENSORS_DPS_TO_RADS	Adafruit_Sensor.h	/^#define SENSORS_DPS_TO_RADS /;"	d
+SENSORS_GAUSS_TO_MICROTESLA	Adafruit_Sensor.h	/^#define SENSORS_GAUSS_TO_MICROTESLA /;"	d
+SENSORS_GRAVITY_EARTH	Adafruit_Sensor.h	/^#define SENSORS_GRAVITY_EARTH /;"	d
+SENSORS_GRAVITY_MOON	Adafruit_Sensor.h	/^#define SENSORS_GRAVITY_MOON /;"	d
+SENSORS_GRAVITY_STANDARD	Adafruit_Sensor.h	/^#define SENSORS_GRAVITY_STANDARD /;"	d
+SENSORS_GRAVITY_SUN	Adafruit_Sensor.h	/^#define SENSORS_GRAVITY_SUN /;"	d
+SENSORS_MAGFIELD_EARTH_MAX	Adafruit_Sensor.h	/^#define SENSORS_MAGFIELD_EARTH_MAX /;"	d
+SENSORS_MAGFIELD_EARTH_MIN	Adafruit_Sensor.h	/^#define SENSORS_MAGFIELD_EARTH_MIN /;"	d
+SENSORS_PRESSURE_SEALEVELHPA	Adafruit_Sensor.h	/^#define SENSORS_PRESSURE_SEALEVELHPA /;"	d
+SENSOR_TYPE_ACCELEROMETER	Adafruit_Sensor.h	/^  SENSOR_TYPE_ACCELEROMETER         = (1),   \/**< Gravity + linear acceleration *\/$/;"	e	enum:__anon4
+SENSOR_TYPE_AMBIENT_TEMPERATURE	Adafruit_Sensor.h	/^  SENSOR_TYPE_AMBIENT_TEMPERATURE   = (13),$/;"	e	enum:__anon4
+SENSOR_TYPE_COLOR	Adafruit_Sensor.h	/^  SENSOR_TYPE_COLOR                 = (17)$/;"	e	enum:__anon4
+SENSOR_TYPE_CURRENT	Adafruit_Sensor.h	/^  SENSOR_TYPE_CURRENT               = (16),$/;"	e	enum:__anon4
+SENSOR_TYPE_GRAVITY	Adafruit_Sensor.h	/^  SENSOR_TYPE_GRAVITY               = (9),$/;"	e	enum:__anon4
+SENSOR_TYPE_GYROSCOPE	Adafruit_Sensor.h	/^  SENSOR_TYPE_GYROSCOPE             = (4),$/;"	e	enum:__anon4
+SENSOR_TYPE_LIGHT	Adafruit_Sensor.h	/^  SENSOR_TYPE_LIGHT                 = (5),$/;"	e	enum:__anon4
+SENSOR_TYPE_LINEAR_ACCELERATION	Adafruit_Sensor.h	/^  SENSOR_TYPE_LINEAR_ACCELERATION   = (10),  \/**< Acceleration not including gravity *\/$/;"	e	enum:__anon4
+SENSOR_TYPE_MAGNETIC_FIELD	Adafruit_Sensor.h	/^  SENSOR_TYPE_MAGNETIC_FIELD        = (2),$/;"	e	enum:__anon4
+SENSOR_TYPE_ORIENTATION	Adafruit_Sensor.h	/^  SENSOR_TYPE_ORIENTATION           = (3),$/;"	e	enum:__anon4
+SENSOR_TYPE_PRESSURE	Adafruit_Sensor.h	/^  SENSOR_TYPE_PRESSURE              = (6),$/;"	e	enum:__anon4
+SENSOR_TYPE_PROXIMITY	Adafruit_Sensor.h	/^  SENSOR_TYPE_PROXIMITY             = (8),$/;"	e	enum:__anon4
+SENSOR_TYPE_RELATIVE_HUMIDITY	Adafruit_Sensor.h	/^  SENSOR_TYPE_RELATIVE_HUMIDITY     = (12),$/;"	e	enum:__anon4
+SENSOR_TYPE_ROTATION_VECTOR	Adafruit_Sensor.h	/^  SENSOR_TYPE_ROTATION_VECTOR       = (11),$/;"	e	enum:__anon4
+SENSOR_TYPE_VOLTAGE	Adafruit_Sensor.h	/^  SENSOR_TYPE_VOLTAGE               = (15),$/;"	e	enum:__anon4
+SPI	SPI.cpp	/^SPIClass SPI;$/;"	v
+SPIClass	SPI.h	/^class SPIClass {$/;"	c
+SPISettings	SPI.h	/^  SPISettings() :_clock(1000000), _bitOrder(LSBFIRST), _dataMode(SPI_MODE0){}$/;"	f	class:SPISettings
+SPISettings	SPI.h	/^  SPISettings(uint32_t clock, uint8_t bitOrder, uint8_t dataMode) :_clock(clock), _bitOrder(bitOrder), _dataMode(dataMode){}$/;"	f	class:SPISettings
+SPISettings	SPI.h	/^class SPISettings {$/;"	c
+SPI_MODE0	SPI.h	/^const uint8_t SPI_MODE0 = 0x00; \/\/\/<  CPOL: 0  CPHA: 0$/;"	v
+SPI_MODE1	SPI.h	/^const uint8_t SPI_MODE1 = 0x01; \/\/\/<  CPOL: 0  CPHA: 1$/;"	v
+SPI_MODE2	SPI.h	/^const uint8_t SPI_MODE2 = 0x10; \/\/\/<  CPOL: 1  CPHA: 0$/;"	v
+SPI_MODE3	SPI.h	/^const uint8_t SPI_MODE3 = 0x11; \/\/\/<  CPOL: 1  CPHA: 1$/;"	v
+SSID	ESP8266WiFi.cpp	/^std::string WiFi::SSID(void)$/;"	f	class:WiFi
+STANDBY_MS_0_5	Adafruit_BME280.h	/^    STANDBY_MS_0_5 = 0b000,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_10	Adafruit_BME280.h	/^    STANDBY_MS_10 = 0b110,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_1000	Adafruit_BME280.h	/^    STANDBY_MS_1000 = 0b101$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_125	Adafruit_BME280.h	/^    STANDBY_MS_125 = 0b010,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_20	Adafruit_BME280.h	/^    STANDBY_MS_20 = 0b111,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_250	Adafruit_BME280.h	/^    STANDBY_MS_250 = 0b011,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_500	Adafruit_BME280.h	/^    STANDBY_MS_500 = 0b100,$/;"	e	enum:Adafruit_BME280::standby_duration
+STANDBY_MS_62_5	Adafruit_BME280.h	/^    STANDBY_MS_62_5 = 0b001,$/;"	e	enum:Adafruit_BME280::standby_duration
+Second	TimeLib.h	/^  uint8_t Second; $/;"	m	struct:__anon23
+SeekSet	LittleFS.h	/^#define SeekSet /;"	d
+Serial	Serial.cpp	/^class Serial Serial;$/;"	v	typeref:class:Serial
+Serial	Serial.h	/^class Serial {$/;"	c
+Status	Time.cpp	/^static timeStatus_t Status = timeNotSet;$/;"	v	file:
+String	Arduino.h	/^#define	String /;"	d
+TimeElements	TimeLib.h	/^} 	tmElements_t, TimeElements, *tmElementsPtr_t;$/;"	t	typeref:struct:__anon23
+TwoWire	Wire.cpp	/^TwoWire::TwoWire()$/;"	f	class:TwoWire
+TwoWire	Wire.cpp	/^TwoWire::TwoWire(void){};$/;"	f	class:TwoWire
+TwoWire	Wire.h	/^class TwoWire {$/;"	c
+WIFI_OTHER	ESP8266WiFi.h	/^    WIFI_OTHER$/;"	e	enum:__anon16
+WIFI_STA	ESP8266WiFi.h	/^    WIFI_STA,$/;"	e	enum:__anon16
+WL_CONNECTED	ESP8266WiFi.h	/^    WL_CONNECTED,$/;"	e	enum:__anon15
+WL_OTHER	ESP8266WiFi.h	/^    WL_OTHER$/;"	e	enum:__anon15
+Wday	TimeLib.h	/^  uint8_t Wday;   \/\/ day of week, sunday is day 1$/;"	m	struct:__anon23
+WiFi	ESP8266WiFi.cpp	/^class WiFi WiFi;$/;"	v	typeref:class:WiFi
+WiFi	ESP8266WiFi.h	/^class WiFi {$/;"	c
+WiFiClient	WiFiClient.cpp	/^WiFiClient::WiFiClient()$/;"	f	class:WiFiClient
+WiFiClient	WiFiClient.cpp	/^WiFiClient::WiFiClient(int fd)$/;"	f	class:WiFiClient
+WiFiClient	WiFiClient.h	/^class WiFiClient {$/;"	c
+WiFiServer	WiFiServer.cpp	/^WiFiServer::WiFiServer(int newport)$/;"	f	class:WiFiServer
+WiFiServer	WiFiServer.h	/^class WiFiServer {$/;"	c
+WiFiUDP	WiFiUdp.cpp	/^WiFiUDP::WiFiUDP()$/;"	f	class:WiFiUDP
+WiFiUDP	WiFiUdp.h	/^class WiFiUDP {$/;"	c
+Wire	Wire.cpp	/^TwoWire Wire;$/;"	v
+X11OptionsEngageNow	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::X11OptionsEngageNow (bool fs)$/;"	f	class:Adafruit_RA8875
+Year	TimeLib.h	/^  uint8_t Year;   \/\/ offset from 1970; $/;"	m	struct:__anon23
+_ADAFRUIT_SENSOR_H	Adafruit_Sensor.h	/^#define _ADAFRUIT_SENSOR_H$/;"	d
+_ARDUINO_H	Arduino.h	/^#define _ARDUINO_H$/;"	d
+_Adafruit_RA8875_H	Adafruit_RA8875.h	/^#define _Adafruit_RA8875_H$/;"	d
+_EEPROM_H	EEPROM.h	/^#define _EEPROM_H$/;"	d
+_ESP8266WIFI_H	ESP8266WiFi.h	/^#define _ESP8266WIFI_H$/;"	d
+_ESP_H	ESP.h	/^#define _ESP_H$/;"	d
+_GFXFONT_H_	gfxfont.h	/^#define _GFXFONT_H_$/;"	d
+_GPIO_ESP	Arduino.h	/^  #define _GPIO_ESP$/;"	d
+_GPIO_FREEBSD	Arduino.h	/^    #define _GPIO_FREEBSD$/;"	d
+_GPIO_H	GPIO.h	/^#define _GPIO_H$/;"	d
+_GPIO_LINUX	Arduino.h	/^    #define _GPIO_LINUX$/;"	d
+_HTTP_UPDATE_H	ESP8266httpUpdate.h	/^#define _HTTP_UPDATE_H$/;"	d
+_IIC_ESP	Arduino.h	/^  #define _IIC_ESP$/;"	d
+_IIC_FREEBSD	Arduino.h	/^    #define _IIC_FREEBSD$/;"	d
+_IIC_LINUX	Arduino.h	/^    #define _IIC_LINUX$/;"	d
+_IPADDRESS_H	IPAddress.h	/^#define _IPADDRESS_H$/;"	d
+_IS_FREEBSD	Arduino.h	/^  #define _IS_FREEBSD$/;"	d
+_IS_LINUX	Arduino.h	/^  #define _IS_LINUX$/;"	d
+_LITTLEFS_H	LittleFS.h	/^#define _LITTLEFS_H$/;"	d
+_SERIAL_H	Serial.h	/^#define _SERIAL_H$/;"	d
+_SPI_H	SPI.h	/^#define _SPI_H$/;"	d
+_Time_h	TimeLib.h	/^#define _Time_h$/;"	d
+_WIFICLIENT_H	WiFiClient.h	/^#define _WIFICLIENT_H$/;"	d
+_WIFI_SERVER_H	WiFiServer.h	/^#define _WIFI_SERVER_H$/;"	d
+_WIFI_UDP_H	WiFiUdp.h	/^#define _WIFI_UDP_H$/;"	d
+_WIRE_H	Wire.h	/^#define _WIRE_H$/;"	d
+__BME280_H__	Adafruit_BME280.h	/^#define __BME280_H__$/;"	d
+__FlashStringHelper	Arduino.h	/^#define	__FlashStringHelper /;"	d
+_address	IPAddress.h	/^	} _address;$/;"	m	class:IPAddress	typeref:union:IPAddress::__anon18
+_bitOrder	SPI.h	/^  uint8_t  _bitOrder;$/;"	m	class:SPISettings
+_bme280_calib	Adafruit_BME280.h	/^  bme280_calib_data _bme280_calib; \/\/!< here calibration data is stored$/;"	m	class:Adafruit_BME280
+_clock	SPI.h	/^  uint32_t _clock;$/;"	m	class:SPISettings
+_configReg	Adafruit_BME280.h	/^  config _configReg; \/\/!< config register object$/;"	m	class:Adafruit_BME280
+_cs	Adafruit_BME280.h	/^  int8_t _cs;   \/\/!< for the SPI interface$/;"	m	class:Adafruit_BME280
+_dataMode	SPI.h	/^  uint8_t  _dataMode;$/;"	m	class:SPISettings
+_humReg	Adafruit_BME280.h	/^  ctrl_hum _humReg; \/\/!< hum register object$/;"	m	class:Adafruit_BME280
+_i2caddr	Adafruit_BME280.h	/^  uint8_t _i2caddr;  \/\/!< I2C addr for the TwoWire interface$/;"	m	class:Adafruit_BME280
+_measReg	Adafruit_BME280.h	/^  ctrl_meas _measReg; \/\/!< measurement register object$/;"	m	class:Adafruit_BME280
+_miso	Adafruit_BME280.h	/^  int8_t _miso; \/\/!< for the SPI interface$/;"	m	class:Adafruit_BME280
+_mosi	Adafruit_BME280.h	/^  int8_t _mosi; \/\/!< for the SPI interface$/;"	m	class:Adafruit_BME280
+_sck	Adafruit_BME280.h	/^  int8_t _sck;  \/\/!< for the SPI interface$/;"	m	class:Adafruit_BME280
+_sensorID	Adafruit_BME280.h	/^  int32_t _sensorID; \/\/!< ID of the BME Sensor$/;"	m	class:Adafruit_BME280
+_spi	Adafruit_BME280.h	/^  SPIClass *_spi; \/\/!< pointer to SPI object$/;"	m	class:Adafruit_BME280
+_trace_client	WiFiClient.cpp	/^static bool _trace_client = false;$/;"	v	file:
+_trace_littlefs	LittleFS.cpp	/^static bool _trace_littlefs = false;$/;"	v	file:
+_trace_server	WiFiServer.cpp	/^static bool _trace_server = false;$/;"	v	file:
+_wire	Adafruit_BME280.h	/^  TwoWire *_wire; \/\/!< pointer to a TwoWire object$/;"	m	class:Adafruit_BME280
+acceleration	Adafruit_Sensor.h	/^        sensors_vec_t   acceleration;         \/**< acceleration values are in meter per second per second (m\/s^2) *\/$/;"	m	union:__anon12::__anon13
+adjustTime	Time.cpp	/^void adjustTime(long adjustment) {$/;"	f
+analogRead	Arduino.cpp	/^uint16_t analogRead(int pin)$/;"	f
+available	WiFiClient.cpp	/^int WiFiClient::available()$/;"	f	class:WiFiClient
+available	WiFiServer.cpp	/^WiFiClient WiFiServer::available()$/;"	f	class:WiFiServer
+available	Wire.cpp	/^int TwoWire::available(void)$/;"	f	class:TwoWire
+available	Wire.cpp	/^int TwoWire::available(void){return 0;};$/;"	f	class:TwoWire
+b	Adafruit_Sensor.h	/^            float b;       \/**< Blue component *\/$/;"	m	struct:__anon9::__anon10::__anon11
+begin	Adafruit_BME280.cpp	/^bool Adafruit_BME280::begin(TwoWire *theWire) {$/;"	f	class:Adafruit_BME280
+begin	Adafruit_BME280.cpp	/^bool Adafruit_BME280::begin(uint8_t addr) {$/;"	f	class:Adafruit_BME280
+begin	Adafruit_BME280.cpp	/^bool Adafruit_BME280::begin(uint8_t addr, TwoWire *theWire) {$/;"	f	class:Adafruit_BME280
+begin	Adafruit_BME280.cpp	/^bool Adafruit_BME280::begin(void) {$/;"	f	class:Adafruit_BME280
+begin	Adafruit_RA8875.cpp	/^bool Adafruit_RA8875::begin (int not_used)$/;"	f	class:Adafruit_RA8875
+begin	EEPROM.cpp	/^void EEPROM::begin (int s)$/;"	f	class:EEPROM
+begin	ESP8266WiFi.cpp	/^void WiFi::begin (char *ssid, char *pw)$/;"	f	class:WiFi
+begin	LittleFS.cpp	/^void LittleFS::begin(void)$/;"	f	class:LittleFS
+begin	SPI.h	/^        void begin(void){}$/;"	f	class:SPIClass
+begin	Serial.cpp	/^void Serial::begin (int baud)$/;"	f	class:Serial
+begin	WiFiServer.cpp	/^bool WiFiServer::begin(char ynot[])$/;"	f	class:WiFiServer
+begin	WiFiUdp.cpp	/^bool WiFiUDP::begin(int port)$/;"	f	class:WiFiUDP
+begin	Wire.cpp	/^void TwoWire::begin()$/;"	f	class:TwoWire
+begin	Wire.cpp	/^void TwoWire::begin(void){};$/;"	f	class:TwoWire
+beginMulticast	WiFiUdp.cpp	/^bool WiFiUDP::beginMulticast (IPAddress ifIP, IPAddress mcIP, int port)$/;"	f	class:WiFiUDP
+beginPacket	WiFiUdp.cpp	/^void WiFiUDP::beginPacket (const char *host, int port)$/;"	f	class:WiFiUDP
+beginTransaction	SPI.h	/^        void beginTransaction(SPISettings settings) { }$/;"	f	class:SPIClass
+beginTransmission	Wire.cpp	/^void TwoWire::beginTransmission(uint8_t addr)$/;"	f	class:TwoWire
+beginTransmission	Wire.cpp	/^void TwoWire::beginTransmission(uint8_t){};$/;"	f	class:TwoWire
+bitmap	gfxfont.h	/^	uint8_t  *bitmap;      \/\/ Glyph bitmaps, concatenated$/;"	m	struct:__anon25
+bitmapOffset	gfxfont.h	/^	uint32_t bitmapOffset;      \/\/ Pointer into GFXfont->bitmap$/;"	m	struct:__anon24
+black_gc	Adafruit_RA8875.h	/^	GC black_gc;$/;"	m	class:Adafruit_RA8875
+bme280_calib_data	Adafruit_BME280.h	/^} bme280_calib_data;$/;"	t	typeref:struct:__anon2
+breakTime	Time.cpp	/^void breakTime(time_t timeInput, tmElements_t &tm){$/;"	f
+buffer	DateStrings.cpp	/^static char buffer[dt_MAX_STRING_LEN+1];  \/\/ must be big enough for longest string and the terminating null$/;"	v	file:
+byte	Wire.h	/^#define byte /;"	d
+bytes	IPAddress.h	/^	    uint8_t bytes[4];  \/\/ IPv4 address$/;"	m	union:IPAddress::__anon18
+c	Adafruit_Sensor.h	/^        float c[3];$/;"	m	union:__anon9::__anon10
+cacheTime	Time.cpp	/^static time_t cacheTime;   \/\/ the time the cache was updated$/;"	v	file:
+channel	ESP8266WiFi.cpp	/^int WiFi::channel(void)$/;"	f	class:WiFi
+checkFlashCRC	ESP.h	/^        int checkFlashCRC()$/;"	f	class:ESP
+cleanupDir	ESP8266httpUpdate.cpp	/^void ESPhttpUpdate::cleanupDir (const char *tmp)$/;"	f	class:ESPhttpUpdate
+close	LittleFS.cpp	/^void File::close(void)$/;"	f	class:File
+closeConnection	Wire.cpp	/^void TwoWire::closeConnection()$/;"	f	class:TwoWire
+color	Adafruit_Sensor.h	/^        sensors_color_t color;                \/**< color in RGB component values *\/$/;"	m	union:__anon12::__anon13
+commit	EEPROM.cpp	/^bool EEPROM::commit(void)$/;"	f	class:EEPROM
+config	Adafruit_BME280.h	/^  struct config {$/;"	s	class:Adafruit_BME280
+connect	WiFiClient.cpp	/^bool WiFiClient::connect(IPAddress ip, int port)$/;"	f	class:WiFiClient
+connect	WiFiClient.cpp	/^bool WiFiClient::connect(const char *host, int port)$/;"	f	class:WiFiClient
+connect_to	WiFiClient.cpp	/^int WiFiClient::connect_to (int sockfd, struct sockaddr *serv_addr, int addrlen, int to_ms)$/;"	f	class:WiFiClient
+connected	WiFiClient.cpp	/^bool WiFiClient::connected()$/;"	f	class:WiFiClient
+crackArgs	Arduino.cpp	/^static void crackArgs (int ac, char *av[])$/;"	f	file:
+crackCIDR	ESP8266WiFi.cpp	/^static bool crackCIDR (const char line[], IPAddress &m)$/;"	f	file:
+crackIP	ESP8266WiFi.cpp	/^static bool crackIP (const char line[], IPAddress &a)$/;"	f	file:
+ctime	LittleFS.h	/^        time_t ctime;                   \/\/ really mtime$/;"	m	class:Dir
+ctrl_hum	Adafruit_BME280.h	/^  struct ctrl_hum {$/;"	s	class:Adafruit_BME280
+ctrl_meas	Adafruit_BME280.h	/^  struct ctrl_meas {$/;"	s	class:Adafruit_BME280
+current	Adafruit_Sensor.h	/^        float           current;              \/**< current in milliamps (mA) *\/$/;"	m	union:__anon12::__anon13
+current_font	Adafruit_RA8875.h	/^	const GFXfont *current_font;$/;"	m	class:Adafruit_RA8875
+cursor_x	Adafruit_RA8875.h	/^	uint16_t cursor_x, cursor_y;$/;"	m	class:Adafruit_RA8875
+cursor_y	Adafruit_RA8875.h	/^	uint16_t cursor_x, cursor_y;$/;"	m	class:Adafruit_RA8875
+data	Adafruit_Sensor.h	/^        float           data[4];$/;"	m	union:__anon12::__anon13
+data_array	EEPROM.h	/^        uint8_t *data_array;$/;"	m	class:EEPROM
+day	Time.cpp	/^int day(){$/;"	f
+day	Time.cpp	/^int day(time_t t) { \/\/ the day for the given time (0-6)$/;"	f
+dayNames_P	DateStrings.cpp	/^const PROGMEM char * const PROGMEM dayNames_P[] =$/;"	v
+dayOfWeek	TimeLib.h	/^#define dayOfWeek(/;"	d
+dayShortStr	DateStrings.cpp	/^char* dayShortStr(uint8_t day) $/;"	f
+dayStr	DateStrings.cpp	/^char* dayStr(uint8_t day) $/;"	f
+daysToTime_t	TimeLib.h	/^#define daysToTime_t /;"	d
+defaultAppDir	Arduino.cpp	/^static std::string defaultAppDir()$/;"	f	file:
+delay	Arduino.cpp	/^void delay (uint32_t ms)$/;"	f
+dev_addr	Wire.h	/^        uint8_t dev_addr;$/;"	m	class:TwoWire
+dig_H1	Adafruit_BME280.h	/^  uint8_t dig_H1; \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_H2	Adafruit_BME280.h	/^  int16_t dig_H2; \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_H3	Adafruit_BME280.h	/^  uint8_t dig_H3; \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_H4	Adafruit_BME280.h	/^  int16_t dig_H4; \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_H5	Adafruit_BME280.h	/^  int16_t dig_H5; \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_H6	Adafruit_BME280.h	/^  int8_t dig_H6;  \/\/\/< humidity compensation value$/;"	m	struct:__anon2
+dig_P1	Adafruit_BME280.h	/^  uint16_t dig_P1; \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P2	Adafruit_BME280.h	/^  int16_t dig_P2;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P3	Adafruit_BME280.h	/^  int16_t dig_P3;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P4	Adafruit_BME280.h	/^  int16_t dig_P4;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P5	Adafruit_BME280.h	/^  int16_t dig_P5;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P6	Adafruit_BME280.h	/^  int16_t dig_P6;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P7	Adafruit_BME280.h	/^  int16_t dig_P7;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P8	Adafruit_BME280.h	/^  int16_t dig_P8;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_P9	Adafruit_BME280.h	/^  int16_t dig_P9;  \/\/\/< pressure compensation value$/;"	m	struct:__anon2
+dig_T1	Adafruit_BME280.h	/^  uint16_t dig_T1; \/\/\/< temperature compensation value$/;"	m	struct:__anon2
+dig_T2	Adafruit_BME280.h	/^  int16_t dig_T2;  \/\/\/< temperature compensation value$/;"	m	struct:__anon2
+dig_T3	Adafruit_BME280.h	/^  int16_t dig_T3;  \/\/\/< temperature compensation value$/;"	m	struct:__anon2
+digitalRead	Arduino.h	/^#define	digitalRead(/;"	d
+digitalWrite	Arduino.h	/^#define	digitalWrite(/;"	d
+dir	LittleFS.h	/^        DIR *dir;$/;"	m	class:Dir
+display	Adafruit_RA8875.h	/^	Display *display;$/;"	m	class:Adafruit_RA8875
+displayOn	Adafruit_RA8875.h	/^	void displayOn (int o)$/;"	f	class:Adafruit_RA8875
+displayReady	Adafruit_RA8875.cpp	/^bool Adafruit_RA8875::displayReady()$/;"	f	class:Adafruit_RA8875
+distance	Adafruit_Sensor.h	/^        float           distance;             \/**< distance in centimeters *\/$/;"	m	union:__anon12::__anon13
+dnsIP	ESP8266WiFi.cpp	/^IPAddress WiFi::dnsIP(void)$/;"	f	class:WiFi
+dowFriday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowInvalid	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowMonday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowSaturday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowSunday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowThursday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowTuesday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+dowWednesday	TimeLib.h	/^    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday$/;"	e	enum:__anon21
+drawCanvas	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawCanvas()$/;"	f	class:Adafruit_RA8875
+drawCircle	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawCircle(int16_t x0, int16_t y0, int16_t r0, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+drawLine	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness,$/;"	f	class:Adafruit_RA8875
+drawLine	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+drawLineOverlap	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawLineOverlap (int16_t x0, int16_t y0, int16_t x1, int16_t y1, int8_t overlap,$/;"	f	class:Adafruit_RA8875
+drawPR	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawPR(void)$/;"	f	class:Adafruit_RA8875
+drawPixel	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawPixel(int16_t x, int16_t y, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+drawPixels	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawPixels (uint16_t * p, uint32_t count, int16_t x, int16_t y)$/;"	f	class:Adafruit_RA8875
+drawRect	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+drawSubPixel	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawSubPixel(int16_t x, int16_t y, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+drawThickLine	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawThickLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1,$/;"	f	class:Adafruit_RA8875
+drawTriangle	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::drawTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2,$/;"	f	class:Adafruit_RA8875
+dt_MAX_STRING_LEN	TimeLib.h	/^#define dt_MAX_STRING_LEN /;"	d
+dt_SHORT_STR_LEN	DateStrings.cpp	/^#define dt_SHORT_STR_LEN /;"	d	file:
+dword	IPAddress.h	/^	    uint32_t dword;$/;"	m	union:IPAddress::__anon18
+elapsedDays	TimeLib.h	/^#define elapsedDays(/;"	d
+elapsedSecsThisWeek	TimeLib.h	/^#define elapsedSecsThisWeek(/;"	d
+elapsedSecsToday	TimeLib.h	/^#define elapsedSecsToday(/;"	d
+enableAutoRange	Adafruit_Sensor.h	/^  virtual void enableAutoRange(bool enabled) {};$/;"	f	class:Adafruit_Sensor
+endPacket	WiFiUdp.cpp	/^bool WiFiUDP::endPacket()$/;"	f	class:WiFiUDP
+endTransaction	SPI.h	/^        void endTransaction(void) { }$/;"	f	class:SPIClass
+endTransmission	Wire.cpp	/^uint8_t TwoWire::endTransmission(bool sendStop)$/;"	f	class:TwoWire
+endTransmission	Wire.cpp	/^uint8_t TwoWire::endTransmission(bool sendStop){return 0;};$/;"	f	class:TwoWire
+err_lines_head	ESP8266httpUpdate.h	/^        int err_lines_head;                     \/\/ index of next == oldest$/;"	m	class:ESPhttpUpdate
+err_lines_q	ESP8266httpUpdate.h	/^        char *err_lines_q[MAXERRLINES];$/;"	m	class:ESPhttpUpdate
+errstr	LittleFS.h	/^        std::string errstr;             \/\/ strerror(errno)$/;"	m	class:File
+fbThread	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::fbThread ()$/;"	f	class:Adafruit_RA8875
+fbThreadHelper	Adafruit_RA8875.cpp	/^void *Adafruit_RA8875::fbThreadHelper(void *me)$/;"	f	class:Adafruit_RA8875
+fb_canvas	Adafruit_RA8875.h	/^	fbpix_t *fb_canvas;             \/\/ main drawing image buffer$/;"	m	class:Adafruit_RA8875
+fb_cursor	Adafruit_RA8875.h	/^	fbpix_t *fb_cursor;             \/\/ temp image buffer for cursor overlay$/;"	m	class:Adafruit_RA8875
+fb_dirty	Adafruit_RA8875.h	/^	volatile bool fb_dirty;$/;"	m	class:Adafruit_RA8875
+fb_fb	Adafruit_RA8875.h	/^	fbpix_t *fb_fb;                 \/\/ pointer to mmap fb$/;"	m	class:Adafruit_RA8875
+fb_fd	Adafruit_RA8875.h	/^	int fb_fd;                      \/\/ frame buffer mmap file descriptor$/;"	m	class:Adafruit_RA8875
+fb_lock	Adafruit_RA8875.h	/^	pthread_mutex_t fb_lock;$/;"	m	class:Adafruit_RA8875
+fb_nbytes	Adafruit_RA8875.h	/^	int fb_nbytes;                  \/\/ bytes in each in-memory image buffer$/;"	m	class:Adafruit_RA8875
+fb_si	Adafruit_RA8875.h	/^	struct fb_var_screeninfo fb_si;$/;"	m	class:Adafruit_RA8875	typeref:struct:Adafruit_RA8875::fb_var_screeninfo
+fb_stage	Adafruit_RA8875.h	/^	fbpix_t *fb_stage;              \/\/ temp image during staging to fb hw$/;"	m	class:Adafruit_RA8875
+fb_var_screeninfo	Adafruit_RA8875.h	/^struct fb_var_screeninfo {$/;"	s
+fbpix_t	Adafruit_RA8875.h	/^typedef uint16_t fbpix_t;$/;"	t
+fbpix_t	Adafruit_RA8875.h	/^typedef uint32_t fbpix_t;$/;"	t
+fileCreationTime	LittleFS.cpp	/^time_t Dir::fileCreationTime()$/;"	f	class:Dir
+fileName	LittleFS.cpp	/^std::string Dir::fileName()$/;"	f	class:Dir
+fileSize	LittleFS.cpp	/^size_t Dir::fileSize()$/;"	f	class:Dir
+filename	EEPROM.h	/^	char *filename;$/;"	m	class:EEPROM
+fileno	LittleFS.cpp	/^int File::fileno()$/;"	f	class:File
+fillCircle	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::fillCircle(int16_t x0, int16_t y0, int16_t r0, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+fillRect	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::fillRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16)$/;"	f	class:Adafruit_RA8875
+fillScreen	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::fillScreen (uint16_t color16)$/;"	f	class:Adafruit_RA8875
+fillTriangle	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2,$/;"	f	class:Adafruit_RA8875
+filter	Adafruit_BME280.h	/^    unsigned int filter : 3; \/\/\/< filter settings$/;"	m	struct:Adafruit_BME280::config
+findFullPath	ESP8266httpUpdate.cpp	/^bool ESPhttpUpdate::findFullPath (const char *argv0, char full_path[], size_t fplen)$/;"	f	class:ESPhttpUpdate
+findKeyboard	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::findKeyboard()$/;"	f	class:Adafruit_RA8875
+findMouse	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::findMouse()$/;"	f	class:Adafruit_RA8875
+first	gfxfont.h	/^	uint16_t   first, last; \/\/ ASCII extents$/;"	m	struct:__anon25
+flush	WiFiClient.h	/^	void flush(void){};$/;"	f	class:WiFiClient
+fname	LittleFS.h	/^        std::string fname;              \/\/ direct->d_name$/;"	m	class:Dir
+fp	EEPROM.h	/^        FILE *fp;$/;"	m	class:EEPROM
+fp	LittleFS.h	/^        FILE *fp;$/;"	m	class:File
+fpath	LittleFS.h	/^        std::string fpath;              \/\/ full path$/;"	m	class:File
+g	Adafruit_Sensor.h	/^            float g;       \/**< Green component *\/$/;"	m	struct:__anon9::__anon10::__anon11
+gatewayIP	ESP8266WiFi.cpp	/^IPAddress WiFi::gatewayIP(void)$/;"	f	class:WiFi
+gbase	GPIO.h	/^        volatile uint32_t *gbase;$/;"	m	class:GPIO
+get	Adafruit_BME280.h	/^    unsigned int get() { return (osrs_h); }$/;"	f	struct:Adafruit_BME280::ctrl_hum
+get	Adafruit_BME280.h	/^    unsigned int get() { return (osrs_t << 5) | (osrs_p << 2) | mode; }$/;"	f	struct:Adafruit_BME280::ctrl_meas
+get	Adafruit_BME280.h	/^    unsigned int get() { return (t_sb << 5) | (filter << 2) | spi3w_en; }$/;"	f	struct:Adafruit_BME280::config
+getChar	Adafruit_RA8875.cpp	/^char Adafruit_RA8875::getChar()$/;"	f	class:Adafruit_RA8875
+getChipId	ESP.cpp	/^uint32_t ESP::getChipId()$/;"	f	class:ESP
+getCommand	ESP8266WiFi.cpp	/^static bool getCommand (bool verbose, const char cmd[], char line[], size_t line_len)$/;"	f	file:
+getCreationTime	LittleFS.cpp	/^time_t File::getCreationTime()$/;"	f	class:File
+getCursorX	Adafruit_RA8875.cpp	/^int16_t Adafruit_RA8875::getCursorX(void)$/;"	f	class:Adafruit_RA8875
+getCursorY	Adafruit_RA8875.cpp	/^int16_t Adafruit_RA8875::getCursorY(void)$/;"	f	class:Adafruit_RA8875
+getExternalTime	TimeLib.h	/^typedef time_t(*getExternalTime)();$/;"	t
+getFreeHeap	ESP.h	/^	uint32_t getFreeHeap(void) $/;"	f	class:ESP
+getGPIO	GPIO.cpp	/^GPIO& GPIO::getGPIO()$/;"	f	class:GPIO
+getLastError	ESP8266httpUpdate.cpp	/^int ESPhttpUpdate::getLastError(void)$/;"	f	class:ESPhttpUpdate
+getLastErrorString	ESP8266httpUpdate.cpp	/^String ESPhttpUpdate::getLastErrorString(void)$/;"	f	class:ESPhttpUpdate
+getMouse	Adafruit_RA8875.cpp	/^bool Adafruit_RA8875::getMouse (uint16_t *x, uint16_t *y)$/;"	f	class:Adafruit_RA8875
+getRawPix	Adafruit_RA8875.cpp	/^bool Adafruit_RA8875::getRawPix(uint8_t *rgb24, int npix)$/;"	f	class:Adafruit_RA8875
+getScreenSize	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::getScreenSize (int *w, int *h)$/;"	f	class:Adafruit_RA8875
+getTextBounds	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::getTextBounds(char *string, int16_t x, int16_t y,$/;"	f	class:Adafruit_RA8875
+getTimePtr	Time.cpp	/^getExternalTime getTimePtr;  \/\/ pointer to external sync function$/;"	v
+glyph	gfxfont.h	/^	GFXglyph *glyph;       \/\/ Glyph array$/;"	m	struct:__anon25
+graphicsMode	Adafruit_RA8875.h	/^	void graphicsMode(void)$/;"	f	class:Adafruit_RA8875
+gyro	Adafruit_Sensor.h	/^        sensors_vec_t   gyro;                 \/**< gyroscope values are in rad\/s *\/$/;"	m	union:__anon12::__anon13
+handle	GPIO.h	/^        gpio_handle_t handle;$/;"	m	class:GPIO
+heading	Adafruit_Sensor.h	/^            float heading; \/**< Angle between the longitudinal axis (the plane body) and magnetic north, measured clockwise when viewing from the top of the device. 0-359° *\/$/;"	m	struct:__anon5::__anon6::__anon8
+height	Adafruit_RA8875.cpp	/^uint16_t Adafruit_RA8875::height(void)$/;"	f	class:Adafruit_RA8875
+height	gfxfont.h	/^	uint16_t  width, height;    \/\/ Bitmap dimensions in pixels$/;"	m	struct:__anon24
+hostname	ESP8266WiFi.cpp	/^std::string WiFi::hostname(void)$/;"	f	class:WiFi
+hour	Time.cpp	/^int hour() { \/\/ the hour now $/;"	f
+hour	Time.cpp	/^int hour(time_t t) { \/\/ the hour for the given time$/;"	f
+hourFormat12	Time.cpp	/^int hourFormat12() { \/\/ the hour now in 12 hour format$/;"	f
+hourFormat12	Time.cpp	/^int hourFormat12(time_t t) { \/\/ the hour for the given time in 12 hour format$/;"	f
+hoursToTime_t	TimeLib.h	/^#define hoursToTime_t /;"	d
+i2c_fd	Wire.h	/^        int i2c_fd;$/;"	m	class:TwoWire
+img	Adafruit_RA8875.h	/^	XImage *img;$/;"	m	class:Adafruit_RA8875
+info	LittleFS.cpp	/^void LittleFS::info (FSInfo &info)$/;"	f	class:LittleFS
+init	Adafruit_BME280.cpp	/^bool Adafruit_BME280::init() {$/;"	f	class:Adafruit_BME280
+isAM	Time.cpp	/^uint8_t isAM() { \/\/ returns true if time now is AM$/;"	f
+isAM	Time.cpp	/^uint8_t isAM(time_t t) { \/\/ returns true if given time is AM$/;"	f
+isPM	Time.cpp	/^uint8_t isPM() { \/\/ returns true if PM$/;"	f
+isPM	Time.cpp	/^uint8_t isPM(time_t t) { \/\/ returns true if PM$/;"	f
+isReadingCalibration	Adafruit_BME280.cpp	/^bool Adafruit_BME280::isReadingCalibration(void) {$/;"	f	class:Adafruit_BME280
+isReady	GPIO.cpp	/^bool GPIO::isReady()$/;"	f	class:GPIO
+kbThread	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::kbThread ()$/;"	f	class:Adafruit_RA8875
+kbThreadHelper	Adafruit_RA8875.cpp	/^void *Adafruit_RA8875::kbThreadHelper(void *me)$/;"	f	class:Adafruit_RA8875
+kb_cq	Adafruit_RA8875.h	/^        char kb_cq[20];$/;"	m	class:Adafruit_RA8875
+kb_cqhead	Adafruit_RA8875.h	/^        int kb_cqhead, kb_cqtail;$/;"	m	class:Adafruit_RA8875
+kb_cqtail	Adafruit_RA8875.h	/^        int kb_cqhead, kb_cqtail;$/;"	m	class:Adafruit_RA8875
+kb_fd	Adafruit_RA8875.h	/^        int kb_fd;$/;"	m	class:Adafruit_RA8875
+kb_lock	Adafruit_RA8875.h	/^	pthread_mutex_t kb_lock;$/;"	m	class:Adafruit_RA8875
+last	gfxfont.h	/^	uint16_t   first, last; \/\/ ASCII extents$/;"	m	struct:__anon25
+len	LittleFS.h	/^        size_t len;$/;"	m	class:Dir
+light	Adafruit_Sensor.h	/^        float           light;                \/**< light in SI lux units *\/$/;"	m	union:__anon12::__anon13
+localIP	ESP8266WiFi.cpp	/^IPAddress WiFi::localIP(void)$/;"	f	class:WiFi
+lock	GPIO.h	/^        pthread_mutex_t lock;$/;"	m	class:GPIO
+macAddress	ESP8266WiFi.cpp	/^std::string WiFi::macAddress(void)$/;"	f	class:WiFi
+magnetic	Adafruit_Sensor.h	/^        sensors_vec_t   magnetic;             \/**< magnetic vector values are in micro-Tesla (uT) *\/$/;"	m	union:__anon12::__anon13
+main	Arduino.cpp	/^int main (int ac, char *av[])$/;"	f
+makeTime	Time.cpp	/^time_t makeTime(const tmElements_t &tm){   $/;"	f
+mapGPIOAddress	GPIO.cpp	/^bool GPIO::mapGPIOAddress(char ynot[])$/;"	f	class:GPIO
+max_cpu_usage	Arduino.cpp	/^static float max_cpu_usage = MAX_CPU_USAGE;$/;"	v	file:
+max_value	Adafruit_Sensor.h	/^    float    max_value;                       \/**< maximum value of this sensor's value in SI units *\/$/;"	m	struct:__anon14
+millis	Arduino.cpp	/^uint32_t millis(void)$/;"	f
+min_delay	Adafruit_Sensor.h	/^    int32_t  min_delay;                       \/**< min delay in microseconds between events. zero = not a constant rate *\/$/;"	m	struct:__anon14
+min_value	Adafruit_Sensor.h	/^    float    min_value;                       \/**< minimum value of this sensor's value in SI units *\/$/;"	m	struct:__anon14
+minute	Time.cpp	/^int minute() {$/;"	f
+minute	Time.cpp	/^int minute(time_t t) { \/\/ the minute for the given time$/;"	f
+minutesToTime_t	TimeLib.h	/^#define minutesToTime_t /;"	d
+mkAppDir	Arduino.cpp	/^static void mkAppDir(const char *user_dir)$/;"	f	file:
+mode	Adafruit_BME280.h	/^    unsigned int mode : 2; \/\/\/< device mode$/;"	m	struct:Adafruit_BME280::ctrl_meas
+mode	ESP8266WiFi.cpp	/^int WiFi::mode (int m)$/;"	f	class:WiFi
+month	Time.cpp	/^int month(){$/;"	f
+month	Time.cpp	/^int month(time_t t) {  \/\/ the month for the given time$/;"	f
+monthDays	Time.cpp	/^static  const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31}; \/\/ API starts months from 1, this array starts from 0$/;"	v	file:
+monthNames_P	DateStrings.cpp	/^const PROGMEM char * const PROGMEM monthNames_P[] =$/;"	v
+monthShortStr	DateStrings.cpp	/^char* monthShortStr(uint8_t month)$/;"	f
+monthStr	DateStrings.cpp	/^char* monthStr(uint8_t month)$/;"	f
+mouseThread	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::mouseThread (void)$/;"	f	class:Adafruit_RA8875
+mouseThreadHelper	Adafruit_RA8875.cpp	/^void *Adafruit_RA8875::mouseThreadHelper(void *me)$/;"	f	class:Adafruit_RA8875
+mouse_downs	Adafruit_RA8875.h	/^	volatile int mouse_ups, mouse_downs;$/;"	m	class:Adafruit_RA8875
+mouse_fd	Adafruit_RA8875.h	/^	int mouse_fd, touch_fd;$/;"	m	class:Adafruit_RA8875
+mouse_idle	Adafruit_RA8875.h	/^        int mouse_idle;$/;"	m	class:Adafruit_RA8875
+mouse_lock	Adafruit_RA8875.h	/^	pthread_mutex_t mouse_lock;$/;"	m	class:Adafruit_RA8875
+mouse_tv	Adafruit_RA8875.h	/^        struct timeval mouse_tv;$/;"	m	class:Adafruit_RA8875	typeref:struct:Adafruit_RA8875::timeval
+mouse_ups	Adafruit_RA8875.h	/^	volatile int mouse_ups, mouse_downs;$/;"	m	class:Adafruit_RA8875
+mouse_x	Adafruit_RA8875.h	/^	volatile int16_t mouse_x, mouse_y;$/;"	m	class:Adafruit_RA8875
+mouse_y	Adafruit_RA8875.h	/^	volatile int16_t mouse_x, mouse_y;$/;"	m	class:Adafruit_RA8875
+mvLog	Arduino.cpp	/^static void mvLog (const char *from, const char *to)$/;"	f	file:
+n_data_array	EEPROM.h	/^        size_t n_data_array;$/;"	m	class:EEPROM
+n_peek	WiFiClient.h	/^  	int n_peek;                     \/\/ n useful values in peek[]$/;"	m	class:WiFiClient
+n_retdata	Wire.h	/^        int n_txdata, n_rxdata, n_retdata;$/;"	m	class:TwoWire
+n_rxdata	Wire.h	/^        int n_txdata, n_rxdata, n_retdata;$/;"	m	class:TwoWire
+n_txdata	Wire.h	/^        int n_txdata, n_rxdata, n_retdata;$/;"	m	class:TwoWire
+name	Adafruit_Sensor.h	/^    char     name[12];                        \/**< sensor name *\/$/;"	m	struct:__anon14
+next	LittleFS.cpp	/^bool Dir::next()$/;"	f	class:Dir
+nextMidnight	TimeLib.h	/^#define nextMidnight(/;"	d
+nextSunday	TimeLib.h	/^#define nextSunday(/;"	d
+nextSyncTime	Time.cpp	/^static uint32_t nextSyncTime = 0;$/;"	v	file:
+next_peek	WiFiClient.h	/^        int next_peek;                  \/\/ next peek[] index to use$/;"	m	class:WiFiClient
+none	Adafruit_BME280.h	/^    unsigned int none : 1;     \/\/\/< unused - don't set$/;"	m	struct:Adafruit_BME280::config
+none	Adafruit_BME280.h	/^    unsigned int none : 5;$/;"	m	struct:Adafruit_BME280::ctrl_hum
+now	Time.cpp	/^time_t now() {$/;"	f
+numberOfHours	TimeLib.h	/^#define numberOfHours(/;"	d
+numberOfMinutes	TimeLib.h	/^#define numberOfMinutes(/;"	d
+numberOfSeconds	TimeLib.h	/^#define numberOfSeconds(/;"	d
+onProgress	ESP8266httpUpdate.cpp	/^void ESPhttpUpdate::onProgress (void (*my_progressCB)(int current, int total))$/;"	f	class:ESPhttpUpdate
+open	LittleFS.cpp	/^File LittleFS::open (const char *fname, const char *how)$/;"	f	class:LittleFS
+openConnection	Wire.cpp	/^bool TwoWire::openConnection()$/;"	f	class:TwoWire
+openDir	LittleFS.cpp	/^Dir LittleFS::openDir (const char *dname)$/;"	f	class:LittleFS
+operator []	IPAddress.h	/^        uint8_t operator[](int index) const {$/;"	f	class:IPAddress
+operator []	IPAddress.h	/^        uint8_t& operator[](int index) {$/;"	f	class:IPAddress
+operator bool	LittleFS.cpp	/^Dir::operator bool()$/;"	f	class:Dir
+operator bool	LittleFS.cpp	/^File::operator bool()$/;"	f	class:File
+operator bool	Serial.cpp	/^Serial::operator bool()$/;"	f	class:Serial
+operator bool	WiFiClient.cpp	/^WiFiClient::operator bool()$/;"	f	class:WiFiClient
+operator bool	WiFiUdp.h	/^        operator bool() const { return (sockfd >= 0); }$/;"	f	class:WiFiUDP
+options_engage	Adafruit_RA8875.h	/^        volatile bool options_engage, options_fullscreen;$/;"	m	class:Adafruit_RA8875
+options_fullscreen	Adafruit_RA8875.h	/^        volatile bool options_engage, options_fullscreen;$/;"	m	class:Adafruit_RA8875
+orientation	Adafruit_Sensor.h	/^        sensors_vec_t   orientation;          \/**< orientation values are in degrees *\/$/;"	m	union:__anon12::__anon13
+osrs_h	Adafruit_BME280.h	/^    unsigned int osrs_h : 3; \/\/\/< pressure oversampling$/;"	m	struct:Adafruit_BME280::ctrl_hum
+osrs_p	Adafruit_BME280.h	/^    unsigned int osrs_p : 3; \/\/\/< pressure oversampling$/;"	m	struct:Adafruit_BME280::ctrl_meas
+osrs_t	Adafruit_BME280.h	/^    unsigned int osrs_t : 3; \/\/\/< temperature oversampling$/;"	m	struct:Adafruit_BME280::ctrl_meas
+ourSystem	Adafruit_RA8875.cpp	/^static void ourSystem (const char *fmt, ...)$/;"	f	file:
+our_argv	Arduino.cpp	/^char **our_argv;                \/\/ our argv for restarting$/;"	v
+our_dir	Arduino.cpp	/^std::string our_dir;            \/\/ our storage directory, including trailing \/$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-1600x960";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-2400x1440";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-3200x1920";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-800x480";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-fb0-1600x960";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-fb0-2400x1440";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-fb0-3200x1920";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-fb0-800x480";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-web-1600x960";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-web-2400x1440";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-web-3200x1920";$/;"	v
+our_make	Arduino.cpp	/^      char our_make[] = "hamclock-web-800x480";$/;"	v
+parsePacket	WiFiUdp.cpp	/^int WiFiUDP::parsePacket()$/;"	f	class:WiFiUDP
+peek	WiFiClient.h	/^  	uint8_t peek[4096];             \/\/ read-ahead buffer$/;"	m	class:WiFiClient
+pgm_read_byte	Arduino.h	/^#define	pgm_read_byte(/;"	d
+pgm_read_byte	DateStrings.cpp	/^#define pgm_read_byte(/;"	d	file:
+pgm_read_dword	Arduino.h	/^#define	pgm_read_dword(/;"	d
+pgm_read_float	Arduino.h	/^#define	pgm_read_float(/;"	d
+pgm_read_ptr	Arduino.h	/^#define	pgm_read_ptr(/;"	d
+pgm_read_word	Arduino.h	/^#define	pgm_read_word(/;"	d
+pgm_read_word	DateStrings.cpp	/^#define pgm_read_word(/;"	d	file:
+pinMode	Arduino.h	/^#define	pinMode(/;"	d
+pitch	Adafruit_Sensor.h	/^            float pitch;   \/**< Rotation around the lateral axis (the wing span, 'Y axis'). Pitch is positive and increasing when moving upwards. -180°<=pitch<=180°) *\/$/;"	m	struct:__anon5::__anon6::__anon8
+pixmap	Adafruit_RA8875.h	/^	Pixmap pixmap;$/;"	m	class:Adafruit_RA8875
+plotChar	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotChar (char ch)$/;"	f	class:Adafruit_RA8875
+plotEarth	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotEarth (uint16_t x0, uint16_t y0, float lat0, float lng0,$/;"	f	class:Adafruit_RA8875
+plotLine	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+plotLineHigh	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotLineHigh(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+plotLineLow	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotLineLow(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+plotLineRaw	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotLineRaw(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+plotfb	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::plotfb (int16_t x, int16_t y, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+port	WiFiServer.h	/^	int port;$/;"	m	class:WiFiServer
+prError	ESP8266httpUpdate.cpp	/^void ESPhttpUpdate::prError (const char *fmt, ...)$/;"	f	class:ESPhttpUpdate
+pr_draw	Adafruit_RA8875.h	/^        volatile bool pr_draw;$/;"	m	class:Adafruit_RA8875
+pr_h	Adafruit_RA8875.h	/^        uint16_t pr_x, pr_y, pr_w, pr_h;$/;"	m	class:Adafruit_RA8875
+pr_w	Adafruit_RA8875.h	/^        uint16_t pr_x, pr_y, pr_w, pr_h;$/;"	m	class:Adafruit_RA8875
+pr_x	Adafruit_RA8875.h	/^        uint16_t pr_x, pr_y, pr_w, pr_h;$/;"	m	class:Adafruit_RA8875
+pr_y	Adafruit_RA8875.h	/^        uint16_t pr_x, pr_y, pr_w, pr_h;$/;"	m	class:Adafruit_RA8875
+pressure	Adafruit_Sensor.h	/^        float           pressure;             \/**< pressure in hectopascal (hPa) *\/$/;"	m	union:__anon12::__anon13
+prevMillis	Time.cpp	/^static uint32_t prevMillis = 0;$/;"	v	file:
+previousMidnight	TimeLib.h	/^#define previousMidnight(/;"	d
+previousSunday	TimeLib.h	/^#define previousSunday(/;"	d
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (char *s)$/;"	f	class:Adafruit_RA8875
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (char c)$/;"	f	class:Adafruit_RA8875
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (const char *s)$/;"	f	class:Adafruit_RA8875
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (float f, int p)$/;"	f	class:Adafruit_RA8875
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (int i, int b)$/;"	f	class:Adafruit_RA8875
+print	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::print (long l)$/;"	f	class:Adafruit_RA8875
+print	Serial.cpp	/^void Serial::print (String s)$/;"	f	class:Serial
+print	Serial.cpp	/^void Serial::print (char *s)$/;"	f	class:Serial
+print	Serial.cpp	/^void Serial::print (char c)$/;"	f	class:Serial
+print	Serial.cpp	/^void Serial::print (const char *s)$/;"	f	class:Serial
+print	Serial.cpp	/^void Serial::print (int i)$/;"	f	class:Serial
+print	Serial.cpp	/^void Serial::print (void)$/;"	f	class:Serial
+print	WiFiClient.cpp	/^void WiFiClient::print (String s)$/;"	f	class:WiFiClient
+print	WiFiClient.cpp	/^void WiFiClient::print (float f)$/;"	f	class:WiFiClient
+print	WiFiClient.cpp	/^void WiFiClient::print (float f, int s)$/;"	f	class:WiFiClient
+print	WiFiClient.cpp	/^void WiFiClient::print (void)$/;"	f	class:WiFiClient
+printf	Serial.cpp	/^int Serial::printf (const char *fmt, ...)$/;"	f	class:Serial
+println	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::println (char *s)$/;"	f	class:Adafruit_RA8875
+println	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::println (const char *s)$/;"	f	class:Adafruit_RA8875
+println	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::println (int i, int b)$/;"	f	class:Adafruit_RA8875
+println	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::println (void)$/;"	f	class:Adafruit_RA8875
+println	Serial.cpp	/^void Serial::println (char *s)$/;"	f	class:Serial
+println	Serial.cpp	/^void Serial::println (const char *s)$/;"	f	class:Serial
+println	Serial.cpp	/^void Serial::println (int i)$/;"	f	class:Serial
+println	Serial.cpp	/^void Serial::println (void)$/;"	f	class:Serial
+println	WiFiClient.cpp	/^void WiFiClient::println (String s)$/;"	f	class:WiFiClient
+println	WiFiClient.cpp	/^void WiFiClient::println (float f)$/;"	f	class:WiFiClient
+println	WiFiClient.cpp	/^void WiFiClient::println (float f, int s)$/;"	f	class:WiFiClient
+println	WiFiClient.cpp	/^void WiFiClient::println (int i)$/;"	f	class:WiFiClient
+println	WiFiClient.cpp	/^void WiFiClient::println (uint32_t i)$/;"	f	class:WiFiClient
+println	WiFiClient.cpp	/^void WiFiClient::println (void)$/;"	f	class:WiFiClient
+progressCB	ESP8266httpUpdate.h	/^        void (*progressCB)(int current, int total);$/;"	m	class:ESPhttpUpdate
+psk	ESP8266WiFi.cpp	/^std::string WiFi::psk(void)$/;"	f	class:WiFi
+putChar	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::putChar (char c)$/;"	f	class:Adafruit_RA8875
+r	Adafruit_Sensor.h	/^            float r;       \/**< Red component *\/$/;"	m	struct:__anon9::__anon10::__anon11
+r_buf	WiFiUdp.h	/^	uint8_t r_buf[1024];$/;"	m	class:WiFiUDP
+r_n	WiFiUdp.h	/^	int r_n, w_n;$/;"	m	class:WiFiUDP
+random	Arduino.cpp	/^long random(int max)$/;"	f
+randomSeed	Arduino.h	/^#define	randomSeed(/;"	d
+read	EEPROM.cpp	/^uint8_t EEPROM::read (uint32_t address)$/;"	f	class:EEPROM
+read	LittleFS.cpp	/^size_t File::read (uint8_t *buf, size_t count)$/;"	f	class:File
+read	WiFiClient.cpp	/^int WiFiClient::read()$/;"	f	class:WiFiClient
+read	WiFiUdp.cpp	/^int WiFiUDP::read(uint8_t *buf, int n)$/;"	f	class:WiFiUDP
+read	Wire.cpp	/^int TwoWire::read(void)$/;"	f	class:TwoWire
+read	Wire.cpp	/^int TwoWire::read(void){return 0;};$/;"	f	class:TwoWire
+read16	Adafruit_BME280.cpp	/^uint16_t Adafruit_BME280::read16(byte reg) {$/;"	f	class:Adafruit_BME280
+read16_LE	Adafruit_BME280.cpp	/^uint16_t Adafruit_BME280::read16_LE(byte reg) {$/;"	f	class:Adafruit_BME280
+read24	Adafruit_BME280.cpp	/^uint32_t Adafruit_BME280::read24(byte reg) {$/;"	f	class:Adafruit_BME280
+read8	Adafruit_BME280.cpp	/^uint8_t Adafruit_BME280::read8(byte reg) {$/;"	f	class:Adafruit_BME280
+readAltitude	Adafruit_BME280.cpp	/^float Adafruit_BME280::readAltitude(float seaLevel) {$/;"	f	class:Adafruit_BME280
+readCoefficients	Adafruit_BME280.cpp	/^void Adafruit_BME280::readCoefficients(void) {$/;"	f	class:Adafruit_BME280
+readData	Adafruit_RA8875.cpp	/^uint16_t Adafruit_RA8875::readData(void)$/;"	f	class:Adafruit_RA8875
+readHumidity	Adafruit_BME280.cpp	/^float Adafruit_BME280::readHumidity(void) {$/;"	f	class:Adafruit_BME280
+readPin	GPIO.cpp	/^bool GPIO::readPin (uint8_t p) { return false; }$/;"	f	class:GPIO
+readPin	GPIO.cpp	/^bool GPIO::readPin (uint8_t p)$/;"	f	class:GPIO
+readPressure	Adafruit_BME280.cpp	/^float Adafruit_BME280::readPressure(void) {$/;"	f	class:Adafruit_BME280
+readS16	Adafruit_BME280.cpp	/^int16_t Adafruit_BME280::readS16(byte reg) { return (int16_t)read16(reg); }$/;"	f	class:Adafruit_BME280
+readS16_LE	Adafruit_BME280.cpp	/^int16_t Adafruit_BME280::readS16_LE(byte reg) {$/;"	f	class:Adafruit_BME280
+readTemperature	Adafruit_BME280.cpp	/^float Adafruit_BME280::readTemperature(void) {$/;"	f	class:Adafruit_BME280
+read_first	Adafruit_RA8875.h	/^	bool read_msb, read_first;$/;"	m	class:Adafruit_RA8875
+read_msb	Adafruit_RA8875.h	/^	bool read_msb, read_first;$/;"	m	class:Adafruit_RA8875
+read_x	Adafruit_RA8875.h	/^	uint16_t read_x, read_y;$/;"	m	class:Adafruit_RA8875
+read_y	Adafruit_RA8875.h	/^	uint16_t read_x, read_y;$/;"	m	class:Adafruit_RA8875
+ready	Adafruit_RA8875.h	/^        volatile bool ready;$/;"	m	class:Adafruit_RA8875
+ready	GPIO.h	/^        bool ready;$/;"	m	class:GPIO
+refreshCache	Time.cpp	/^void refreshCache(time_t t) {$/;"	f
+relative_humidity	Adafruit_Sensor.h	/^        float           relative_humidity;    \/**< relative humidity in percent *\/$/;"	m	union:__anon12::__anon13
+remoteIP	WiFiClient.cpp	/^String WiFiClient::remoteIP()$/;"	f	class:WiFiClient
+remoteIP	WiFiUdp.cpp	/^IPAddress WiFiUDP::remoteIP()$/;"	f	class:WiFiUDP
+remoteip	WiFiUdp.h	/^	struct sockaddr_in remoteip;$/;"	m	class:WiFiUDP	typeref:struct:WiFiUDP::sockaddr_in
+remove	LittleFS.cpp	/^void LittleFS::remove (const char *fname)$/;"	f	class:LittleFS
+requestFrom	Wire.cpp	/^uint8_t TwoWire::requestFrom(uint8_t addr, uint8_t nbytes)$/;"	f	class:TwoWire
+requestFrom	Wire.cpp	/^uint8_t TwoWire::requestFrom(uint8_t, uint8_t){return 0;};$/;"	f	class:TwoWire
+reserved	Adafruit_Sensor.h	/^    uint8_t reserved[3];$/;"	m	struct:__anon5
+reserved0	Adafruit_Sensor.h	/^    int32_t reserved0;                        \/**< reserved *\/$/;"	m	struct:__anon12
+resolution	Adafruit_Sensor.h	/^    float    resolution;                      \/**< smallest difference between two values reported by this sensor *\/$/;"	m	struct:__anon14
+restart	ESP.cpp	/^void ESP::restart(void)$/;"	f	class:ESP
+rgba	Adafruit_Sensor.h	/^    uint32_t rgba;         \/**< 24-bit RGBA value *\/$/;"	m	struct:__anon9
+roll	Adafruit_Sensor.h	/^            float roll;    \/**< Rotation around the longitudinal axis (the plane body, 'X axis'). Roll is positive and increasing when moving downward. -90°<=roll<=90° *\/$/;"	m	struct:__anon5::__anon6::__anon8
+rotation	Adafruit_RA8875.h	/^	int rotation;$/;"	m	class:Adafruit_RA8875
+runCommand	ESP8266httpUpdate.cpp	/^bool ESPhttpUpdate::runCommand (bool use_euid, int p0, int p1, int pn, const char *fmt, ...)$/;"	f	class:ESPhttpUpdate
+rxdata	Wire.h	/^        uint8_t rxdata[MAX_RXBUF];$/;"	m	class:TwoWire
+screen_h	Adafruit_RA8875.h	/^        volatile int screen_w, screen_h;$/;"	m	class:Adafruit_RA8875
+screen_w	Adafruit_RA8875.h	/^        volatile int screen_w, screen_h;$/;"	m	class:Adafruit_RA8875
+seaLevelForAltitude	Adafruit_BME280.cpp	/^float Adafruit_BME280::seaLevelForAltitude(float altitude, float atmospheric) {$/;"	f	class:Adafruit_BME280
+second	Time.cpp	/^int second() {$/;"	f
+second	Time.cpp	/^int second(time_t t) {  \/\/ the second for the given time$/;"	f
+seek	LittleFS.cpp	/^bool File::seek (size_t offset, int whence)$/;"	f	class:File
+sendto_n	WiFiUdp.h	/^	int sendto_n;$/;"	m	class:WiFiUDP
+sensorID	Adafruit_BME280.cpp	/^uint32_t Adafruit_BME280::sensorID(void) { return _sensorID; }$/;"	f	class:Adafruit_BME280
+sensor_filter	Adafruit_BME280.h	/^  enum sensor_filter {$/;"	g	class:Adafruit_BME280
+sensor_id	Adafruit_Sensor.h	/^    int32_t  sensor_id;                       \/**< unique sensor identifier *\/$/;"	m	struct:__anon14
+sensor_id	Adafruit_Sensor.h	/^    int32_t sensor_id;                        \/**< unique sensor identifier *\/$/;"	m	struct:__anon12
+sensor_mode	Adafruit_BME280.h	/^  enum sensor_mode {$/;"	g	class:Adafruit_BME280
+sensor_sampling	Adafruit_BME280.h	/^  enum sensor_sampling {$/;"	g	class:Adafruit_BME280
+sensor_t	Adafruit_Sensor.h	/^} sensor_t;$/;"	t	typeref:struct:__anon14
+sensors_color_t	Adafruit_Sensor.h	/^} sensors_color_t;$/;"	t	typeref:struct:__anon9
+sensors_event_t	Adafruit_Sensor.h	/^} sensors_event_t;$/;"	t	typeref:struct:__anon12
+sensors_type_t	Adafruit_Sensor.h	/^} sensors_type_t;$/;"	t	typeref:enum:__anon4
+sensors_vec_t	Adafruit_Sensor.h	/^} sensors_vec_t;$/;"	t	typeref:struct:__anon5
+setAddr	Wire.cpp	/^void TwoWire::setAddr (uint8_t addr)$/;"	f	class:TwoWire
+setAsInput	GPIO.cpp	/^void GPIO::setAsInput (uint8_t p)$/;"	f	class:GPIO
+setAsInput	GPIO.cpp	/^void GPIO::setAsInput(uint8_t p) { } $/;"	f	class:GPIO
+setAsInput	GPIO.cpp	/^void GPIO::setAsInput(uint8_t p)$/;"	f	class:GPIO
+setAsOutput	GPIO.cpp	/^void GPIO::setAsOutput (uint8_t p)$/;"	f	class:GPIO
+setAsOutput	GPIO.cpp	/^void GPIO::setAsOutput(uint8_t p) { }$/;"	f	class:GPIO
+setAsOutput	GPIO.cpp	/^void GPIO::setAsOutput(uint8_t p)$/;"	f	class:GPIO
+setCursor	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setCursor(uint16_t x, uint16_t y)$/;"	f	class:Adafruit_RA8875
+setCursorIfVis	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setCursorIfVis (uint16_t row, uint16_t col, fbpix_t color)$/;"	f	class:Adafruit_RA8875
+setEarthPix	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setEarthPix (char *day_pixels, char *night_pixels)$/;"	f	class:Adafruit_RA8875
+setFont	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setFont (const GFXfont *f)$/;"	f	class:Adafruit_RA8875
+setHi	GPIO.cpp	/^void GPIO::setHi (uint8_t p)$/;"	f	class:GPIO
+setHi	GPIO.cpp	/^void GPIO::setHi(uint8_t p) { }$/;"	f	class:GPIO
+setHi	GPIO.cpp	/^void GPIO::setHi(uint8_t p)$/;"	f	class:GPIO
+setHiLo	GPIO.cpp	/^void GPIO::setHiLo (uint8_t p, bool hi) { }$/;"	f	class:GPIO
+setHiLo	GPIO.cpp	/^void GPIO::setHiLo (uint8_t p, bool hi)$/;"	f	class:GPIO
+setLo	GPIO.cpp	/^void GPIO::setLo(uint8_t p) { }$/;"	f	class:GPIO
+setLo	GPIO.cpp	/^void GPIO::setLo(uint8_t p)$/;"	f	class:GPIO
+setMouse	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setMouse (int x, int y)$/;"	f	class:Adafruit_RA8875
+setNoDelay	WiFiClient.cpp	/^void WiFiClient::setNoDelay(bool on)$/;"	f	class:WiFiClient
+setPR	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setPR (uint16_t x, uint16_t y, uint16_t w, uint16_t h)$/;"	f	class:Adafruit_RA8875
+setRotation	Adafruit_RA8875.h	/^	void setRotation (int r)$/;"	f	class:Adafruit_RA8875
+setSampling	Adafruit_BME280.cpp	/^void Adafruit_BME280::setSampling(sensor_mode mode,$/;"	f	class:Adafruit_BME280
+setSyncInterval	Time.cpp	/^void setSyncInterval(time_t interval){ \/\/ set the number of seconds between re-sync$/;"	f
+setSyncProvider	Time.cpp	/^void setSyncProvider( getExternalTime getTimeFunction){$/;"	f
+setTextColor	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setTextColor(uint16_t color16)$/;"	f	class:Adafruit_RA8875
+setTime	Time.cpp	/^void setTime(int hr,int min,int sec,int dy, int mnth, int yr){$/;"	f
+setTime	Time.cpp	/^void setTime(time_t t) { $/;"	f
+setTimeCallback	LittleFS.h	/^        void setTimeCallback (time_t (*f)()) { (void)f; }       \/\/ ignored$/;"	f	class:LittleFS
+setXY	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::setXY (int16_t x, int16_t y)$/;"	f	class:Adafruit_RA8875
+size	LittleFS.cpp	/^size_t File::size()$/;"	f	class:File
+sn	ESP.h	/^        uint32_t sn;$/;"	m	class:ESP
+socket	WiFiClient.h	/^	int socket;$/;"	m	class:WiFiClient
+socket	WiFiServer.h	/^	int socket;$/;"	m	class:WiFiServer
+sockfd	WiFiUdp.h	/^	int sockfd;$/;"	m	class:WiFiUDP
+spi3w_en	Adafruit_BME280.h	/^    unsigned int spi3w_en : 1; \/\/\/< unused - don't set$/;"	m	struct:Adafruit_BME280::config
+spi_speed	Adafruit_RA8875.cpp	/^uint32_t spi_speed;$/;"	v
+spixfer	Adafruit_BME280.cpp	/^uint8_t Adafruit_BME280::spixfer(uint8_t x) {$/;"	f	class:Adafruit_BME280
+standby_duration	Adafruit_BME280.h	/^  enum standby_duration {$/;"	g	class:Adafruit_BME280
+status	Adafruit_Sensor.h	/^    int8_t status;$/;"	m	struct:__anon5
+status	ESP8266WiFi.cpp	/^int WiFi::status(void)$/;"	f	class:WiFi
+stdout2File	Arduino.cpp	/^static void stdout2File()$/;"	f	file:
+stop	WiFiClient.cpp	/^void WiFiClient::stop()$/;"	f	class:WiFiClient
+stop	WiFiServer.cpp	/^void WiFiServer::stop()$/;"	f	class:WiFiServer
+stop	WiFiUdp.cpp	/^void WiFiUDP::stop()$/;"	f	class:WiFiUDP
+strcmp_P	Arduino.h	/^#define strcmp_P /;"	d
+strcpy_P	Arduino.h	/^#define strcpy_P /;"	d
+strcpy_P	DateStrings.cpp	/^#define strcpy_P(/;"	d	file:
+strlen_P	Arduino.h	/^#define strlen_P /;"	d
+strncmp_P	Arduino.h	/^#define strncmp_P /;"	d
+strncpy_P	Arduino.h	/^#define strncpy_P /;"	d
+strspn_P	Arduino.h	/^#define strspn_P /;"	d
+subnetMask	ESP8266WiFi.cpp	/^IPAddress WiFi::subnetMask(void)$/;"	f	class:WiFi
+swap2	Adafruit_RA8875.h	/^        void swap2 (int16_t &x0, int16_t &y0, int16_t &x1, int16_t &y1) {$/;"	f	class:Adafruit_RA8875
+syncInterval	Time.cpp	/^static uint32_t syncInterval = 300;  \/\/ time sync will be attempted after this many seconds$/;"	v	file:
+sysTime	Time.cpp	/^static uint32_t sysTime = 0;$/;"	v	file:
+sysUnsyncedTime	Time.cpp	/^time_t sysUnsyncedTime = 0; \/\/ the time sysTime unadjusted by sync  $/;"	v
+t_fine	Adafruit_BME280.h	/^  int32_t t_fine; \/\/!< temperature with high resolution, stored as an attribute$/;"	m	class:Adafruit_BME280
+t_httpUpdate_return	ESP8266httpUpdate.h	/^typedef int t_httpUpdate_return;$/;"	t
+t_sb	Adafruit_BME280.h	/^    unsigned int t_sb : 3; \/\/\/< inactive duration (standby time) in normal mode$/;"	m	struct:Adafruit_BME280::config
+takeForcedMeasurement	Adafruit_BME280.cpp	/^void Adafruit_BME280::takeForcedMeasurement() {$/;"	f	class:Adafruit_BME280
+temperature	Adafruit_Sensor.h	/^        float           temperature;          \/**< temperature is in degrees centigrade (Celsius) *\/$/;"	m	union:__anon12::__anon13
+test_bit	Adafruit_RA8875.cpp	/^            #define test_bit(/;"	d	file:
+textSetCursor	Adafruit_RA8875.h	/^	void textSetCursor(uint16_t x, uint16_t y)$/;"	f	class:Adafruit_RA8875
+text_color	Adafruit_RA8875.h	/^	fbpix_t text_color;$/;"	m	class:Adafruit_RA8875
+timeDayOfWeek_t	TimeLib.h	/^} timeDayOfWeek_t;$/;"	t	typeref:enum:__anon21
+timeNeedsSync	TimeLib.h	/^typedef enum {timeNotSet, timeNeedsSync, timeSet$/;"	e	enum:__anon20
+timeNotSet	TimeLib.h	/^typedef enum {timeNotSet, timeNeedsSync, timeSet$/;"	e	enum:__anon20
+timeSet	TimeLib.h	/^typedef enum {timeNotSet, timeNeedsSync, timeSet$/;"	e	enum:__anon20
+timeStatus	Time.cpp	/^timeStatus_t timeStatus() {$/;"	f
+timeStatus_t	TimeLib.h	/^}  timeStatus_t ;$/;"	t	typeref:enum:__anon20
+timestamp	Adafruit_Sensor.h	/^    int32_t timestamp;                        \/**< time is in milliseconds *\/$/;"	m	struct:__anon12
+tm	Time.cpp	/^static tmElements_t tm;          \/\/ a cache of time elements$/;"	v	file:
+tmByteFields	TimeLib.h	/^} tmByteFields;	   $/;"	t	typeref:enum:__anon22
+tmDay	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmElementsPtr_t	TimeLib.h	/^} 	tmElements_t, TimeElements, *tmElementsPtr_t;$/;"	t	typeref:struct:__anon23
+tmElements_t	TimeLib.h	/^} 	tmElements_t, TimeElements, *tmElementsPtr_t;$/;"	t	typeref:struct:__anon23
+tmHour	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmMinute	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmMonth	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmNbrFields	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmSecond	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmWday	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmYear	TimeLib.h	/^    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields$/;"	e	enum:__anon22
+tmYearToCalendar	TimeLib.h	/^#define  tmYearToCalendar(/;"	d
+tmYearToY2k	TimeLib.h	/^#define  tmYearToY2k(/;"	d
+totalBytes	LittleFS.h	/^    size_t totalBytes;$/;"	m	struct:__anon19
+touchEnable	Adafruit_RA8875.h	/^	void touchEnable (bool b)$/;"	f	class:Adafruit_RA8875
+touchRead	Adafruit_RA8875.cpp	/^void Adafruit_RA8875::touchRead (uint16_t *x, uint16_t *y)$/;"	f	class:Adafruit_RA8875
+touch_fd	Adafruit_RA8875.h	/^	int mouse_fd, touch_fd;$/;"	m	class:Adafruit_RA8875
+touched	Adafruit_RA8875.cpp	/^bool Adafruit_RA8875::touched(void)$/;"	f	class:Adafruit_RA8875
+tout	WiFiClient.cpp	/^int WiFiClient::tout (int to_ms, int fd)$/;"	f	class:WiFiClient
+transfer	SPI.h	/^        uint8_t transfer(uint8_t data) { return 0; }$/;"	f	class:SPIClass
+transmitting	Wire.h	/^        bool transmitting;$/;"	m	class:TwoWire
+txdata	Wire.h	/^        uint8_t txdata[MAX_TXBUF];$/;"	m	class:TwoWire
+type	Adafruit_Sensor.h	/^    int32_t  type;                            \/**< this sensor's type (ex. SENSOR_TYPE_LIGHT) *\/$/;"	m	struct:__anon14
+type	Adafruit_Sensor.h	/^    int32_t type;                             \/**< sensor type *\/$/;"	m	struct:__anon12
+update	ESP8266httpUpdate.cpp	/^t_httpUpdate_return ESPhttpUpdate::update(WiFiClient &client, const char *url)$/;"	f	class:ESPhttpUpdate
+usage	Arduino.cpp	/^static void usage (const char *errfmt, ...)$/;"	f	file:
+usedBytes	LittleFS.h	/^    size_t usedBytes;$/;"	m	struct:__anon19
+v	Adafruit_Sensor.h	/^        float v[3];$/;"	m	union:__anon5::__anon6
+verbose	Wire.cpp	/^static bool verbose = false;$/;"	v	file:
+version	Adafruit_Sensor.h	/^    int32_t  version;                         \/**< version of the hardware + driver *\/$/;"	m	struct:__anon14
+version	Adafruit_Sensor.h	/^    int32_t version;                          \/**< must be sizeof(struct sensors_event_t) *\/$/;"	m	struct:__anon12
+visdepth	Adafruit_RA8875.h	/^        int visdepth;$/;"	m	class:Adafruit_RA8875
+visual	Adafruit_RA8875.h	/^        Visual *visual;$/;"	m	class:Adafruit_RA8875
+voltage	Adafruit_Sensor.h	/^        float           voltage;              \/**< voltage in volts (V) *\/$/;"	m	union:__anon12::__anon13
+w_n	WiFiUdp.h	/^	int r_n, w_n;$/;"	m	class:WiFiUDP
+wdtDisable	ESP.h	/^	void wdtDisable(void)$/;"	f	class:ESP
+wdtFeed	ESP.h	/^	void wdtFeed(void)$/;"	f	class:ESP
+weekday	Time.cpp	/^int weekday() {   \/\/ Sunday is day 1$/;"	f
+weekday	Time.cpp	/^int weekday(time_t t) {$/;"	f
+weeksToTime_t	TimeLib.h	/^#define weeksToTime_t /;"	d
+width	Adafruit_RA8875.cpp	/^uint16_t Adafruit_RA8875::width(void)$/;"	f	class:Adafruit_RA8875
+width	gfxfont.h	/^	uint16_t  width, height;    \/\/ Bitmap dimensions in pixels$/;"	m	struct:__anon24
+win	Adafruit_RA8875.h	/^	Window win;$/;"	m	class:Adafruit_RA8875
+write	EEPROM.cpp	/^void EEPROM::write (uint32_t address, uint8_t byte)$/;"	f	class:EEPROM
+write	LittleFS.cpp	/^size_t File::write (char *buf, size_t count)$/;"	f	class:File
+write	WiFiClient.cpp	/^int WiFiClient::write (const uint8_t *buf, int n)$/;"	f	class:WiFiClient
+write	WiFiUdp.cpp	/^void WiFiUDP::write (uint8_t *buf, int n)$/;"	f	class:WiFiUDP
+write	Wire.cpp	/^size_t TwoWire::write(const uint8_t *data, size_t quantity)$/;"	f	class:TwoWire
+write	Wire.cpp	/^size_t TwoWire::write(const uint8_t *data, size_t quantity){return 0;};$/;"	f	class:TwoWire
+write	Wire.cpp	/^size_t TwoWire::write(uint8_t datum)$/;"	f	class:TwoWire
+write	Wire.cpp	/^size_t TwoWire::write(uint8_t){return 0;};$/;"	f	class:TwoWire
+write8	Adafruit_BME280.cpp	/^void Adafruit_BME280::write8(byte reg, byte value) {$/;"	f	class:Adafruit_BME280
+writeCommand	Adafruit_RA8875.h	/^	void writeCommand (uint8_t c)$/;"	f	class:Adafruit_RA8875
+x	Adafruit_Sensor.h	/^            float x;$/;"	m	struct:__anon5::__anon6::__anon7
+xAdvance	gfxfont.h	/^	uint16_t  xAdvance;         \/\/ Distance to advance cursor (x axis)$/;"	m	struct:__anon24
+xOffset	gfxfont.h	/^	int16_t   xOffset, yOffset; \/\/ Dist from cursor pos to UL corner$/;"	m	struct:__anon24
+xres	Adafruit_RA8875.h	/^    int xres, yres;$/;"	m	struct:fb_var_screeninfo
+y	Adafruit_Sensor.h	/^            float y;$/;"	m	struct:__anon5::__anon6::__anon7
+y2kYearToTm	TimeLib.h	/^#define  y2kYearToTm(/;"	d
+yAdvance	gfxfont.h	/^	uint16_t   yAdvance;   \/\/ Newline distance (y axis)$/;"	m	struct:__anon25
+yOffset	gfxfont.h	/^	int16_t   xOffset, yOffset; \/\/ Dist from cursor pos to UL corner$/;"	m	struct:__anon24
+year	Time.cpp	/^int year() {  \/\/ as in Processing, the full four digit year: (2009, 2010 etc) $/;"	f
+year	Time.cpp	/^int year(time_t t) { \/\/ the year for the given time$/;"	f
+yield	ESP.cpp	/^void yield(void)$/;"	f
+yres	Adafruit_RA8875.h	/^    int xres, yres;$/;"	m	struct:fb_var_screeninfo
+z	Adafruit_Sensor.h	/^            float z;$/;"	m	struct:__anon5::__anon6::__anon7
+~Adafruit_Sensor	Adafruit_Sensor.h	/^  virtual ~Adafruit_Sensor() {}$/;"	f	class:Adafruit_Sensor
+~Dir	LittleFS.cpp	/^Dir::~Dir()$/;"	f	class:Dir
+~LittleFS	LittleFS.cpp	/^LittleFS::~LittleFS()$/;"	f	class:LittleFS
+~TwoWire	Wire.cpp	/^TwoWire::~TwoWire()$/;"	f	class:TwoWire
+~TwoWire	Wire.cpp	/^TwoWire::~TwoWire(void){};$/;"	f	class:TwoWire
+~WiFiUDP	WiFiUdp.cpp	/^WiFiUDP::~WiFiUDP()$/;"	f	class:WiFiUDP

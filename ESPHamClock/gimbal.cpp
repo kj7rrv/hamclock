@@ -38,7 +38,6 @@ int gimbal_trace_level = 1;
 #define LDIRBOX_SZ      10                              // large direction control box size
 #define SDIRBOX_SZ      8                               // small direction control box size
 #define DIRBOX_GAP      4                               // gap between control box pairs
-#define AUTO_Y          (box.y+PLOTBOX_H-CHAR_H-15)     // auto button y coord
 #define ARROW_COLOR     RGB565(255,125,0)               // color for directional arrow controls
 #define UPOVER_COLOR    RA8875_RED                      // upover symbol color
 #define UPDATE_MS       1005                            // command update interval, ms

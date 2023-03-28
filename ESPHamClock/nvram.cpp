@@ -149,7 +149,8 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_BCMODE
     1,                          // NV_SDO
     1,                          // NV_SDOROT
-    1,                          // NV_ONTHEAIR
+    1,                          // NV_OTATYPE
+    1,                          // NV_OTASORT
 
 };
 

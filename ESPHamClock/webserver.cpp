@@ -747,8 +747,8 @@ static bool spots_helper (WiFiClient &client, const DXClusterSpot *spots, int ns
         ll2maidenhead (grid, to_ll);
 
         // add remaining fields
-        snprintf (buf+bufl, buf_len-bufl, _FX(" %-*s %04u %7s %6s %7.2f %7.2f   %6.0f   %4.0f %s\n"),
-                MAX_SPOTCALL_LEN-1, spot.dx_call, spot.utcs, spot.mode,
+        snprintf (buf+bufl, buf_len-bufl, _FX(" %-*s %02d%02d %7s %6s %7.2f %7.2f   %6.0f   %4.0f %s\n"),
+                MAX_SPOTCALL_LEN-1, spot.dx_call, hour(spot.spotted), minute(spot.spotted), spot.mode,
                 grid, to_ll.lat_d, to_ll.lng_d, dist, bear, bear_ismag ? _FX("magnetic") : _FX("true"));
 
         // print
@@ -2899,26 +2899,13 @@ static bool setWiFiTime (WiFiClient &client, char line[], size_t line_len)
 
     } else if (wa.found[0] && wa.value[0] != NULL) {
 
-        int yr, mo, dy, hr, mn, sc;
-        if (sscanf (wa.value[0], _FX("%d-%d-%dT%d:%d:%d"), &yr, &mo, &dy, &hr, &mn, &sc) == 6) {
-
-            // reformat
-            tmElements_t tm;
-            tm.Year = yr - 1970;
-            tm.Month = mo;
-            tm.Day = dy;
-            tm.Hour = hr;
-            tm.Minute = mn;
-            tm.Second = sc;
-
-            // convert and engage
-            changeTime (makeTime(tm));
-
-        } else {
-
+        // convert and engage if ok
+        time_t new_t = crackISO8601 (wa.value[0]);
+        if (new_t)
+            changeTime (new_t);
+        else {
             strcpy (line, _FX("garbled ISO"));
             return (false);
-
         }
 
     } else {
@@ -3150,9 +3137,44 @@ static bool doWiFiUpdate (WiFiClient &client, char *unused_line, size_t line_len
     return (true);
 }
 
+/* set locked mode on or off
+ */
+static bool setWiFiScreenLock (WiFiClient &client, char line[], size_t line_len)
+{
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "lock";                       // 0
+
+    // parse
+    if (!parseWebCommand (wa, line, line_len))
+        return (false);
+
+    // engage
+    if (wa.found[0]) {
+        if (strcmp (wa.value[0], "on") == 0)
+            setScreenLock (true);
+        else if (strcmp (wa.value[0], "off") == 0)
+            setScreenLock (false);
+        else {
+            snprintf (line, line_len, "must be on or off");
+            return (false);
+        }
+    } else {
+        strcpy (line, garbcmd);
+        return (false);
+    }
+
+    // ack
+    startPlainText(client);
+    client.print (F("ok\n"));
+
+    // ok
+    return (true);
+}
+
 
 /* change the live spots configuration
- *   spot=of|by&what=call|grid&data=psk|wspr|rbn&bands=160,...
+ *   spot=of|by&what=call|grid&show=maxdist|counts&data=psk|wspr|rbn&age=mins&bands=all|160,...
  */
 static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
 {
@@ -3163,6 +3185,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     wa.name[wa.nargs++] = "data";                       // 2
     wa.name[wa.nargs++] = "bands";                      // 3
     wa.name[wa.nargs++] = "age";                        // 4
+    wa.name[wa.nargs++] = "show";                       // 5
 
     // parse
     if (!parseWebCommand (wa, line, line_len))
@@ -3173,24 +3196,24 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
 
     if (wa.found[0]) {
         const char *spot = wa.value[0];
-        if (strcmp (spot, "of") == 0)
+        if (strcmp (spot, _FX("of")) == 0)
             new_mask |= PSKMB_OFDE;
-        else if (strcmp (spot, "by") == 0)
+        else if (strcmp (spot, _FX("by")) == 0)
             new_mask &= ~PSKMB_OFDE;
         else {
-            strcpy (line, "spot must be by or of");
+            strcpy (line, _FX("spot must be by or of"));
             return (false);
         }
     }
 
     if (wa.found[1]) {
         const char *what = wa.value[1];
-        if (strcmp (what, "call") == 0)
+        if (strcmp (what, _FX("call")) == 0)
             new_mask |= PSKMB_CALL;
-        else if (strcmp (what, "grid") == 0)
+        else if (strcmp (what, _FX("grid")) == 0)
             new_mask &= ~PSKMB_CALL;
         else {
-            strcpy (line, "what must be call or grid");
+            strcpy (line, _FX("what must be call or grid"));
             return (false);
         }
     }
@@ -3198,21 +3221,21 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     if (wa.found[2]) {
         const char *data = wa.value[2];
         new_mask &= ~PSKMB_SRCMASK;
-        if (strcmp (data, "psk") == 0)
+        if (strcmp (data, _FX("psk")) == 0)
             new_mask |= PSKMB_PSK;
-        else if (strcmp (data, "wspr") == 0)
+        else if (strcmp (data, _FX("wspr")) == 0)
             new_mask |= PSKMB_WSPR;
-        else if (strcmp (data, "rbn") == 0)
+        else if (strcmp (data, _FX("rbn")) == 0)
             new_mask |= PSKMB_RBN;
         else {
-            strcpy (line, "data must be psk wspr or rbn");
+            strcpy (line, _FX("data must be psk wspr or rbn"));
             return (false);
         }
     }
 
     // check for RBN
     if (((new_mask & PSKMB_SRCMASK) == PSKMB_RBN) && (!(new_mask & PSKMB_CALL) || !(new_mask & PSKMB_OFDE))){
-        strcpy (line, "RBN requires of-call");
+        strcpy (line, _FX("RBN requires of-call"));
         return (false);
     }
 
@@ -3221,11 +3244,11 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     if (wa.found[3]) {
         char bands[strlen(wa.value[3])+1];
         strcpy (bands, wa.value[3]);
-        if (strcmp (bands, "all") == 0) {
+        if (strcmp (bands, _FX("all")) == 0) {
             new_bands = (1 << PSKBAND_N) - 1;
         } else {
             char *token, *string = bands;
-            while ((token = strsep (&string, ",")) != NULL) {
+            while ((token = strsep (&string, _FX(","))) != NULL) {
                 switch (atoi(token)) {
                 case 160: new_bands |= (1 << PSKBAND_160M); break;
                 case 80:  new_bands |= (1 << PSKBAND_80M);  break;
@@ -3240,7 +3263,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
                 case 6:   new_bands |= (1 << PSKBAND_6M);   break;
                 case 2:   new_bands |= (1 << PSKBAND_2M);   break;
                 default:
-                    strcpy (line, "unknown band");
+                    strcpy (line, _FX("unknown band"));
                     return (false);
                 }
             }
@@ -3265,14 +3288,28 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
             new_age = age;
             break;
         default:
-            strcpy (line, "unsupported age -- see GUI");
+            strcpy (line, _FX("age: 30 60 120 360 1440"));
+            return (false);
+        }
+    }
+
+    // change show, if set
+    uint8_t new_dist = psk_showdist;
+    if (wa.found[5]) {
+        if (strcmp (wa.value[5], _FX("maxdist")) == 0)
+            new_dist = 1;
+        else if (strcmp (wa.value[5], _FX("counts")) == 0)
+            new_dist = 0;
+        else {
+            strcpy (line, _FX("show: maxdist or counts"));
             return (false);
         }
     }
 
     // skip if no changes
-    if (psk_mask == new_mask && psk_bands == new_bands && psk_maxage_mins == new_age) {
-        strcpy (line, "no change");
+    if (psk_mask == new_mask && psk_bands == new_bands && psk_maxage_mins == new_age
+                        && psk_showdist == new_dist) {
+        strcpy (line, _FX("no change"));
         return (false);
     }
 
@@ -3280,12 +3317,13 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     psk_mask = new_mask;
     psk_bands = new_bands;
     psk_maxage_mins = new_age;
+    psk_showdist = new_dist;
     savePSKState();
     scheduleNewPSK();
 
     // ack
     startPlainText (client);
-    client.print ("ok\n");
+    client.print (F("ok\n"));
 
     // ok
     return (true);
@@ -3365,7 +3403,7 @@ static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
  * the whole table uses arrays so strings are in ESP FLASH too.
  */
 #define CT_MAX_CMD      20                              // max command string length, w/EOS
-#define CT_MAX_HELP     71                              // max help string length, w/EOS
+#define CT_MAX_HELP     100                              // max help string length, w/EOS
 #define CT_FUNP(ctp) ((PCTF)pgm_read_dword(&ctp->funp)) // handy function pointer
 typedef bool (*PCTF)(WiFiClient &client, char line[], size_t line_len);   // ptr to command table function
 typedef struct {
@@ -3398,7 +3436,8 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
-    { "set_livespots?",     setWiFiLiveSpots,      "spot=of|by&what=call|grid&data=psk|wspr|rbn&age=mins&bands=all|160,..." },
+    { "set_livespots?",     setWiFiLiveSpots,      "spot=of|by&what=call|grid&show=maxdist|counts&data=psk|wspr|rbn&age=mins&bands=all|160,..." },
+    { "set_screenlock?",    setWiFiScreenLock,     "lock=on|off" },
     { "set_mercenter?",     setWiFiMerCenter,      "lng=X" },
     { "set_mapcolor?",      setWiFiMapColor,       "setup_name=R,G,B" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
@@ -3437,7 +3476,8 @@ static bool roCommandOk (const char *cmd)
     return (strncmp (cmd, "get_", 4) == 0
                     || strncmp_P (cmd, PSTR("set_alarm"), 9) == 0
                     || strncmp_P (cmd, PSTR("set_stopwatch"), 13) == 0
-                    || strncmp_P (cmd, PSTR("set_touch"), 9) == 0);
+                    || strncmp_P (cmd, PSTR("set_touch"), 9) == 0
+                    || strncmp_P (cmd, PSTR("set_screenlock"), 14) == 0);
 }
 
 /* run the given web server command.
@@ -3537,7 +3577,7 @@ static void serveRemote(WiFiClient &client, bool ro)
             continue;
 
         // command followed by help in separate column
-        const int indent = 30;
+        const int indent = 22;
         int cmd_len = strlen (ramcmd);
         client.print (ramcmd);
         snprintf (line, line_mem.getSize(), "%*s", indent-cmd_len, "");
@@ -3884,6 +3924,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
 
     case DEMO_CALLFG:
         {
+            // fake a touch to rotate the text color
             SCoord s;
             s.x = cs_info.box.x + cs_info.box.w/4;
             s.y = cs_info.box.y + cs_info.box.h/2;
@@ -3898,6 +3939,7 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
 
     case DEMO_CALLBG:
         {
+            // fake a touch to rotate the bg color
             SCoord s;
             s.x = cs_info.box.x + 3*cs_info.box.w/4;
             s.y = cs_info.box.y + cs_info.box.h/2;

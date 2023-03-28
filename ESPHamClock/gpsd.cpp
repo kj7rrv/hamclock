@@ -5,7 +5,7 @@
  *   more info: https://gpsd.gitlab.io/gpsd/gpsd_json.html
  *
  * Simple server test, run this command:
- *   while true; do echo '"class":"TPV","mode":2,"lat":34.567,"lon":-123.456,"time":"2020-01-02T03:04:05.000Z"' | nc -l 192.168.7.11 2947; done
+ *   while true; do echo '"class":"TPV","mode":2,"lat":34.567,"lon":-123.456,"time":"2020-01-02T03:04:05.000Z"'; done | nc -k -l 192.168.7.11 2947
  */
 
 #include "HamClock.h"
@@ -57,20 +57,12 @@ static bool lookforTime (const char *buf, void *arg)
         }
 
         // crack time form: "time":"2012-04-05T15:00:01.501Z"
-        int yr, mo, dy, hr, mn, sc;
-        if (sscanf (timestr+8, _FX("%d-%d-%dT%d:%d:%d"), &yr, &mo, &dy, &hr, &mn, &sc) != 6)
+        const char *iso = timestr+8;
+        time_t gpsd_time = crackISO8601 (iso);
+        if (gpsd_time == 0) {
+            Serial.printf (_FX("GPSD: unexpected ISO8601: %.24s\n"), iso);
             return (false);
-        Serial.printf (_FX("GPSD: %04d-%02d-%02dT%02d:%02d:%02d\n"), yr, mo, dy, hr, mn, sc);
-
-        // reformat to UNIX time
-        tmElements_t tm;
-        tm.Year = yr - 1970;
-        tm.Month = mo;
-        tm.Day = dy;
-        tm.Hour = hr;
-        tm.Minute = mn;
-        tm.Second = sc;
-        time_t gpsd_time = makeTime (tm);
+        }
 
         // correct for time spent here
         gpsd_time += (millis() - t0 + 500)/1000;
@@ -246,4 +238,25 @@ void updateGPSDLoc()
         #define _MIN_STEP 1                             // miles
         if (dist2 > _MIN_STEP*_MIN_STEP)
             newDE (ll, NULL);
+}
+
+/* convert YYYY-MM-DDTHH:MM:SS to unix time, or 0 if fails
+ */
+time_t crackISO8601 (const char *iso)
+{
+        time_t t = 0;
+        int yr, mo, dy, hr, mn, sc;
+        if (sscanf (iso, _FX("%d-%d-%dT%d:%d:%d"), &yr, &mo, &dy, &hr, &mn, &sc) == 6) {
+
+            // reformat
+            tmElements_t tm;
+            tm.Year = yr - 1970;
+            tm.Month = mo;
+            tm.Day = dy;
+            tm.Hour = hr;
+            tm.Minute = mn;
+            tm.Second = sc;
+            t = makeTime(tm);
+        }
+        return (t);
 }

@@ -155,7 +155,10 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
             fatalError ("Unknown sdo_choice: %d", sdo_choice);
             return (true);              // lint
         }
-        system (cmd);
+        if (system (cmd))
+            Serial.printf (_FX("SDO: fail: %s\n"), cmd);
+        else
+            Serial.printf (_FX("SDO: ok: %s\n"), cmd);
         return (true);
     }
 #endif // _IS_UNIX

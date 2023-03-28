@@ -16,7 +16,6 @@
 #include "HamClock.h"
 
 // basic arrangement
-#define NPKB_ROWS       4               // actual keyboard rows
 #define NPKB_COLS       9               // actual keyboard cols
 #define NP_NBOXR        8               // total number of rows in box
 #define NP_FONTW        6               // fixed-width font width
@@ -52,7 +51,6 @@ typedef struct {
     uint8_t r;                  // row 0 .. NP_NBOXR-1
     char str[NPF_MAXLEN+1];     // user contents, including EOS
 } NPField;
-static const char ll_fmt[] = "%.6g%c";  // lat/long + dir format suitable within NPF_MAXLEN
 
 // field names
 typedef enum {
@@ -84,10 +82,8 @@ static int keyboardMap (int row, int col)
  */
 static void setNPLL (NPField f[NPF_N], const LatLong &ll)
 {
-    snprintf (f[NPF_LAT].str, sizeof(f[NPF_LAT].str), ll_fmt,
-                                            fabsf(ll.lat_d), ll.lat_d < 0 ? 'S' : 'N');
-    snprintf (f[NPF_LNG].str, sizeof(f[NPF_LNG].str), ll_fmt,
-                                            fabsf(ll.lng_d), ll.lng_d < 0 ? 'W' : 'E');
+    formatLat (ll.lat_d, f[NPF_LAT].str, sizeof(f[NPF_LAT].str));
+    formatLng (ll.lng_d, f[NPF_LNG].str, sizeof(f[NPF_LNG].str));
 }
 
 

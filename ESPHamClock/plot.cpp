@@ -12,10 +12,6 @@
 #define FONTH           8                       // font height
 
 
-// forward declarations
-static int tickmarks (float min, float max, int numdiv, float ticks[]);
-
-
 /* plot the given data within the given box.
  * if y_min == y_max: auto scale min and max from data
  * if y_min < y_max:  force min to y_min and max to y_max
@@ -656,44 +652,4 @@ void prepPlotBox (const SBox &box)
     tft.drawLine (box.x, box.y, box.x, by, BORDER_COLOR);               // left
     tft.drawLine (box.x, box.y, rx, box.y, BORDER_COLOR);               // top
     tft.drawLine (rx, box.y, rx, by, BORDER_COLOR);                     // right
-}
-
-/* given min and max and an approximate number of divisions desired,
- * fill in ticks[] with nicely spaced values and return how many.
- * N.B. return value, and hence number of entries to ticks[], might be as
- *   much as 2 more than numdiv.
- */
-static int tickmarks (float min, float max, int numdiv, float ticks[])
-{
-    static int factor[] = { 1, 2, 5 };
-    #define NFACTOR    NARRAY(factor)
-    float minscale;
-    float delta;
-    float lo;
-    float v;
-    int n;
-
-    minscale = fabsf (max - min);
-
-    if (minscale == 0) {
-        /* null range: return ticks in range min-1 .. min+1 */
-        for (n = 0; n < numdiv; n++)
-            ticks[n] = min - 1.0 + n*2.0/numdiv;
-        return (numdiv);
-    }
-
-    delta = minscale/numdiv;
-    for (n=0; n < (int)NFACTOR; n++) {
-        float scale;
-        float x = delta/factor[n];
-        if ((scale = (powf(10.0F, ceilf(log10f(x)))*factor[n])) < minscale)
-            minscale = scale;
-    }
-    delta = minscale;
-
-    lo = floor(min/delta);
-    for (n = 0; (v = delta*(lo+n)) < max+delta; )
-        ticks[n++] = v;
-
-    return (n);
 }

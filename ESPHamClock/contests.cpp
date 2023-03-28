@@ -9,51 +9,23 @@
 #define CREDITS_Y0      31                      // dy of credits row
 #define START_DY        47                      // dy of first row
 #define CONTEST_DY      12                      // dy of each successive row
-#define MAX_ROWS        ((box.h - START_DY)/CONTEST_DY)         // max display rows
-#define OK2SCUP         (ctst_topi < n_contests - MAX_ROWS)     // whether it is ok to scroll up
-#define OK2SCDW         (ctst_topi > 0)                         // whether it is ok to scroll down
-#define CTST_INDENT     5                       // indent
 #define MAX_CTST_LEN    26                      // max contest entry length, not counting EOS
-#define SCR_DX          (PLOTBOX_W-15)          // scroll control dx center within box
-#define SCRUP_DY        9                       // up " dy down "
-#define SCRDW_DY        23                      // down " dy down "
-#define SCR_R           5                       // " radius
+#define MAX_VIS         ((PLOTBOX_H - START_DY)/CONTEST_DY)     // max visible rows
+#define OK2SCDW         (top_vis < n_contests - MAX_VIS)        // whether it is ok to scroll down
+#define OK2SCUP         (top_vis > 0)                           // whether it is ok to scroll up
 
 static const char contest_page[] PROGMEM = "/contests/contests.txt";
 
-static char **contests;                         // malloced array of malloced strings
+// current collection of ota spots
+#if defined(_IS_ESP8266)
+#define MAX_CONTESTS    MAX_VIS                 // limit ram use on ESP
+#else
+#define MAX_CONTESTS    50                      // even UNIX has limit so scrolling isn't crazy long
+#endif
+static char *contests[MAX_CONTESTS];            // malloced strings
 static char *credit;                            // malloced credit line
 static int n_contests;                          // n entries in contests[]
-static int ctst_topi;                           // contests[] index currently showing on first row
-
-
-/* draw, else erase, the up scroll control;
- */
-static void drawScrollUp (const SBox &box, bool draw)
-{
-        uint16_t x0 = box.x + SCR_DX;
-        uint16_t y0 = box.y + SCRUP_DY - SCR_R;
-        uint16_t x1 = box.x + SCR_DX - SCR_R;
-        uint16_t y1 = box.y + SCRUP_DY + SCR_R;
-        uint16_t x2 = box.x + SCR_DX + SCR_R;
-        uint16_t y2 = box.y + SCRUP_DY + SCR_R;
-
-        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? CONTEST_COLOR : RA8875_BLACK);
-}
-
-/* draw, else erase, the down scroll control.
- */
-static void drawScrollDown (const SBox &box, bool draw)
-{
-        uint16_t x0 = box.x + SCR_DX - SCR_R;
-        uint16_t y0 = box.y + SCRDW_DY - SCR_R;
-        uint16_t x1 = box.x + SCR_DX + SCR_R;
-        uint16_t y1 = box.y + SCRDW_DY - SCR_R;
-        uint16_t x2 = box.x + SCR_DX;
-        uint16_t y2 = box.y + SCRDW_DY + SCR_R;
-
-        tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? CONTEST_COLOR : RA8875_BLACK);
-}
+static int top_vis;                             // contests[] index currently showing on first row
 
 
 /* draw contests[] in the given pane box
@@ -82,12 +54,12 @@ static void drawContests (const SBox &box)
     tft.setCursor (box.x + (box.w-cw)/2, box.y + CREDITS_Y0);
     tft.print (credit);
 
-    // show each contest starting with ctst_topi, up to max
+    // show each contest starting with top_vis, up to max visible
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(RA8875_WHITE);
     uint16_t y = box.y + START_DY;
     int n_shown = 0;
-    for (int i = ctst_topi; i < n_contests && n_shown < MAX_ROWS; i++) {
+    for (int i = top_vis; i < n_contests && n_shown < MAX_VIS; i++) {
         uint16_t w = getTextWidth (contests[i]);
         tft.setCursor (box.x + (box.w-w)/2, y);
         tft.print (contests[i]);
@@ -96,28 +68,30 @@ static void drawContests (const SBox &box)
     }
 
     // draw scroll controls, if needed
-    if (OK2SCDW)
-        drawScrollDown (box, true);
-    if (OK2SCUP)
-        drawScrollUp (box, true);
+    drawScrollDown (box, CONTEST_COLOR, n_contests - top_vis - MAX_VIS, OK2SCDW);
+    drawScrollUp (box, CONTEST_COLOR, top_vis, OK2SCUP);
 }
 
 /* scroll up, if appropriate to do so now.
  */
-static void scrollUp (const SBox &box)
+static void scrollContestUp (const SBox &box)
 {
     if (OK2SCUP) {
-        ctst_topi += 1;
+        top_vis -= (MAX_VIS - 1);               // retain 1 for context
+        if (top_vis < 0)
+            top_vis = 0;
         drawContests (box);
     }
 }
 
 /* scroll down, if appropriate to do so now.
  */
-static void scrollDown (const SBox &box)
+static void scrollContestDown (const SBox &box)
 {
     if (OK2SCDW) {
-        ctst_topi -= 1;
+        top_vis += (MAX_VIS - 1);               // retain 1 for context
+        if (top_vis > n_contests - MAX_VIS)
+            top_vis = n_contests - MAX_VIS;
         drawContests (box);
     }
 }
@@ -176,14 +150,12 @@ bool updateContests (const SBox &box)
             goto out;
         }
 
-        // reset contests[]
-        if (contests) {
-            for (int i = 0; i < n_contests; i++)
-                free (contests[i]);
-            free (contests);
-            contests = NULL;
-            n_contests = 0;
-        }
+        // reset contests and credit
+        for (int i = 0; i < n_contests; i++)
+            free (contests[i]);
+        n_contests = 0;
+        free (credit);
+        credit = NULL;
 
         // first line is credit
         if (!getTCPLine (contest_client, line, sizeof(line), NULL)) {
@@ -196,18 +168,19 @@ bool updateContests (const SBox &box)
         ok = true;
 
         // each addition line is a contest
-        while (getTCPLine (contest_client, line, sizeof(line), NULL)) {
+        while (n_contests < MAX_CONTESTS && getTCPLine (contest_client, line, sizeof(line), NULL)) {
             // Serial.printf (_FX("Contest %d: %s\n"), n_contests, line);
             scrubContest (line);
-            contests = (char **) realloc (contests, (n_contests+1) * sizeof(char*));
             contests[n_contests++] = strdup (line);
         }
     }
 
 out:
 
-    // TODO: this will cause confusion if op is using control buttons
-    ctst_topi = 0;
+    // jump to bottom. disconcerting perhaps but how to find same position in new list?
+    top_vis = n_contests - MAX_VIS;
+    if (top_vis < 0)
+        top_vis = 0;
 
     if (ok) {
         Serial.printf (_FX("CON: Found %d\n"), n_contests);
@@ -226,29 +199,32 @@ out:
  */
 bool checkContestsTouch (const SCoord &s, const SBox &box)
 {
-    // scroll control? N.B. use a fairly wide region to reduce false menus
-    if (s.x >= box.x + 3*box.w/4) { 
-        if (s.y >= box.y + SCRUP_DY - SCR_R && s.y <= box.y + SCRUP_DY + SCR_R) {
-            scrollUp (box);
-        } else if (s.y >= box.y + SCRDW_DY - SCR_R && s.y <= box.y + SCRDW_DY + SCR_R) {
-            scrollDown (box);
-        }
-        // always claim responsibility in this area even if no scroll controls are present
-        if (s.y < box.y + PANETITLE_H)
-            return (true);
-    }
+    // scroll control?
+    if (s.y < box.y + PANETITLE_H) {
 
-    if (s.y > box.y + PANETITLE_H) {
+        if (checkScrollUpTouch (s, box)) {
+            scrollContestUp (box);
+            return (true);
+        }
+        if (checkScrollDownTouch (s, box)) {
+            scrollContestDown (box);
+            return (true);
+        }
+
+    } else {
+
 #if defined(_IS_UNIX)
-        // tapping anywhere in contests brings up brower page showing contests
+        // tapping anywhere in contests brings up browser page showing contests
         //   on macos: sudo port install xdg-utils
         //   on ubuntu or RPi: sudo apt install xdg-utils
         //   on redhat: sudo yum install xdg-utils
         static const char cmd[] = "xdg-open https://www.contestcalendar.com/weeklycont.php";
-        Serial.printf (_FX("CON: running %s\n"), cmd);
-        (void) system (cmd);
+        if (system (cmd))
+            Serial.printf (_FX("CON: fail: %s\n"), cmd);
+        else
+            Serial.printf (_FX("CON: ok: %s\n"), cmd);
 #endif
-        // stay here in any case
+        // stay if touch lower portion regardless
         return (true);
     }
 

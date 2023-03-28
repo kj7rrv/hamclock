@@ -1,5 +1,6 @@
 /* this is the html that runs in a browser showing a live hamclock connection.
  * the basic idea is to start with a complete image then continuously poll for incremental changes.
+ * this page is loaded first with all subsequent communication via a websocket.
  * ESP is far too slow reading pixels to make this practical.
  */
 
@@ -39,9 +40,10 @@ char live_html[] =  R"_raw_html_(
         const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
 
         // state
-        var session_id = 0;             // unique id for this browser instance
+        var ws;                         // Websocket
+        var ws_abdata = 0;              // ws onmessage header capture
         var drawing_verbose = 0;        // > 0 for more info about drawing
-        var web_verbose = 0;            // > 0 for more info about web commands
+        var ws_verbose = 0;             // > 0 for more info about websocket commands
         var event_verbose = 0;          // > 0 for more info about keyboard or pointer activity
         var prev_regnhdr;               // for erasing if drawing_verbose > 1
         var app_scale = 0;              // size factor -- set for real when get first whole image
@@ -56,58 +58,62 @@ char live_html[] =  R"_raw_html_(
         // called one time after page has loaded
         function onLoad() {
 
-            console.log ("* onLoad");
-            
-            // create session id
-            session_id = Math.round(1000*(Date.now() + Math.random()));
-            console.log ("sid " + session_id);
+            // create websocket
+            ws = new WebSocket ("ws://" + location.host);       // back to same
+            ws.binaryType = "arraybuffer";
+            ws.onopen = function () {
+                if (ws_verbose)
+                    console.log('WS connection established.');
+            };
+            ws.onclose = function () {
+                if (ws_verbose)
+                    console.log('WS connection closed.');
+                reloadThisPage();
+            };
+            ws.onerror = function (e) {
+                console.log('WS connection failed: ', e);
+                reloadThisPage();
+            };
 
+
+            // respond to hamclock messages
+            ws.onmessage = function (e) {
+                if (ws_verbose)
+                    console.log ('ws onmessage length ' + e.data.byteLength);
+                if (e.data instanceof ArrayBuffer) {
+                    var data8 = new Uint8Array (e.data);
+                    if (data8[0] == 137 && data8[1] == 80 && data8[2] == 78 && data8[3] == 71) {
+                        // this is a PNG image -- show whole if alone else assume its part of an update
+                        if (ws_abdata) {
+                            drawUpdate (new Uint8Array(ws_abdata), data8);
+                            ws_abdata = 0;
+                        } else {
+                            drawFullImage (data8);
+                        }
+                        // ask for updates regardless
+                        runSoon (getUpdate);
+                    } else {
+                        // save image update header
+                        ws_abdata = e.data;
+                    }
+                }
+            }
+
+            // request a new full image
+            function getFullImage() {
+                sendWSMsg ("get_live.png?");
+            }
+
+            // request an image update
+            function getUpdate() {
+                sendWSMsg ("get_live.bin?");
+            }
+            
+            
             // handy access to canvas and drawing context
             cvs = document.getElementById('hamclock-cvs');
             ctx = cvs.getContext('2d', { alpha: false });       // faster w/o alpha
             ctx.translate(0.5, 0.5);                            // a tiny bit less blurry?
-
-            // request one full screen image then schedule incremental update if ok else reload page.
-            // also use the image info to set overall size and scaling.
-            function getFullImage() {
-
-                let update_sent = Date.now();
-                sendGetRequest ('get_live.png?sid=' + session_id, 'blob')
-                .then (function (response) {
-                    drawFullImage (response);
-                    runSoon (getUpdate, 1);
-                })
-                .catch (function (err) {
-                    console.log(err);
-                    reloadThisPage();
-                })
-                .finally (function() {
-                    if (web_verbose)
-                        console.log ("  getFullImage took " + (Date.now() - update_sent) + " ms");
-                });
-            }
-
-
-            // request one incremental update then schedule another if repeat else a full update
-            function getUpdate (repeat) {
-
-                let update_sent = Date.now();
-                sendGetRequest ('get_live.bin?sid=' + session_id, 'arraybuffer')
-                .then (function (response) {
-                    drawUpdate (response);
-                    if (repeat)
-                        runSoon (getUpdate, 1);
-                })
-                .catch (function (err) {
-                    console.log(err);
-                    runSoon (getFullImage, 0);
-                })
-                .finally (function() {
-                    if (web_verbose)
-                        console.log ("  getUpdate took " + (Date.now() - update_sent) + " ms");
-                });
-            }
-
 
             // given inherent hamclock build size, set canvas size and configure to stay centered
             function initCanvas (hc_w, hc_h) {
@@ -157,29 +163,29 @@ char live_html[] =  R"_raw_html_(
                     console.log ("canvas is " + hc_w + " x " + hc_h + " app_scale " + app_scale);
             }
 
-            // display the given full png blob
-            function drawFullImage (png_blob) {
+            // display the given full png uint8
+            function drawFullImage (png8) {
 
-                if (drawing_verbose)
-                    console.log ("drawFullImage " + png_blob.size);
-                createImageBitmap (png_blob)
+                var pngbl = new Blob ([png8], {type:"image/png"});
+                createImageBitmap (pngbl)
                 .then(function(ibm) {
+                    if (drawing_verbose)
+                        console.log ("drawFullImage size " + ibm.width + " x " + ibm.height);
                     initCanvas(ibm.width, ibm.height);
                     ctx.drawImage(ibm, 0, 0);
                 })
                 .catch(function(err){
-                    console.log("full promise err: " + err);
+                    console.log("full image promise err: " + err);
                 });
             }
 
-            // display the given arraybuffer update
-            function drawUpdate (ab) {
+            // update given header and png sprites image -- see liveweb.cpp::updateExistingClient()
+            function drawUpdate (hdr8, png8) {
 
                 // extract 4-byte header preamble
-                let aba = new Uint8Array(ab);
-                const blok_w = aba[0];                          // block width, pixels
-                const blok_h = aba[1];                          // block width, pixels
-                const n_regn = (aba[2] << 8) | aba[3];          // n regns, MSB LSB
+                const blok_w = hdr8[0];                         // block width, pixels
+                const blok_h = hdr8[1];                         // block width, pixels
+                const n_regn = (hdr8[2] << 8) | hdr8[3];        // total n blocks wide, MSB LSB
 
                 if (drawing_verbose > 1) {
                     // erase, or at least unmark, previous marked regions
@@ -195,22 +201,22 @@ char live_html[] =  R"_raw_html_(
                         ctx.stroke();
                     }
                     // save for next time
-                    prev_regnhdr = aba.slice(0,4+3*n_regn);
+                    prev_regnhdr = hdr8.slice(0,4+3*n_regn);
                 }
 
                 // walk down remainder of header and draw each region
                 if (n_regn > 0) {
-                    // remainder is one image blok_h hi of n_regns contiguous regions each variable width
-                    let pngb = new Blob([aba.slice(4+3*n_regn)], {type:"image/png"});
-                    createImageBitmap (pngb)
+                    // png8 is one image blok_h hi of n_regns contiguous regions each variable width
+                    let pngbl = new Blob ([png8], {type:"image/png"});
+                    createImageBitmap (pngbl)
                     .then(function(ibm) {
                         // render each region.
-                        let regn_x = 0;                         // walk region x along pngb
+                        let regn_x = 0;                         // walk region x along img
                         let n_draw = 0;                         // count n drawn regions just for stat
                         for (let i = 0; i < n_regn; i++) {
-                            const cvs_x = aba[4+3*i] * blok_w;  // ul corner x in canvas pixels
-                            const cvs_y = aba[5+3*i] * blok_h;  // ul corner y in canvas pixels
-                            const n_long = aba[6+3*i];          // n regions long
+                            const cvs_x = hdr8[4+3*i] * blok_w; // ul corner x in canvas pixels
+                            const cvs_y = hdr8[5+3*i] * blok_h; // ul corner y in canvas pixels
+                            const n_long = hdr8[6+3*i];         // n regions long
                             const cvs_w = n_long * blok_w;      // total region width in canvas pixels
                             ctx.drawImage (ibm, regn_x, 0, cvs_w, blok_h, cvs_x, cvs_y, cvs_w, blok_h);
 
@@ -229,33 +235,33 @@ char live_html[] =  R"_raw_html_(
                             n_draw += n_long;
                         }
                         if (drawing_verbose)
-                            console.log ("  drawUpdate " + aba.byteLength + "B " +
+                            console.log ("  drawUpdate " + hdr8.byteLength + "B " +
                                         n_regn + "/" + n_draw + " of " + blok_w + " x " + blok_h);
 
-                    }).
-                    catch(function(err) {
+                    })
+                    .catch(function(err) {
                         console.log("update promise err: ", err);
-                        runSoon (getFullImage, 0);
+                        runSoon (getFullImage);
                     });
                 }
 
             }
 
-            // schedule func(arg) soon
+            // schedule func() soon
             var upd_tid = 0;                            // update pacing timer id
-            function runSoon (func, arg) {
+            function runSoon (func) {
 
                 // insure no nested requests
                 if (upd_tid) {
-                    if (web_verbose)
+                    if (ws_verbose)
                         console.log ("cancel pending timer");
                     clearTimeout(upd_tid);
                 }
 
                 // register callback
-                upd_tid = setTimeout (function(){upd_tid = 0; func(arg);}, UPDATE_MS);
-                if (web_verbose)
-                    console.log ("  set timer for " + func.name + " in " + UPDATE_MS + " ms");
+                upd_tid = setTimeout (function(){upd_tid = 0; func();}, UPDATE_MS);
+                if (ws_verbose)
+                    console.log ("setting timer for " + func.name + " in " + UPDATE_MS + " ms");
             }
 
             // given any pointer event return coords with respect to canvas scaled to application.
@@ -268,23 +274,6 @@ char live_html[] =  R"_raw_html_(
                     const y = Math.round((event.clientY - rect.top)/app_scale);
                     return ({x, y});
                 }
-            }
-
-
-            // send the given user event with our sid
-            function sendUserEvent (get) {
-
-                if (event_verbose)
-                    console.log ('sending ' + get);
-                sendGetRequest (get, 'text')
-                .then (function(response) {
-                    // we used to do an immediate update for immediate feedback but with faster looping
-                    // it just caused a large backlog
-                    // getUpdate(0);
-                })
-                .catch (function (err) {
-                    console.log(err);
-                });
             }
 
 
@@ -311,10 +300,8 @@ char live_html[] =  R"_raw_html_(
                 // all ours
                 event.preventDefault();
 
-                // compose and send event well outside app
-                let get = 'set_mouse?x=-1&y=-1';
-                get += '&sid=' + session_id;
-                sendUserEvent (get);
+                // send location well outside app
+                sendWSMsg ('set_mouse?x=-1&y=-1');
 
             });
 
@@ -343,9 +330,8 @@ char live_html[] =  R"_raw_html_(
                 pointerdown_ms = 0;
 
                 // compose and send
-                let get = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
-                get += '&sid=' + session_id;
-                sendUserEvent (get);
+                let msg = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
+                sendWSMsg (msg);
             });
 
 
@@ -368,9 +354,8 @@ char live_html[] =  R"_raw_html_(
                 }
 
                 // compose and send
-                let get = 'set_mouse?x=' + m.x + '&y=' + m.y;
-                get += '&sid=' + session_id;
-                sendUserEvent (get);
+                let msg = 'set_mouse?x=' + m.x + '&y=' + m.y;
+                sendWSMsg (msg);
             });
 
 
@@ -406,9 +391,7 @@ char live_html[] =  R"_raw_html_(
                 }
 
                 // compose and send
-                let get = 'set_char?char=' + k;
-                get += '&sid=' + session_id;
-                sendUserEvent (get);
+                sendWSMsg ('set_char?char=' + k);
             });
 
             // respond to mobile device being rotated. resize seems to work better than orientationchange
@@ -417,7 +400,7 @@ char live_html[] =  R"_raw_html_(
                 if (event_verbose)
                     console.log ("resize event");
                 // get full image to establish new screen size
-                runSoon (getFullImage, 0);
+                runSoon (getFullImage);
             });
 
             // reload this page as last resort, probably because server process restarted
@@ -430,40 +413,21 @@ char live_html[] =  R"_raw_html_(
                     } catch(err) {
                         console.log('* reload err: ' + err);
                     }
-                }, 1000);
+                }, 2000);
             }
 
 
 
-            // return a Promise for the given url of the given type, passing response to resolve
-            function sendGetRequest (url, type) {
-
-                return new Promise(function (resolve, reject) {
-                    if (web_verbose)
-                        console.log ('sendGetRequest ' + url);
-                    let xhr = new XMLHttpRequest();
-                    xhr.open('GET', url);
-                    xhr.responseType = type;
-                    xhr.addEventListener ('load', function () {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            if (drawing_verbose) {
-                                if (type == 'text')
-                                    console.log("  " + url + " reply: " + xhr.responseText);
-                                else
-                                    console.log("  " + url + " back ok");
-                            }
-                            resolve(xhr.response);
-                        } else {
-                            reject (url + ": " + xhr.status + " " + xhr.statusText);
-                        }
-                    });
-                    xhr.addEventListener ('error', function () {
-                        reject (url + ": " + xhr.status + " " + xhr.statusText);
-                    });
-                    xhr.send();
-                });
+            // send the given message over the websocket
+            function sendWSMsg (msg) {
+                if (ws.readyState != 1) {
+                    setTimeout (sendWSMsg, 500, msg);
+                } else {
+                    if (ws_verbose)
+                        console.log ('sendWSMsg ' + msg);
+                    ws.send (msg);
+                }
             }
-
 
             // all set. start things off with the full image, repeats from then on with updates forever.
             getFullImage();

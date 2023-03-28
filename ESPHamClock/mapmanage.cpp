@@ -30,14 +30,11 @@ PropMapSetting prop_map = PROP_MAP_OFF;
 
 
 // central file name components for the core background maps -- not including voacap.
-// N.B. must be in same order as CoreMaps
+#define X(a,b)   b,                                     // expands COREMAPS to each name plus comma
 const char *map_styles[CM_N] = {
-    "Countries",
-    "Terrain",
-    "DRAP",
-    "MUF",
-    "Aurora",
+    COREMAPS
 };
+#undef X
 
 // prop and muf style names
 static const char prop_style[] = "PropMap";
@@ -444,13 +441,18 @@ static bool bmpHdrOk (char *buf, uint32_t w, uint32_t h, uint32_t *filesizep)
 
 /* marshall the day and night file names and titles for the given style.
  * N.B. we do not check for suffient room in the arrays
- * N.B. DRAP name adds -S for no-scale version as of HamClock V2.67
+ * N.B. CM_DRAP name adds -S for no-scale version as of HamClock V2.67
+ * N.B. CM_WX name depends on useMetricUnits()
  */
 static void buildMapNames (const char *style, char *dfile, char *nfile, char *dtitle, char *ntitle)
 {
         if (strcmp (style, "DRAP") == 0) {
-            snprintf (dfile, 32, _FX("/map-D-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
-            snprintf (nfile, 32, _FX("/map-N-%dx%d-%s-S.bmp"), HC_MAP_W, HC_MAP_H, style);
+            snprintf (dfile, 32, _FX("/map-D-%dx%d-DRAP-S.bmp"), HC_MAP_W, HC_MAP_H);
+            snprintf (nfile, 32, _FX("/map-N-%dx%d-DRAP-S.bmp"), HC_MAP_W, HC_MAP_H);
+        } else if (strcmp (style, "Weather") == 0) {
+            const char *units = useMetricUnits() ? "mB" : "in";
+            snprintf (dfile, 32, _FX("/map-D-%dx%d-Weather-%s.bmp"), HC_MAP_W, HC_MAP_H, units);
+            snprintf (nfile, 32, _FX("/map-N-%dx%d-Weather-%s.bmp"), HC_MAP_W, HC_MAP_H, units);
         } else {
             snprintf (dfile, 32, _FX("/map-D-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
             snprintf (nfile, 32, _FX("/map-N-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
@@ -741,7 +743,8 @@ static bool installFileMaps()
         resetWatchdog();
 
         // confirm core_map is one of the file styles
-        if (core_map != CM_COUNTRIES && core_map != CM_TERRAIN && core_map != CM_DRAP && core_map !=CM_AURORA)
+        if (core_map != CM_COUNTRIES && core_map != CM_TERRAIN && core_map != CM_DRAP
+                            && core_map != CM_AURORA && core_map != CM_WX)
             fatalError (_FX("style not a file map %d"), core_map);        // does not return
 
         // create names and titles
@@ -848,7 +851,8 @@ void initCoreMaps()
  */
 bool mapScaleIsUp(void)
 {
-    return (prop_map == PROP_MAP_OFF && (core_map == CM_DRAP || core_map == CM_MUF || core_map == CM_AURORA));
+    return (prop_map == PROP_MAP_OFF &&
+        (core_map == CM_DRAP || core_map == CM_MUF || core_map == CM_AURORA || core_map == CM_WX));
 }
 
 
@@ -967,8 +971,8 @@ int propMap2Band (PropMapSetting pms)
 void drawMapScale()
 {
     typedef struct {
-        int value;
-        uint32_t color;
+        int value;                              // world value
+        uint32_t color;                         // map color
     } MapScalePoint;
 
     // CM_DRAP and CM_MUF
@@ -992,6 +996,22 @@ void drawMapScale()
         {100, 0xFF0000},
     };
 
+    // CM_WX
+    static const MapScalePoint w_scale[] = {  // see fetchWordWx.pl
+        // values are degs C
+        {-50,  0xD1E7FF},
+        {-40,  0xB5D5FF},
+        {-30,  0x88BFFF},
+        {-20,  0x73AAFF},
+        {-10,  0x4078D9},
+        {0,    0x2060A6},
+        {10,   0x009EDC},
+        {20,   0xBEE5B4},
+        {30,   0xFF8C24},
+        {40,   0xEE0051},
+        {50,   0x5B0023},
+    };
+
     const MapScalePoint *msp;
     unsigned n_scale;
     unsigned n_labels;
@@ -1010,6 +1030,12 @@ void drawMapScale()
         n_scale = NARRAY(a_scale);
         n_labels = 5;
         title = "% Chance";
+        break;
+    case CM_WX:
+        msp = w_scale;
+        n_scale = NARRAY(w_scale);
+        n_labels = 10;
+        title = "Degs C";
         break;
     default:
         fatalError (_FX("drawMapScale core_map %d"), (int)core_map);
@@ -1043,7 +1069,7 @@ void drawMapScale()
         for (uint16_t x = _MS_V2X(msp[i-1].value); x <= _MS_V2X(msp[i].value); x++) {
             if (x < mapscale_b.x + mapscale_b.w) {
                 // macros can overflow slightlty
-                float value = (float)_MS_DV*(x - _MS_X0)/_MS_DX;
+                float value = _MS_MINV + (float)_MS_DV*(x - _MS_X0)/_MS_DX;
                 float frac = fminf(fmaxf((value - msp[i-1].value)/dm,0),1);
                 uint16_t new_c = RGB565(r0+frac*(r1-r0), g0+frac*(g1-g0), b0+frac*(b1-b0));
                 tft.drawLine (x, mapscale_b.y, x, mapscale_b.y+mapscale_b.h-1, 1, new_c);
@@ -1053,19 +1079,43 @@ void drawMapScale()
 
     // draw labels inside mapscale_b
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    for (unsigned i = 0; i <= n_labels; i++) {
-        // evenly spaced but keep ends just inside mapscale_b
-        uint16_t x = i == 0 ? _MS_X0+2 : (i == n_labels ? _MS_X1-18 : _MS_X0 + _MS_DX*i/n_labels - 7);
-        tft.setCursor (x, _MS_PRY);
-        tft.setTextColor (i < n_labels/2 ? RA8875_WHITE : RA8875_BLACK);
-        int value = _MS_MINV + _MS_DV*i/n_labels;
-        tft.print (value);
-    }
 
-    // draw title
-    tft.setTextColor (RA8875_WHITE);
-    tft.setCursor (_MS_X0 + _MS_DX/(2*n_labels)-10, _MS_PRY);
-    tft.print (title);
+    if (core_map == CM_WX && !useMetricUnits()) {
+
+        // create F scale
+        float f_ticks[n_labels+2];
+        int n_fticks = tickmarks (9.0F*(_MS_MINV)/5+32, 9.0F*(_MS_MAXV)/5+32, n_labels, f_ticks);
+
+        for (int i = 1; i < n_fticks-1; i++) {                  // just use inner set of ticks
+            float t_f = f_ticks[i];
+            float t_c = 5.0F*(t_f - 32)/9;
+            uint16_t x = _MS_X0 + _MS_DX*(t_c - _MS_MINV)/_MS_DV;
+            tft.setCursor (x-15, _MS_PRY);                      // rouch x center
+            tft.setTextColor (i < 3*n_fticks/8 || i > 5*n_fticks/8 ? RA8875_BLACK : RA8875_WHITE );
+            tft.print ((int)t_f);
+        }
+
+        // draw scale meaning
+        tft.setTextColor (RA8875_BLACK);
+        tft.setCursor (_MS_X0 + 5, _MS_PRY);
+        tft.print ("Degs F");
+
+    } else {
+
+        for (unsigned i = 0; i <= n_labels; i++) {
+            // evenly spaced but keep ends just inside mapscale_b
+            uint16_t x = i == 0 ? _MS_X0+2 : (i == n_labels ? _MS_X1-18 : _MS_X0 + _MS_DX*i/n_labels - 7);
+            tft.setCursor (x, _MS_PRY);
+            tft.setTextColor (i < n_labels/2 ? RA8875_WHITE : RA8875_BLACK);
+            int value = _MS_MINV + _MS_DV*i/n_labels;
+            tft.print (value);
+        }
+
+        // draw scale meaning
+        tft.setTextColor (RA8875_WHITE);
+        tft.setCursor (_MS_X0 + _MS_DX/(2*n_labels)-10, _MS_PRY);
+        tft.print (title);
+    }
 }
 
 

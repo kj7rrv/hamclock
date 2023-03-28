@@ -40,15 +40,12 @@ bool found_phot;                                // set if initial read > 1, else
 uint8_t brb_mode;                               // one of BRB_MODE
 uint8_t brb_rotset;                             // mask of current BRB_MODE
 time_t brb_rotationT;                           // time of next rotation
-const char *brb_names[BRB_N] = {                // N.B. must be in same order as BRB_MODE
-     "NCDXF",
-     "On/Off",
-     "PhotoR",
-     "Brite",
-     "SpcWx",
-     "BME@76",
-     "BME@77",
+
+#define X(a,b)  b,                              // expands BRBMODES to name plus comma
+const char *brb_names[BRB_N] = {
+     BRBMODES
 };
+#undef X
 
 // configuration values
 #define BPWM_MAX        255                     // PWM for 100% brightness

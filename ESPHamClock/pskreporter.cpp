@@ -10,6 +10,7 @@
 uint8_t psk_mask;                               // one of PSKModeBits
 uint32_t psk_bands;                             // bitmask of PSKBandSetting
 uint16_t psk_maxage_mins;                       // query period, minutes
+uint8_t psk_showdist;                           // show max distances, else count
 
 // handy
 #define SET_PSKBAND(b)  (psk_bands |= (1 << (b)))
@@ -25,7 +26,6 @@ static const char rbn_page[] PROGMEM = "/fetchRBN.pl";
 #define PSK_MAXDR       5                       // radius of max dist marker
 
 // common private state
-static uint8_t show_maxdist;                    // show max distances, else count
 static int n_reports;                           // count of reports in psk_bands
 
 // band stats
@@ -236,9 +236,9 @@ void initPSKState()
         psk_maxage_mins = 30;
         NVWriteUInt16 (NV_PSK_MAXAGE, psk_maxage_mins);
     }
-    if (!NVReadUInt8 (NV_PSK_SHOWDIST, &show_maxdist)) {
-        show_maxdist = 0;
-        NVWriteUInt8 (NV_PSK_SHOWDIST, show_maxdist);
+    if (!NVReadUInt8 (NV_PSK_SHOWDIST, &psk_showdist)) {
+        psk_showdist = 0;
+        NVWriteUInt8 (NV_PSK_SHOWDIST, psk_showdist);
     }
 }
 
@@ -250,7 +250,7 @@ void savePSKState()
     NVWriteUInt8 (NV_PSK_MODEBITS, psk_mask);
     NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
     NVWriteUInt16 (NV_PSK_MAXAGE, psk_maxage_mins);
-    NVWriteUInt8 (NV_PSK_SHOWDIST, show_maxdist);
+    NVWriteUInt8 (NV_PSK_SHOWDIST, psk_showdist);
 }
 
 /* draw the desired spot locations for each band, as appropriate.
@@ -318,7 +318,7 @@ void drawPSKPane (const SBox &box)
         uint16_t x = box.x + TBLGAP + col*(TBCOLW+TBLGAP);
         uint16_t y = box.y + 3*box.h/8 + row*(box.h/2)/(PSKBAND_N/2);
         char report[30];
-        if (show_maxdist) {
+        if (psk_showdist) {
             float d = bstats[i].maxkm;
             if (!useMetricUnits())
                 d *= MI_PER_KM;
@@ -342,11 +342,11 @@ void drawPSKPane (const SBox &box)
     }
 
     // label
-    const char *label = show_maxdist ? (useMetricUnits() ? "Max distance (km)" : "Max distance (mi)")
+    const char *label = psk_showdist ? (useMetricUnits() ? "Max distance (km)" : "Max distance (mi)")
                                      : "Counts";
     uint16_t lw = getTextWidth (label);
     uint16_t x = box.x + (box.w-lw)/2;
-    if (show_maxdist)
+    if (psk_showdist)
         x -= 2*PSK_MAXDR;
     uint16_t y = box.y + box.h - 15;
     tft.setTextColor (RA8875_WHITE);
@@ -354,7 +354,7 @@ void drawPSKPane (const SBox &box)
     tft.print (label);
 
     // target example if showing distance
-    if (show_maxdist) {
+    if (psk_showdist) {
         SCoord s;
         s.x = box.x + box.w - 5*PSK_MAXDR;
         s.y = y + 3;
@@ -579,7 +579,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     bool isrbn = (psk_mask & PSKMB_SRCMASK) == PSKMB_RBN;
     bool use_call = (psk_mask & PSKMB_CALL) != 0;
     bool of_de = (psk_mask & PSKMB_OFDE) != 0;
-    bool sh_dist = show_maxdist != 0;
+    bool show_dist = psk_showdist != 0;
 
     // menu
     #define PRI_INDENT 2
@@ -603,7 +603,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[10] = {MENU_1OFN, ispsk,     1, PRI_INDENT, "PSK"};
     mitems[11] = {MENU_1OFN, of_de,     2, PRI_INDENT, "of DE"};
     mitems[12] = {MENU_1OFN, use_call,  3, PRI_INDENT, "Call"};
-    mitems[13] = {MENU_1OFN, sh_dist,   7, PRI_INDENT, "MaxDst"};
+    mitems[13] = {MENU_1OFN, show_dist, 7, PRI_INDENT, "MaxDst"};
     mitems[14] = {MENU_1OFN, false,     6, PRI_INDENT, "30 min"};
     mitems[15] = {MENU_1OFN, false,     6, PRI_INDENT, "6 hrs"};
     mitems[16] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_30M),  4, SEC_INDENT, bands[PSKBAND_30M].name};
@@ -614,7 +614,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[20] = {MENU_1OFN, iswspr,    1, PRI_INDENT, "WSPR"};
     mitems[21] = {MENU_1OFN, !of_de,    2, PRI_INDENT, "by DE"};
     mitems[22] = {MENU_1OFN, !use_call, 3, PRI_INDENT, "Grid"};
-    mitems[23] = {MENU_1OFN, !sh_dist,  7, PRI_INDENT, "Count"};
+    mitems[23] = {MENU_1OFN, !show_dist,7, PRI_INDENT, "Count"};
     mitems[24] = {MENU_1OFN, false,     6, PRI_INDENT, "1 hour"};
     mitems[25] = {MENU_1OFN, false,     6, PRI_INDENT, "24 hrs"};
     mitems[26] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_12M),  4, SEC_INDENT, bands[PSKBAND_12M].name};
@@ -698,7 +698,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
                 fatalError (_FX("PSK: No menu age"));
 
             // get how to show
-            show_maxdist = mitems[13].set;
+            psk_showdist = mitems[13].set;
 
             // persist
             savePSKState();
@@ -791,7 +791,7 @@ void drawPSKPaths ()
     if (findPaneForChoice(PLOT_CH_PSK) == PANE_NONE)
         return;
 
-    if (show_maxdist) {
+    if (psk_showdist) {
 
         // just show the max path in each band
         for (int i = 0; i < PSKBAND_N; i++)
@@ -844,7 +844,7 @@ bool getClosestPSK (const LatLong &ll, const PSKReport **rpp)
     }
 
     // ignore others if no tree yet or just showing max
-    if (show_maxdist || !kd3tree || !kd3root)
+    if (psk_showdist || !kd3tree || !kd3root)
         return (false);
 
     // find node clostest to ll
