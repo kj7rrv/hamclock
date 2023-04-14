@@ -948,10 +948,10 @@ static void changeBrightness (const SCoord &s)
             else if (s.y > b.y + b.h)
                 bpwm = user_off;
             else
-                bpwm = user_off + (user_on-user_off)*(b.y + b.h - s.y)/b.h;
+                bpwm = user_on - (user_on-user_off)*(s.y - b.y)/b.h;
 
-            // redefine upper or lower range, whichever is closer
-            if (phot > (fast_phot_bright+fast_phot_dim)/2) {
+            // redefine upper or lower range depending on top or bottom half
+            if (s.y < b.y + b.h/2) {
                 // change bright end
                 fast_bpwm_bright = bpwm;
                 fast_phot_bright = phot;
@@ -1114,21 +1114,25 @@ void doNCDXFBoxTouch (const SCoord &s)
 }
 
 
-/* set on/off/idle times for the given dow then update display if today is dow.
- * times are minutes since DE midnight; idle is mins or ignored if < 0; dow is 1..7 Sun..Sat else "today".
- * since we only allow changing idle by multiples of 5, we enforce that here and caller can get results.
+/* set on/off/idle times for the given dow then engage if today is indeed dow.
+ *   dow is 1..7 for Sun..Sat
+ *   on/off times are minutes since DE midnight
+ *   idle is mins
+ * dow < 0 means ignore on/off too, idle < 0 means ignore idle.
+ * since we only allow changing idle by multiples of 5, we enforce that here and caller can get back results.
  * N.B. this does NOT count as a new user interaction for determining idle timeout.
  * N.B. we do NOT validate args
- * return whether even implemented.
+ * return whether on/off is even implemented.
  */
 bool setDisplayOnOffTimes (int dow, uint16_t new_on, uint16_t new_off, int &idle)
 {
     if (support_onoff) {
 
-        // persist new on/off
-        persistOnOffTimes (dow, new_on, new_off);
+        // persist new on/off if desired
+        if (dow >= 1)
+            persistOnOffTimes (dow, new_on, new_off);
 
-        // engage and persist new idle time if desired
+        // persist new idle time if desired
         if (idle >= 0) {
             // enforce multiples of 5
             idle -= idle%5;

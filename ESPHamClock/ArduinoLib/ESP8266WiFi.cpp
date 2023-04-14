@@ -36,12 +36,13 @@ static bool getCommand (bool verbose, const char cmd[], char line[], size_t line
 	FILE *pp = popen (cmd, "r");
 	if (!pp)
 	    return (false);
-	bool ok = fgets (line, line_len, pp) != NULL;
-        int eof_or_err = !ok && (feof(pp) || ferror(pp));
+	bool fgets_ok = fgets (line, line_len, pp) != NULL;
+        int err = ferror(pp);
+        int eof = feof(pp);
 	int wstatus = pclose (pp);
         int exited = WIFEXITED(wstatus);
         int exstatus = WEXITSTATUS(wstatus);
-        if (ok && exited && exstatus == 0 && strlen(line) > 1) {
+        if (fgets_ok && exited && exstatus == 0 && strlen(line) > 1) {
             line[strlen(line)-1] = '\0';        // rm \n
             if (verbose)
                 printf ("** back=%s\n", line);
@@ -49,7 +50,16 @@ static bool getCommand (bool verbose, const char cmd[], char line[], size_t line
         }
         if (!verbose)
             printf ("** cmd=%s\n", cmd);
-        printf ("** err=%d exited=%d exstatus=%d\n", eof_or_err, exited, exstatus);
+        int signaled = WIFSIGNALED(wstatus);
+        int signal = WTERMSIG(wstatus);
+        if (exited)
+            printf ("** err=%d eof=%d exstatus=%d\n", err, eof, exstatus);
+        else if (signaled)
+            printf ("** err=%d eof=%d signal=%d\n", err, eof, signal);
+        else if (wstatus == -1)
+            printf ("** err=%d eof=%d wait(2) err: %s\n", err, eof, strerror(errno));
+        else
+            printf ("** err=%d eof=%d nknown wait status: %d\n", err, eof, wstatus);
 	return (false);
 }
 

@@ -266,23 +266,23 @@ static void drawAnalogClock (time_t delocal_t)
         uint16_t tx = de_info_b.x+indent;
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor (DE_COLOR);
-        tft.setCursor (tx, y0-r);
+        tft.setCursor (tx, y0-r+1);
         tft.print (dayShortStr(wd));
 
         // am/pm
-        tft.setCursor (tx, y0-r+rowh);
+        tft.setCursor (tx, y0-r+rowh+1);
         tft.print (hr < 12 ? "AM" : "PM");
 
         // mon
         tx = de_info_b.x+de_info_b.w-indent-3*charw;
-        tft.setCursor (tx, y0-r);
+        tft.setCursor (tx, y0-r+1);
         tft.print (monthShortStr(mo));
 
         // date
         tx = de_info_b.x+de_info_b.w-indent-charw;
         if (dy > 9)
             tx -= charw;
-        tft.setCursor (tx, y0-r+rowh);
+        tft.setCursor (tx, y0-r+rowh+1);
         tft.print (dy);
 
         // sunrise/set

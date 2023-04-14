@@ -588,8 +588,7 @@ static void ws_onclose (ws_cli_conn_t *client)
     }
 
     // if get here, client was not found in si_list
-    if (live_verbose)
-        printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
+    printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
 }
 
 /* callback when browser sends us a message on a websocket
@@ -634,9 +633,9 @@ static void ws_onmessage (ws_cli_conn_t *client, const unsigned char *msg, uint6
 }
 
 /* called when we receive a "normal" client message, ie, one that is not from a web socket.
- * sockfp is prepared for writing and is positioned just after the header.
+ * sockfp is prepared for writing and is positioned just after the header. caller will close, not us.
  */
-static void onnonws (FILE *sockfp, const char *header)
+static void ws_not (FILE *sockfp, const char *header)
 {
     // first line should be the GET containing the desired page
     char fn[50];
@@ -646,7 +645,7 @@ static void onnonws (FILE *sockfp, const char *header)
     }
 
     if (live_verbose)
-        printf ("LIVE: onnonws GET %s\n", fn);
+        printf ("LIVE: ws_not GET %s\n", fn);
 
     // dispatch according to GET file
     if (strcmp (fn, "live.html") == 0)
@@ -654,6 +653,7 @@ static void onnonws (FILE *sockfp, const char *header)
     else if (strcmp (fn, "favicon.ico") == 0)
         sendLiveFavicon (sockfp);
     else {
+        printf ("LIVE: unknown GET %s\n", fn);
         fprintf (sockfp, "HTTP/1.0 400 Bad request\r\n");
         fprintf (sockfp, "Content-Type: text/plain; charset=us-ascii\r\n");
         fprintf (sockfp, "Connection: close\r\n\r\n");
@@ -671,24 +671,31 @@ void initLiveWeb (bool verbose)
 
         // just report
 
-        tftMsg (verbose, 0, "Live Web server on port %d", liveweb_port);
+        if (liveweb_port > 0)
+            tftMsg (verbose, 0, "Live Web server on port %d", liveweb_port);
+        else
+            tftMsg (verbose, 0, "Live Web server is disabled");
 
     } else {
-
-        // actually start stuff
 
         // handle all write errors inline
         signal (SIGPIPE, SIG_IGN);
 
-        // start server
-        struct ws_events evs;
-        evs.onopen    = ws_onopen;
-        evs.onclose   = ws_onclose;
-        evs.onmessage = ws_onmessage;
-        evs.onnonws   = onnonws;
-        ws_socket(&evs, liveweb_port, 1, 1000);
-        if (live_verbose)
-            printf ("LIVE: started server thread on port %d\n", liveweb_port);
+        // actually start stuff unless not wanted
+        if (liveweb_port < 0) {
+            if (live_verbose)
+                printf ("LIVE: live web is disabled\n");
+        } else {
+            // start websocket server
+            struct ws_events evs;
+            evs.onopen    = ws_onopen;
+            evs.onclose   = ws_onclose;
+            evs.onmessage = ws_onmessage;
+            evs.onnonws   = ws_not;
+            ws_socket (&evs, liveweb_port, 1, 1000);
+            if (live_verbose)
+                printf ("LIVE: started server thread on port %d\n", liveweb_port);
+        }
     }
 }
 

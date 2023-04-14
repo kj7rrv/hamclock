@@ -272,7 +272,7 @@ void drawPSKSpots ()
     }
 }
 
-/* draw the PSK pane in the given
+/* draw the PSK pane in the given box
  * COMMON
  */
 void drawPSKPane (const SBox &box)
@@ -736,7 +736,7 @@ bool getPSKBandStats (PSKBandStats stats[PSKBAND_N], const char *names[PSKBAND_N
 /* return whether the path for the given freq should be drawn dashed
  * UNIX only
  */
-static bool getBandDashed (long Hz)
+bool getBandDashed (long Hz)
 {
     int b = findBand (Hz);
     return (b >= 0 && b < PSKBAND_N ? getColorDashed(bands[b].cid) : RA8875_BLACK);
@@ -748,24 +748,28 @@ static void drawPSKPath (const PSKReport &rpt)
 {
     float dist, bear;
     propPath (false, de_ll, sdelat, cdelat, rpt.ll, &dist, &bear);
-    const int n_step = (int)(ceilf(dist/deg2rad(4))) | 1;   // odd so first and last dashed always drawn
+    const int n_step = (int)(ceilf(dist/deg2rad(PATH_SEGLEN))) | 1;     // odd so dashed ends always drawn
     const float step = dist/n_step;
     bool dashed = getBandDashed (rpt.Hz);
     uint16_t color = getBandColor(rpt.Hz);
-    SCoord last_good_s = {0, 0};            // for dot
-    SCoord prev_s = {0, 0};                 // .x == 0 means don't show
+    SCoord last_good_s = {0, 0};                                        // for dot
+    SCoord prev_s = {0, 0};                                             // .x == 0 means don't show
+    uint16_t lwRaw = fmax (1, tft.SCALESZ - n_reports/30);              // thinner when more tracks
+    uint16_t mkRaw = lwRaw+fmin(2,tft.SCALESZ);                         // marker size
+    // printf ("*********** tft.SCALESZ %d n_reports %d lwRaw %d mkRaw %d\n", tft.SCALESZ, n_reports, lwRaw, mkRaw);
+
+    // N.B. compute each segment even if not showing paths in order to find last_good_s
     for (int i = 0; i <= n_step; i++) {     // fence posts
         float r = i*step;
         float ca, B;
         SCoord s;
         solveSphere (bear, r, sdelat, cdelat, &ca, &B);
-        ll2s (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
+        ll2sRaw (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, lwRaw);
         if (prev_s.x > 0) {
-            if (segmentSpanOk(prev_s, s, 0)) {
-                if (!dashed || n_step < 7 || (i & 1))
-                    tft.drawLine (prev_s.x, prev_s.y, s.x, s.y, 1, color);
-                if (i == n_step)            // only mark if really at the end of the path
-                    last_good_s = s;
+            if (segmentSpanOkRaw(prev_s, s, lwRaw)) {
+                if (showSpotPaths() && (!dashed || n_step < 7 || (i & 1)))
+                    tft.drawLineRaw (prev_s.x, prev_s.y, s.x, s.y, lwRaw, color);
+                last_good_s = s;
             } else
                s.x = 0;
         }
@@ -774,10 +778,14 @@ static void drawPSKPath (const PSKReport &rpt)
 
     if (last_good_s.x > 0) {
         // transmitter end is round -- like an expanding wave??
-        if (psk_mask & PSKMB_OFDE)
-            tft.fillRect (last_good_s.x-PSK_DOTR, last_good_s.y-PSK_DOTR, 2*PSK_DOTR, 2*PSK_DOTR, color);
-        else
-            tft.fillCircle (last_good_s.x, last_good_s.y, PSK_DOTR, color);
+        SCoord last_app_s = last_good_s;
+        if (psk_mask & PSKMB_OFDE) {
+            tft.fillRectRaw (last_app_s.x-mkRaw, last_app_s.y-mkRaw, 2*mkRaw, 2*mkRaw, color);
+            tft.drawRectRaw (last_app_s.x-mkRaw, last_app_s.y-mkRaw, 2*mkRaw, 2*mkRaw, RA8875_BLACK);
+        } else {
+            tft.fillCircleRaw (last_app_s.x, last_app_s.y, mkRaw, color);
+            tft.drawCircleRaw (last_app_s.x, last_app_s.y, mkRaw, RA8875_BLACK);
+        }
     }
 }
 
@@ -823,7 +831,7 @@ bool getClosestPSK (const LatLong &ll, const PSKReport **rpp)
     if (!overMap(ll_s))
         return (false);
 
-    // find closest among show_maxs[] (which were set when plotted so must be ok)
+    // find closest among bstats[] (which were set when plotted so must be ok)
     int min_d = 10000;
     int min_rpt = 0;
     for (int i = 0; i < PSKBAND_N; i++) {

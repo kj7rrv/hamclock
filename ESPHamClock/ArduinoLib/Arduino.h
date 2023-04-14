@@ -90,6 +90,7 @@ extern std::string our_dir;
 
 
 // glue with parent program
+#include "../version.h"
 extern void setX11FullScreen (bool);
 extern void setDemoMode(bool on);
 extern void setCenterLng (int16_t l);

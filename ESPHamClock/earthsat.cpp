@@ -11,18 +11,19 @@
 bool dx_info_for_sat;                   // global to indicate whether dx_info_b is for DX info or sat info
 
 // path drawing
+// N.B. MAX_PATH must be a power of 2 for dashed lines
 #if defined(_IS_ESP8266)
     // this requires dense collection of individual dots that are plotted as the map is drawn
-    #define MAX_PATH    2000            // max number of points in orbit path
+    #define MAX_PATH    2048            // max number of points in orbit path
     #define FOOT_ALT0   1000            // n dots for 0 deg altitude locus
     #define FOOT_ALT30  300             // n dots for 30 deg altitude locus
     #define FOOT_ALT60  100             // n dots for 60 deg altitude locus
 #else
-    // much sparser because here draw lines all at once after the map
-    #define MAX_PATH    250             // max number of points in orbit path
-    #define FOOT_ALT0   100             // n dots for 0 deg altitude locus
-    #define FOOT_ALT30  35              // n dots for 30 deg altitude locus
-    #define FOOT_ALT60  12              // n dots for 60 deg altitude locus
+    // can be sparser because we just draw lines
+    #define MAX_PATH    512             // max number of points in orbit path
+    #define FOOT_ALT0   200             // n dots for 0 deg altitude locus
+    #define FOOT_ALT30  100             // n dots for 30 deg altitude locus
+    #define FOOT_ALT60  75              // n dots for 60 deg altitude locus
 #endif
 #define N_FOOT      3                   // number of footprint altitude loci
 
@@ -247,7 +248,7 @@ static void updateFootPrint (float satlat, float satlng)
             solveSphere (A, vrad, cosc, sinc, &cosa, &B);
             float vlat = M_PIF/2-acosf(cosa);
             float vlng = fmodf(B+satlng+5*M_PIF,2*M_PIF)-M_PIF; // require [-180.180)
-            ll2s (vlat, vlng, foot_path[n], 2);
+            ll2sRaw (vlat, vlng, foot_path[n], 2);
 
             // skip duplicate points
             if (n == 0 || memcmp (&foot_path[n], &foot_path[n-1], sizeof(SCoord)))
@@ -622,10 +623,11 @@ static void setSatMapNameLoc()
 
         // avoid current sat footprint
         #define _SAT_FOOT_R 75          // typical footprint??
-        SCoord &sat_s = sat_path[0];
-        uint16_t dy = sat_s.y > name_l_s.y ? sat_s.y - name_l_s.y : name_l_s.y - sat_s.y;
-        if (dy < _SAT_FOOT_R && name_r_s.x >= sat_s.x - _SAT_FOOT_R && name_l_s.x < sat_s.x + _SAT_FOOT_R) {
-            name_l_s.x = sat_s.x + _SAT_FOOT_R + _EDGE_GUARD;
+        uint16_t sat_x = sat_path[0].x/tft.SCALESZ;
+        uint16_t sat_y = sat_path[0].y/tft.SCALESZ;
+        uint16_t dy = sat_y > name_l_s.y ? sat_y - name_l_s.y : name_l_s.y - sat_y;
+        if (dy < _SAT_FOOT_R && name_r_s.x >= sat_x - _SAT_FOOT_R && name_l_s.x < sat_x + _SAT_FOOT_R) {
+            name_l_s.x = sat_x + _SAT_FOOT_R + _EDGE_GUARD;
             name_r_s.x = name_l_s.x + map_name_b.w;
         }
 
@@ -1365,16 +1367,16 @@ void updateSatPath()
     // fill sat_path
     float period = sat->period();
     n_path = 0;
-    uint16_t max_path = isSatMoon() ? 1 : MAX_PATH;         // N.B. only set the current location if Moon
+    uint16_t max_path = isSatMoon() ? 1 : MAX_PATH;             // N.B. only set the current location if Moon
+    int dashed = 0;
     for (uint16_t p = 0; p < max_path; p++) {
 
-        // 1/3rd are off screen to make a dashed line effect
-        // N.B. hack knows MAX_PATH is 250 for UNIX and blanks 2/3 on ESP and 1/2 on UNIX
-        if (getColorDashed(SATPATH_CSPR) && (p % (MAX_PATH*3/250)) < (MAX_PATH*2/250-1)) {
-            sat_path[n_path] = {1000, 1000};
+        // place dashed line points off screen courtesy overMap()
+        if (getColorDashed(SATPATH_CSPR) && (dashed++ & (MAX_PATH>>7))) {   // first always on for center dot
+            sat_path[n_path] = {10000, 10000};
         } else {
             // compute next point along path
-            ll2s (satlat, satlng, sat_path[n_path], 2);
+            ll2sRaw (satlat, satlng, sat_path[n_path], tft.SCALESZ*tft.SCALESZ);
         }
 
         // skip duplicate points
@@ -1411,11 +1413,18 @@ void drawSatPathAndFoot()
     resetWatchdog();
 
     uint16_t path_color = getMapColor(SATPATH_CSPR);
+    bool draw_start = true;
     for (int i = 1; i < n_path; i++) {
         SCoord &sp0 = sat_path[i-1];
         SCoord &sp1 = sat_path[i];
-        if (segmentSpanOk(sp0,sp1,1))
-            tft.drawLine (sp0.x, sp0.y, sp1.x, sp1.y, 1, path_color);
+        if (segmentSpanOkRaw(sp0,sp1,tft.SCALESZ*tft.SCALESZ)) {
+            if (draw_start) {
+                tft.fillCircleRaw (sp0.x, sp0.y, 2*tft.SCALESZ, path_color);
+                tft.drawCircleRaw (sp0.x, sp0.y, 2*tft.SCALESZ, RA8875_BLACK);
+                draw_start = false;
+            }
+            tft.drawLineRaw (sp0.x, sp0.y, sp1.x, sp1.y, tft.SCALESZ, path_color);
+        }
     }
 
     uint16_t foot_color = getMapColor(SATFOOT_CSPR);
@@ -1423,8 +1432,8 @@ void drawSatPathAndFoot()
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
             SCoord &sf0 = sat_foot[alt_i][foot_i];
             SCoord &sf1 = sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
-            if (segmentSpanOk(sf0,sf1,1))
-                tft.drawLine (sf0.x, sf0.y, sf1.x, sf1.y, 1, foot_color);
+            if (segmentSpanOkRaw(sf0,sf1,1))
+                tft.drawLineRaw (sf0.x, sf0.y, sf1.x, sf1.y, tft.SCALESZ, foot_color);
         }
     }
 }
@@ -1505,8 +1514,8 @@ bool checkSatMapTouch (const SCoord &s)
         return (false);
 
     SBox sat_b;
-    sat_b.x = sat_path[0].x-SAT_TOUCH_R;
-    sat_b.y = sat_path[0].y-SAT_TOUCH_R;
+    sat_b.x = sat_path[0].x/tft.SCALESZ-SAT_TOUCH_R;
+    sat_b.y = sat_path[0].y/tft.SCALESZ-SAT_TOUCH_R;
     sat_b.w = 2*SAT_TOUCH_R;
     sat_b.h = 2*SAT_TOUCH_R;
 

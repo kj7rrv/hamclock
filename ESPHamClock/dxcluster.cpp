@@ -452,7 +452,7 @@ static void drawDXSpotOnMap (const DXClusterSpot &spot)
     #if defined(_SUPPORT_SPOTPATH)
 
         // draw connecting path if desired
-        if (getSpotPaths()) {
+        if (showSpotPaths()) {
             LatLong from_ll, to_ll;
             from_ll.lat = spot.de_lat;
             from_ll.lat_d = rad2deg(from_ll.lat);
@@ -466,25 +466,29 @@ static void drawDXSpotOnMap (const DXClusterSpot &spot)
             float cdelatx = cosf(from_ll.lat);
             float dist, bear;
             propPath (false, from_ll, sdelatx, cdelatx, to_ll, &dist, &bear);
-            const int n_step = ceilf(dist/deg2rad(3));
+            const int n_step = (int)ceilf(dist/deg2rad(PATH_SEGLEN)) | 1;       // always odd for dashed ends
             const float step = dist/n_step;
-            const uint16_t color = getBandColor(spot.kHz * 1000);   // wants Hz
-            SCoord prev_s = {0, 0};                                 // .x == 0 means don't show
-            SCoord de_s = {0, 0}, dx_s = {0, 0};                    // first and last points drawn
-            for (int i = 0; i <= n_step; i++) {                     // fence posts
+            const uint16_t color = getBandColor(spot.kHz * 1000);       // wants Hz
+            const bool dashed = getBandDashed (spot.kHz * 1000);
+            SCoord prev_s = {0, 0};                                     // .x == 0 means don't show
+            SCoord de_s = {0, 0}, dx_s = {0, 0};                        // first and last points drawn
+            uint16_t lwRaw = fmax (1, tft.SCALESZ - n_dxspots/30);      // thinner when more tracks
+            uint16_t mkRaw = lwRaw+fmin(2,tft.SCALESZ);                 // marker size
+
+            for (int i = 0; i <= n_step; i++) {                         // fence posts
                 float r = i*step;
                 float ca, B;
                 SCoord s;
                 solveSphere (bear, r, sdelatx, cdelatx, &ca, &B);
-                ll2s (asinf(ca), fmodf(from_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
+                ll2sRaw (asinf(ca), fmodf(from_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, lwRaw);
                 if (prev_s.x > 0) {
-                    if (segmentSpanOk(prev_s, s, 0)) {
-                        tft.drawLine (prev_s.x, prev_s.y, s.x, s.y, 1, color);
-                        // record ends only if really the first and last
-                        if (i == 1)
+                    if (segmentSpanOkRaw(prev_s, s, lwRaw)) {
+                        if (!dashed || n_step < 7 || (i & 1))
+                            tft.drawLineRaw (prev_s.x, prev_s.y, s.x, s.y, lwRaw, color);
+                        // capture first and last position
+                        if (de_s.x == 0)
                             de_s = prev_s;
-                        if (i == n_step)
-                            dx_s = s;
+                        dx_s = s;
                     } else
                        s.x = 0;
                 }
@@ -492,12 +496,14 @@ static void drawDXSpotOnMap (const DXClusterSpot &spot)
             }
 
             // always mark the DE end as the listener
-            if (overMap (de_s))
-                tft.fillRect (de_s.x-PSK_DOTR, de_s.y-PSK_DOTR, 2*PSK_DOTR, 2*PSK_DOTR, color); // not +1
+            tft.fillRectRaw (de_s.x-mkRaw, de_s.y-mkRaw, 2*mkRaw+1, 2*mkRaw, color);
+            tft.drawRectRaw (de_s.x-mkRaw, de_s.y-mkRaw, 2*mkRaw+1, 2*mkRaw, RA8875_BLACK);
 
             // mark the DX end as TX only if not also labeling
-            if (!labelSpots() && overMap(dx_s))
-                tft.fillCircle (dx_s.x, dx_s.y, PSK_DOTR, color);
+            if (!labelSpots()) {
+                tft.fillCircleRaw (dx_s.x, dx_s.y, mkRaw, color);
+                tft.drawCircleRaw (dx_s.x, dx_s.y, mkRaw, RA8875_BLACK);
+            }
         }
 
     #endif // _SUPPORT_SPOTPATH
@@ -1299,7 +1305,7 @@ void drawDXClusterSpotsOnMap ()
 {
         // skip if we are not up or don't want spots on map
         if (!useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE
-                    || (!labelSpots() && !getSpotPaths()))
+                    || (!labelSpots() && !showSpotPaths()))
             return;
 
         for (uint8_t i = 0; i < n_dxspots; i++)

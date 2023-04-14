@@ -7,7 +7,7 @@
 // allow setting some/all these in Menu?
 #define MENU_TBM        2               // top and bottom margin
 #define MENU_RM         2               // right margin
-#define MENU_RH         13              // row height
+#define MENU_RH         12              // row height
 #define MENU_IS         6               // indicator size
 #define MENU_BH         14              // button height
 #define MENU_BB         4               // ok/cancel button horizontal border

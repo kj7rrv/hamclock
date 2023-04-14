@@ -15,7 +15,7 @@
  */
 typedef struct {
     int16_t lat, lng;                   // degs N E *100
-    SCoord s[2];                        // corresponding screen coord, 2nd poly if s[1].x > 0
+    SCoord s[2];                        // corresponding _raw_ screen coord, 2nd poly if s[1].x > 0
 } ZoneVertex;
 
 /* collection of vertices comprising a zone collection
@@ -25,8 +25,8 @@ typedef struct {
     int16_t lat_lbl, lng_lbl;           // label, same encoding as ZoneVertex
     ZoneVertex *verts;                  // ploygon vertices, can be 2 lists
     uint16_t n_verts;
-    SCoord s_lbl;                       // screen coord of label
-    SBox bound_b[2];                    // screen coord bounding box, [1].x != only if required
+    SCoord s_lbl;                       // app screen coord of label
+    SBox bound_b[2];                    // app screen coord bounding box, [1].x != only if required
 } ZonePoly;
 
 
@@ -27938,17 +27938,21 @@ void updateZoneSCoords (ZoneID id)
     const ZonePoly *end_zp = &zpoly[n_z];
     for (ZonePoly *zp = zpoly; zp < end_zp; zp++) {
 
-        // set label screen coord
+        // set label screen coord in app coords
         ll2s (deg2rad(zp->lat_lbl * 0.01F), deg2rad(zp->lng_lbl) * 0.01F, zp->s_lbl, 1);
 
         // toggle polly at each wrap
         int poly = 0;
 
         // loop through each vertex assigning screen coords and finding bounding boxes (2nd if wraps)
-        uint16_t map_xcenter = map_b.x + map_b.w/2;             // handy map x center
-        uint16_t map_xright = map_b.x + map_b.w - 1;            // handy map x right edge
-        uint16_t map_ycenter = map_b.y + map_b.h/2;             // handy map y center
-        uint16_t map_bottom = map_b.y + map_b.h - 1;            // handy map bottom
+        uint16_t map_y = tft.SCALESZ*map_b.y;                       // handy raw map top
+        uint16_t map_h = tft.SCALESZ*map_b.h;                       // handy raw map height
+        uint16_t map_wo2 = tft.SCALESZ*map_b.w/2;                   // handy raw map width-over-2
+        uint16_t map_xleft = tft.SCALESZ*map_b.x;                   // handy raw map x left edge
+        uint16_t map_xcenter = tft.SCALESZ*(map_b.x + map_b.w/2);   // handy raw map x center
+        uint16_t map_xright = tft.SCALESZ*(map_b.x + map_b.w - 1);  // handy raw map x right edge
+        uint16_t map_ycenter = tft.SCALESZ*(map_b.y + map_b.h/2);   // handy raw map y center
+        uint16_t map_bottom = tft.SCALESZ*(map_b.y + map_b.h - 1);  // handy raw map bottom
         uint16_t min_x[2] = {0,0}, max_x[2] = {0,0};            // x bb for each poly
         uint16_t min_y[2] = {0,0}, max_y[2] = {0,0};            // y bb for each poly
         bool azim1_drop = false;                                // force dropping an azim1 poly
@@ -27957,9 +27961,9 @@ void updateZoneSCoords (ZoneID id)
         ZoneVertex *end_vp = &zp->verts[zp->n_verts];
         for (ZoneVertex *vp = zp->verts; vp < end_vp; vp++) {
 
-            // find vertex screen coord, still undefined as to which poly
+            // find vertex screen coord in full raw coords, still undefined as to which poly
             SCoord vs;
-            ll2s (deg2rad(vp->lat * 0.01F), deg2rad(vp->lng * 0.01F), vs, 1);
+            ll2sRaw (deg2rad(vp->lat * 0.01F), deg2rad(vp->lng * 0.01F), vs, 1);
 
             // check for wrap depending on projection
 
@@ -27967,11 +27971,11 @@ void updateZoneSCoords (ZoneID id)
                 if (prev_vp && (vs.x < map_xcenter) != (prev_vp->s[poly].x < map_xcenter)) {
                     // spans hemispheres: extend to top-bottom edges
                     if (prev_vp->s[poly].y < map_ycenter)
-                        prev_vp->s[poly].y = map_b.y;
+                        prev_vp->s[poly].y = map_y;
                     else
                         prev_vp->s[poly].y = map_bottom;
                     if (vs.y < map_ycenter)
-                        vs.y = map_b.y;
+                        vs.y = map_y;
                     else
                         vs.y = map_bottom;
 
@@ -27979,14 +27983,14 @@ void updateZoneSCoords (ZoneID id)
                     poly = 1 - poly;
                 }
             } else if (map_proj == MAPP_MERCATOR) {
-                if (prev_vp && abs((int)vs.x - (int)prev_vp->s[poly].x) > map_b.w/2) {
+                if (prev_vp && abs((int)vs.x - (int)prev_vp->s[poly].x) > map_wo2) {
                     // too wide: extend to left-right edges
                     if (prev_vp->s[poly].x < map_xcenter) {
-                        prev_vp->s[poly].x = map_b.x;
+                        prev_vp->s[poly].x = map_xleft;
                         vs.x = map_xright;
                     } else {
                         prev_vp->s[poly].x = map_xright;
-                        vs.x = map_b.x;
+                        vs.x = map_xleft;
                     }
 
                     // swap poly
@@ -27997,7 +28001,7 @@ void updateZoneSCoords (ZoneID id)
                 // discard zones near the antipodal horizon -- don't bother swapping poly
                 int dx = abs((int)vs.x - (int)map_xcenter);
                 int dy = abs((int)vs.y - (int)map_ycenter);
-                int max_rr = 0.95F*map_b.h/2*map_b.h/2;    // 0.95 r^2
+                int max_rr = 0.95F*map_h/2*map_h/2;    // 0.95 r^2
                 if (dx*dx + dy*dy > max_rr)
                     azim1_drop = true;
             }
@@ -28022,11 +28026,11 @@ void updateZoneSCoords (ZoneID id)
             prev_vp = vp;
         }
 
-        // find each bb
-        uint16_t bb0_w = max_x[0] - min_x[0];
-        uint16_t bb0_h = max_y[0] - min_y[0];
-        uint16_t bb1_w = max_x[1] - min_x[1];
-        uint16_t bb1_h = max_y[1] - min_y[1];
+        // find each app bb
+        uint16_t bb0_w = (max_x[0] - min_x[0])/tft.SCALESZ;
+        uint16_t bb0_h = (max_y[0] - min_y[0])/tft.SCALESZ;
+        uint16_t bb1_w = (max_x[1] - min_x[1])/tft.SCALESZ;
+        uint16_t bb1_h = (max_y[1] - min_y[1])/tft.SCALESZ;
 
         zp->bound_b[0] = {min_x[0], min_y[0], bb0_w, bb0_h};
         zp->bound_b[1] = {min_x[1], min_y[1], bb1_w, bb1_h};
@@ -28130,11 +28134,11 @@ void drawZone (ZoneID id, uint16_t color, int n_only)
             SCoord s01 = {0, 0};
             const ZoneVertex *end_vp = &zp->verts[zp->n_verts];
             for (ZoneVertex *vp = zp->verts; vp < end_vp; vp++) {
-                if (s00.x > 0 && segmentSpanOk (s00, vp->s[0], 0) && memcmp(&s00,&(vp->s[0]),sizeof(s00)))
-                    tft.drawLine (s00.x, s00.y, vp->s[0].x, vp->s[0].y, color);
+                if (s00.x > 0 && segmentSpanOkRaw (s00, vp->s[0], 0) && memcmp(&s00,&(vp->s[0]),sizeof(s00)))
+                    tft.drawLineRaw (s00.x, s00.y, vp->s[0].x, vp->s[0].y, 1, color);
                 s00 = vp->s[0];
-                if (s01.x > 0 && segmentSpanOk (s01, vp->s[1], 0) && memcmp(&s01,&(vp->s[1]),sizeof(s01)))
-                    tft.drawLine (s01.x, s01.y, vp->s[1].x, vp->s[1].y, color);
+                if (s01.x > 0 && segmentSpanOkRaw (s01, vp->s[1], 0) && memcmp(&s01,&(vp->s[1]),sizeof(s01)))
+                    tft.drawLineRaw (s01.x, s01.y, vp->s[1].x, vp->s[1].y, 1, color);
                 s01 = vp->s[1];
             }
         }

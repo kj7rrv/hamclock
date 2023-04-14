@@ -86,7 +86,24 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
             #endif
 	}
 
-	void drawRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
+        // non-standard
+	void drawLineRaw (int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness, uint16_t color)
+	{
+	    if (rotation == 2) {
+		x0 = width()  - 1 - x0;
+		y0 = height() - 1 - y0;
+		x1 = width()  - 1 - x1;
+		y1 = height() - 1 - y1;
+	    }
+            #if defined (_IS_ESP8266)
+                (void)thickness;
+                Adafruit_RA8875::drawLine(x0, y0, x1, y1, color);
+            #else
+                Adafruit_RA8875::drawLineRaw (x0, y0, x1, y1, thickness, color);
+            #endif
+	}
+
+	void drawRect (int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
 	{
 	    if (rotation == 2) {
 		x0 = width()  - 1 - x0;
@@ -95,6 +112,20 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		h = -h;
 	    }
 	    Adafruit_RA8875::drawRect(x0, y0, w, h, color);
+	}
+
+        // non-standard
+	void drawRectRaw (int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
+	{
+	    if (rotation == 2) {
+		x0 = width() - 1 - x0;
+		y0 = height() - 1 - y0;
+	    }
+            #if defined (_IS_ESP8266)
+                Adafruit_RA8875::drawRect(x0, y0, w, h, color);
+            #else
+                Adafruit_RA8875::drawRectRaw (x0, y0, w, h, color);
+            #endif
 	}
 
 	void fillRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
@@ -108,6 +139,22 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 	    Adafruit_RA8875::fillRect(x0, y0, w, h, color);
 	}
 
+        // non-standard
+	void fillRectRaw(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
+	{
+	    if (rotation == 2) {
+		x0 = width()  - 1 - x0;
+		y0 = height() - 1 - y0;
+		w = -w;
+		h = -h;
+	    }
+            #if defined (_IS_ESP8266)
+                Adafruit_RA8875::fillRect(x0, y0, w, h, color);
+            #else
+                Adafruit_RA8875::fillRectRaw (x0, y0, w, h, color);
+            #endif
+	}
+
 	void drawCircle(int16_t x0, int16_t y0, int16_t r, uint16_t color)
 	{
 	    if (rotation == 2) {
@@ -117,6 +164,20 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 	    Adafruit_RA8875::drawCircle(x0, y0, r, color);
 	}
 
+        // non-standard
+	void drawCircleRaw(int16_t x0, int16_t y0, int16_t r, uint16_t color)
+	{
+	    if (rotation == 2) {
+		x0 = width() - 1 - x0;
+		y0 = height() - 1 - y0;
+	    }
+            #if defined (_IS_ESP8266)
+                Adafruit_RA8875::drawCircle(x0, y0, r, color);
+            #else
+                Adafruit_RA8875::drawCircleRaw (x0, y0, r, color);
+            #endif
+	}
+
 	void fillCircle(int16_t x0, int16_t y0, int16_t r, uint16_t color)
 	{
 	    if (rotation == 2) {
@@ -124,6 +185,20 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		y0 = height() - 1 - y0;
 	    }
 	    Adafruit_RA8875::fillCircle(x0, y0, r, color);
+	}
+
+        // non-standard
+	void fillCircleRaw(int16_t x0, int16_t y0, int16_t r, uint16_t color)
+	{
+	    if (rotation == 2) {
+		x0 = width() - 1 - x0;
+		y0 = height() - 1 - y0;
+	    }
+            #if defined (_IS_ESP8266)
+                Adafruit_RA8875::fillCircle(x0, y0, r, color);
+            #else
+                Adafruit_RA8875::fillCircleRaw (x0, y0, r, color);
+            #endif
 	}
 
 	void drawTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color)

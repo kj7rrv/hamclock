@@ -146,13 +146,9 @@
 
 #endif
 
-
-
 // canonical map size 
 #define EARTH_H   330
-#define EARTH_XH  1
 #define EARTH_W   660
-#define EARTH_XW  1
 
 
 // UNIX-like modules
@@ -242,6 +238,9 @@ extern void radioResetIO(void);
 
 // time to leave new DX path up, millis()
 #define DXPATH_LINGER   20000   
+
+// path segment length, degrees
+#define PATH_SEGLEN     2
 
 // tcp ports
 #define BACKEND_PORT    80
@@ -604,6 +603,7 @@ extern void resetWatchdog(void);
 extern void wdDelay(int ms);
 extern bool timesUp (uint32_t *prev, uint32_t dt);
 extern void setDXPathInvalid(void);
+extern const SCoord raw2appSCoord (const SCoord &s_raw);
 extern bool overMap (const SCoord &s);
 extern bool overAnySymbol (const SCoord &s);
 extern bool overRSS (const SCoord &s);
@@ -923,6 +923,8 @@ extern void drawMoon (void);
 extern void drawDXInfo (void);
 extern void ll2s (const LatLong &ll, SCoord &s, uint8_t edge);
 extern void ll2s (float lat, float lng, SCoord &s, uint8_t edge);
+extern void ll2sRaw (const LatLong &ll, SCoord &s, uint8_t edge);
+extern void ll2sRaw (float lat, float lng, SCoord &s, uint8_t edge);
 extern bool s2ll (uint16_t x, uint16_t y, LatLong &ll);
 extern bool s2ll (const SCoord &s, LatLong &ll);
 extern void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp);
@@ -941,6 +943,7 @@ extern bool checkOnAir(void);
 extern float lngDiff (float dlng);
 extern bool overViewBtn (const SCoord &s, uint16_t border);
 extern bool segmentSpanOk (const SCoord &s0, const SCoord &s1, uint16_t border);
+extern bool segmentSpanOkRaw (const SCoord &s0, const SCoord &s1, uint16_t border);
 extern bool desiredBearing (const LatLong &ll, float &bear);
 
 
@@ -1235,7 +1238,7 @@ extern bool getRigctld (char host[], int *portp);
 extern bool getRotctld (char host[], int *portp);
 extern bool getFlrig (char host[], int *portp);
 extern const char *getDXClusterLogin(void);
-extern bool getSpotPaths(void);
+extern bool showSpotPaths(void);
 extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 extern bool getColorDashed(ColorSelection id);
@@ -1771,6 +1774,8 @@ typedef enum {
 #define PSKMB_WSPR      (0)
 #define PSKMB_RBN       (PSKMB_SRC1)
 
+#define PSK_DOTR       2                // end point marker radius for several paths, not just PSK
+
 typedef enum {
     PSKBAND_160M,
     PSKBAND_80M,
@@ -1828,12 +1833,13 @@ extern bool getPSKBandStats (PSKBandStats stats[PSKBAND_N], const char *names[PS
 
 // only UNIX adds the following:
 
-#define PSK_DOTR       2                // end point marker radius (also use by dxcluster)
 
 extern uint16_t getBandColor (long Hz);
 extern void drawPSKPaths (void);
 extern bool getClosestPSK (const LatLong &ll, const PSKReport **rpp);
 extern void getPSKSpots (const PSKReport* &rp, int &n_rep);
+extern bool getBandDashed (long Hz);
+
 
 
 

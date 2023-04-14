@@ -14,7 +14,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>
  */
-#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -1438,7 +1437,9 @@ static void *ws_establishconnection(void *vclient)
             if (cli_events.onnonws) {
                 FILE *sockfp = fdopen (client->client_sock, "w");
                 (*cli_events.onnonws) (sockfp, client->header);
-                /* this closes client_sock but close_client() will close it again harmlessly */
+                /* want shutdown() first, then more closes are harmless */
+                fflush(sockfp);
+                close_socket(client->client_sock);
                 fclose (sockfp);
             }
             goto closed;

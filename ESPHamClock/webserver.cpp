@@ -69,6 +69,92 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
 static bool first_pixel = true;
 
 
+// some color names culled from rgb.txt
+typedef struct {
+    uint8_t r, g, b;
+    char name[11];
+} ColorName;
+static ColorName cnames[] PROGMEM = {
+    {  0, 255, 255,	"aqua"},
+    {127, 255, 212,	"aquamarine"},
+    {240, 255, 255,	"azure"},
+    {245, 245, 220,	"beige"},
+    {255, 228, 196,	"bisque"},
+    {  0,   0,   0,	"black"},
+    {  0,   0, 255,	"blue"},
+    {165,  42,  42,	"brown"},
+    {222, 184, 135,	"burlywood"},
+    {127, 255,   0,	"chartreuse"},
+    {210, 105,  30,	"chocolate"},
+    {255, 127,  80,	"coral"},
+    {255, 248, 220,	"cornsilk"},
+    {220,  20,  60,	"crimson"},
+    {  0, 255, 255,	"cyan"},
+    {178,  34,  34,	"firebrick"},
+    {255,   0, 255,	"fuchsia"},
+    {220, 220, 220,	"gainsboro"},
+    {218, 165,  32,	"goldenrod"},
+    {  0, 255,   0,	"green"},
+    {240, 255, 240,	"honeydew"},
+    { 75,   0, 130,	"indigo"},
+    {255, 255, 240,	"ivory"},
+    {240, 230, 140,	"khaki"},
+    {230, 230, 250,	"lavender"},
+    {  0, 255,   0,	"lime"},
+    {250, 240, 230,	"linen"},
+    {255,   0, 255,	"magenta"},
+    {176,  48,  96,	"maroon"},
+    {255, 228, 181,	"moccasin"},
+    {  0,   0, 128,	"navy"},
+    {128, 128,   0,	"olive"},
+    {255, 165,   0,	"orange"},
+    {218, 112, 214,	"orchid"},
+    {205, 133,  63,	"peru"},
+    {255, 192, 203,	"pink"},
+    {221, 160, 221,	"plum"},
+    {160,  32, 240,	"purple"},
+    {255,   0,   0,	"red"},
+    {250, 128, 114,	"salmon"},
+    {255, 245, 238,	"seashell"},
+    {160,  82,  45,	"sienna"},
+    {192, 192, 192,	"silver"},
+    {255, 250, 250,	"snow"},
+    {210, 180, 140,	"tan"},
+    {  0, 128, 128,	"teal"},
+    {216, 191, 216,	"thistle"},
+    {255,  99,  71,	"tomato"},
+    { 64, 224, 208,	"turquoise"},
+    {238, 130, 238,	"violet"},
+    {245, 222, 179,	"wheat"},
+    {255, 255, 255,	"white"},
+    {255, 255,   0,	"yellow"},
+    {255, 215,   0,     "gold"},
+};
+
+/* lookup some common color names
+ */
+static bool findColorName (const char *name, int &r, int &g, int &b)
+{
+    for (int i = 0; i < NARRAY(cnames); i++) {
+        if (strcmp_P (name, cnames[i].name) == 0) {
+            r = pgm_read_byte(&cnames[i].r);
+            g = pgm_read_byte(&cnames[i].g);
+            b = pgm_read_byte(&cnames[i].b);
+            return (true);
+        }
+    }
+
+    return (false);
+}
+
+/* print list of colors to the given client
+ */
+static void printColorNames (WiFiClient &client)
+{
+    for (int i = 0; i < NARRAY(cnames); i++)
+        client.println (FPSTR(cnames[i].name));
+}
+
 /* remove leading and trailing white space IN PLACE, return str.
  */
 char *trim (char *str)
@@ -1644,9 +1730,16 @@ static bool setWiFiTitle (WiFiClient &client, char line[], size_t line_len)
     uint16_t fg_c = 0;
     if (fg) {
         int r, g, b;
-        if (sscanf (fg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || !rgbOk (r, g, b)) {
-            strcpy (line, garbcmd);
-            return (false);
+        if (sscanf (fg, _FX("%d,%d,%d"), &r, &g, &b) == 3) {
+            if (!rgbOk (r, g, b)) {
+                strcpy (line, _FX("bad fg RGB"));
+                return (false);
+            }
+        } else if (!findColorName (fg, r, g, b)) {
+            startPlainText (client);
+            client.print(F("color names:\n"));
+            printColorNames (client);
+            return (true);
         }
         fg_c = RGB565(r,g,b);
     }
@@ -1659,9 +1752,16 @@ static bool setWiFiTitle (WiFiClient &client, char line[], size_t line_len)
             rainbow = true;
         else {
             int r, g, b;
-            if (sscanf (bg, _FX("%d,%d,%d"), &r, &g, &b) != 3 || !rgbOk (r, g, b)) {
-                strcpy (line, garbcmd);
-                return (false);
+            if (sscanf (bg, _FX("%d,%d,%d"), &r, &g, &b) == 3) {
+                if (!rgbOk (r, g, b)) {
+                    strcpy (line, _FX("bad bg RGB"));
+                    return (false);
+                }
+            } else if (!findColorName (bg, r, g, b)) {
+                startPlainText (client);
+                client.print(F("color names:\n"));
+                printColorNames (client);
+                return (true);
             }
             bg_c = RGB565(r,g,b);
         }
@@ -2052,7 +2152,7 @@ static bool crackDOW (const char *daystr, int &dow)
 }
 
 /* remote command to set display on/off/idle times
- * on=HR:MN&off=HR:MN&idle=mins&day=DOW
+ * on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins
  */
 static bool setWiFiDisplayTimes (WiFiClient &client, char line[], size_t line_len)
 {
@@ -2077,27 +2177,52 @@ static bool setWiFiDisplayTimes (WiFiClient &client, char line[], size_t line_le
         const char *day = wa.value[2];
         const char *idle = wa.value[3];
 
-        // crack -- on and off are required, day and idle are optional
-        int on_hr, on_mn, off_hr, off_mn, idle_mins = -1, dow = -1;
-        if ((!wa.found[0] || !on || sscanf (on, _FX("%d:%d"), &on_hr, &on_mn) != 2)
-                    || (!wa.found[1] || !off || sscanf (off, _FX("%d:%d"), &off_hr, &off_mn) != 2)
-                    || (wa.found[2] && (!day || !crackDOW (day, dow)))
-                    || (wa.found[3] && !atoiOnly(idle,&idle_mins))) {
-            strcpy (line, garbcmd);
+        // crack -- need at least one of on&off or idle
+        int on_hr = -1, on_mn = -1, off_hr = -1, off_mn = -1, idle_mins = -1;
+        bool found_onoff = wa.found[0] && on && wa.found[1] && off
+                            && sscanf (on, _FX("%d:%d"), &on_hr, &on_mn) == 2
+                            && sscanf (off, _FX("%d:%d"), &off_hr, &off_mn) == 2;
+        bool found_idle = wa.found[3] && idle && atoiOnly(idle,&idle_mins);
+
+        // check idle
+        if (found_idle && idle_mins < 0) {
+            strcpy (line, _FX("Invalid idle"));
             return (false);
         }
 
         // pack times and validate
-        uint16_t on_mins = on_hr*60 + on_mn;
-        uint16_t off_mins = off_hr*60 + off_mn;
-        if (on_mins >= MINSPERDAY || off_mins >= MINSPERDAY) {
-            strcpy (line, _FX("Invalid time"));
+        int dow = -1;
+        uint16_t on_mins = 0;
+        uint16_t off_mins = 0;
+        bool found_day = wa.found[2] && day;
+        if (found_onoff) {
+
+            on_mins = on_hr*60 + on_mn;
+            off_mins = off_hr*60 + off_mn;
+            if (on_mins >= MINSPERDAY || off_mins >= MINSPERDAY) {
+                strcpy (line, _FX("Invalid time"));
+                return (false);
+            }
+
+            // default today if no dow
+            if (found_day) {
+                if (!crackDOW (day, dow)) {
+                    strcpy (line, _FX("Invalid day"));
+                    return (false);
+                }
+            } else {
+                // imply today if no day
+                dow = DEWeekday();
+            }
+        } else if (found_day) {
+            strcpy (line, _FX("day requires on and off"));
             return (false);
         }
 
-        // default today if no dow
-        if (dow < 0)
-            dow = DEWeekday();
+        if (!found_onoff && !found_idle) {
+            strcpy (line, garbcmd);
+            return (false);
+        }
 
         // engage
         if (!setDisplayOnOffTimes (dow, on_mins, off_mins, idle_mins)) {
@@ -2107,25 +2232,24 @@ static bool setWiFiDisplayTimes (WiFiClient &client, char line[], size_t line_le
 
         // ack
         startPlainText (client);
-        const char hm_fmt[] = "%02d:%02d";
         char buf[100];
 
-        FWIFIPR (client, F("On    "));
-        snprintf (buf, sizeof(buf), hm_fmt, on_hr, on_mn);
-        client.println (buf);
+        if (found_onoff) {
+            FWIFIPR (client, F("On    "));
+            snprintf (buf, sizeof(buf), _FX("%02d:%02d"), on_hr, on_mn);
+            client.println (buf);
+            FWIFIPR (client, F("Off   "));
+            snprintf (buf, sizeof(buf), _FX("%02d:%02d"), off_hr, off_mn);
+            client.println (buf);
+            FWIFIPR (client, F("Day   "));
+            strcpy (buf, dayShortStr(dow));
+            client.println (buf);
+        }
 
-        FWIFIPR (client, F("Off   "));
-        snprintf (buf, sizeof(buf), hm_fmt, off_hr, off_mn);
-        client.println (buf);
-
-        if (idle_mins >= 0) {
+        if (found_idle) {
             FWIFIPR (client, F("Idle  "));
             client.println (idle_mins);
         }
-
-        FWIFIPR (client, F("Day   "));
-        strcpy (buf, dayShortStr(dow));
-        client.println (buf);
 
         // ok
         return (true);
@@ -2243,22 +2367,44 @@ static bool setWiFiNewDX (WiFiClient &client, char line[], size_t line_len)
 }
 
 /* set a map view color, names must match those displayed in Setup after changing all '_' to ' '
+ *   setup=name&color=R,G,B" },
  */
 static bool setWiFiMapColor (WiFiClient &client, char line[], size_t line_len)
 {
     (void)(line_len);
 
-    // easier not to use WebArgs in this case
-    char color[30];
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "setup";
+    wa.name[wa.nargs++] = "color";
+    if (!parseWebCommand (wa, line, line_len))
+        return (false);
+
+    // crack color into rgb by value or by name
     int r, g, b;
-    if (sscanf (line, "%29[^=]=%d,%d,%d", color, &r, &g, &b) != 4 || !rgbOk (r, g, b)) {
-        strcpy (line, garbcmd);
+    if (!wa.found[1]) {
+        strcpy (line, _FX("missing color"));
         return (false);
     }
+    if (sscanf (wa.value[1], _FX("%d,%d,%d"), &r, &g, &b) == 3) {
+        if (!rgbOk (r, g, b)) {
+            strcpy (line, _FX("bad rgb values"));
+            return (false);
+        }
+    } else if (!findColorName(wa.value[1],r,g,b)) {
+        startPlainText (client);
+        client.print(F("color names:\n"));
+        printColorNames (client);
+        return (true);
+    }
 
-    // now try to install
-    if (!setMapColor (color, RGB565(r,g,b))) {
-        strcpy (line, "bad name");
+    // try to install
+    if (!wa.found[0]) {
+        strcpy (line, _FX("missing setup name"));
+        return (false);
+    }
+    if (!setMapColor (wa.value[0], RGB565(r,g,b))) {
+        strcpy (line, _FX("unknown setup name"));
         return (false);
     }
 
@@ -3187,9 +3333,14 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     wa.name[wa.nargs++] = "age";                        // 4
     wa.name[wa.nargs++] = "show";                       // 5
 
+    const char *usage =
+        _FX("spot=of|by&what=call|grid&show=maxdist|counts&data=psk|wspr|rbn&age=mins&bands=all|160,...");
+
     // parse
-    if (!parseWebCommand (wa, line, line_len))
+    if (!parseWebCommand (wa, line, line_len)) {
+        snprintf (line, line_len, usage);
         return (false);
+    }
 
     // since components are optional we start with the current mask and modify
     uint8_t new_mask = psk_mask;
@@ -3309,7 +3460,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     // skip if no changes
     if (psk_mask == new_mask && psk_bands == new_bands && psk_maxage_mins == new_age
                         && psk_showdist == new_dist) {
-        strcpy (line, _FX("no change"));
+        snprintf (line, line_len, usage);
         return (false);
     }
 
@@ -3403,7 +3554,7 @@ static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
  * the whole table uses arrays so strings are in ESP FLASH too.
  */
 #define CT_MAX_CMD      20                              // max command string length, w/EOS
-#define CT_MAX_HELP     100                              // max help string length, w/EOS
+#define CT_MAX_HELP     60                              // max help string length, w/EOS
 #define CT_FUNP(ctp) ((PCTF)pgm_read_dword(&ctp->funp)) // handy function pointer
 typedef bool (*PCTF)(WiFiClient &client, char line[], size_t line_len);   // ptr to command table function
 typedef struct {
@@ -3436,10 +3587,10 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
     { "set_displayTimes?",  setWiFiDisplayTimes,   "on=HR:MN&off=HR:MN&day=[Sun..Sat]&idle=mins" },
-    { "set_livespots?",     setWiFiLiveSpots,      "spot=of|by&what=call|grid&show=maxdist|counts&data=psk|wspr|rbn&age=mins&bands=all|160,..." },
+    { "set_livespots?",     setWiFiLiveSpots,      "(see error message)" },
     { "set_screenlock?",    setWiFiScreenLock,     "lock=on|off" },
     { "set_mercenter?",     setWiFiMerCenter,      "lng=X" },
-    { "set_mapcolor?",      setWiFiMapColor,       "setup_name=R,G,B" },
+    { "set_mapcolor?",      setWiFiMapColor,       "setup=name&color=R,G,B" },
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
     { "set_newde?",         setWiFiNewDE,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
     { "set_newdx?",         setWiFiNewDX,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
@@ -3564,8 +3715,10 @@ static void serveRemote(WiFiClient &client, bool ro)
     // if get here, command was not found but client is still open to list help
     startPlainText(client);
 #if defined(_IS_UNIX)
-    snprintf (line, line_mem.getSize(), "HamClock Live is now on port %d\r\n\r\n", liveweb_port);
-    client.print (line);
+    if (liveweb_port > 0) {
+        snprintf (line, line_mem.getSize(), "HamClock Live is on port %d\r\n\r\n", liveweb_port);
+        client.print (line);
+    }
 #endif
     for (uint8_t i = 0; i < N_CMDTABLE-N_UNDOC_CMD; i++) {
         const CmdTble *ctp = &command_table[i];
@@ -3617,12 +3770,18 @@ void checkWebServer(bool ro)
     }
 }
 
-/* call to start restful server.
+/* call to start restful server unless disabled.
  * report ok with tftMsg but fatalError if trouble.
  */
 void initWebServer()
 {
     resetWatchdog();
+
+    if (restful_port < 0) {
+        tftMsg (true, 0, "RESTful API service is disabled");
+        return;
+    }
+
 
     restful_server = new WiFiServer(restful_port);
 

@@ -84,9 +84,9 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define PAGE_H          35                      // page button height
 #define CURSOR_DROP     2                       // pixels to drop cursor
 #define NVMS_NONE       0                       // NV_MAPSPOTS to map nothing
-#define NVMS_PREFIX     1                       // NV_MAPSPOTS to map just prefix
-#define NVMS_CALL       2                       // NV_MAPSPOTS to map full callsign
-#define NVMS_PCMASK     3                       // NV_MAPSPOTS mask for NVMS_PREFIX or NVMS_CALL
+#define NVMS_PREFIX     0x1                     // NV_MAPSPOTS to map just prefix
+#define NVMS_CALL       0x2                     // NV_MAPSPOTS to map full callsign
+#define NVMS_PCMASK     0x3                     // NV_MAPSPOTS mask for NVMS_PREFIX or NVMS_CALL
 #define NVMS_PATH       4                       // NV_MAPSPOTS |= to show path
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index from 0 return screen y
 
@@ -226,9 +226,9 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 2" -- index 1
 
-    {1, { 20, R2Y(2), 60, PR_H}, { 80, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {1, { 20, R2Y(3), 60, PR_H}, { 80, R2Y(3), 260, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
-    {1, { 20, R2Y(4), 60, PR_H}, { 80, R2Y(4), 260, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
+    {1, { 20, R2Y(1), 60, PR_H}, { 80, R2Y(1),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, { 20, R2Y(2), 60, PR_H}, { 80, R2Y(2), 260, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
+    {1, { 20, R2Y(3), 60, PR_H}, { 80, R2Y(3), 260, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
 
     {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 410, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 410, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
@@ -298,7 +298,6 @@ typedef enum {
     // page "2"
     CLUSTER_BPR,
     CLISWSJTX_BPR,
-    SPOTPATH_BPR,
     DXCLCMD0_BPR,
     DXCLCMD1_BPR,
     DXCLCMD2_BPR,
@@ -325,8 +324,9 @@ typedef enum {
     BEARING_BPR,
     SPOTLBL_BPR,
     SPOTLBLCALL_BPR,
-    X11_FULLSCRN_BPR,
+    SPOTPATH_BPR,
     FLIP_BPR,
+    X11_FULLSCRN_BPR,
 
     N_BPR
 } BPIds;
@@ -347,7 +347,6 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes"},
     {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes"},
-    {1, {20,  R2Y(1),  60, PR_H},  { 80, R2Y(1), 50,  PR_H}, false, "Path?", "No", "Yes"},
 
     {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
     {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
@@ -386,15 +385,17 @@ static BoolPrompt bool_pr[N_BPR] = {
     {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric"},
     {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N"},
 
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot label?", "No", NULL},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", NULL},
     {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call"},
                                                         // entangled: None: F X  Prefix: T F  Call: T T
 
-
-    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Full scrn?", "No", "Yes"},
-                                                                // state box wide enough for "Won't fit"
+    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3),  40, PR_H}, false, "Spot paths?", "No", "Yes"},
 
     {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+
+    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Full scrn?", "No", "Yes"},
+                                                                // state box wide enough for "Won't fit"
+
 
 
     // "page 6" -- index 5
@@ -674,6 +675,7 @@ static void checkLLGEdit(const StringPrompt *sp)
 
     } else if (sp == &string_pr[GRID_SPR]) {
 
+        // convert to ll if possible
         LatLong ll;
         if (maidenhead2ll (ll, sp->v_str)) {
             formatLat (ll.lat_d, string_pr[LAT_SPR].v_str, string_pr[LAT_SPR].v_len);
@@ -758,13 +760,10 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     }
 
-    if (bp == &bool_pr[SPOTPATH_BPR]) {
-        #if defined(_SUPPORT_SPOTPATH)
-            if (!bool_pr[CLUSTER_BPR].state)
-        #endif
-                return (false);
-    }
-
+    #if !defined(_SUPPORT_SPOTPATH)
+    if (bp == &bool_pr[SPOTPATH_BPR])
+        return (false);
+    #endif
 
     if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
                     || bp == &bool_pr[DXCLCMD2_BPR] || bp == &bool_pr[DXCLCMD3_BPR]) {
@@ -925,7 +924,6 @@ static void nextTabFocus()
 
         { NULL, &bool_pr[CLUSTER_BPR] },
         { NULL, &bool_pr[CLISWSJTX_BPR] },
-        { NULL, &bool_pr[SPOTPATH_BPR] },
         {       &string_pr[DXPORT_SPR], NULL},
         {       &string_pr[DXHOST_SPR], NULL},
         {       &string_pr[DXLOGIN_SPR], NULL},
@@ -976,8 +974,9 @@ static void nextTabFocus()
         { NULL, &bool_pr[BEARING_BPR] },
         { NULL, &bool_pr[SPOTLBL_BPR] },
         { NULL, &bool_pr[SPOTLBLCALL_BPR] },
-        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
+        { NULL, &bool_pr[SPOTPATH_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
+        { NULL, &bool_pr[X11_FULLSCRN_BPR] },
 
         // page 3
     };
@@ -2319,7 +2318,7 @@ static void initSetup()
 
     uint8_t spotops;
     if (!NVReadUInt8 (NV_MAPSPOTS, &spotops)) {
-        spotops = NVMS_PREFIX;
+        spotops = NVMS_PREFIX | NVMS_PATH;
         NVWriteUInt8 (NV_MAPSPOTS, spotops);
     }
     bool_pr[SPOTLBL_BPR].state = ((spotops & NVMS_PCMASK) != NVMS_NONE);
@@ -2571,9 +2570,9 @@ static bool askRun()
 
     // appropriate prompt
 #if defined(_IS_ESP8266)
-    tft.print (F("Tap anywhere to enter Setup screen ... "));
+    tft.print (F("Tap anywhere to enter Setup ... "));
 #else
-    tft.print (F("Click anywhere to enter Setup screen ... "));
+    tft.print (F("Click anywhere to enter Setup ... "));
 #endif // _IS_ESP8266
 
     int16_t x = tft.getCursorX();
@@ -3019,6 +3018,19 @@ static void runSetup()
 
 }
 
+/* update the case of each component of the given grid square.
+ * N.B. we do NOT validate the grid
+ */
+static char *scrubGrid (char *g)
+{
+    g[0] = toupper(g[0]);
+    g[1] = toupper(g[1]);
+    g[4] = tolower(g[4]);
+    g[5] = tolower(g[5]);
+
+    return (g);
+}
+
 /* all done
  */
 static void finishSettingUp()
@@ -3109,12 +3121,12 @@ static void finishSettingUp()
             dashed |= (1 << i);
     NVWriteUInt32 (NV_DASHED, dashed);
 
-    // set DE tz and grid only if ll was edited and op is not using some other method to set location
+    // save DE tz and grid only if ll was edited and op is not using some other method to set location
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state && ll_edited) {
         normalizeLL (de_ll);
         NVWriteFloat(NV_DE_LAT, de_ll.lat_d);
         NVWriteFloat(NV_DE_LNG, de_ll.lng_d);
-        setNVMaidenhead(NV_DE_GRID, de_ll);
+        NVWriteString(NV_DE_GRID, scrubGrid(string_pr[GRID_SPR].v_str));
         de_tz.tz_secs = getTZ (de_ll);
         NVWriteInt32(NV_DE_TZ, de_tz.tz_secs);
     }
@@ -3351,7 +3363,7 @@ bool useMagBearing()
 
 /* return whether to draw dx paths
  */
-bool getSpotPaths()
+bool showSpotPaths()
 {
 #if defined(_SUPPORT_SPOTPATH)
     return (bool_pr[SPOTPATH_BPR].state);

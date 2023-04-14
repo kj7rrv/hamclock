@@ -155,7 +155,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
                 // label first, last or whole number change but never two adjacent or just before last
                 if (i == 0 || i == nyt-1 || (!prev_tick && (int)yticks[i-1] != (int)yticks[i] && i != nyt-2)){
                     snprintf (buf, sizeof(buf), "%.0f", yticks[i]);
-                    tft.setCursor (tx - getTextWidth(buf) - 1, ty - FONTH/2);
+                    tft.setCursor (tx - getTextWidth(buf) - 1, ty - FONTH/2 + 1);
                     tft.print (buf);
                     prev_tick = true;
                 } else
@@ -165,7 +165,7 @@ uint16_t color, float y_min, float y_max, char *label_str)
 
         // y label is title over plot
         uint16_t tl = getTextWidth(ylabel);
-        tft.setCursor (box.x+LGAP+(box.w-LGAP-tl)/2, box.y+(TGAP-FONTH)/2);
+        tft.setCursor (box.x+LGAP+(box.w-LGAP-tl)/2, box.y+(TGAP-FONTH)/2+1);
         tft.print (ylabel);
 
         // x labels and tickmarks just below plot

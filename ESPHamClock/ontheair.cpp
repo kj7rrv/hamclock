@@ -535,12 +535,12 @@ bool overAnyOnTheAirSpots (const SCoord &s)
 }
 
 /* draw all current OTA spots on the map
- * N.B. we assume updateOnTheAirlusterSpotScreenLocations() has already been called to set locations.
+ * N.B. we assume updateOnTheAirSpotScreenLocations() has already been called to set locations.
  */
 void drawOnTheAirSpotsOnMap (void)
 {
     // skip if we are not up or don't want spots on map
-    if (findPaneForChoice(PLOT_CH_OTA) == PANE_NONE || !labelSpots())
+    if (!labelSpots() || findPaneForChoice(PLOT_CH_OTA) == PANE_NONE)
         return;
 
     for (int i = 0; i < n_otaspots; i++)
@@ -561,5 +561,9 @@ void updateOnTheAirSpotScreenLocations (void)
  */
 bool getClosestOnTheAirSpot (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
 {
-        return (getClosestDXC (otaspots, n_otaspots, ll, sp, llp));
+    // false for sure if not labeling or spots are not on
+    if (!labelSpots() || findPaneForChoice(PLOT_CH_OTA) == PANE_NONE)
+        return (false);
+
+    return (getClosestDXC (otaspots, n_otaspots, ll, sp, llp));
 }

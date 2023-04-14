@@ -106,10 +106,19 @@ SCoord wifi_tt_s;
 Adafruit_RA8875_R tft(RA8875_CS, RA8875_RESET);
 
 // manage the great circle path through DE and DX points
+// ESP must use points in order to selectively erase, UNIX never needs to erase
+
+#if defined(_IS_ESP8266)
+#define USE_GPATH
+#endif
+
+#if defined(USE_GPATH)
 #define MAX_GPATH               1500    // max number of points to draw in great circle path
 static SCoord *gpath;                   // malloced path points
 static uint16_t n_gpath;                // actual number in use
-static uint32_t gpath_time;             // millis() when great path was drawn
+#endif // USE_GPATH
+
+static uint32_t gpath_time;             // millis() when great path was drawn, else 0
 static SBox prefix_b;                   // where to show DX prefix text
 
 // manage using DX cluster prefix or one from nearestPrefix()
@@ -133,15 +142,18 @@ const char *detime_names[DETIME_N] = {
     "Digital 24 hour",
 };
 
-/* free gpath.
+/* set DX-DE path no longer valid
  */
 void setDXPathInvalid()
 {
+#if defined(USE_GPATH)
     if (gpath) {
         free (gpath);
         gpath = NULL;
     }
     n_gpath = 0;
+#endif // USE_GPATH
+    gpath_time = 0;
 }
 
 // these are needed for any normal C++ compiler, not that crazy Arduino IDE
@@ -291,7 +303,8 @@ void setup()
 
 // #define _GFX_COORD_TEST
 #if defined(_GFX_COORD_TEST)
-    // just used to confirm our posix porting layer graphics agree with Adafruit
+
+    // confirm our posix porting layer graphics agree with Adafruit
     tft.fillScreen(RA8875_BLACK);
     tft.fillRect (100, 100, 6, 6, RA8875_RED);
     tft.drawRect (100, 100, 8, 8, RA8875_RED);
@@ -314,6 +327,22 @@ void setup()
     tft.drawPixel (112,207,RA8875_RED);
     tft.drawPixel (114,207,RA8875_RED);
     tft.drawPixel (114,200,RA8875_RED);
+
+
+    // explore thick line artifacts
+
+    for (float a = 0; a < 2*M_PIF; a += M_PIF/47) {
+        uint16_t x = 250*tft.SCALESZ;
+        uint16_t y = 100*tft.SCALESZ;
+        int16_t dx = 100*tft.SCALESZ * cosf(a);
+        int16_t dy = -100*tft.SCALESZ * sinf(a);
+        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ-2, RA8875_RED);
+        x += 400;
+        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ, RA8875_RED);
+        x += 400;
+        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ+2, RA8875_RED);
+    }
+
     while(1)
         wdDelay(100);
 #endif // _GFX_COORD_TEST
@@ -1188,6 +1217,7 @@ static void eraseDXMarker()
  */
 static void eraseDXPath()
 {
+#if defined(USE_GPATH)
     // get out fast if nothing to do
     if (!n_gpath)
         return;
@@ -1200,6 +1230,8 @@ static void eraseDXPath()
     // erase the great path
     for (uint16_t i = 0; i < n_gpath; i++)
         drawMapCoord (gpath[i]);
+
+#endif // USE_GPATH
 
     // mark no longer active
     setDXPathInvalid();
@@ -1256,7 +1288,8 @@ bool desiredBearing (const LatLong &ll, float &bear)
 }
 
 /* draw great circle through DE and DX.
- * save screen coords in gpath[]
+ * ESP uses points and saves screen coords in gpath[] so they can be selectively erase; UNIX draws
+ *   with connected line segments because they need never be erased.
  */
 void drawDXPath ()
 {
@@ -1265,6 +1298,8 @@ void drawDXPath ()
     // find short-path bearing and distance from DE to DX
     float dist, bear;
     propDEPath (false, dx_ll, &dist, &bear);
+
+#if defined(USE_GPATH)
 
     // start with max nnumber of points, then reduce
     gpath = (SCoord *) realloc (gpath, MAX_GPATH * sizeof(SCoord));
@@ -1296,6 +1331,28 @@ void drawDXPath ()
     if (!gpath && n_gpath > 0)
         fatalError("realloc gpath: %d", n_gpath);
 
+#else // UNIX
+
+    // walk great circle path from DE through DX
+    float ca, B;
+    SCoord s0 = {0, 0}, s1;
+    uint16_t short_col = getMapColor(SHORTPATH_CSPR);
+    uint16_t long_col = getMapColor(LONGPATH_CSPR);
+    bool sp_dashed = getColorDashed(SHORTPATH_CSPR);
+    bool lp_dashed = getColorDashed(LONGPATH_CSPR);
+    bool dash_toggle = false;
+    for (float b = 0; b < 2*M_PIF; b += deg2rad(PATH_SEGLEN)) {
+        solveSphere (bear, b, sdelat, cdelat, &ca, &B);
+        ll2sRaw (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s1, 1);
+        bool show = b < dist ? (!sp_dashed || dash_toggle) : (!lp_dashed || dash_toggle);
+        if (s0.x && show && segmentSpanOkRaw (s0, s1, 1))
+            tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, tft.SCALESZ, b < dist ? short_col : long_col);
+        s0 = s1;
+        dash_toggle = !dash_toggle;
+    }
+
+#endif // USE_GPATH
+
     // printFreeHeap (F("drawDXPath"));
 }
 
@@ -1304,7 +1361,7 @@ void drawDXPath ()
  */
 bool waiting4DXPath()
 {
-    if (n_gpath == 0)
+    if (gpath_time == 0)
         return (false);
 
     if (timesUp (&gpath_time, DXPATH_LINGER)) {
@@ -1397,6 +1454,78 @@ void drawSBox (const SBox &box, uint16_t color)
     tft.drawRect (box.x, box.y, box.w, box.h, color);
 }
 
+/* draw the given string in the given color anchored at x0,y0 with optional black shadow.
+ */
+static void shadowString (const char *str, bool shadow, uint16_t color, uint16_t x0, uint16_t y0)
+{
+    if (shadow && color != RA8875_BLACK) {
+        tft.setTextColor (RA8875_BLACK);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                if (dx != 0 && dy != 0) {
+                    tft.setCursor (x0 + dx, y0 + dy);
+                    tft.print (str);
+                }
+            }
+        }
+    }
+
+    tft.setTextColor (color);
+    tft.setCursor (x0, y0);
+    tft.print (str);
+}
+
+/* draw the given string centered in the given box using the current font and given color.
+ * if it fits in one line, set y to box.y + l1dy.
+ * if fits as two lines draw set their y to box.y + l12dy and l22dy.
+ * if latter two are 0 then don't even try 2 lines.
+ * if it won't fit in 2 lines and anyway is set, draw as much as possible.
+ * if shadow then draw a black background shadow.
+ * return whether it all fit some way.
+ */
+static bool drawBoxText (bool anyway, const SBox &box, const char *str, uint16_t color,
+uint16_t l1dy, uint16_t l12dy, uint16_t l22dy, bool shadow)
+{
+    // try as one line
+    uint16_t w = getTextWidth (str);
+    if (w < box.w) {
+        shadowString (str, shadow, color, box.x + (box.w-w)/2, box.y + l1dy);
+        return (true);
+    }
+
+    // bale if don't even want to try 2 lines
+    if (l12dy == 0 || l22dy == 0)
+        return (false);
+
+    // try splitting into 2 lines
+    StackMalloc str_copy0(str);
+    char *s0 = str_copy0.getMem();
+    for (char *space = strrchr (s0,' '); space; space = strrchr (s0,' ')) {
+        *space = '\0';
+        uint16_t w0 = getTextWidth (s0);
+        if (w0 < box.w) {
+            char *s1 = space + 1;
+            strcpy (s1, str + (s1 - s0));               // restore zerod spaces
+            uint16_t w1 = getTextWidth (s1);
+            if (w1 < box.w) {
+                // 2 lines fit
+                shadowString (s0, shadow, color, box.x + (box.w - w0)/2, box.y + l12dy);
+                shadowString (s1, shadow, color, box.x + (box.w - w1)/2, box.y + l22dy);
+                return (true);
+            } else if (anyway) {
+                // print 1st line and as AMAP of 2nd
+                shadowString (s0, shadow, color, box.x + (box.w - w0)/2, box.y + l12dy);
+                w1 = maxStringW (s1, box.w);
+                shadowString (s1, shadow, color, box.x + (box.w - w1)/2, box.y + l22dy);
+                return (false);
+            }
+        }
+    }
+
+    // no way
+    return (false);
+}
+
 /* draw callsign using cs_info.
  * draw everything if all, else just fg text.
  */
@@ -1411,57 +1540,44 @@ void drawCallsign (bool all)
             fillSBox (cs_info.box, cs_info.bg_color);
     }
 
-    // make copy in order to replace each 0 with del which is modified to be a slashed-0
-    StackMalloc call_cpy(cs_info.call);
-    char *call = call_cpy.getMem();
-    for (char *z = call; *z != '\0' ; z++) {
+    tft.setTextColor(cs_info.fg_color);
+
+    // make copy in order to replace each 0 with del which is modified to be a slashed-0 in BOLD/LARGE
+    StackMalloc call_slash0(cs_info.call);
+    char *slash0 = call_slash0.getMem();
+    for (char *z = slash0; *z != '\0' ; z++) {
         if (*z == '0')
             *z = 127;   // del
     }
 
-    // keep shrinking font until fits
-    uint16_t cw, ch;
+    // make a copy with all upper case to try two lines using SMALL font (avoids descenders)
+    StackMalloc call_uc(cs_info.call);
+    char *uc = call_uc.getMem();
+    for (char *z = uc; *z != '\0' ; z++)
+        *z = toupper(*z);
+
+
+    // keep shrinking font and trying 2 lines until fits
+    const SBox &box = cs_info.box;              // handier
+    uint16_t fg_c = cs_info.fg_color;           // handy
+    bool sh = cs_info.bg_rainbow;               // shadow only if bg is rainbow
     selectFontStyle (BOLD_FONT, LARGE_FONT);
-    getTextBounds (call, &cw, &ch);
-
-    bool fast_font = false;
-    if (cw >= cs_info.box.w) {
+    if (!drawBoxText (false, box, slash0, fg_c, box.h/2+20, 0, 0, sh)) {
+        // try smaller font
         selectFontStyle (BOLD_FONT, SMALL_FONT);
-        getTextBounds (call, &cw, &ch);
-        if (cw >= cs_info.box.w) {
+        if (!drawBoxText (false, box, cs_info.call, fg_c, box.h/2+10, 0, 0, sh)) {
+            // try smaller font
             selectFontStyle (LIGHT_FONT, SMALL_FONT);
-            getTextBounds (call, &cw, &ch);
-            if (cw >= cs_info.box.w) {
-                selectFontStyle (LIGHT_FONT, FAST_FONT);
-                getTextBounds (call, &cw, &ch);
-                fast_font = true;
-            }
-        }
-    }
-
-    // one last clip to be sure then draw
-    cw = maxStringW (call, cs_info.box.w);
-    int cx = cs_info.box.x + (cs_info.box.w-cw)/2;
-    int cy = cs_info.box.y + ch + (cs_info.box.h-ch)/2 - 3;
-    if (fast_font)
-        cy -= ch;               // FAST_FONT y is on top, other are on the bottom
-
-    // draw shadow if text is other than black and bg is rainbox
-    if (cs_info.fg_color != RA8875_BLACK && cs_info.bg_rainbow) {
-        tft.setTextColor (RA8875_BLACK);
-        for (int dx = -1; dx <= 1; dx += 1) {
-            for (int dy = -1; dy <= 1; dy += 1) {
-                if (dx != 0 || dy != 0) {
-                    tft.setCursor (cx+dx, cy+dy);
-                    tft.print(call);
+            if (!drawBoxText (false, box, cs_info.call, fg_c, box.h/2+10, 0, 0, sh)) {
+                // try all upper case to allow 2 lines with regard to descenders
+                if (!drawBoxText (false, box, uc, fg_c, box.h/2+10, box.h/2-2, box.h-3, sh)) {
+                    // try smallest font
+                    selectFontStyle (LIGHT_FONT, FAST_FONT);
+                    (void) drawBoxText (true, box, cs_info.call, fg_c, box.h/2-10, box.h/2-14, box.h/2+4, sh);
                 }
             }
         }
     }
-
-    tft.setCursor (cx, cy);
-    tft.setTextColor (cs_info.fg_color);
-    tft.print(call);
 }
 
 /* draw full spectrum in the given box.
@@ -1671,6 +1787,15 @@ static void drawUptime(bool force)
     }
 }
 
+/* given an SCoord in raw coords, return one in app coords
+ */
+const SCoord raw2appSCoord (const SCoord &s_raw)
+{
+    SCoord s_app;
+    s_app.x = s_raw.x/tft.SCALESZ;
+    s_app.y = s_raw.y/tft.SCALESZ;
+    return (s_app);
+}
 
 /* return whether coordinate s is over the maidenhead key around the edges.
  * N.B. assumes key is only shown in mercator projection.

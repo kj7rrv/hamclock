@@ -159,7 +159,6 @@ class Adafruit_RA8875 {
 	void touchRead (uint16_t *x, uint16_t *y);
 	void drawPixel(int16_t x, int16_t y, uint16_t color16);
         void drawPixels(uint16_t * p, uint32_t count, int16_t x, int16_t y);
-	void drawSubPixel(int16_t x, int16_t y, uint16_t color16);
 	void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color16);
 	void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness, uint16_t color16);
 	void drawRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16);
@@ -170,6 +169,14 @@ class Adafruit_RA8875 {
 	    uint16_t color16);
 	void fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2,
 	    uint16_t color16);
+
+        // non-standard access to full underlying resolution
+	void drawSubPixel(int16_t x, int16_t y, uint16_t color16);
+	void drawLineRaw(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness, uint16_t color16);
+	void fillRectRaw(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16);
+	void drawRectRaw(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16);
+	void fillCircleRaw(int16_t x0, int16_t y0, int16_t r, uint16_t color16);
+	void drawCircleRaw(int16_t x0, int16_t y0, int16_t r, uint16_t color16);
 
 	// special method to draw hi res earth pixel
 	void plotEarth (uint16_t x0, uint16_t y0, float lat0, float lng0,
@@ -302,17 +309,6 @@ class Adafruit_RA8875 {
         // total display size
         volatile int screen_w, screen_h;
 
-        /* for drawLineOverlap:
-         * Overlap means drawing additional pixel when changing minor direction
-         * Needed for drawThickLine, otherwise some pixels will be missing in the thick line
-         */
-        typedef enum {
-            LINE_OVERLAP_NONE,  // No line overlap, like in standard Bresenham
-            LINE_OVERLAP_MAJOR, // Overlap - first go major then minor direction. Pixel is drawn as extension after actual line
-            LINE_OVERLAP_MINOR, // Overlap - first go minor then major direction. Pixel is drawn as extension before next line
-            LINE_OVERLAP_BOTH   // Overlap - both
-        } DLOverlap;
-
 	// frame buffer is drawn in separate thread protected by fb_lock
         static void *fbThreadHelper(void *me);
         #define APP_WIDTH  800
@@ -324,13 +320,6 @@ class Adafruit_RA8875 {
 	fbpix_t *fb_canvas;             // main drawing image buffer
 	fbpix_t *fb_stage;              // temp image during staging to fb hw
 	int fb_nbytes;                  // bytes in each in-memory image buffer
-        void drawLineOverlap (int16_t x0, int16_t y0, int16_t x1, int16_t y1, int8_t overlap, fbpix_t aColor);
-        void drawThickLine (int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thick, fbpix_t aColor);
-	void plotLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color);
-        void plotLineLow(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color);
-        void plotLineHigh(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color);
-        void plotLineRaw(int16_t x0, int16_t y0, int16_t x1, int16_t y1, fbpix_t color);
-	void plotfb (int16_t x, int16_t y, fbpix_t color);
 	void plotChar (char c);
 	fbpix_t text_color;
 	uint16_t cursor_x, cursor_y;
@@ -340,6 +329,19 @@ class Adafruit_RA8875 {
 	int FB_X0;
 	int FB_Y0;
 
+        // full res helpers
+	void plotfb (int16_t x, int16_t y, fbpix_t color);
+        void plotDrawRect (int16_t x0, int16_t y0, int16_t w, int16_t h, fbpix_t fbpix);
+        void plotFillRect (int16_t x0, int16_t y0, int16_t w, int16_t h, fbpix_t fbpix);
+        void plotDrawCircle (int16_t x0, int16_t y0, int16_t r0, fbpix_t fbpix);
+        void plotFillCircle(int16_t x0, int16_t y0, int16_t r0, fbpix_t fbpix);
+
+        // brezenham implementation
+        void plotLineRaw (int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thick, fbpix_t color);
+        void drawLineOverlap (int16_t aXStart, int16_t aYStart, int16_t aXEnd, int16_t aYEnd,
+                        uint8_t aOverlap, fbpix_t aColor);
+        void drawThickLine (int16_t aXStart, int16_t aYStart, int16_t aXEnd, int16_t aYEnd,
+                        int16_t aThickness, uint8_t aThicknessMode, fbpix_t aColor);
 
 	// big earth mmap'd maps
         uint16_t (*DEARTH_BIG)[EARTH_BIG_H][EARTH_BIG_W];

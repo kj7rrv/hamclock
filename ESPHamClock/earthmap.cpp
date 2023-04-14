@@ -50,7 +50,7 @@ bool mapmenu_pending;
 #define LL_LNG_GRID     15
 #define RADIAL_GRID     15
 #define THETA_GRID      15
-#define FINESTEP_GRID   5
+#define FINESTEP_GRID   1
 
 // establish GRIDC and GRIDC00
 static void getGridColorCache()
@@ -300,13 +300,13 @@ static void drawLLGrid (int lat_step, int lng_step)
 
         // lines of latitude, exclude the poles
         for (float lat = -90+lat_step; lat < 90; lat += lat_step) {
-            ll2s (deg2rad(lat), deg2rad(-180), s0, 0);
+            ll2sRaw (deg2rad(lat), deg2rad(-180), s0, 0);
             for (float lng = -180+lng_step; lng <= 180; lng += lng_step) {
-                ll2s (deg2rad(lat), deg2rad(lng), s1, 0);
+                ll2sRaw (deg2rad(lat), deg2rad(lng), s1, 0);
                 for (float lg = lng-lng_step+FINESTEP_GRID; lg <= lng; lg += FINESTEP_GRID) {
-                    ll2s (deg2rad(lat), deg2rad(lg), s1, 0);
-                    if (segmentSpanOk (s0, s1, 1))
-                        tft.drawLine (s0.x, s0.y, s1.x, s1.y, lat == 0 ? GRIDC00 : GRIDC);
+                    ll2sRaw (deg2rad(lat), deg2rad(lg), s1, 0);
+                    if (segmentSpanOkRaw (s0, s1, 1))
+                        tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, 1, lat == 0 ? GRIDC00 : GRIDC);
                     s0 = s1;
                 }
                 s0 = s1;
@@ -315,13 +315,13 @@ static void drawLLGrid (int lat_step, int lng_step)
 
         // lines of longitude -- pole to pole
         for (float lng = -180; lng < 180; lng += lng_step) {
-            ll2s (deg2rad(-90), deg2rad(lng), s0, 0);
+            ll2sRaw (deg2rad(-90), deg2rad(lng), s0, 0);
             for (float lat = -90+lat_step; lat <= 90; lat += lat_step) {
-                ll2s (deg2rad(lat), deg2rad(lng), s1, 0);
+                ll2sRaw (deg2rad(lat), deg2rad(lng), s1, 0);
                 for (float lt = lat-lat_step+FINESTEP_GRID; lt <= lat; lt += FINESTEP_GRID) {
-                    ll2s (deg2rad(lt), deg2rad(lng), s1, 0);
-                    if (segmentSpanOk (s0, s1, 1))
-                        tft.drawLine (s0.x, s0.y, s1.x, s1.y, lng == 0 ? GRIDC00 : GRIDC);
+                    ll2sRaw (deg2rad(lt), deg2rad(lng), s1, 0);
+                    if (segmentSpanOkRaw (s0, s1, 1))
+                        tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, 1, lng == 0 ? GRIDC00 : GRIDC);
                     s0 = s1;
                 }
                 s0 = s1;
@@ -395,9 +395,9 @@ static void drawAzimGrid ()
             // avoid poles on mercator plots
             if (map_proj != MAPP_MERCATOR || (lat > min_pole_lat && lat < max_pole_lat)) {
                 float lng = de_ll.lng + B;
-                ll2s (lat, lng, s1, 0);
-                if (segmentSpanOk (s0, s1, 1))
-                    tft.drawLine (s0.x, s0.y, s1.x, s1.y, GRIDC);
+                ll2sRaw (lat, lng, s1, 0);
+                if (segmentSpanOkRaw (s0, s1, 1))
+                    tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, 1, GRIDC);
                 s0 = s1;
             } else
                 s0.x = 0;
@@ -425,9 +425,9 @@ static void drawAzimGrid ()
             // avoid poles on mercator plots
             if (map_proj != MAPP_MERCATOR || (lat > min_pole_lat && lat < max_pole_lat)) {
                 float lng = de_ll.lng + B;
-                ll2s (lat, lng, s1, 0);
-                if (s0.x > 0 && segmentSpanOk (s0, s1, 1))
-                    tft.drawLine (s0.x, s0.y, s1.x, s1.y, GRIDC);
+                ll2sRaw (lat, lng, s1, 0);
+                if (s0.x > 0 && segmentSpanOkRaw (s0, s1, 1))
+                    tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, 1, GRIDC);
                 s0 = s1;
             } else
                 s0.x = 0;
@@ -444,16 +444,16 @@ static void drawTropicsGrid()
 
         // just 2 lines at lat +- 23.5
         SCoord s00, s01, s10, s11;
-        ll2s (deg2rad(-23.5F), deg2rad(-180), s00, 0);
-        ll2s (deg2rad(23.5F), deg2rad(-180), s10, 0);
+        ll2sRaw (deg2rad(-23.5F), deg2rad(-180), s00, 0);
+        ll2sRaw (deg2rad(23.5F), deg2rad(-180), s10, 0);
         for (float lng = -180; lng <= 180; lng += FINESTEP_GRID) {
-            ll2s (deg2rad(-23.5), deg2rad(lng), s01, 0);
-            ll2s (deg2rad(23.5), deg2rad(lng), s11, 0);
-            if (segmentSpanOk (s00, s01, 0))
-                tft.drawLine (s00.x, s00.y, s01.x, s01.y, GRIDC);
+            ll2sRaw (deg2rad(-23.5), deg2rad(lng), s01, 0);
+            ll2sRaw (deg2rad(23.5), deg2rad(lng), s11, 0);
+            if (segmentSpanOkRaw (s00, s01, 0))
+                tft.drawLineRaw (s00.x, s00.y, s01.x, s01.y, 1, GRIDC);
             s00 = s01;
-            if (segmentSpanOk (s10, s11, 0))
-                tft.drawLine (s10.x, s10.y, s11.x, s11.y, GRIDC);
+            if (segmentSpanOkRaw (s10, s11, 0))
+                tft.drawLineRaw (s10.x, s10.y, s11.x, s11.y, 1, GRIDC);
             s10 = s11;
         }
 
@@ -1302,6 +1302,17 @@ void drawMoreEarth()
             drawMapMenu();
             mapmenu_pending = false;
         }
+
+    // define TIME_MAP_DRAW
+    #if defined(TIME_MAP_DRAW)
+        static struct timeval tv0;
+        struct timeval tv1;
+        gettimeofday (&tv1, NULL);
+        if (tv0.tv_sec != 0)
+            printf ("****** map %ld us\n", TVDELUS (tv0, tv1));
+        tv0 = tv1;
+    #endif // TIME_MAP_DRAW
+
     }
 
 #endif // _IS_UNIX
@@ -1386,6 +1397,90 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
 
     default:
         fatalError (_FX("ll2s() bad map_proj %d"), map_proj);
+    }
+
+}
+
+
+void ll2sRaw (float lat, float lng, SCoord &s, uint8_t edge)
+{
+    LatLong ll;
+    ll.lat = lat;
+    ll.lat_d = rad2deg(ll.lat);
+    ll.lng = lng;
+    ll.lng_d = rad2deg(ll.lng);
+    ll2sRaw (ll, s, edge);
+}
+void ll2sRaw (const LatLong &ll, SCoord &s, uint8_t edge)
+{
+    resetWatchdog();
+
+    uint16_t map_x = tft.SCALESZ*map_b.x;
+    uint16_t map_y = tft.SCALESZ*map_b.y;
+    uint16_t map_w = tft.SCALESZ*map_b.w;
+    uint16_t map_h = tft.SCALESZ*map_b.h;
+
+    switch ((MapProjection)map_proj) {
+
+    case MAPP_AZIMUTHAL: {
+        // sph tri between de, dx and N pole
+        float ca, B;
+        solveSphere (ll.lng - de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &ca, &B);
+        if (ca > 0) {
+            // front (left) side, centered at DE
+            float a = acosf (ca);
+            float R = fminf (a*map_w/(2*M_PIF), map_w/4 - edge - 1);        // well clear
+            float dx = R*sinf(B);
+            float dy = R*cosf(B);
+            s.x = roundf(map_x + map_w/4 + dx);
+            s.y = roundf(map_y + map_h/2 - dy);
+        } else {
+            // back (right) side, centered at DE antipode
+            float a = M_PIF - acosf (ca);
+            float R = fminf (a*map_w/(2*M_PIF), map_w/4 - edge - 1);        // well clear
+            float dx = -R*sinf(B);
+            float dy = R*cosf(B);
+            s.x = roundf(map_x + 3*map_w/4 + dx);
+            s.y = roundf(map_y + map_h/2 - dy);
+        }
+        } break;
+
+    case MAPP_AZIM1: {
+        // sph tri between de, dx and N pole
+        float ca, B;
+        solveSphere (ll.lng - de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &ca, &B);
+        float a = AZIM1_ZOOM*acosf (ca);
+        float R = fminf (map_h/2*powf(a/M_PIF,1/AZIM1_FISHEYE), map_h/2 - edge - 1);
+        float dx = R*sinf(B);
+        float dy = R*cosf(B);
+        s.x = roundf(map_x + map_w/2 + dx);
+        s.y = roundf(map_y + map_h/2 - dy);
+        } break;
+
+    case MAPP_MERCATOR: {
+
+        // straight rectangular Mercator projection
+        s.x = roundf(map_x + map_w*fmodf(ll.lng_d-getCenterLng()+540,360)/360);
+        s.y = roundf(map_y + map_h*(90-ll.lat_d)/180);
+
+        // guard edge
+        uint16_t e;
+        e = map_x + edge;
+        if (s.x < e)
+            s.x = e;
+        e = map_x + map_w - edge - 1;
+        if (s.x > e)
+            s.x = e;
+        e = map_y + edge;
+        if (s.y < e)
+            s.y = e;
+        e = map_y + map_h - edge - 1;
+        if (s.y > e)
+            s.y = e;
+        } break;
+
+    default:
+        fatalError (_FX("ll2sRaw() bad map_proj %d"), map_proj);
     }
 
 }
@@ -1963,6 +2058,29 @@ bool segmentSpanOk (const SCoord &s0, const SCoord &s1, uint16_t border)
     if (overViewBtn(s0,border) || overViewBtn(s1,border))
         return (false);         // over the view button
     if (!overMap(s0) || !overMap(s1))
+        return (false);         // off the map entirely
+    return (true);              // ok!
+}
+
+/* return whether the given line segment spans a reasonable portion of the map.
+ * beware map edge, view button, wrap-around and crossing center of azm map
+ * coords are in raw pixels.
+ */
+bool segmentSpanOkRaw (const SCoord &s0, const SCoord &s1, uint16_t border)
+{
+    uint16_t map_x = tft.SCALESZ*map_b.x;
+    uint16_t map_w = tft.SCALESZ*map_b.w;
+    uint16_t map_h = tft.SCALESZ*map_b.h;
+
+    if (s0.x > s1.x ? (s0.x - s1.x > map_w/4) : (s1.x - s0.x > map_w/4))
+        return (false);         // too wide
+    if (s0.y > s1.y ? (s0.y - s1.y > map_h/3) : (s1.y - s0.y > map_h/3))
+        return (false);         // too hi
+    if (map_proj == MAPP_AZIMUTHAL && ((s0.x < map_x+map_w/2) != (s1.x < map_x+map_w/2)))
+        return (false);         // crosses azimuthal hemisphere
+    if (overViewBtn(raw2appSCoord(s0),border/tft.SCALESZ) || overViewBtn(raw2appSCoord(s1),border/tft.SCALESZ))
+        return (false);         // over the view button
+    if (!overMap(raw2appSCoord(s0)) || !overMap(raw2appSCoord(s1)))
         return (false);         // off the map entirely
     return (true);              // ok!
 }

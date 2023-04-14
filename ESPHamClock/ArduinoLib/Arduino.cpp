@@ -103,9 +103,9 @@ static void mvLog (const char *from, const char *to)
 }
 
 
-/* roll log files and divert stdout and stderr to fresh file in our_dir
+/* roll diag files and divert stdout and stderr to fresh file in our_dir
  */
-static void stdout2File()
+static void makeDiagFile()
 {
         // save previous few
         mvLog ("diagnostic-log-1.txt", "diagnostic-log-2.txt"); 
@@ -124,10 +124,6 @@ static void stdout2File()
 
         // original fd no longer needed
         close (logfd);
-
-        // note
-        printf ("stdout log file is %s\n", new_log_fn);
-        fprintf (stderr, "stderr log file is %s\n", new_log_fn);
 }
 
 /* return default working directory
@@ -137,6 +133,39 @@ static std::string defaultAppDir()
         std::string home = getenv ("HOME");
         return (home + "/.hamclock/");
 }
+
+/* like mkdir() but checks/creates all intermediate components
+ */
+static int mkpath (const char *path, int mode)
+{
+        mode_t old_um = umask(0);
+        char *path_copy = strdup(path);
+        char *p = path_copy;
+        int ok, atend, atslash;
+
+        do {
+            atend = (*p == '\0');
+            atslash = (*p == '/' && p > path_copy);
+            ok = 1;
+            if (atend || atslash) {
+                *p = '\0';
+                if (mkdir (path_copy, mode) == 0) {
+                    if (chown (path_copy, getuid(), getgid()) < 0)
+                        ok = 0;
+                } else if (errno != EEXIST)
+                    ok = 0;
+                if (atslash)
+                    *p = '/';
+            }
+            p++;
+        } while (ok && !atend);
+
+        free (path_copy);
+        umask(old_um);
+
+        return (ok ? 0 : -1);
+}
+
 
 /* insure our application work directory exists and named in our_dir.
  * use default unless user_dir.
@@ -159,14 +188,11 @@ static void mkAppDir(const char *user_dir)
 
         // insure exists, fine if already created
         const char *path = our_dir.c_str();
-        mode_t old_um = umask(0);
-        if (mkdir (path, 0775) < 0 && errno != EEXIST) {
+        if (mkpath (path, 0775) < 0 && errno != EEXIST) {
             // EEXIST just means it already exists
             fprintf (stderr, "%s: %s\n", path, strerror(errno));
             exit(1);
         }
-        (void) !chown (path, getuid(), getgid());
-        umask(old_um);
 }
 
 /* convert the given ISO 8601 date-time string to UNIX seconds in usr_datetime.
@@ -193,6 +219,14 @@ static void setUsrDateTime (const char *iso8601)
         usr_datetime = mktime (&tms);
 }
 
+/* show version info
+ */
+static void showVersion()
+{
+        fprintf (stderr, "Version %s\n", HC_VERSION);
+        fprintf (stderr, "built as %s\n", our_make);
+}
+
 /* show usage and exit(1)
  */
 static void usage (const char *errfmt, ...)
@@ -217,7 +251,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -b h : set backend host to h; default is %s\n", backend_host);
         fprintf (stderr, " -c   : disable all touch events from web interface\n");
         fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -e p : set RESTful web server port to p; default is %d\n", restful_port);
+        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", restful_port);
         fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
         fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
         fprintf (stderr, " -h   : print this help summary\n");
@@ -228,7 +262,8 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
         fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
-        fprintf (stderr, " -w p : set live web server port to p; default is %d\n", liveweb_port);
+        fprintf (stderr, " -v   : show version info and exit\n");
+        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n", liveweb_port);
 
         exit(1);
 }
@@ -270,10 +305,10 @@ static void crackArgs (int ac, char *av[])
                     break;
                 case 'e':
                     if (ac < 2)
-                        usage ("missing port number for -e");
+                        usage ("missing RESTful port number for -e");
                     restful_port = atoi(*++av);
-                    if (restful_port < 1 || restful_port > 65535)
-                        usage ("-e port must be 1 - 65535");
+                    if (restful_port > 65535)
+                        usage ("-e port must be <= 65535");
                     ac--;
                     break;
                 case 'f':
@@ -334,12 +369,16 @@ static void crackArgs (int ac, char *av[])
                         usage ("-t percentage must be 20 .. 100");
                     ac--;
                     break;
+                case 'v':
+                    showVersion();
+                    exit(0);
+                    break;      // lint
                 case 'w':
                     if (ac < 2)
-                        usage ("missing RESTful port for -w");
+                        usage ("missing web port number for -w");
                     liveweb_port = atoi(*++av);
-                    if (liveweb_port < 1 || liveweb_port > 65535)
-                        usage ("-w port must be 1 - 65535");
+                    if (liveweb_port > 65535)
+                        usage ("-w port must be <= 65535");
                     ac--;
                     break;
                 case 'x':
@@ -362,7 +401,7 @@ static void crackArgs (int ac, char *av[])
             usage ("-i requires -k");
         if (cl_set && !skip_skip)
             usage ("-l requires -k");
-        if (liveweb_port == restful_port)
+        if (liveweb_port == restful_port && liveweb_port > 0 && restful_port > 0)
             usage ("Live web and RESTful ports may not be equal: %d %d", liveweb_port, restful_port);
 
 
@@ -371,7 +410,7 @@ static void crackArgs (int ac, char *av[])
 
         // redirect stdout to diag file unless requested not to
         if (diag_to_file)
-            stdout2File();
+            makeDiagFile();
 
         // set desired screen option if set
         if (fs_set)
@@ -397,7 +436,8 @@ int main (int ac, char *av[])
         for (int i = 0; i < ac; i++)
             printf ("  argv[%d] = %s\n", i, av[i]);
 
-        // log our make, working dir and uid
+        // log our key info: make, working dir and uid
+        printf ("process id %d\n", getpid());
         printf ("built as %s\n", our_make);
         printf ("working directory is %s\n", our_dir.c_str());
         printf ("ruid %d euid %d\n", getuid(), geteuid());

@@ -53,7 +53,250 @@ char live_html[] =  R"_raw_html_(
         var pointermove_ms = 0;         // Date.now when pointermove event
         var cvs, ctx;                   // handy
 
+        // define functions, onLoad follows near the bottom
 
+        // request a new full image
+        function getFullImage() {
+            sendWSMsg ("get_live.png?");
+        }
+
+        // request an image update
+        function getUpdate() {
+            sendWSMsg ("get_live.bin?");
+        }
+        
+
+        // given inherent hamclock build size, set canvas size and configure to stay centered
+        function initCanvas (hc_w, hc_h) {
+            if (drawing_verbose) {
+                console.log("document.documentElement.clientWidth = " + document.documentElement.clientWidth);
+                console.log("window.innerWidth = " + window.innerWidth);
+                console.log ("hamclock is " +  hc_w + " x " +  hc_h);
+            }
+
+            // pixels to draw on always match the real clock size
+            cvs.width =  hc_w;
+            cvs.height =  hc_h;
+
+            // get window area dimensions
+            let win_w = document.documentElement.clientWidth || window.innerWidth;
+            let win_h = document.documentElement.clientHeight || window.innerHeight;
+
+            // center if HC is smaller else shrink to fit
+            if (hc_w < win_w && hc_h < win_h) {
+
+                // hc is smaller -- center in full screen
+                cvs.style.width = hc_w + "px";
+                cvs.style.height = hc_h + "px";
+
+            } else {
+
+                // hc is larger -- shrink to fit preserving aspect
+                if (win_w*hc_h > win_h*hc_w) {
+                    hc_w = hc_w*win_h/hc_h;
+                    hc_h = win_h;
+                } else {
+                    hc_h = hc_h*win_w/hc_w;
+                    hc_w = win_w;
+                }
+                cvs.style.width = hc_w + "px";
+                cvs.style.height = hc_h + "px";
+            }
+
+            // center 
+            cvs.style.position = 'absolute';
+            cvs.style.top = "50%";
+            cvs.style.left = "50%";
+            cvs.style.margin = (-hc_h/2) + "px" + " 0 0 " + (-hc_w/2) + "px"; // trbl
+            app_scale = hc_w/APP_W;
+
+            if (drawing_verbose)
+                console.log ("canvas is " + hc_w + " x " + hc_h + " app_scale " + app_scale);
+        }
+
+        // display the given full png uint8
+        function drawFullImage (png8) {
+
+            var pngbl = new Blob ([png8], {type:"image/png"});
+            createImageBitmap (pngbl)
+            .then(function(ibm) {
+                if (drawing_verbose)
+                    console.log ("drawFullImage size " + ibm.width + " x " + ibm.height);
+                initCanvas(ibm.width, ibm.height);
+                ctx.drawImage(ibm, 0, 0);
+            })
+            .catch(function(err){
+                console.log("full image promise err: " + err);
+            });
+        }
+
+        // update given header and png sprites image -- see liveweb.cpp::updateExistingClient()
+        function drawUpdate (hdr8, png8) {
+
+            // extract 4-byte header preamble
+            const blok_w = hdr8[0];                         // block width, pixels
+            const blok_h = hdr8[1];                         // block width, pixels
+            const n_regn = (hdr8[2] << 8) | hdr8[3];        // total n blocks wide, MSB LSB
+
+            if (drawing_verbose > 1) {
+                // erase, or at least unmark, previous marked regions
+                if (prev_regnhdr) {
+                    ctx.strokeStyle = "black";
+                    ctx.beginPath();
+                    for (let i = 0; i < prev_regnhdr.length; i++) {
+                        const cvs_x = prev_regnhdr[4+3*i] * blok_w;
+                        const cvs_y = prev_regnhdr[5+3*i] * blok_h;
+                        const cvs_w = prev_regnhdr[6+3*i] * blok_w;
+                        ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
+                    }
+                    ctx.stroke();
+                }
+                // save for next time
+                prev_regnhdr = hdr8.slice(0,4+3*n_regn);
+            }
+
+            // walk down remainder of header and draw each region
+            if (n_regn > 0) {
+                // png8 is one image blok_h hi of n_regns contiguous regions each variable width
+                let pngbl = new Blob ([png8], {type:"image/png"});
+                createImageBitmap (pngbl)
+                .then(function(ibm) {
+                    // render each region.
+                    let regn_x = 0;                         // walk region x along img
+                    let n_draw = 0;                         // count n drawn regions just for stat
+                    for (let i = 0; i < n_regn; i++) {
+                        const cvs_x = hdr8[4+3*i] * blok_w; // ul corner x in canvas pixels
+                        const cvs_y = hdr8[5+3*i] * blok_h; // ul corner y in canvas pixels
+                        const n_long = hdr8[6+3*i];         // n regions long
+                        const cvs_w = n_long * blok_w;      // total region width in canvas pixels
+                        ctx.drawImage (ibm, regn_x, 0, cvs_w, blok_h, cvs_x, cvs_y, cvs_w, blok_h);
+
+                        if (drawing_verbose > 1) {
+                            // mark updated regions
+                            if (drawing_verbose > 2)
+                                console.log (regn_x + " : " + cvs_x + "," + cvs_y + " "
+                                                    + cvs_w + "x" + blok_h);
+                            ctx.strokeStyle = "red";
+                            ctx.beginPath();
+                            ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
+                            ctx.stroke();
+                        }
+
+                        regn_x += cvs_w;                    // next region
+                        n_draw += n_long;
+                    }
+                    if (drawing_verbose)
+                        console.log ("  drawUpdate " + hdr8.byteLength + "B " +
+                                    n_regn + "/" + n_draw + " of " + blok_w + " x " + blok_h);
+
+                })
+                .catch(function(err) {
+                    console.log("update promise err: ", err);
+                    runSoon (getFullImage);
+                });
+            }
+
+        }
+
+        // schedule func() soon
+        var upd_tid = 0;                            // update pacing timer id
+        function runSoon (func) {
+
+            // insure no nested requests
+            if (upd_tid) {
+                if (ws_verbose)
+                    console.log ("cancel pending timer");
+                clearTimeout(upd_tid);
+            }
+
+            // register callback
+            upd_tid = setTimeout (function(){upd_tid = 0; func();}, UPDATE_MS);
+            if (ws_verbose)
+                console.log ("setting timer for " + func.name + " in " + UPDATE_MS + " ms");
+        }
+
+        // given any pointer event return coords with respect to canvas scaled to application.
+        // returns undefined if scaling factor is not yet known.
+        function getAppCoords (event) {
+
+            if (app_scale) {
+                const rect = cvs.getBoundingClientRect();
+                const x = Math.round((event.clientX - rect.left)/app_scale);
+                const y = Math.round((event.clientY - rect.top)/app_scale);
+                return ({x, y});
+            }
+        }
+
+
+        // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
+        window.addEventListener('keydown', function(event) {
+
+            // get char name
+            let k = event.key;
+
+            // a real space would create 'char= ' which doesn't parse so we invent Space name
+            if (k === ' ')
+                k = 'Space';
+
+            // ignore if modied
+            if (event.metaKey || event.ctrlKey || event.altKey) {
+                if (event_verbose)
+                    console.log('ignoring modified ' + k);
+                return;
+            }
+
+            // accept only certain non-alphanumeric keys
+            if (k.length > 1 && !nonan_chars.find (e => { if (e == k) return true; })) {
+                if (event_verbose)
+                    console.log('ignoring ' + k);
+                return;
+            }
+
+            // don't let browser see tab
+            if (k === "Tab") {
+                if (event_verbose)
+                    console.log ("stopping tab");
+                event.preventDefault();
+            }
+
+            // compose and send
+            sendWSMsg ('set_char?char=' + k);
+        });
+
+        // respond to mobile device being rotated. resize seems to work better than orientationchange
+        // window.addEventListener("orientationchange", function(event) {
+        window.addEventListener("resize", function(event) {
+            if (event_verbose)
+                console.log ("resize event");
+            // get full image to establish new screen size
+            runSoon (getFullImage);
+        });
+
+        // reload this page as last resort, probably because server process restarted
+        function reloadThisPage() {
+
+            console.log ('* reloading');
+            setTimeout (function() {
+                try {
+                    window.location.reload(true);
+                } catch(err) {
+                    console.log('* reload err: ' + err);
+                }
+            }, 2000);
+        }
+
+
+
+        // send the given message over the websocket
+        function sendWSMsg (msg) {
+            if (ws.readyState != 1) {
+                setTimeout (sendWSMsg, 500, msg);
+            } else {
+                if (ws_verbose)
+                    console.log ('sendWSMsg ' + msg);
+                ws.send (msg);
+            }
+        }
 
         // called one time after page has loaded
         function onLoad() {
@@ -98,184 +341,11 @@ char live_html[] =  R"_raw_html_(
                     }
                 }
             }
-
-            // request a new full image
-            function getFullImage() {
-                sendWSMsg ("get_live.png?");
-            }
-
-            // request an image update
-            function getUpdate() {
-                sendWSMsg ("get_live.bin?");
-            }
-            
             
             // handy access to canvas and drawing context
             cvs = document.getElementById('hamclock-cvs');
             ctx = cvs.getContext('2d', { alpha: false });       // faster w/o alpha
             ctx.translate(0.5, 0.5);                            // a tiny bit less blurry?
-
-            // given inherent hamclock build size, set canvas size and configure to stay centered
-            function initCanvas (hc_w, hc_h) {
-                if (drawing_verbose) {
-                    console.log("document.documentElement.clientWidth = " + document.documentElement.clientWidth);
-                    console.log("window.innerWidth = " + window.innerWidth);
-                    console.log ("hamclock is " +  hc_w + " x " +  hc_h);
-                }
-
-                // pixels to draw on always match the real clock size
-                cvs.width =  hc_w;
-                cvs.height =  hc_h;
-
-                // get window area dimensions
-                let win_w = document.documentElement.clientWidth || window.innerWidth;
-                let win_h = document.documentElement.clientHeight || window.innerHeight;
-
-                // center if HC is smaller else shrink to fit
-                if (hc_w < win_w && hc_h < win_h) {
-
-                    // hc is smaller -- center in full screen
-                    cvs.style.width = hc_w + "px";
-                    cvs.style.height = hc_h + "px";
-
-                } else {
-
-                    // hc is larger -- shrink to fit preserving aspect
-                    if (win_w*hc_h > win_h*hc_w) {
-                        hc_w = hc_w*win_h/hc_h;
-                        hc_h = win_h;
-                    } else {
-                        hc_h = hc_h*win_w/hc_w;
-                        hc_w = win_w;
-                    }
-                    cvs.style.width = hc_w + "px";
-                    cvs.style.height = hc_h + "px";
-                }
-
-                // center 
-                cvs.style.position = 'absolute';
-                cvs.style.top = "50%";
-                cvs.style.left = "50%";
-                cvs.style.margin = (-hc_h/2) + "px" + " 0 0 " + (-hc_w/2) + "px"; // trbl
-                app_scale = hc_w/APP_W;
-
-                if (drawing_verbose)
-                    console.log ("canvas is " + hc_w + " x " + hc_h + " app_scale " + app_scale);
-            }
-
-            // display the given full png uint8
-            function drawFullImage (png8) {
-
-                var pngbl = new Blob ([png8], {type:"image/png"});
-                createImageBitmap (pngbl)
-                .then(function(ibm) {
-                    if (drawing_verbose)
-                        console.log ("drawFullImage size " + ibm.width + " x " + ibm.height);
-                    initCanvas(ibm.width, ibm.height);
-                    ctx.drawImage(ibm, 0, 0);
-                })
-                .catch(function(err){
-                    console.log("full image promise err: " + err);
-                });
-            }
-
-            // update given header and png sprites image -- see liveweb.cpp::updateExistingClient()
-            function drawUpdate (hdr8, png8) {
-
-                // extract 4-byte header preamble
-                const blok_w = hdr8[0];                         // block width, pixels
-                const blok_h = hdr8[1];                         // block width, pixels
-                const n_regn = (hdr8[2] << 8) | hdr8[3];        // total n blocks wide, MSB LSB
-
-                if (drawing_verbose > 1) {
-                    // erase, or at least unmark, previous marked regions
-                    if (prev_regnhdr) {
-                        ctx.strokeStyle = "black";
-                        ctx.beginPath();
-                        for (let i = 0; i < prev_regnhdr.length; i++) {
-                            const cvs_x = prev_regnhdr[4+3*i] * blok_w;
-                            const cvs_y = prev_regnhdr[5+3*i] * blok_h;
-                            const cvs_w = prev_regnhdr[6+3*i] * blok_w;
-                            ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
-                        }
-                        ctx.stroke();
-                    }
-                    // save for next time
-                    prev_regnhdr = hdr8.slice(0,4+3*n_regn);
-                }
-
-                // walk down remainder of header and draw each region
-                if (n_regn > 0) {
-                    // png8 is one image blok_h hi of n_regns contiguous regions each variable width
-                    let pngbl = new Blob ([png8], {type:"image/png"});
-                    createImageBitmap (pngbl)
-                    .then(function(ibm) {
-                        // render each region.
-                        let regn_x = 0;                         // walk region x along img
-                        let n_draw = 0;                         // count n drawn regions just for stat
-                        for (let i = 0; i < n_regn; i++) {
-                            const cvs_x = hdr8[4+3*i] * blok_w; // ul corner x in canvas pixels
-                            const cvs_y = hdr8[5+3*i] * blok_h; // ul corner y in canvas pixels
-                            const n_long = hdr8[6+3*i];         // n regions long
-                            const cvs_w = n_long * blok_w;      // total region width in canvas pixels
-                            ctx.drawImage (ibm, regn_x, 0, cvs_w, blok_h, cvs_x, cvs_y, cvs_w, blok_h);
-
-                            if (drawing_verbose > 1) {
-                                // mark updated regions
-                                if (drawing_verbose > 2)
-                                    console.log (regn_x + " : " + cvs_x + "," + cvs_y + " "
-                                                        + cvs_w + "x" + blok_h);
-                                ctx.strokeStyle = "red";
-                                ctx.beginPath();
-                                ctx.rect (cvs_x, cvs_y, cvs_w, blok_h);
-                                ctx.stroke();
-                            }
-
-                            regn_x += cvs_w;                    // next region
-                            n_draw += n_long;
-                        }
-                        if (drawing_verbose)
-                            console.log ("  drawUpdate " + hdr8.byteLength + "B " +
-                                        n_regn + "/" + n_draw + " of " + blok_w + " x " + blok_h);
-
-                    })
-                    .catch(function(err) {
-                        console.log("update promise err: ", err);
-                        runSoon (getFullImage);
-                    });
-                }
-
-            }
-
-            // schedule func() soon
-            var upd_tid = 0;                            // update pacing timer id
-            function runSoon (func) {
-
-                // insure no nested requests
-                if (upd_tid) {
-                    if (ws_verbose)
-                        console.log ("cancel pending timer");
-                    clearTimeout(upd_tid);
-                }
-
-                // register callback
-                upd_tid = setTimeout (function(){upd_tid = 0; func();}, UPDATE_MS);
-                if (ws_verbose)
-                    console.log ("setting timer for " + func.name + " in " + UPDATE_MS + " ms");
-            }
-
-            // given any pointer event return coords with respect to canvas scaled to application.
-            // returns undefined if scaling factor is not yet known.
-            function getAppCoords (event) {
-
-                if (app_scale) {
-                    const rect = cvs.getBoundingClientRect();
-                    const x = Math.round((event.clientX - rect.left)/app_scale);
-                    const y = Math.round((event.clientY - rect.top)/app_scale);
-                    return ({x, y});
-                }
-            }
-
 
             // pointerdown: record time and position
             cvs.addEventListener ('pointerdown', function(event) {
@@ -358,76 +428,6 @@ char live_html[] =  R"_raw_html_(
                 sendWSMsg (msg);
             });
 
-
-            // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
-            window.addEventListener('keydown', function(event) {
-
-                // get char name
-                let k = event.key;
-
-                // a real space would create 'char= ' which doesn't parse so we invent Space name
-                if (k === ' ')
-                    k = 'Space';
-
-                // ignore if modied
-                if (event.metaKey || event.ctrlKey || event.altKey) {
-                    if (event_verbose)
-                        console.log('ignoring modified ' + k);
-                    return;
-                }
-
-                // accept only certain non-alphanumeric keys
-                if (k.length > 1 && !nonan_chars.find (e => { if (e == k) return true; })) {
-                    if (event_verbose)
-                        console.log('ignoring ' + k);
-                    return;
-                }
-
-                // don't let browser see tab
-                if (k === "Tab") {
-                    if (event_verbose)
-                        console.log ("stopping tab");
-                    event.preventDefault();
-                }
-
-                // compose and send
-                sendWSMsg ('set_char?char=' + k);
-            });
-
-            // respond to mobile device being rotated. resize seems to work better than orientationchange
-            // window.addEventListener("orientationchange", function(event) {
-            window.addEventListener("resize", function(event) {
-                if (event_verbose)
-                    console.log ("resize event");
-                // get full image to establish new screen size
-                runSoon (getFullImage);
-            });
-
-            // reload this page as last resort, probably because server process restarted
-            function reloadThisPage() {
-
-                console.log ('* reloading');
-                setTimeout (function() {
-                    try {
-                        window.location.reload(true);
-                    } catch(err) {
-                        console.log('* reload err: ' + err);
-                    }
-                }, 2000);
-            }
-
-
-
-            // send the given message over the websocket
-            function sendWSMsg (msg) {
-                if (ws.readyState != 1) {
-                    setTimeout (sendWSMsg, 500, msg);
-                } else {
-                    if (ws_verbose)
-                        console.log ('sendWSMsg ' + msg);
-                    ws.send (msg);
-                }
-            }
 
             // all set. start things off with the full image, repeats from then on with updates forever.
             getFullImage();

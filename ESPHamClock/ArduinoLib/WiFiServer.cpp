@@ -133,6 +133,7 @@ void WiFiServer::stop()
         if (socket >= 0) {
             if (_trace_server)
                 printf ("WiFiServer: closing fd %d\n", socket);
+            shutdown (socket, SHUT_RDWR);
             close (socket);
             socket = -1;
         }
