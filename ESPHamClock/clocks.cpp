@@ -94,15 +94,18 @@ static time_t getTime(void)
     return (t);
 }
 
-/* given number of seconds into a day, print HH:MM
+/* given number of seconds into a day, print HH:MM with optional leading 0 if needed
  */
-static void prHM (const uint32_t t)
+static void prHM (const uint32_t t, bool leading_zero)
 {
     uint16_t hh = t/SECS_PER_HOUR;
     uint16_t mm = (t - hh*SECS_PER_HOUR)/SECS_PER_MIN;
 
     char buf[20];
-    snprintf (buf, sizeof(buf), "%d:%02d", hh, mm);
+    if (leading_zero)
+        snprintf (buf, sizeof(buf), "%02d:%02d", hh, mm);
+    else
+        snprintf (buf, sizeof(buf), "%d:%02d", hh, mm);
     tft.print(buf);
 }
 
@@ -156,17 +159,17 @@ static void drawRiseSet(time_t t0, time_t trise, time_t tset, SBox &b, uint8_t s
             if (night_now) {
                 tft.setCursor (b.x, b.y+8);
                 tft.print (F("R at "));
-                prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs));
+                prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs), true);
                 tft.setCursor (b.x, b.y+b.h/2+4);
                 tft.print (F("S at "));
-                prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs));
+                prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs), true);
             } else {
                 tft.setCursor (b.x, b.y+8);
                 tft.print (F("S at "));
-                prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs));
+                prHM (3600*hour(tset+tz_secs) + 60*minute(tset+tz_secs), true);
                 tft.setCursor (b.x, b.y+b.h/2+4);
                 tft.print (F("R at "));
-                prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs));
+                prHM (3600*hour(trise+tz_secs) + 60*minute(trise+tz_secs), true);
             }
 
         } else {
@@ -179,17 +182,17 @@ static void drawRiseSet(time_t t0, time_t trise, time_t tset, SBox &b, uint8_t s
             tft.setCursor (b.x, b.y+8);
             if (night_now) {
                 tft.print (F("R in "));
-                prHM (rdt > 0 ? SECS_PER_DAY-rdt : -rdt);
+                prHM (rdt > 0 ? SECS_PER_DAY-rdt : -rdt, false);
                 tft.setCursor (b.x, b.y+b.h/2+4);
                 tft.print (F("S "));
-                prHM (sdt >= 0 ? sdt : SECS_PER_DAY+sdt);
+                prHM (sdt >= 0 ? sdt : SECS_PER_DAY+sdt, false);
                 tft.print (F(" ago"));
             } else {
                 tft.print (F("S in "));
-                prHM (sdt > 0 ? SECS_PER_DAY-sdt : -sdt);
+                prHM (sdt > 0 ? SECS_PER_DAY-sdt : -sdt, false);
                 tft.setCursor (b.x, b.y+b.h/2+4);
                 tft.print (F("R "));
-                prHM (rdt >= 0 ? rdt : SECS_PER_DAY+rdt);
+                prHM (rdt >= 0 ? rdt : SECS_PER_DAY+rdt, false);
                 tft.print (F(" ago"));
             }
         }
@@ -1198,11 +1201,8 @@ bool checkClockTouch (SCoord &s)
 
         // restart systems if likely effected by time change
         int dt = abs (utc_offset - off0);
-        if (dt > 5*60) {
-            initWiFiRetry();        // this will also update moon
-        } else {
-            updateMoonPane (false);
-        }
+        if (dt > 60)
+            initWiFiRetry();
         if (dt >= 30)
             displaySatInfo();
 
@@ -1246,7 +1246,7 @@ void changeTime (time_t t)
     // update map
     initEarthMap();
     displaySatInfo();
-    updateMoonPane (false);
+    updateMoonPane (false);     // info for sure, but rely on this to know if image also needs updating
 }
 
 /* show menu of timezone offsets +- 2 from nominal.

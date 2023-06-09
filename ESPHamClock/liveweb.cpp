@@ -55,6 +55,12 @@ static SessionInfo *si_list;                            // malloced list
 static int si_n;                                        // n malloced
 static pthread_mutex_t si_lock = PTHREAD_MUTEX_INITIALIZER;     // atomic updates
 
+#if defined(__GNUC__)
+static void bye (const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)));
+#else
+static void bye (const char *fmt, ...);
+#endif
+
 
 /* we can't use fatalError because the main thread will keep running and quickly obscure it.
  * N.B. we assume final message will include trailing \n
@@ -252,7 +258,7 @@ static void updateExistingClient (ws_cli_conn_t *client)
         }
     }
     if (n_bloks != (chg0-chg_regns)/BLOK_NBYTES)        // assert
-        bye ("live regions %d != %d\n", n_bloks, (chg0-chg_regns)/BLOK_NBYTES);
+        bye ("live regions %d != %d\n", n_bloks, (int)((chg0-chg_regns)/BLOK_NBYTES));
 
     if (live_verbose > 1) {
         struct timeval tv1;

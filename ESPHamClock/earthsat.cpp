@@ -81,6 +81,12 @@ static char sat_name[NV_SATNAME_LEN];   // NV_SATNAME cache (spaces are undersco
 static time_t tle_refresh;              // last TLE update
 static bool new_pass;                   // set when new pass is ready
 
+#if defined(__GNUC__)
+static void fatalSatError (const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)));
+#else
+static void fatalSatError (const char *fmt, ...);
+#endif
+
 
 /* copy from_str to to_str up to maxlen, changing all from_char to to_char
  */
@@ -804,13 +810,6 @@ static void fatalSatError (const char *fmt, ...)
     initScreen();
 }
 
-static void showSelectionBox (uint16_t x, uint16_t y, bool on)
-{
-    uint16_t fill_color = on ? SAT_COLOR : RA8875_BLACK;
-    tft.fillRect (x, y+(CELL_H-CB_SIZE)/2+3, CB_SIZE, CB_SIZE, fill_color);
-    tft.drawRect (x, y+(CELL_H-CB_SIZE)/2+3, CB_SIZE, CB_SIZE, RA8875_WHITE);
-}
-
 
 /* look up sat_name. if found set up sat, else inform user and remove sat altogether.
  * return whether found it.
@@ -897,6 +896,13 @@ out:
     return (ok);
 }
 
+static void showSelectionBox (const SCoord &c, bool on)
+{
+    uint16_t fill_color = on ? SAT_COLOR : RA8875_BLACK;
+    tft.fillRect (c.x, c.y+(CELL_H-CB_SIZE)/2+3, CB_SIZE, CB_SIZE, fill_color);
+    tft.drawRect (c.x, c.y+(CELL_H-CB_SIZE)/2+3, CB_SIZE, CB_SIZE, RA8875_WHITE);
+}
+
 /* show all names and allow op to choose one or none.
  * save selection in sat_name, even if empty for no selection.
  * return whether sat was selected.
@@ -907,12 +913,33 @@ static bool askSat()
 
     resetWatchdog();
 
+    // entire display is one big menu box
+    SBox screen_b;
+    screen_b.x = 0;
+    screen_b.y = 0;
+    screen_b.w = tft.width();
+    screen_b.h = tft.height();
+
+    // prep for user input (way up here to avoid goto warnings)
+    SCoord tap_s;
+    char typed_c;
+    UserInput ui = {
+        screen_b,
+        NULL,
+        false,
+        MENU_TO,
+        false,
+        tap_s,
+        typed_c,
+    };
+
+    // init selected item to none, might be set while drawing the matrix
+    SCoord sel_s = {0, 0};
+    int sel_idx = NO_SAT;
+    int prev_sel_idx = NO_SAT;
+
     // don't inherit anything lingering after the tap that got us here
     drainTouch();
-
-    // if stop while listing record as if it was a tap on that item
-    SCoord s_stop;
-    bool stop_tap = false;
 
     // erase screen and set font
     eraseScreen();
@@ -943,14 +970,14 @@ static bool askSat()
     // show Ok button
     drawStringInBox ("Ok", ok_b, false, RA8875_WHITE);
 
-    /// setup
+    // prep storage
     StackMalloc t1(TLE_LINEL);
     StackMalloc t2(TLE_LINEL);
     typedef char SatNames[MAX_NSAT][NV_SATNAME_LEN];
     StackMalloc name_mem(sizeof(SatNames));
     SatNames *sat_names = (SatNames *) name_mem.getMem();
-    uint16_t prev_sel_x = 0, prev_sel_y = 0;
-    int sel_idx = NO_SAT;
+
+    // n sats we display, may be fewer than total possible if tap to stop early
     int n_sat = 0;
 
     // open connection
@@ -980,27 +1007,26 @@ static bool askSat()
         int r = n_sat % N_ROWS;
         int c = n_sat / N_ROWS;
 
-        // ul corner
-        uint16_t x = c*CELL_W;
-        uint16_t y = TBORDER + r*CELL_H;
+        // ul corner of this cell
+        SCoord cell_s;
+        cell_s.x = c*CELL_W;
+        cell_s.y = TBORDER + r*CELL_H;
 
-        // allow early stop if tap
-        if (readCalTouchWS(s_stop) != TT_NONE) {
-            stop_tap = true;
+        // allow early stop by tapping while drawing matrix
+        if (readCalTouchWS (cell_s) != TT_NONE || tft.getChar(NULL,NULL) != 0) {
             tft.setTextColor (RA8875_WHITE);
-            tft.setCursor (x, y + FONT_H);        // match below
+            tft.setCursor (cell_s.x, cell_s.y + FONT_H);
             tft.print (F("Listing stopped"));
             break;
         }
 
-        // show tick box, pre-select if saved before
+        // draw tick box, pre-selected if it's the current sat
         if (strcmp (sat_name, (*sat_names)[n_sat]) == 0) {
+            showSelectionBox (cell_s, true);
             sel_idx = n_sat;
-            showSelectionBox (x, y, true);
-            prev_sel_x = x;
-            prev_sel_y = y;
+            sel_s = cell_s;
         } else {
-            showSelectionBox (x, y, false);
+            showSelectionBox (cell_s, false);
         }
 
         // display next rise time of this sat
@@ -1010,7 +1036,7 @@ static bool askSat()
         SatRiseSet rs;
         findNextPass((*sat_names)[n_sat], nowWO(), rs);
         tft.setTextColor (RA8875_WHITE);
-        tft.setCursor (x + CB_SIZE + 8, y + FONT_H);
+        tft.setCursor (cell_s.x + CB_SIZE + 8, cell_s.y + FONT_H);
         if (rs.rise_ok) {
             DateTime t_now = userDateTime(nowWO());
             if (rs.rise_time < rs.set_time) {
@@ -1055,57 +1081,66 @@ static bool askSat()
     if (n_sat == 0)
         goto out;
 
-    // entire display is one big menu box
-    SBox screen_b;
-    screen_b.x = 0;
-    screen_b.y = 0;
-    screen_b.w = tft.width();
-    screen_b.h = tft.height();
-
-    // follow touches to make selection, done when tap Ok or any item during drawing
+    // follow touches to make selection
     selectFontStyle (BOLD_FONT, SMALL_FONT);
-    SCoord s_tap;
-    while (stop_tap || waitForTap (screen_b, NULL, MENU_TO, false, s_tap)) {
+    while (waitForUser (ui)) {
 
-        // use stop tap first time if set
-        if (stop_tap) {
-            s_tap = s_stop;
-            stop_tap = false;
-        }
-
-        // tap Ok button?
-        if (inBox (s_tap, ok_b)) {
-            // show Ok button toggle
+        // tap Ok button or type Enter or ESC?
+        if (typed_c == '\r' || typed_c == '\n' || typed_c == 27 || inBox (tap_s, ok_b)) {
+            // show Ok button highlighted
             drawStringInBox ("Ok", ok_b, true, RA8875_WHITE);
             goto out;
         }
 
-        // else toggle tapped sat, if any
-        resetWatchdog();
-        int r = (s_tap.y - TBORDER)/CELL_H;
-        int c = s_tap.x/CELL_W;
-        if (s_tap.y < TBORDER || s_tap.x - c*CELL_W > CELL_W/4)
-            continue;                           // require tapping in left quarter of cell
-        int tap_idx = c*N_ROWS + r;             // column major order
-        if (tap_idx < n_sat) {
-            // toggle
-            uint16_t x = c * CELL_W;
-            uint16_t y = TBORDER + r * CELL_H;
-            if (tap_idx == sel_idx) {
-                // already on: forget and toggle off
-                // Serial.printf (_FX("forget %s\n"), (*sat_names)[sel_idx]);
-                showSelectionBox (x, y, false);
-                sel_idx = NO_SAT;
+        // handle a typed direction key
+        if (typed_c) {
+            if (sel_idx != NO_SAT) {
+                // act wrt current selection
+                tap_s = sel_s;
+                switch (typed_c) {
+                case 'h': tap_s.x -= CELL_W; break;
+                case 'j': tap_s.y += CELL_H; break;
+                case 'k': tap_s.y -= CELL_H; break;
+                case 'l': tap_s.x += CELL_W; break;
+                case ' ': break;        // toggle this entry
+                default:  continue;     // ignore
+                }
+            } else if (prev_sel_idx != NO_SAT) {
+                // nothing selected now but there was a previous selection
+                tap_s.x = (prev_sel_idx / N_ROWS) * CELL_W;
+                tap_s.y = TBORDER + (prev_sel_idx % N_ROWS) * CELL_H;
             } else {
-                // toggle previous selection off (if any) and show selected
-                if (prev_sel_y > 0)
-                    showSelectionBox (prev_sel_x, prev_sel_y, false);
-                sel_idx = tap_idx;
-                prev_sel_x = x;
-                prev_sel_y = y;
-                // Serial.printf (_FX("select %s\n"), (*sat_names)[sel_idx]);
-                showSelectionBox (x, y, true);
+                // first time and nothing selected, start in first cell
+                tap_s.x = 0;
+                tap_s.y = TBORDER;
             }
+        }
+
+        // ignore if outside or beyond the matrix
+        int r = (tap_s.y - TBORDER)/CELL_H;
+        int c = tap_s.x/CELL_W;
+        int tap_idx = c*N_ROWS + r;             // column major order
+        if (r < 0 || r >= N_ROWS || c < 0 || c >= N_COLS || tap_idx < 0 || tap_idx >= n_sat)
+            continue;
+
+        // normalize the tap location to upper left of cell
+        tap_s.x = c*CELL_W;
+        tap_s.y = TBORDER + r*CELL_H;
+
+        // update tapped cell
+        if (tap_idx == sel_idx) {
+            // already on: toggle off and forget
+            showSelectionBox (tap_s, false);
+            prev_sel_idx = sel_idx;
+            sel_idx = NO_SAT;
+        } else {
+            // toggle previous selection off (if any) and show new selection
+            if (sel_idx != NO_SAT)
+                showSelectionBox (sel_s, false);
+            prev_sel_idx = sel_idx;
+            sel_idx = tap_idx;
+            sel_s = tap_s;
+            showSelectionBox (sel_s, true);
         }
     }
 
@@ -1412,6 +1447,12 @@ void drawSatPathAndFoot()
 
     resetWatchdog();
 
+    // decide line width
+    uint16_t lw = getSpotPathSize();
+    if (lw == 0)
+        lw = tft.SCALESZ;
+
+    // draw path
     uint16_t path_color = getMapColor(SATPATH_CSPR);
     bool draw_start = true;
     for (int i = 1; i < n_path; i++) {
@@ -1419,21 +1460,22 @@ void drawSatPathAndFoot()
         SCoord &sp1 = sat_path[i];
         if (segmentSpanOkRaw(sp0,sp1,tft.SCALESZ*tft.SCALESZ)) {
             if (draw_start) {
-                tft.fillCircleRaw (sp0.x, sp0.y, 2*tft.SCALESZ, path_color);
-                tft.drawCircleRaw (sp0.x, sp0.y, 2*tft.SCALESZ, RA8875_BLACK);
+                tft.fillCircleRaw (sp0.x, sp0.y, 2*lw, path_color);
+                tft.drawCircleRaw (sp0.x, sp0.y, 2*lw, RA8875_BLACK);
                 draw_start = false;
             }
-            tft.drawLineRaw (sp0.x, sp0.y, sp1.x, sp1.y, tft.SCALESZ, path_color);
+            tft.drawLineRaw (sp0.x, sp0.y, sp1.x, sp1.y, lw, path_color);
         }
     }
 
+    // draw foots
     uint16_t foot_color = getMapColor(SATFOOT_CSPR);
     for (int alt_i = 0; alt_i < N_FOOT; alt_i++) {
         for (uint16_t foot_i = 0; foot_i < n_foot[alt_i]; foot_i++) {
             SCoord &sf0 = sat_foot[alt_i][foot_i];
             SCoord &sf1 = sat_foot[alt_i][(foot_i+1)%n_foot[alt_i]];   // closure!
             if (segmentSpanOkRaw(sf0,sf1,1))
-                tft.drawLineRaw (sf0.x, sf0.y, sf1.x, sf1.y, tft.SCALESZ, foot_color);
+                tft.drawLineRaw (sf0.x, sf0.y, sf1.x, sf1.y, lw, foot_color);
         }
     }
 }
@@ -1945,9 +1987,19 @@ static void showNextSatEvents ()
         free ((void*)sazs);
     }
 
-    // wait for fresh tap or timeout
-    SCoord tap;
-    (void) waitForTap (ok_b, NULL, _SNS_TIMEOUT, false, tap);
+    // wait for any input
+    SCoord s_tap;
+    char typed_char;
+    UserInput ui = {
+        ok_b,
+        NULL,
+        false,
+        _SNS_TIMEOUT,
+        false,
+        s_tap,
+        typed_char,
+    };
+    waitForUser (ui);
 
     // ack
     drawStringInBox (button_name, ok_b, true, RA8875_GREEN);

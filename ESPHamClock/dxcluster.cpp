@@ -116,7 +116,7 @@
 // setup 
 #define DXC_COLOR       RA8875_GREEN
 #define LISTING_COLOR   RA8875_WHITE
-#define CLUSTER_TIMEOUT (5*60*1000)             // send something if idle this long, millis      // TODO
+#define CLUSTER_TIMEOUT (10*60*1000)            // send something if idle this long, millis
 #define MAX_AGE         300000                  // max age to restore spot in list, millis
 #define HOSTNM_Y0       32                      // host name y down from box top
 #define LISTING_Y0      47                      // first spot y down from box top
@@ -156,6 +156,12 @@ typedef enum {
 } DXClusterType;
 static DXClusterType cl_type;
 
+#if defined(__GNUC__)
+static void dxcLog (const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)));
+#else
+static void dxcLog (const char *fmt, ...)
+#endif
+
 
 /* return the current host name
  */
@@ -192,7 +198,7 @@ static void drawSpotOnList (const SBox &box, int spot_i)
 
         // add call and age
         ll += snprintf (line+ll, sizeof(line)-ll, _FX(" %-*s %3dm"), MAX_SPOTCALL_LEN-1, spot.dx_call,
-                        spotAgeMinutes (spot));
+                        (int)((now() - spot.spotted + 30)/60));
 
         tft.print (line);
 }
@@ -258,20 +264,17 @@ static void strtolower (char *str)
                 *str = tolower(c);
 }
 
-/* log the given message, adding trailing \n if not already in message.
- * N.B. remove any \a characters
+/* log the given message
+ * N.B. we assume trailing \n and remove any \a characters
  */
 static void dxcLog (const char *fmt, ...)
 {
         // format
-        char msg[128];
+        char msg[200];
         va_list ap;
         va_start (ap, fmt);
-        int ml = vsnprintf (msg, sizeof(msg), fmt, ap);
+        (void) vsnprintf (msg, sizeof(msg), fmt, ap);
         va_end (ap);
-
-        // note whether ends with newline
-        bool has_nl = msg[ml-1] == '\n';
 
         // print with boilerplate and w/o bell
         Serial.print (F("DXC: "));
@@ -280,10 +283,6 @@ static void dxcLog (const char *fmt, ...)
         for (char *mp = msg; *mp != '\0'; mp++)
             if (*mp != '\a')
                 Serial.print (*mp);
-
-        // insure trailing newline
-        if (!has_nl)
-            Serial.print ('\n');
 }
 
 /* return whether the given spider response line looks like their prompt.
@@ -296,19 +295,20 @@ static bool isSpiderPrompt (const char *line, int ll)
 
 /* read cluster until find next line that looks like a prompt.
  * return whether found
+ * TODO: this might skip through more spots
  */
 static bool lookForDXClusterPrompt()
 {
-        char line[120];
+        char line[150];
         uint16_t ll;
 
         while (getTCPLine (dx_client, line, sizeof(line), &ll)) {
-            dxcLog (line);
+            dxcLog (_FX("%s\n"), line);
             if (isSpiderPrompt (line, ll))
                 return (true);
         }
 
-        dxcLog (_FX("Can not find prompt"));
+        dxcLog (_FX("Can not find prompt\n"));
         return (false);
 }
 
@@ -326,7 +326,7 @@ static bool lookForDXClusterString (char *buf, uint16_t bufl, const char *str)
 
         // log if failure
         if (!found)
-            dxcLog (_FX("Failed to find cluster response '%s'"), str);
+            dxcLog (_FX("Failed to find cluster response '%s'\n"), str);
 
         // always try to skip to next prompt
         (void) lookForDXClusterPrompt();
@@ -383,12 +383,12 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
         if (cl_type == CT_DXSPIDER) {
 
             // ask for heading 
-            snprintf (buf, sizeof(buf), _FX("show/heading %s"), call);
-            dxcLog (buf);
-            dx_client.println (buf);
+            snprintf (buf, sizeof(buf), _FX("show/heading %s\n"), call);
+            dxcLog (_FX("%s"), buf);
+            dx_client.print (buf);
 
             // find response
-            if (!lookForDXClusterString (buf, sizeof(buf), "degs"))
+            if (!lookForDXClusterString (buf, sizeof(buf), _FX("degs")))
                 return (false);
 
     #if defined(_SUPPORT_ARCLUSTER)
@@ -396,12 +396,12 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
         } else if (cl_type == CT_ARCLUSTER) {
 
             // ask for heading 
-            snprintf (buf, sizeof(buf), _FX("show heading %s"), call);
-            dxcLog (buf);
-            dx_client.println (buf);
+            snprintf (buf, sizeof(buf), _FX("show heading %s\n"), call);
+            dxcLog (_FX("%s"), buf);
+            dx_client.print (buf);
 
             // find response
-            if (!lookForDXClusterString (buf, sizeof(buf), "distance"))
+            if (!lookForDXClusterString (buf, sizeof(buf), _FX("distance")))
                 return (false);
 
     #endif // _SUPPORT_ARCLUSTER
@@ -415,8 +415,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
 
 
         // if get here we should have a line containing <heading> deg .. <miles> mi
-        // strcpy(buf,"9miW8WTS Michigan-K: 71 degs - dist: 790 mi, 1272 km Reciprocal heading: 261 degs");
-        dxcLog (buf);
+        dxcLog (_FX("%s\n"), buf);
         strtolower(buf);
         int heading, miles;
         if (findLabeledValue (buf, &heading, "degs") && findLabeledValue (buf, &miles, "mi")) {
@@ -424,7 +423,7 @@ static bool getDXClusterSpotLL (const char *call, LatLong &ll)
             dxcLog (_FX("%s heading= %d miles= %d lat= %g lon= %g\n"), call,
                                                                     heading, miles, ll.lat_d, ll.lng_d);
         } else {
-            dxcLog (_FX("No heading"));
+            dxcLog (_FX("No heading\n"));
             return (false);
         }
 
@@ -447,12 +446,15 @@ static void engageDXCRow (DXClusterSpot &s)
 
 /* draw spot and/or path on map
  */
-static void drawDXSpotOnMap (const DXClusterSpot &spot)
+static void drawDXPathOnMap (const DXClusterSpot &spot)
 {
     #if defined(_SUPPORT_SPOTPATH)
 
         // draw connecting path if desired
-        if (showSpotPaths()) {
+
+        uint16_t lwRaw = getSpotPathSize();
+
+        if (lwRaw) {
             LatLong from_ll, to_ll;
             from_ll.lat = spot.de_lat;
             from_ll.lat_d = rad2deg(from_ll.lat);
@@ -472,8 +474,7 @@ static void drawDXSpotOnMap (const DXClusterSpot &spot)
             const bool dashed = getBandDashed (spot.kHz * 1000);
             SCoord prev_s = {0, 0};                                     // .x == 0 means don't show
             SCoord de_s = {0, 0}, dx_s = {0, 0};                        // first and last points drawn
-            uint16_t lwRaw = fmax (1, tft.SCALESZ - n_dxspots/30);      // thinner when more tracks
-            uint16_t mkRaw = lwRaw+fmin(2,tft.SCALESZ);                 // marker size
+            uint16_t mkRaw = 3*lwRaw/2;                                 // marker size
 
             for (int i = 0; i <= n_step; i++) {                         // fence posts
                 float r = i*step;
@@ -507,8 +508,6 @@ static void drawDXSpotOnMap (const DXClusterSpot &spot)
         }
 
     #endif // _SUPPORT_SPOTPATH
-
-    drawDXCOnMap (spot);
 }
 
 
@@ -520,7 +519,7 @@ static void addDXClusterSpot (const SBox &box, DXClusterSpot &new_spot)
         for (int i = 0; i < n_dxspots; i++) {
             DXClusterSpot &spot = dxspots[i];
             if (fabsf(new_spot.kHz-spot.kHz) < 0.1F && strcmp (new_spot.dx_call, spot.dx_call) == 0) {
-                dxcLog (_FX("DXC: %s dup"), new_spot.dx_call);
+                dxcLog (_FX("DXC: %s dup\n"), new_spot.dx_call);
                 return;
             }
         }
@@ -548,7 +547,8 @@ static void addDXClusterSpot (const SBox &box, DXClusterSpot &new_spot)
 
         // show on map
         setDXCMapPosition (list_spot);
-        drawDXSpotOnMap (list_spot);
+        drawDXPathOnMap (list_spot);
+        drawDXCOnMap (list_spot);
 }
 
 /* given address of pointer into a WSJT-X message, extract bool and advance pointer to next field.
@@ -621,7 +621,7 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
         uint32_t magic = wsjtx_quint32 (bpp);
         // dxcLog (_FX("magic 0x%x\n"), magic);
         if (magic != 0xADBCCBDA) {
-            dxcLog (_FX("packet received but wrong magic"));
+            dxcLog (_FX("packet received but wrong magic\n"));
             return (false);
         }
 
@@ -653,7 +653,7 @@ static bool wsjtxIsStatusMsg (uint8_t **bpp)
 static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 {
         resetWatchdog();
-        // dxcLog (_FX("Parsing status"));
+        // dxcLog (_FX("Parsing status\n"));
 
         // crack remaining fields down to grid
         uint32_t hz = wsjtx_quint64 (bpp);                      // capture freq
@@ -729,7 +729,7 @@ static void showDXClusterErr (const SBox &box, const char *msg)
         tft.print (msg);
 
         // log
-        dxcLog (msg);
+        dxcLog (_FX("%s\n"), msg);
 
         // shut down connection
         closeDXCluster();
@@ -746,9 +746,9 @@ static void prefillDXList(const SBox &box)
         char line[150];
 
         // ask for recent entries
-        snprintf (line, sizeof(line), _FX("show/dx %d"), MAX_VIS);
-        dxcLog (line);
-        dx_client.println (line);
+        snprintf (line, sizeof(line), _FX("show/dx %d\n"), MAX_VIS);
+        dxcLog (_FX("%s"), line);
+        dx_client.print (line);
         updateClocks(false);
 
         // collect spots until find next prompt.
@@ -764,11 +764,11 @@ static void prefillDXList(const SBox &box)
         int n_ss = 0;
         uint16_t ll;
         while (getTCPLine (dx_client, line, sizeof(line), &ll) && !isSpiderPrompt(line, ll)) {
-            // dxcLog (line);
+            // dxcLog (_FX("%s\n"), line);
             int ut;
             if (sscanf (line, _FX("%f %20s %*s %d"), &ss[n_ss].kHz, ss[n_ss].call, &ut) == 3
                                                                 && n_ss < MAX_VIS) {
-                dxcLog (line);
+                dxcLog (_FX("%s\n"), line);
                 ss[n_ss++].ut = ut;
             }
         }
@@ -815,7 +815,7 @@ static bool connectDXCluster (const SBox &box)
                 // look alive
                 resetWatchdog();
                 updateClocks(false);
-                dxcLog (_FX("connect ok"));
+                dxcLog (_FX("connect ok\n"));
 
                 // assume first question is asking for call
                 const char *login = getDXClusterLogin();
@@ -826,9 +826,10 @@ static bool connectDXCluster (const SBox &box)
                 uint16_t bl;
                 StackMalloc buf_mem(200);
                 char *buf = buf_mem.getMem();
+                size_t bufl = buf_mem.getSize();
                 cl_type = CT_UNKNOWN;
-                while (getTCPLine (dx_client, buf, buf_mem.getSize(), &bl)) {
-                    // dxcLog (buf);
+                while (getTCPLine (dx_client, buf, bufl, &bl)) {
+                    // dxcLog (_FX("%s\n"), buf);
                     strtolower(buf);
                     if (strstr (buf, "dx") && strstr (buf, "spider"))
                         cl_type = CT_DXSPIDER;
@@ -853,9 +854,9 @@ static bool connectDXCluster (const SBox &box)
                 }
 
                 // send not here
-                snprintf (buf, buf_mem.getSize(), _FX("set/nohere"));
-                dx_client.println(buf);
-                dxcLog (buf);
+                snprintf (buf, bufl, _FX("set/nohere\n"));
+                dxcLog (_FX("%s"), buf);
+                dx_client.print (buf);
                 if (!lookForDXClusterPrompt()) {
                     showDXClusterErr (box, _FX("Error from set/nohere"));
                     return (false);
@@ -868,9 +869,9 @@ static bool connectDXCluster (const SBox &box)
                 for (int i = 0; i < N_DXCLCMDS; i++) {
                     if (dx_on[i] && strlen(dx_cmds[i]) > 0) {
                         dx_client.println(dx_cmds[i]);
-                        dxcLog (dx_cmds[i]);
+                        dxcLog (_FX("%s\n"), dx_cmds[i]);
                         if (!lookForDXClusterPrompt()) {
-                            snprintf (buf, buf_mem.getSize(), _FX("Error from %s"), dx_cmds[i]);
+                            snprintf (buf, bufl, _FX("No > from %s\n"), dx_cmds[i]);
                             showDXClusterErr (box, buf);
                             return (false);
                         }
@@ -936,11 +937,11 @@ static bool sendDXClusterHeartbeat()
         if (!useDXCluster() || !dx_client)
             return (true);
 
-        const char *hbcmd = _FX("show/date");
-        dx_client.println (hbcmd);
-        dxcLog (hbcmd);
+        const char *hbcmd = _FX("ping\n");
+        dxcLog (_FX("feeding %s"), hbcmd);
+        dx_client.print (hbcmd);
         if (!lookForDXClusterPrompt()) {
-            dxcLog (_FX("No > after show/date"));
+            dxcLog (_FX("No > after %s"), hbcmd);
             return (false);
         }
 
@@ -965,26 +966,26 @@ bool sendDXClusterDELLGrid()
         // handy DE lat/lon in common format
         char llstr[30];
         snprintf (llstr, sizeof(llstr), _FX("%.0f %.0f %c %.0f %.0f %c"),
-                    fabsf(de_ll.lat_d), fmodf(60*fabsf(de_ll.lat_d), 60), de_ll.lat_d < 0 ? 'S' : 'N',
-                    fabsf(de_ll.lng_d), fmodf(60*fabsf(de_ll.lng_d), 60), de_ll.lng_d < 0 ? 'W' : 'E');
+                floorf(fabsf(de_ll.lat_d)), floorf(fmodf(60*fabsf(de_ll.lat_d), 60)), de_ll.lat_d<0?'S':'N',
+                floorf(fabsf(de_ll.lng_d)), floorf(fmodf(60*fabsf(de_ll.lng_d), 60)), de_ll.lng_d<0?'W':'E');
 
         if (cl_type == CT_DXSPIDER) {
 
             // set grid
-            snprintf (buf, sizeof(buf), _FX("set/qra %s"), maid);
-            dx_client.println(buf);
-            dxcLog (buf);
+            snprintf (buf, sizeof(buf), _FX("set/qra %s\n"), maid);
+            dx_client.print(buf);
+            dxcLog (_FX("%s"), buf);
             if (!lookForDXClusterPrompt()) {
-                dxcLog (_FX("No > after set/qra"));
+                dxcLog (_FX("No > after %s"), buf);
                 return (false);
             }
 
             // set DE ll
-            snprintf (buf, sizeof(buf), _FX("set/location %s"), llstr);
-            dx_client.println(buf);
-            dxcLog (buf);
+            snprintf (buf, sizeof(buf), _FX("set/location %s\n"), llstr);
+            dx_client.print(buf);
+            dxcLog (_FX("%s"), buf);
             if (!lookForDXClusterPrompt()) {
-                dxcLog (_FX("No > after set/loc"));
+                dxcLog (_FX("No > after %s"), buf);
                 return (false);
             }
 
@@ -996,23 +997,23 @@ bool sendDXClusterDELLGrid()
         } else if (cl_type == CT_ARCLUSTER) {
 
             // friendly turn off skimmer just avoid getting swamped
-            strcpy (buf, _FX("set dx filter not skimmer"));
-            dx_client.println(buf);
-            dxcLog (buf);
+            strcpy (buf, _FX("set dx filter not skimmer\n"));
+            dx_client.print(buf);
+            dxcLog (_FX("%s"), buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "filter"))
                 return (false);
 
             // set grid
-            snprintf (buf, sizeof(buf), _FX("set station grid %sjj"), maid);    // fake 6-char grid
-            dx_client.println(buf);
-            dxcLog (buf);
+            snprintf (buf, sizeof(buf), _FX("set station grid %sjj\n"), maid);    // fake 6-char grid
+            dx_client.print(buf);
+            dxcLog (_FX("%s"), buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "set to"))
                 return (false);
 
             // set ll
-            snprintf (buf, sizeof(buf), _FX("set station latlon %s"), llstr);
-            dx_client.println(buf);
-            dxcLog (buf);
+            snprintf (buf, sizeof(buf), _FX("set station latlon %s\n"), llstr);
+            dx_client.print(buf);
+            dxcLog (_FX("%s"), buf);
             if (!lookForDXClusterString (buf, sizeof(buf), "location"))
                 return (false);
 
@@ -1084,7 +1085,7 @@ static bool crackSpiderSpot (char line[], DXClusterSpot &news)
         memset (&news, 0, sizeof(news));
 
         if (sscanf (line, _FX("DX de %11[^ :]: %f %11s"), news.de_call, &news.kHz, news.dx_call) != 3) {
-            dxcLog ("unknown format: %s", line);
+            dxcLog (_FX("unknown format: %s\n"), line);
             return (false);
         }
 
@@ -1133,7 +1134,7 @@ bool updateDXCluster(const SBox &box)
             char line[120];
             while (dx_client.available() && getTCPLine (dx_client, line, sizeof(line), NULL)) {
                 // DX de KD0AA:     18100.0  JR1FYS       FT8 LOUD in FL!                2156Z EL98
-                dxcLog (line);
+                dxcLog (_FX("%s\n"), line);
 
                 // look alive
                 updateClocks(false);
@@ -1157,7 +1158,6 @@ bool updateDXCluster(const SBox &box)
             // send something if quiet for too long
             if (millis() - last_action > CLUSTER_TIMEOUT) {
                 last_action = millis();        // avoid banging
-                dxcLog (_FX("feeding"));
                 if (!sendDXClusterHeartbeat()) {
                     showDXClusterErr (box, _FX("Heartbeat lost connection"));
                     return(false);
@@ -1305,11 +1305,14 @@ void drawDXClusterSpotsOnMap ()
 {
         // skip if we are not up or don't want spots on map
         if (!useDXCluster() || findPaneForChoice(PLOT_CH_DXCLUSTER) == PANE_NONE
-                    || (!labelSpots() && !showSpotPaths()))
+                    || (!labelSpots() && getSpotPathSize() == 0))
             return;
 
+        // draw all paths first, then labels so they appear on top
         for (uint8_t i = 0; i < n_dxspots; i++)
-            drawDXSpotOnMap (dxspots[i]);
+            drawDXPathOnMap (dxspots[i]);
+        for (uint8_t i = 0; i < n_dxspots; i++)
+            drawDXCOnMap (dxspots[i]);
 }
 
 /* return whether the given screen coord lies over any spot label.
@@ -1447,11 +1450,4 @@ void setDXCMapPosition (DXClusterSpot &s)
         ll.lng_d = rad2deg(ll.lng);
         ll2s (ll, center, 0);
         setMapTagBox (tag, center, 0, s.map_b);
-}
-
-/* return age of spot in minutes
- */
-int spotAgeMinutes (const DXClusterSpot &s)
-{
-    return ((now() - s.spotted + 30)/60);
 }

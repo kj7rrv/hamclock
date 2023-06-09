@@ -1632,7 +1632,17 @@ static void showAlarmRinging()
 
         // wait for tap or timeout anywhere in pane
         SCoord s;
-        (void) waitForTap (b, checkExternalTurnOff, ALM_RINGTO, true, s);
+        char c;
+        UserInput ui = {
+            b,
+            checkExternalTurnOff,
+            false,
+            ALM_RINGTO,
+            true,
+            s,
+            c,
+        };
+        (void) waitForUser (ui);
 
         // off
         alarm_state = ALMS_ARMED;

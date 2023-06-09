@@ -177,15 +177,16 @@ static void formatOTASpot (const DXClusterSpot &spot, char line[MAX_LINE])
     // leading space then spot id
     l += snprintf (line+l, MAX_LINE-l, _FX(" %*.*s"), ID_LEN, ID_LEN, spot.de_call);
 
-    // squeeze in age
-    int age = spotAgeMinutes(spot);
+    // age on right
+    int age_min = (now() - spot.spotted + 30)/60;
     if (ota_type == OTAT_SOTA) {
-        if (age < 10)
-            snprintf (line+l, MAX_LINE-l, _FX(" %d"), age);
+        // only room for 1 column
+        if (age_min < 10)
+            snprintf (line+l, MAX_LINE-l, _FX(" %d"), age_min);
         else
             snprintf (line+l, MAX_LINE-l, _FX(" +"));
     } else
-        snprintf (line+l, MAX_LINE-l, _FX(" %2dm"), age);
+        snprintf (line+l, MAX_LINE-l, _FX(" %2dm"), age_min);
 }
 
 /* redraw all visible otaspots in the given box.

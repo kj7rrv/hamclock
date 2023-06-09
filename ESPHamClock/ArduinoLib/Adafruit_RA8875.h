@@ -171,7 +171,7 @@ class Adafruit_RA8875 {
 	    uint16_t color16);
 
         // non-standard access to full underlying resolution
-	void drawSubPixel(int16_t x, int16_t y, uint16_t color16);
+	void drawPixelRaw(int16_t x, int16_t y, uint16_t color16);
 	void drawLineRaw(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness, uint16_t color16);
 	void fillRectRaw(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16);
 	void drawRectRaw(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color16);
@@ -194,11 +194,12 @@ class Adafruit_RA8875 {
 
         // put and get next keyboard character
         void putChar (char c);
-        char getChar(void);
+        char getChar(bool *control, bool *shift);
 
         // set and get current mouse position
         bool getMouse (uint16_t *x, uint16_t *y);
         void setMouse (int x, int y);
+        bool warpCursor (char dir, unsigned n, int *xp, int *yp);
 
         void setEarthPix (char *day_pixels, char *night_pixels);
 
@@ -270,6 +271,8 @@ class Adafruit_RA8875 {
         // used by X11OptionsEngageNow
         volatile bool options_engage, options_fullscreen;
 
+        void encodeKeyEvent (XKeyEvent *event);
+
 
 #endif // _USE_X11
 
@@ -298,9 +301,16 @@ class Adafruit_RA8875 {
 	pthread_mutex_t mouse_lock;
 	volatile int16_t mouse_x, mouse_y;
 	volatile int mouse_ups, mouse_downs;
+
+        typedef struct {
+            char c;
+            bool control;
+            bool shift;
+        } KBState;
+        #define KB_N 20
+        KBState kb_q[KB_N];
+        int kb_qhead, kb_qtail;
 	pthread_mutex_t kb_lock;
-        char kb_cq[20];
-        int kb_cqhead, kb_cqtail;
 
         struct timeval mouse_tv;
         int mouse_idle;

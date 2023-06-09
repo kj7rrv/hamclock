@@ -533,29 +533,33 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
         updateClocks(false);
 
         // copy pixels
-        mapMsg (100, _FX("%s: downloading"), title);
-        for (uint32_t nbytescopy = 0; nbytescopy < npixbytes; nbytescopy++) {
-            resetWatchdog();
+        {   // statement block just to avoid complaint about goto bypassing t0
+            mapMsg (100, _FX("%s: downloading"), title);
+            uint32_t t0 = millis();
+            for (uint32_t nbytescopy = 0; nbytescopy < npixbytes; nbytescopy++) {
 
-            if (((nbytescopy%(npixbytes/10)) == 0) || nbytescopy == npixbytes-1)
-                mapMsg (0, _FX("%s: %3d%%"), title, 100*(nbytescopy+1)/npixbytes);
+                if (((nbytescopy%(npixbytes/10)) == 0) || nbytescopy == npixbytes-1)
+                    mapMsg (0, _FX("%s: %3d%%"), title, 100*(nbytescopy+1)/npixbytes);
 
-            // read more
-            if (nbufbytes < COPY_BUF_SIZE && !getChar (client, &copy_buf[nbufbytes++])) {
-                Serial.printf (_FX("%s: file is short: %u %u\n"), title, nbytescopy, npixbytes);
-                mapMsg (1000, _FX("%s: file is short"), title);
-                goto out;
-            }
-
-            // write when copy_buf is full or last
-            if (nbufbytes == COPY_BUF_SIZE || nbytescopy == npixbytes-1) {
-                updateClocks(false);
-                if (f.write (copy_buf, nbufbytes) != nbufbytes) {
-                    mapMsg (1000, _FX("%s: write failed"), title);
+                // read more
+                if (nbufbytes < COPY_BUF_SIZE && !getChar (client, &copy_buf[nbufbytes++])) {
+                    Serial.printf (_FX("%s: file is short: %u %u\n"), title, nbytescopy, npixbytes);
+                    mapMsg (1000, _FX("%s: file is short"), title);
                     goto out;
                 }
-                nbufbytes = 0;
+
+                // write when copy_buf is full or last
+                if (nbufbytes == COPY_BUF_SIZE || nbytescopy == npixbytes-1) {
+                    resetWatchdog();
+                    updateClocks(false);
+                    if (f.write (copy_buf, nbufbytes) != nbufbytes) {
+                        mapMsg (1000, _FX("%s: write failed"), title);
+                        goto out;
+                    }
+                    nbufbytes = 0;
+                }
             }
+            Serial.printf (_FX("%s: %ld B/s\n"), title, 1000L*npixbytes/(millis()-t0));
         }
 
         // if get here, it worked!

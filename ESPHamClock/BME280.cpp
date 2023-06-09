@@ -313,15 +313,15 @@ void initBME280()
 {
     connectSensors(true);
 
-    if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset)
-                        || (brb_rotset & (1<<brb_mode)) == 0
-                        || ((brb_rotset & (1 << BRB_SHOW_BME76)) && !bme_data[BME_76])
-                        || ((brb_rotset & (1 << BRB_SHOW_BME77)) && !bme_data[BME_77])) {
-        Serial.printf (_FX("BME: Resetting initial brb_rotset 0x%x to 0x%x\n"),
-                                brb_rotset, 1<<BRB_SHOW_SWSTATS);
-        brb_mode = BRB_SHOW_SWSTATS;
-        brb_rotset = 1 << BRB_SHOW_SWSTATS;
-        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
+    if ((brb_rotset & (1 << BRB_SHOW_BME76)) && !bme_data[BME_76]) {
+        Serial.print (F("BME: Removing BRB_SHOW_BME76 from brb_rotset\n"));
+        brb_rotset &= ~(1 << BRB_SHOW_BME76);
+        checkBRBRotset();
+    }
+    if ((brb_rotset & (1 << BRB_SHOW_BME77)) && !bme_data[BME_77]) {
+        Serial.print (F("BME: Removing BRB_SHOW_BME77 from brb_rotset\n"));
+        brb_rotset &= ~(1 << BRB_SHOW_BME77);
+        checkBRBRotset();
     }
 }
 
@@ -431,10 +431,6 @@ void drawBMEStats()
         return; // lint
     }
 
-    // but no need for name if only one sensor
-    if (getNBMEConnected() == 1)
-        name = "";
-
     // newest data is at head-1
     int qi = (dp->q_head + N_BME_READINGS - 1) % N_BME_READINGS;
 
@@ -469,14 +465,6 @@ void drawBMEStats()
 
     // do it
     drawNCDXFStats (titles, values, colors);
-}
-
-/* called to check whether NCDXF_b is showing BME stats and needs updating.
- */
-void updateBMEStats()
-{
-    if ((brb_mode == BRB_SHOW_BME76 || brb_mode == BRB_SHOW_BME77) && new_data)
-        drawNCDXFBox();
 }
 
 /* handle a touch in NCDXF_b known to be showing BME stats

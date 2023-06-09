@@ -13,6 +13,9 @@ static const char cities_fn[] PROGMEM = "/cities2.txt"; // changed in 2.81
 // malloced sorted kdtree
 static KD3Node *city_root;
 
+// pixel width of longest city
+static int max_city_len;
+
 
 /* query for list of cities, create kdtree.
  * harmless if called more than once.
@@ -50,6 +53,7 @@ void readCities()
             int n_cities = 0;                   // number in use in each list
             int n_malloced = 0;                 // number malloced in each list
             char line[200];
+            max_city_len = 0;
             while (getTCPLine (cities_client, line, sizeof(line), NULL)) {
 
                 // crack
@@ -73,6 +77,11 @@ void readCities()
                 new_ll.lat_d = lat;
                 new_ll.lng_d = lng;
                 normalizeLL (new_ll);
+
+                // capture longest name
+                int name_l = strlen (name);
+                if (name_l > max_city_len)
+                    max_city_len = name_l;
 
                 // good
                 n_cities++;
@@ -104,8 +113,9 @@ void readCities()
 }
 
 /* return name of city and location nearest the given ll, else NULL.
+ * also report longest city length for drawing purposes.
  */
-const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
+const char *getNearestCity (const LatLong &ll, LatLong &city_ll, int &max_cl)
 {
         // ignore if not ready or failed
         if (!city_root)
@@ -123,6 +133,7 @@ const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
         // report results if successful
         best_dist = nearestKD3Dist2Miles (best_dist);   // convert to miles
         if (best_dist < MAX_CSR_DIST) {
+            max_cl = max_city_len;
             KD3Node2ll (*best_city, &city_ll);
             return ((char*)(best_city->data));
         } else {
@@ -135,9 +146,10 @@ const char *getNearestCity (const LatLong &ll, LatLong &city_ll)
 
 // dummies
 
-const char *getNearestCity (const LatLong &ll, LatLong &city_ll) {
+const char *getNearestCity (const LatLong &ll, LatLong &city_ll, int &max_cl) {
     (void) ll;
     (void) city_ll;
+    (void) max_cl;
     return NULL;
 }
 

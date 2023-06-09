@@ -9,127 +9,114 @@
  */
 static void drawMoonImage (const SBox &b)
 {
-    // prep
-    prepPlotBox (b);
+        // prep
+        prepPlotBox (b);
 
-    float phase = lunar_cir.phase;
-    // printf ("Phase %g deg\n", rad2deg(phase));
+        float phase = lunar_cir.phase;
+        // printf ("Phase %g deg\n", rad2deg(phase));
 
-    const uint16_t mr = HC_MOON_W/2;                            // moon radius on output device
-    uint16_t mcx = tft.SCALESZ*(b.x+b.w/2);                     // moon center x "
-    uint16_t mcy = tft.SCALESZ*(b.y+b.h/2);                     // moon center y "
-    int pix_i = 0;                                              // moon_image index
-    for (int16_t dy = -mr; dy < mr; dy++) {                     // scan top-to-bot, matching image
-        float Ry = sqrtf(mr*mr-dy*dy);                          // moon circle half-width at y
-        int16_t Ryi = floorf(Ry+0.5F);                          // " as int
-        for (int16_t dx = -mr; dx < mr; dx++) {                 // scan left-to-right, matching image
-            uint16_t pix = pgm_read_word(&moon_image[pix_i++]); // next pixel
-            if (dx > -Ryi && dx < Ryi) {                        // if inside moon circle
-                float a = acosf((float)dx/Ryi);                 // looking down from NP CW from right limb
-                if (isnan(a) || (phase > 0 && a > phase) || (phase < 0 && a < phase+M_PIF))
-                    pix = RGB565(RGB565_R(pix)/3, RGB565_G(pix)/3, RGB565_B(pix)/3); // unlit side
-                tft.drawSubPixel (mcx+dx, mcy+dy, pix);
+        const uint16_t mr = HC_MOON_W/2;                            // moon radius on output device
+        uint16_t mcx = tft.SCALESZ*(b.x+b.w/2);                     // moon center x "
+        uint16_t mcy = tft.SCALESZ*(b.y+b.h/2);                     // moon center y "
+        int pix_i = 0;                                              // moon_image index
+        for (int16_t dy = -mr; dy < mr; dy++) {                     // scan top-to-bot, matching image
+            float Ry = sqrtf(mr*mr-dy*dy);                          // moon circle half-width at y
+            int16_t Ryi = floorf(Ry+0.5F);                          // " as int
+            for (int16_t dx = -mr; dx < mr; dx++) {                 // scan left-to-right, matching image
+                uint16_t pix = pgm_read_word(&moon_image[pix_i++]); // next pixel
+                if (dx > -Ryi && dx < Ryi) {                        // if inside moon circle
+                    float a = acosf((float)dx/Ryi);                 // looking down from NP CW from right limb
+                    if (isnan(a) || (phase > 0 && a > phase) || (phase < 0 && a < phase+M_PIF))
+                        pix = RGB565(RGB565_R(pix)/3, RGB565_G(pix)/3, RGB565_B(pix)/3); // unlit side
+                    tft.drawPixelRaw (mcx+dx, mcy+dy, pix);
+                }
+                if ((dy%50) == 0)
+                    resetWatchdog();
             }
-            if ((dy%50) == 0)
-                resetWatchdog();
         }
-    }
 }
 
-/* update moon pane info if likely changed or force.
+/* update moon pane info for sure and possibly image also.
  * image is in moon_image[HC_MOON_W*HC_MOON_H].
- * N.B. in deciding whether to update we only consider changes in nowWO, not de_ll or lunar_cir.
  */
-void updateMoonPane (bool force)
+void updateMoonPane (bool force_all)
 {
-        #define INFO_DT         30                              // seconds change to update numeric info
-        #define IMG_DT          1800                            // seconds change to update image
-        static time_t last_info_update;                         // last nowWO we updated info
-        static time_t last_img_update;                          // last nowWO we updated image
-
         // skip altogether if pane not selected
         PlotPane moonpp = findPaneChoiceNow (PLOT_CH_MOON);
         if (moonpp == PANE_NONE)
             return;
         const SBox &box = plot_b[moonpp];
 
-        // skip if too soon unless force
-        time_t t0 = nowWO();
-        bool update_info = force || labs(t0 - last_info_update) > INFO_DT;
-        bool update_img = force || labs(t0 - last_img_update) > IMG_DT;
-        if (!update_info && !update_img)
-            return;
+        resetWatchdog();
 
-        // keep the strings so we can erase them exactly next time; using boxes cut chits from moon
+        // fresh info at user's effective time
+        static time_t prev_t0;
+        time_t t0 = nowWO();
+        getLunarCir (t0, de_ll, lunar_cir);
+
+        // keep the strings so we can erase them exactly next time; using rectangles cuts chits from moon
         static char az_str[10];
         static char el_str[10];
         static char rs_str[10];
         static char rt_str[10];
 
-        resetWatchdog();
-
         selectFontStyle (LIGHT_FONT, FAST_FONT);
 
-        if (update_img) {
+        // start over if requested or old else just erase previous info
 
-            // this also erases the stats so must update info too
+        if (force_all || labs (t0-prev_t0) > 6*3600) {
+
+            // fresh start
             drawMoonImage(box);
-            update_info = true;
 
-            // record update time
-            last_img_update = t0;
-        }
+        } else {
 
-        if (update_info) {
-
-            // squeeze in some interesting info in the corners; no color worked overlaying the lit moon
-
-            if (!update_img) {
-                // no pane erase so erase previous individual stats
-                tft.setTextColor (RA8875_BLACK);
-                tft.setCursor (box.x+1, box.y+2);
-                tft.print (az_str);
-                tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
-                tft.print (el_str);
-                tft.setCursor (box.x+1, box.y+box.h-10);
-                tft.print (rs_str);
-                tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
-                tft.print (rt_str);
-            }
-
-            tft.setTextColor (DE_COLOR);
-
-            snprintf (az_str, sizeof(az_str), "Az: %.0f", rad2deg(lunar_cir.az));
+            // no pane erase so erase previous individual stats
+            tft.setTextColor (RA8875_BLACK);
             tft.setCursor (box.x+1, box.y+2);
             tft.print (az_str);
-
-            snprintf (el_str, sizeof(el_str), "El: %.0f", rad2deg(lunar_cir.el));
             tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
             tft.print (el_str);
-
-            // show which ever rise or set event comes next
-            time_t rise, set;
-            getLunarRS (t0, de_ll, &rise, &set);
-            if (rise > t0 && (set < t0 || rise - t0 < set - t0))
-                snprintf (rs_str, sizeof(rs_str), "R@%02d:%02d", hour(rise+de_tz.tz_secs),
-                                                                  minute (rise+de_tz.tz_secs));
-            else if (set > t0 && (rise < t0 || set - t0 < rise - t0))
-                snprintf (rs_str, sizeof(rs_str), "S@%02d:%02d", hour(set+de_tz.tz_secs),
-                                                                  minute (set+de_tz.tz_secs));
-            else {
-                Serial.printf (_FX("No R/S %ld : %ld %ld\n"), t0, rise, set);
-                strcpy (rs_str, "No R/S");
-            }
             tft.setCursor (box.x+1, box.y+box.h-10);
             tft.print (rs_str);
-
-            snprintf (rt_str, sizeof(rt_str), "%.0f m/s", lunar_cir.vel);;
             tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
             tft.print (rt_str);
-
-            // record update time
-            last_info_update = t0;
         }
+
+        // always draw info
+
+        tft.setTextColor (DE_COLOR);
+
+        snprintf (az_str, sizeof(az_str), "Az: %.0f", rad2deg(lunar_cir.az));
+        tft.setCursor (box.x+1, box.y+2);
+        tft.print (az_str);
+
+        snprintf (el_str, sizeof(el_str), "El: %.0f", rad2deg(lunar_cir.el));
+        tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
+        tft.print (el_str);
+
+        // show which ever rise or set event comes next
+        time_t rise, set;
+        getLunarRS (t0, de_ll, &rise, &set);
+        if (rise > t0 && (set < t0 || rise - t0 < set - t0))
+            snprintf (rs_str, sizeof(rs_str), "R@%02d:%02d", hour(rise+de_tz.tz_secs),
+                                                              minute (rise+de_tz.tz_secs));
+        else if (set > t0 && (rise < t0 || set - t0 < rise - t0))
+            snprintf (rs_str, sizeof(rs_str), "S@%02d:%02d", hour(set+de_tz.tz_secs),
+                                                              minute (set+de_tz.tz_secs));
+        else {
+            Serial.printf (_FX("No R/S %ld : %ld %ld\n"), t0, rise, set);
+            strcpy (rs_str, "No R/S");
+        }
+        tft.setCursor (box.x+1, box.y+box.h-10);
+        tft.print (rs_str);
+
+        snprintf (rt_str, sizeof(rt_str), "%.0f m/s", lunar_cir.vel);;
+        tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
+        tft.print (rt_str);
+
+        // record
+        prev_t0 = t0;
 }
 
 
@@ -538,35 +525,33 @@ void drawMoonElPlot()
         tft.drawPR();
 
         // popup history for erasing
-        time_t prev_popup_t_start = 0;
-        SBox prev_popup_b = {0,0,0,0};
+        bool popup_is_up = false;
+        SBox popup_b = {0,0,0,0};
 
         // report info for tap times until time out or tap Resume button
-        uint32_t timeout_ms = millis();
-        while (!timesUp (&timeout_ms, MP_TO)) {
+        SCoord s;
+        char c;
+        UserInput ui = {
+            map_b,
+            NULL,
+            false,
+            MP_TO,
+            true,
+            s,
+            c,
+        };
+        while (waitForUser(ui)) {
 
-            // check for tap
-            SCoord s;
-            if (readCalTouchWS (s) == TT_NONE) {
-                updateClocks(false);
-                tft.drawPR();           // refresh if drag window
-                wdDelay(100);
-                continue;
-            }
-
-            // done if tap Resume
-            if (inBox (s, resume_b))
+            // done if return, esc or tap Resume button
+            if (c == '\r' || c == '\n' || c == 27 || inBox (s, resume_b))
                 break;
 
-            // refresh timeout
-            timeout_ms = millis();
-
-            // always erase previous popup, if any, by redrawing plot contents
-            if (prev_popup_t_start > 0) {
-                fillSBox (prev_popup_b, RA8875_BLACK);
+            // first erase previous popup, if any
+            if (popup_is_up) {
+                fillSBox (popup_b, RA8875_BLACK);
                 drawMPSetup (t0);
                 drawMPElPlot (t0, t_start, t_end);
-                prev_popup_t_start = 0;
+                popup_is_up = 0;
             }
 
             // show new popup if tap within the plot area
@@ -575,7 +560,6 @@ void drawMoonElPlot()
                 resetWatchdog();
 
                 // popup at s
-                SBox popup_b;
                 popup_b.x = s.x;
                 popup_b.y = s.y;
                 popup_b.w = 122;
@@ -587,12 +571,11 @@ void drawMoonElPlot()
                 if (popup_b.y + popup_b.h > MP_E2Y(-M_PI_2F) - MP_MT)
                     popup_b.y = MP_E2Y(-M_PI_2F) - MP_MT - popup_b.h;
 
-                // draw popup -- it might move
+                // draw popup
                 drawMPPopup (MP_X2T(s.x), popup_b);
 
-                // remember popup and popup's time span for later erase
-                prev_popup_b = popup_b;
-                prev_popup_t_start = MP_X2T(popup_b.x);
+                // note popup is now up
+                popup_is_up = MP_X2T(popup_b.x);
             }
         }
 

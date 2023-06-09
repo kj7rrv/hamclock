@@ -42,7 +42,7 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_UTC_OFFSET
     1,                          // NV_PLOT_1
     1,                          // NV_PLOT_2
-    1,                          // NV_BRB_ROTSET
+    1,                          // NV_BRB_ROTSET_OLD
     1,                          // NV_PLOT_3
     1,                          // NV_RSS_ON
     2,                          // NV_BPWM_DIM
@@ -151,6 +151,7 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_SDOROT
     1,                          // NV_OTATYPE
     1,                          // NV_OTASORT
+    2,                          // NV_BRB_ROTSET
 
 };
 

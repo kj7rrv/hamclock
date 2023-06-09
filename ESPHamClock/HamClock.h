@@ -98,6 +98,10 @@
     #define _SUPPORT_ZONES
 #endif
 
+// only real X11 supports full keyboard control
+#if defined(_IS_UNIX) && !defined(_WEB_ONLY) && !defined (_USE_FB0)
+#define _SUPPORT_KBCTRL
+#endif
 
 // full res app, map, moon and running man sizes
 #if defined(_CLOCK_1600x960)
@@ -454,9 +458,11 @@ enum {
     X(BRB_SHOW_ONOFF,   "On/Off") \
     X(BRB_SHOW_PHOT,    "PhotoR") \
     X(BRB_SHOW_BR,      "Brite")  \
-    X(BRB_SHOW_SWSTATS, "SpcWx")  \
+    X(BRB_SHOW_SWSTATS, "Spc Wx") \
     X(BRB_SHOW_BME76,   "BME@76") \
-    X(BRB_SHOW_BME77,   "BME@77")
+    X(BRB_SHOW_BME77,   "BME@77") \
+    X(BRB_SHOW_DXWX,    "DX Wx")  \
+    X(BRB_SHOW_DEWX,    "DE Wx")
 
 #define X(a,b)  a,                      // expands BRBMODES to enum and comma
 typedef enum {
@@ -466,8 +472,8 @@ typedef enum {
 #undef X
 
 extern uint8_t brb_mode;                // one of BRB_MODE
-extern time_t brb_rotationT;            // time at which to rotate, if more than 1 bit in rotset
-extern uint8_t brb_rotset;              // bitmask of all active BRB_MODE choices
+extern time_t brb_updateT;              // time at which to update
+extern uint16_t brb_rotset;             // bitmask of all active BRB_MODE choices
                                         // N.B. brb_rotset must always include brb_mode
 #define BRBIsRotating()                 ((brb_rotset & ~(1 << brb_mode)) != 0)  // any bits other than mode
 extern const char *brb_names[BRB_N];    // menu names -- must be in same order as BRB_MODE
@@ -594,7 +600,6 @@ extern void drawAllSymbols(bool beacons_too);
 extern void drawTZ(const TZInfo &tzi);
 extern bool inBox (const SCoord &s, const SBox &b);
 extern bool inCircle (const SCoord &s, const SCircle &c);
-extern void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...);
 extern void doReboot(void);
 extern void doExit(void);
 extern void printFreeHeap (const __FlashStringHelper *label);
@@ -618,7 +623,6 @@ extern void getTextBounds (const char str[], uint16_t *wp, uint16_t *hp);
 extern uint16_t getTextWidth (const char str[]);
 extern void normalizeLL (LatLong &ll);
 extern bool screenIsLocked(void);
-extern void fatalError (const char *fmt, ...);
 extern time_t getUptime (uint16_t *days, uint8_t *hrs, uint8_t *mins, uint8_t *secs);
 extern void eraseScreen(void);
 extern void setMapTagBox (const char *tag, const SCoord &c, uint16_t r, SBox &box);
@@ -628,11 +632,24 @@ extern bool getDXPrefix (char p[MAX_PREF_LEN+1]);
 extern void drawScreenLock(void);
 extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
+extern void getDefaultCallsign(void);
 extern void drawCallsign (bool all);
 extern void logState (void);
 extern const char *hc_version;
 extern void fillSBox (const SBox &box, uint16_t color);
 extern void drawSBox (const SBox &box, uint16_t color);
+
+#if defined(__GNUC__)
+extern void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...) __attribute__ ((format (__printf__, 3, 4)));
+#else
+extern void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...);
+#endif
+
+#if defined(__GNUC__)
+extern void fatalError (const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)));
+#else
+extern void fatalError (const char *fmt, ...);
+#endif
 
 
 
@@ -738,7 +755,7 @@ extern bool found_phot;
  *
  */
 extern void readCities(void);
-extern const char *getNearestCity (const LatLong &ll, LatLong &city_ll);
+extern const char *getNearestCity (const LatLong &ll, LatLong &city_ll, int &max_l);
 
 
 
@@ -847,7 +864,6 @@ extern void drawDXCOnMap (const DXClusterSpot &spot);
 extern bool getClosestDXC (const DXClusterSpot *list, int n_list, const LatLong &ll,
     DXClusterSpot *sp, LatLong *llp);
 extern void setDXCMapPosition (DXClusterSpot &s);
-extern int spotAgeMinutes (const DXClusterSpot &s);
 
 
 
@@ -994,7 +1010,6 @@ extern const BMEData *getBMEData (BMEIndex i, bool fresh_read);
 extern int getNBMEConnected (void);
 extern float dewPoint (float T, float RH);
 extern void doBMETouch (const SCoord &s);
-extern void updateBMEStats(void);
 
 
 
@@ -1168,6 +1183,8 @@ typedef enum {
 } DateFormat;
 
 #define N_DXCLCMDS              4               // n dx cluster commands
+#define THINPATHSZ      ((tft.SCALESZ+1)/2)     // NV_MAPSPOTS thin path size
+#define WIDEPATHSZ      (tft.SCALESZ)           // NV_MAPSPOTS wide path size
 
 
 // N.B. must match colsel_pr[] order
@@ -1238,7 +1255,7 @@ extern bool getRigctld (char host[], int *portp);
 extern bool getRotctld (char host[], int *portp);
 extern bool getFlrig (char host[], int *portp);
 extern const char *getDXClusterLogin(void);
-extern bool showSpotPaths(void);
+extern int getSpotPathSize(void);
 extern bool setMapColor (const char *name, uint16_t rgb565);
 extern void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS]);
 extern bool getColorDashed(ColorSelection id);
@@ -1325,7 +1342,13 @@ extern const char *getMapStyle (char s[]);
 extern void drawMapScale(void);
 extern void eraseMapScale(void);
 extern bool mapScaleIsUp(void);
+
+#if defined(__GNUC__)
+extern void mapMsg (uint32_t dwell_ms, const char *fmt, ...) __attribute__ ((format (__printf__, 2, 3)));
+#else
 extern void mapMsg (uint32_t dwell_ms, const char *fmt, ...);
+#endif
+
 
 
 typedef struct {
@@ -1356,6 +1379,9 @@ typedef enum {
     MENU_BLANK,                 // empty space
 } MenuFieldType;
 
+// return whether the given MenuFieldType involves active user interaction
+#define MENU_ACTIVE(i)          ((i)==MENU_1OFN || (i)==MENU_01OFN || (i)==MENU_AL1OFN || (i)==MENU_TOGGLE)
+
 typedef enum {
     MENU_OK_OK,                 // normal ok button appearance
     MENU_OK_BUSY,               // busy ok button appearance
@@ -1384,6 +1410,18 @@ extern bool runMenu (MenuInfo &menu);
 extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
 
 
+typedef struct {
+    const SBox &inbox;                          // overall input box bounds
+    bool (*fp)(void);                           // user check function, else NULL
+    bool fp_true;                               // true if fp returned true
+    uint32_t to_ms;                             // timeout, msec, or 0 forever
+    bool update_clocks;                         // whether to update clocks while waiting
+    SCoord &tap;                                // tap location or ...
+    char &kbchar;                               // keyboard char code
+} UserInput;
+
+extern bool waitForUser (UserInput &ui);
+
 
 /*******************************************************************************************n
  *
@@ -1391,7 +1429,7 @@ extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
  *
  */
 
-extern void updateMoonPane (bool force);
+extern void updateMoonPane (bool force_all);
 extern void drawMoonElPlot (void);
 extern const uint16_t moon_image[HC_MOON_W*HC_MOON_H] PROGMEM;
 
@@ -1419,8 +1457,9 @@ extern bool overAnyBeacon (const SCoord &s);
 extern void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS]);
 extern void drawBeaconKey(void);
 extern void doNCDXFBoxTouch (const SCoord &s);
-extern void drawNCDXFBox(void);
+extern bool drawNCDXFBox(void);
 extern void initBRBRotset(void);
+extern void checkBRBRotset(void);
 extern void drawNCDXFStats (const char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
                           const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
                           const uint16_t colors[NCDXF_B_NFIELDS]);
@@ -1468,7 +1507,7 @@ typedef enum {
     NV_UTC_OFFSET,              // offset from UTC, seconds
     NV_PLOT_1,                  // Pane 1 PlotChoice
     NV_PLOT_2,                  // Pane 2 PlotChoice
-    NV_BRB_ROTSET,              // Beacon box mode bit mask
+    NV_BRB_ROTSET_OLD,          // deprecated after it became too small
     NV_PLOT_3,                  // Pane 3 PlotChoice
 
     NV_RSS_ON,                  // whether to display RSS
@@ -1515,7 +1554,7 @@ typedef enum {
 
     NV_USEGPSD,                 // bit 1: use gpsd for time, bit 2: use for location
     NV_LOGUSAGE,                // whether to phone home with clock settings
-    NV_MAPSPOTS,                // DX spot annotations: 0=none; 1=just prefix; 2=full call; |= 4 path
+    NV_MAPSPOTS,                // DX spot annotations: 0=none; 1=just prefix; 2=full call; |= width
     NV_WIFI_PASSWD,             // WIFI password
     NV_NTPSET,                  // whether to use NV_NTPHOST
 
@@ -1599,6 +1638,7 @@ typedef enum {
 
     NV_OTALIST,                 // 0=POTA or 1=SOTA
     NV_OTASORT,                 // 0-3 Band Call ID Age
+    NV_BRB_ROTSET,              // Beacon box mode bit mask
 
     NV_N
 
@@ -1733,8 +1773,8 @@ extern void showRotatingBorder (void);
 extern void initPlotPanes(void);
 extern void savePlotOps(void);
 extern bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color);
-extern bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap);
 extern int tickmarks (float min, float max, int numdiv, float ticks[]);
+
 
 
 
@@ -1828,6 +1868,7 @@ extern void savePSKState(void);
 extern bool overAnyPSKSpots (const SCoord &s);
 extern void drawPSKSpots(void);
 extern bool getPSKBandStats (PSKBandStats stats[PSKBAND_N], const char *names[PSKBAND_N]);
+extern bool maxPSKageOk (int m);
 
 #if defined(_SUPPORT_PSKUNIX)
 
@@ -2040,12 +2081,17 @@ extern bool parseWebCommand (WebArgs &wa, char line[], size_t line_len);
 
 extern char *trim (char *str);
 extern void startPlainText (WiFiClient &client);
-extern void sendHTTPError (WiFiClient &client, const char *fmt, ...);
 extern void initWebServer(void);
 extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
 extern void runNextDemoCommand(void);
+
+#if defined(__GNUC__)
+extern void sendHTTPError (WiFiClient &client, const char *fmt, ...) __attribute__ ((format(__printf__,2,3)));
+#else
+extern void sendHTTPError (WiFiClient &client, const char *fmt, ...);
+#endif
 
 
 
@@ -2147,6 +2193,11 @@ extern bool updateDEWX (const SBox &box);
 extern bool updateDXWX (const SBox &box);
 extern void showDXWX(void);
 extern void showDEWX(void);
+extern bool getWorldWx (const LatLong &ll, WXInfo &wi);
+extern void fetchWorldWx(void);
+extern bool drawNCDXFWx (BRB_MODE m);
+
+
 
 
 

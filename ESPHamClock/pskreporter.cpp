@@ -214,6 +214,13 @@ bool overAnyPSKSpots (const SCoord &s)
     return (false);
 }
 
+/* return whether the given age, in minutes, is allowed.
+ */
+bool maxPSKageOk (int m)
+{
+    return (m==15 || m==30 || m==60 || m==360 || m==1440);
+}
+
 /* get NV settings related to PSK
  * COMMON
  */
@@ -231,7 +238,7 @@ void initPSKState()
             SET_PSKBAND(i);
         NVWriteUInt32 (NV_PSK_BANDS, psk_bands);
     }
-    if (!NVReadUInt16 (NV_PSK_MAXAGE, &psk_maxage_mins)) {
+    if (!NVReadUInt16 (NV_PSK_MAXAGE, &psk_maxage_mins) || !maxPSKageOk(psk_maxage_mins)) {
         // default 30 minutes
         psk_maxage_mins = 30;
         NVWriteUInt16 (NV_PSK_MAXAGE, psk_maxage_mins);
@@ -303,8 +310,8 @@ void drawPSKPane (const SBox &box)
                 psk_mask & PSKMB_OFDE ? "of" : "by",
                 psk_mask & PSKMB_CALL ? getCallsign() : de_maid,
                 (ispsk ? "PSK" : (iswspr ? "WSPR" : "RBN")),
-                psk_maxage_mins == 30 ? psk_maxage_mins : psk_maxage_mins/60,
-                psk_maxage_mins == 30 ? "mins" : (psk_maxage_mins == 60 ? "hour" : "hrs"));
+                psk_maxage_mins < 60 ? psk_maxage_mins : psk_maxage_mins/60,
+                psk_maxage_mins < 60 ? "mins" : (psk_maxage_mins == 60 ? "hour" : "hrs"));
     uint16_t whw = getTextWidth(where_how);
     tft.setCursor (box.x + (box.w-whw)/2, box.y + box.h/4);
     tft.print (where_how);
@@ -594,7 +601,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[2] = {MENU_LABEL, false, 0, PRI_INDENT, "What:"};
     mitems[3] = {MENU_LABEL, false, 0, PRI_INDENT, "Show:"};
     mitems[4] = {MENU_LABEL, false, 5, PRI_INDENT, "Age:"};
-    mitems[5] = {MENU_1OFN,  false, 6, 5, "2 hrs"};
+    mitems[5] = {MENU_1OFN,  false, 6, 5, "1 hr"};
     mitems[6] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_160M), 4, SEC_INDENT, bands[PSKBAND_160M].name};
     mitems[7] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_80M),  4, SEC_INDENT, bands[PSKBAND_80M].name};
     mitems[8] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_60M),  4, SEC_INDENT, bands[PSKBAND_60M].name};
@@ -604,7 +611,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[11] = {MENU_1OFN, of_de,     2, PRI_INDENT, "of DE"};
     mitems[12] = {MENU_1OFN, use_call,  3, PRI_INDENT, "Call"};
     mitems[13] = {MENU_1OFN, show_dist, 7, PRI_INDENT, "MaxDst"};
-    mitems[14] = {MENU_1OFN, false,     6, PRI_INDENT, "30 min"};
+    mitems[14] = {MENU_1OFN, false,     6, PRI_INDENT, "15 min"};
     mitems[15] = {MENU_1OFN, false,     6, PRI_INDENT, "6 hrs"};
     mitems[16] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_30M),  4, SEC_INDENT, bands[PSKBAND_30M].name};
     mitems[17] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_20M),  4, SEC_INDENT, bands[PSKBAND_20M].name};
@@ -615,7 +622,7 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     mitems[21] = {MENU_1OFN, !of_de,    2, PRI_INDENT, "by DE"};
     mitems[22] = {MENU_1OFN, !use_call, 3, PRI_INDENT, "Grid"};
     mitems[23] = {MENU_1OFN, !show_dist,7, PRI_INDENT, "Count"};
-    mitems[24] = {MENU_1OFN, false,     6, PRI_INDENT, "1 hour"};
+    mitems[24] = {MENU_1OFN, false,     6, PRI_INDENT, "30 min"};
     mitems[25] = {MENU_1OFN, false,     6, PRI_INDENT, "24 hrs"};
     mitems[26] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_12M),  4, SEC_INDENT, bands[PSKBAND_12M].name};
     mitems[27] = {MENU_AL1OFN, TST_PSKBAND(PSKBAND_10M),  4, SEC_INDENT, bands[PSKBAND_10M].name};
@@ -624,9 +631,9 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
 
     // set age
     switch (psk_maxage_mins) {
-    case 30:   mitems[14].set = true; break;
-    case 60:   mitems[24].set = true; break;
-    case 120:  mitems[5].set  = true; break;
+    case 15:   mitems[14].set = true; break;
+    case 30:   mitems[24].set = true; break;
+    case 60:   mitems[5].set  = true; break;
     case 360:  mitems[15].set = true; break;
     case 1440: mitems[25].set = true; break;
     default:   fatalError (_FX("Bad psk_maxage_mins: %d"), psk_maxage_mins);
@@ -685,11 +692,11 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
 
             // get new age
             if (mitems[14].set)
-                psk_maxage_mins = 30;
+                psk_maxage_mins = 15;
             else if (mitems[24].set)
-                psk_maxage_mins = 60;
+                psk_maxage_mins = 30;
             else if (mitems[5].set)
-                psk_maxage_mins = 120;
+                psk_maxage_mins = 60;
             else if (mitems[15].set)
                 psk_maxage_mins = 360;
             else if (mitems[25].set)
@@ -754,9 +761,8 @@ static void drawPSKPath (const PSKReport &rpt)
     uint16_t color = getBandColor(rpt.Hz);
     SCoord last_good_s = {0, 0};                                        // for dot
     SCoord prev_s = {0, 0};                                             // .x == 0 means don't show
-    uint16_t lwRaw = fmax (1, tft.SCALESZ - n_reports/30);              // thinner when more tracks
-    uint16_t mkRaw = lwRaw+fmin(2,tft.SCALESZ);                         // marker size
-    // printf ("*********** tft.SCALESZ %d n_reports %d lwRaw %d mkRaw %d\n", tft.SCALESZ, n_reports, lwRaw, mkRaw);
+    uint16_t lwRaw = getSpotPathSize();
+    uint16_t mkRaw = lwRaw*2;
 
     // N.B. compute each segment even if not showing paths in order to find last_good_s
     for (int i = 0; i <= n_step; i++) {     // fence posts
@@ -767,7 +773,7 @@ static void drawPSKPath (const PSKReport &rpt)
         ll2sRaw (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, lwRaw);
         if (prev_s.x > 0) {
             if (segmentSpanOkRaw(prev_s, s, lwRaw)) {
-                if (showSpotPaths() && (!dashed || n_step < 7 || (i & 1)))
+                if (lwRaw && (!dashed || n_step < 7 || (i & 1)))
                     tft.drawLineRaw (prev_s.x, prev_s.y, s.x, s.y, lwRaw, color);
                 last_good_s = s;
             } else

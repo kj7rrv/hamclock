@@ -213,17 +213,19 @@ int WiFiClient::available()
             return (0);
 
         // read more
-	int n = ::read(socket, peek, sizeof(peek));
-	if (n > 0) {
-	    n_peek = n;
+	int nr = ::read(socket, peek, sizeof(peek));
+	if (nr > 0) {
+            if (_trace_client > 1)
+                printf ("WiFiCl: read(%d) %d\n", socket, nr);
+	    n_peek = nr;
             next_peek = 0;
 	    return (1);
 	} else {
-            if (n == 0) {
+            if (nr == 0) {
                 if (_trace_client)
-                    printf ("WiFiCl: fd %d read EOF\n", socket);
+                    printf ("WiFiCl: read(%d) EOF\n", socket);
             } else
-                printf ("WiFiCl: fd %d read err: %s\n", socket, strerror(errno));
+                printf ("WiFiCl: read(%d): %s\n", socket, strerror(errno));
 	    stop();
 	    return (0);
 	}
@@ -248,14 +250,14 @@ int WiFiClient::write (const uint8_t *buf, int n)
 	    if (nw < 0) {
                 // select says it won't block but it still might be temporarily EAGAIN
                 if (errno != EAGAIN) {
-                    printf ("WiFiCl: write fd %d: %s\n", socket, strerror(errno));
+                    printf ("WiFiCl: write(%d): %s\n", socket, strerror(errno));
                     stop();             // avoid repeated failed attempts
                     return (0);
                 } else
                     nw = 0;             // act like nothing happened
 	    }
 	    if (_trace_client > 1) {
-                printf ("WiFiCl: write %d to fd %d: ", nw, socket);
+                printf ("WiFiCl: write(%d) %d: ", socket, nw);
                 bool all_printable = true;
                 for (int i = 0; i < nw; i++) {
                     if (!isprint(buf[ntot+i])) {

@@ -464,7 +464,7 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
     // erase timeline if not drawing all (because prepPlotBox() already erased everything if draw_all)
     uint16_t timeline_y = PBOT_Y+1;
     if (!draw_all)
-        tft.fillRect (box.x + 1, timeline_y, box.w-2, PFONT_H, RA8875_BLACK);
+        tft.fillRect (box.x + 1, timeline_y-1, box.w-2, PFONT_H+1, RA8875_BLACK);
 
     // label timeline local or utc wth local DE now always on left end
     selectFontStyle (LIGHT_FONT, FAST_FONT);

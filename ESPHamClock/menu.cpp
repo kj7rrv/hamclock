@@ -9,7 +9,6 @@
 #define MENU_RM         2               // right margin
 #define MENU_RH         12              // row height
 #define MENU_IS         6               // indicator size
-#define MENU_BH         14              // button height
 #define MENU_BB         4               // ok/cancel button horizontal border
 #define MENU_BDX        2               // ok/cancel button text horizontal offset
 #define MENU_BDY        3               // ok/cancel button text vertical offset
@@ -18,13 +17,16 @@
 #define MENU_BGC        RA8875_BLACK    // normal background color
 #define MENU_ERRC       RA8875_RED      // error color
 #define MENU_BSYC       RA8875_YELLOW   // busy color
+#define MENU_FOCC       RA8875_GREEN    // focus color
 
 static const char ok_label[] = "Ok";
 static const char cancel_label[] = "Cancel";
 
-/* draw selector symbol and label for the given menu item in the given pick box
+
+/* draw selector symbol and label for the given menu item in the given pick box.
+ * optionally indicate this item has the keyboard focus.
  */
-static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
+static void menuDrawItem (const MenuItem &mi, const SBox &pb, bool draw_label, bool kb_focus)
 {
     // prepare a copy of the label without underscores if drawing
     char *no__copy = NULL;
@@ -43,37 +45,40 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
 
     case MENU_LABEL:
         if (draw_label) {
-            tft.setCursor (box.x + mi.indent, box.y);
+            tft.setCursor (pb.x + mi.indent, pb.y+2);
             tft.print (no__copy);
         }
+        drawSBox (pb, kb_focus ? MENU_FOCC : MENU_BGC);
         break;
 
     case MENU_01OFN:    // fallthru
     case MENU_1OFN:
         if (mi.set)
-            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_FGC);
+            tft.fillCircle (pb.x + mi.indent + MENU_IS/2, pb.y + MENU_RH/2, MENU_IS/2, MENU_FGC);
         else {
-            tft.fillCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_BGC);
-            tft.drawCircle (box.x + mi.indent + MENU_IS/2, box.y + MENU_IS/2, MENU_IS/2, MENU_FGC);
+            tft.fillCircle (pb.x + mi.indent + MENU_IS/2, pb.y + MENU_RH/2, MENU_IS/2, MENU_BGC);
+            tft.drawCircle (pb.x + mi.indent + MENU_IS/2, pb.y + MENU_RH/2, MENU_IS/2, MENU_FGC);
         }
         if (draw_label) {
-            tft.setCursor (box.x + mi.indent + MENU_IS + MENU_IS/2, box.y);
+            tft.setCursor (pb.x + mi.indent + MENU_IS + MENU_IS/2, pb.y+2);
             tft.print (no__copy);
         }
+        drawSBox (pb, kb_focus ? MENU_FOCC : MENU_BGC);
         break;
 
     case MENU_AL1OFN:   // fallthru
     case MENU_TOGGLE:
         if (mi.set)
-            tft.fillRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_FGC);
+            tft.fillRect (pb.x + mi.indent, pb.y + (MENU_RH-MENU_IS)/2, MENU_IS, MENU_IS, MENU_FGC);
         else {
-            tft.fillRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_BGC);
-            tft.drawRect (box.x + mi.indent, box.y, MENU_IS, MENU_IS, MENU_FGC);
+            tft.fillRect (pb.x + mi.indent, pb.y + (MENU_RH-MENU_IS)/2, MENU_IS, MENU_IS, MENU_BGC);
+            tft.drawRect (pb.x + mi.indent, pb.y + (MENU_RH-MENU_IS)/2, MENU_IS, MENU_IS, MENU_FGC);
         }
         if (draw_label) {
-            tft.setCursor (box.x + mi.indent + MENU_IS + MENU_IS/2, box.y);
+            tft.setCursor (pb.x + mi.indent + MENU_IS + MENU_IS/2, pb.y+2);
             tft.print (no__copy);
         }
+        drawSBox (pb, kb_focus ? MENU_FOCC : MENU_BGC);
         break;
     }
 
@@ -81,7 +86,7 @@ static void menuDrawItem (const MenuItem &mi, const SBox &box, bool draw_label)
     free ((void*)no__copy);
 
     // show bounding box for debug
-    // drawSBox (box, RA8875_RED);
+    // drawSBox (pb, RA8875_RED);
 
     // now if just changing indicator
     if (!draw_label)
@@ -111,7 +116,7 @@ static int menuCountItemsSet (MenuInfo &menu, int ii)
 
 /* turn off all items in same group and type as item ii.
  */
-static void menuItemsAllOff (MenuInfo &menu, SBox *boxes, int ii)
+static void menuItemsAllOff (MenuInfo &menu, SBox *pick_boxes, int ii)
 {
     MenuItem &menu_ii = menu.items[ii];
 
@@ -124,7 +129,206 @@ static void menuItemsAllOff (MenuInfo &menu, SBox *boxes, int ii)
             continue;
         if (menu.items[i].set) {
             menu.items[i].set = false;
-            menuDrawItem (menu.items[i], boxes[i], false);
+            menuDrawItem (menu.items[i], pick_boxes[i], false, false);
+        }
+    }
+}
+
+
+
+/* engage a action at the specified pick index.
+ * from_kb indicates whether to highlight the new focus item.
+ */
+static void updateMenu (MenuInfo &menu, SBox *pick_boxes, int pick_i, bool from_kb)
+{
+    SBox &pb = pick_boxes[pick_i];
+    MenuItem &mi = menu.items[pick_i];
+
+    switch (mi.type) {
+    case MENU_LABEL:        // fallthru
+    case MENU_BLANK:        // fallthru
+    case MENU_IGNORE:
+        break;
+
+    case MENU_1OFN:
+        // ignore if already set, else turn this one on and all others in this group off
+        if (!mi.set) {
+            menuItemsAllOff (menu, pick_boxes, pick_i);
+            mi.set = true;
+            menuDrawItem (mi, pb, false, from_kb);
+        }
+        break;
+
+    case MENU_01OFN:
+        // turn off if set, else turn this one on and all others in this group off
+        if (mi.set) {
+            mi.set = false;
+            menuDrawItem (mi, pb, false, from_kb);
+        } else {
+            menuItemsAllOff (menu, pick_boxes, pick_i);
+            mi.set = true;
+            menuDrawItem (mi, pb, false, from_kb);
+        }
+        break;
+
+    case MENU_AL1OFN:
+        // turn on unconditionally, but turn off only if not the last one
+        if (!mi.set) {
+            mi.set = true;
+            menuDrawItem (mi, pb, false, from_kb);
+        } else {
+            if (menuCountItemsSet (menu, pick_i) > 1) {
+                mi.set = false;
+                menuDrawItem (mi, pb, false, from_kb);
+            }
+        }
+        break;
+
+    case MENU_TOGGLE:
+        // uncondition change
+        mi.set = !mi.set;
+        menuDrawItem (mi, pb, false, from_kb);
+        break;
+    }
+}
+
+
+/* update menu based on the given keyboard char.
+ * m_index is index of last updated item.
+ */
+static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const char kbchar)
+{
+    // find first active group if nothing prior
+    if (m_index < 0) {
+        for (int i = 0; i < menu.n_items; i++) {
+            MenuItem &mi = menu.items[i];
+            if (MENU_ACTIVE(mi.type)) {
+                m_index = i;
+                break;
+            }
+        }
+    }
+    if (m_index < 0)
+        return (m_index);                                       // no active types!
+
+
+    // prep search state
+    uint16_t minx = 10000, maxx = 0;
+    uint16_t miny = 10000, maxy = 0;
+    SBox &pm = pick_boxes[m_index];
+    int candidate = -1;
+
+    // search in desired direction
+    switch (kbchar) {
+
+    case 'h':
+        // next field left, if any
+        for (int i = 1; i <= menu.n_items; i++) {
+            int ii = (m_index + i) % menu.n_items;
+            MenuItem &mii = menu.items[ii];
+            SBox &pii = pick_boxes[ii];
+            uint16_t rightii_x = pii.x + pii.w;
+            if (MENU_ACTIVE(mii.type) && pii.y == pm.y && rightii_x <= pm.x && rightii_x > maxx) {
+                candidate = ii;
+                maxx = rightii_x;
+            }
+        }
+        if (candidate >= 0) {
+            // erase current, draw new
+            menuDrawItem (menu.items[m_index], pick_boxes[m_index], false, false);
+            menuDrawItem (menu.items[candidate], pick_boxes[candidate], false, true);
+            m_index = candidate;
+        }
+        break;
+
+    case 'j':
+        // next field down, if any
+        for (int i = 1; i <= menu.n_items; i++) {
+            int ii = (m_index + i) % menu.n_items;
+            MenuItem &mii = menu.items[ii];
+            SBox &pii = pick_boxes[ii];
+            uint16_t topii_y = pii.y;
+            if (MENU_ACTIVE(mii.type) && pii.x == pm.x && topii_y >= pm.y + pm.h && topii_y < miny) {
+                candidate = ii;
+                miny = topii_y;
+            }
+        }
+        if (candidate >= 0) {
+            // erase current, draw new
+            menuDrawItem (menu.items[m_index], pick_boxes[m_index], false, false);
+            menuDrawItem (menu.items[candidate], pick_boxes[candidate], false, true);
+            m_index = candidate;
+        }
+        break;
+
+    case 'k':
+        // next field up, if any
+        for (int i = 1; i <= menu.n_items; i++) {
+            int ii = (m_index + i) % menu.n_items;
+            MenuItem &mii = menu.items[ii];
+            SBox &pii = pick_boxes[ii];
+            uint16_t botii_y = pii.y + pii.h;
+            if (MENU_ACTIVE(mii.type) && pii.x == pm.x && botii_y <= pm.y && botii_y > maxy) {
+                candidate = ii;
+                maxy = botii_y;
+            }
+        }
+        if (candidate >= 0) {
+            // erase current, draw new
+            menuDrawItem (menu.items[m_index], pick_boxes[m_index], false, false);
+            menuDrawItem (menu.items[candidate], pick_boxes[candidate], false, true);
+            m_index = candidate;
+        }
+        break;
+
+    case 'l':
+        // next field right, if any
+        for (int i = 1; i <= menu.n_items; i++) {
+            int ii = (m_index + i) % menu.n_items;
+            MenuItem &mii = menu.items[ii];
+            SBox &pii = pick_boxes[ii];
+            uint16_t leftii_x = pii.x;
+            if (MENU_ACTIVE(mii.type) && pii.y == pm.y && leftii_x >= pm.x + pm.w && leftii_x < minx) {
+                candidate = ii;
+                minx = leftii_x;
+            }
+        }
+        if (candidate >= 0) {
+            // erase current, draw new
+            menuDrawItem (menu.items[m_index], pick_boxes[m_index], false, false);
+            menuDrawItem (menu.items[candidate], pick_boxes[candidate], false, true);
+            m_index = candidate;
+        }
+        break;
+
+    case ' ':
+        // activate this location
+        updateMenu (menu, pick_boxes, m_index, true);
+        break;
+
+    default:
+        break;
+    }
+
+    return (m_index);
+}
+
+/* update menu from the given tap.
+ */
+static void checkTapControl (MenuInfo &menu, SBox *pick_boxes, const SCoord &tap)
+{
+    for (int i = 0; i < menu.n_items; i++) {
+
+        MenuItem &mi = menu.items[i];
+        SBox &pb = pick_boxes[i];
+
+        if (mi.type != MENU_IGNORE && inBox (tap, pb)) {
+
+            // implement each type of behavior
+            updateMenu (menu, pick_boxes, i, false);
+
+            // tap found
+            break;
         }
     }
 }
@@ -170,12 +374,12 @@ bool runMenu (MenuInfo &menu)
 
     // set ok button size, don't know position yet
     menu.ok_b.w = getTextWidth (ok_label) + MENU_BDX*2;
-    menu.ok_b.h = MENU_BH;
+    menu.ok_b.h = MENU_RH;
 
     // create cancel button, set size but don't know position yet
     SBox cancel_b;
     cancel_b.w = getTextWidth (cancel_label) + MENU_BDX*2;
-    cancel_b.h = MENU_BH;
+    cancel_b.h = MENU_RH;
 
     // insure menu width accommodates ok and/or cancel buttons
     if (menu.no_cancel) {
@@ -222,8 +426,8 @@ bool runMenu (MenuInfo &menu)
     }
 
     // display each item in its own pick box
-    StackMalloc ibox_mem(menu.n_items*sizeof(SBox));
-    SBox *items_b = (SBox *) ibox_mem.getMem();
+    StackMalloc pbox_mem(menu.n_items*sizeof(SBox));
+    SBox *pick_boxes = (SBox *) pbox_mem.getMem();
     uint16_t col_w = (menu.menu_b.w - MENU_RM)/menu.n_cols;
     int vrow_i = 0;                          // visual row, only incremented for non-IGNORE items
     for (int i = 0; i < menu.n_items; i++) {
@@ -232,13 +436,13 @@ bool runMenu (MenuInfo &menu)
 
         // assign item next location and draw unless to be ignored
         if (mi.type != MENU_IGNORE) {
-            SBox &ib = items_b[i];
+            SBox &pb = pick_boxes[i];
 
-            ib.x = menu.menu_b.x + (vrow_i/n_rowspercol)*col_w;
-            ib.y = menu.menu_b.y + MENU_TBM + (vrow_i%n_rowspercol)*MENU_RH;
-            ib.w = col_w;
-            ib.h = MENU_RH;
-            menuDrawItem (mi, ib, true);
+            pb.x = menu.menu_b.x + 1 + (vrow_i/n_rowspercol)*col_w;
+            pb.y = menu.menu_b.y + MENU_TBM + (vrow_i%n_rowspercol)*MENU_RH;
+            pb.w = col_w;
+            pb.h = MENU_RH;
+            menuDrawItem (mi, pb, true, false);
 
             vrow_i++;
         }
@@ -249,81 +453,42 @@ bool runMenu (MenuInfo &menu)
     // immediate draw if menu is over map
     tft.drawPR();
 
+    SCoord tap;
+    char kbchar;
+    UserInput ui = {
+        menu.menu_b,
+        NULL,
+        false,
+        MENU_TIMEOUT,
+        menu.update_clocks,
+        tap,
+        kbchar,
+    };
+
     // run
     bool ok = false;
-    SCoord tap;
-    while (waitForTap (menu.menu_b, NULL, MENU_TIMEOUT, menu.update_clocks, tap)) {
+    int kb_item = -1;
+    while (waitForUser (ui)) {
 
-        // check for tap in ok or cancel
-        if (inBox (tap, menu.ok_b)) {
+        // check for Enter or tap in ok
+        if (kbchar == '\r' || kbchar == '\n' || inBox (tap, menu.ok_b)) {
             ok = true;
             break;
         }
-        if (!menu.no_cancel && inBox (tap, cancel_b)) {
+
+        // check for ESC tap or tap in optional cancel
+        if (kbchar == 27 || (!menu.no_cancel && inBox (tap, cancel_b))) {
             break;
         }
 
-        // check for tap in active menu items
-        for (int i = 0; i < menu.n_items; i++) {
-            SBox &ib = items_b[i];
-            MenuItem &mi = menu.items[i];
-
-            if (mi.type != MENU_IGNORE && inBox (tap, ib)) {
-
-                // implement each type of behavior
-                switch (mi.type) {
-                case MENU_LABEL:        // fallthru
-                case MENU_BLANK:        // fallthru
-                case MENU_IGNORE:
-                    break;
-
-                case MENU_1OFN:
-                    // ignore if already set, else turn this one on and all others in this group off
-                    if (!mi.set) {
-                        menuItemsAllOff (menu, items_b, i);
-                        mi.set = true;
-                        menuDrawItem (mi, ib, false);
-                    }
-                    break;
-
-                case MENU_01OFN:
-                    // turn off if set, else turn this one on and all others in this group off
-                    if (mi.set) {
-                        mi.set = false;
-                        menuDrawItem (mi, ib, false);
-                    } else {
-                        menuItemsAllOff (menu, items_b, i);
-                        mi.set = true;
-                        menuDrawItem (mi, ib, false);
-                    }
-                    break;
-
-                case MENU_AL1OFN:
-                    // turn on unconditionally, but turn off only if not the last one
-                    if (!mi.set) {
-                        mi.set = true;
-                        menuDrawItem (mi, ib, false);
-                    } else {
-                        if (menuCountItemsSet (menu, i) > 1) {
-                            mi.set = false;
-                            menuDrawItem (mi, ib, false);
-                        }
-                    }
-                    break;
-
-                case MENU_TOGGLE:
-                    // uncondition change
-                    mi.set = !mi.set;
-                    menuDrawItem (mi, ib, false);
-                    break;
-                }
-
-                // tap found
-                break;
-            }
-        }
+        // check for kb or tap control
+        if (kbchar)
+            kb_item = checkKBControl (menu, pick_boxes, kb_item, kbchar);
+        else
+            checkTapControl (menu, pick_boxes, tap);
     }
 
+    // done
     drainTouch();
 
     // erase in prep for caller to restore covered content
@@ -333,18 +498,8 @@ bool runMenu (MenuInfo &menu)
     Serial.printf (_FX("Menu result after %s:\n"), ok ? "Ok" : "Cancel");
     for (int i = 0; i < menu.n_items; i++) {
         MenuItem &mi = menu.items[i];
-        switch (mi.type) {
-        case MENU_1OFN:         // fallthru
-        case MENU_01OFN:        // fallthru
-        case MENU_AL1OFN:       // fallthru
-        case MENU_TOGGLE:
+        if (MENU_ACTIVE(mi.type))
             Serial.printf (_FX("  %-15s g%d s%d\n"), mi.label ? mi.label : "", mi.group, mi.set);
-            break;
-        case MENU_LABEL:        // fallthru
-        case MENU_IGNORE:       // fallthru
-        case MENU_BLANK:
-            break;
-        }
     }
 
     return (ok);
@@ -378,4 +533,54 @@ void menuRedrawOk (SBox &ok_b, MenuOkState oks)
     tft.setCursor (ok_b.x+MENU_BDX, ok_b.y+MENU_BDY);
     tft.print (ok_label);
     tft.drawPR();
+}
+
+/* wait until:
+ *   a tap occurs inside inbox:                      set tap location and type and return true.
+ *   a char is typed:                                set kbchar and return true.
+ *   (*fp)() (IFF fp != NULL) returns true:          set fp_true to true and return false.
+ *   to_ms is > 0 and nothing happens for that long: return false.
+ * while waiting we optionally update clocks and allow some web server commands.
+ */
+bool waitForUser (UserInput &ui)
+{
+    drainTouch();
+
+    // initial timeout
+    uint32_t t0 = millis();
+
+    // reset both actions until they happen here
+    ui.kbchar = 0;
+    ui.tap = {0, 0};
+
+    for(;;) {
+
+        if (readCalTouchWS(ui.tap) != TT_NONE) {
+            drainTouch();
+            if (inBox (ui.tap, ui.inbox))
+                return(true);
+            // tap restarts base timeout
+            t0 = millis();
+        }
+
+        ui.kbchar = tft.getChar(NULL,NULL);
+        if (ui.kbchar)
+            return (true);
+
+        if (ui.to_ms && timesUp (&t0, ui.to_ms))
+            return (false);
+
+        if (ui.fp && (*ui.fp)()) {
+            ui.fp_true = true;
+            return (false);
+        }
+
+        if (ui.update_clocks)
+            updateClocks(false);
+
+        wdDelay (10);
+
+        // refresh protected region in case X11 window is moved
+        tft.drawPR();
+    }
 }

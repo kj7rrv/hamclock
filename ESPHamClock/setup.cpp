@@ -83,11 +83,10 @@ static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 #define PAGE_W          120                     // page button width
 #define PAGE_H          35                      // page button height
 #define CURSOR_DROP     2                       // pixels to drop cursor
-#define NVMS_NONE       0                       // NV_MAPSPOTS to map nothing
-#define NVMS_PREFIX     0x1                     // NV_MAPSPOTS to map just prefix
-#define NVMS_CALL       0x2                     // NV_MAPSPOTS to map full callsign
-#define NVMS_PCMASK     0x3                     // NV_MAPSPOTS mask for NVMS_PREFIX or NVMS_CALL
-#define NVMS_PATH       4                       // NV_MAPSPOTS |= to show path
+#define NVMS_PREFIX     0x1                     // NV_MAPSPOTS bit to map just prefix
+#define NVMS_CALL       0x2                     // NV_MAPSPOTS bit to map full callsign
+#define NVMS_THIN       0x4                     // NV_MAPSPOTS bit to use THINPATHSZ
+#define NVMS_WIDE       0x8                     // NV_MAPSPOTS bit to use WIDEPATHSZ
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index from 0 return screen y
 
 // color selector constants
@@ -275,17 +274,6 @@ static StringPrompt string_pr[N_SPR] = {
 
 
 
-// define a boolean prompt
-typedef struct {
-    uint8_t page;                               // page number, 0 .. N_PAGES-1
-    SBox p_box;                                 // prompt box
-    SBox s_box;                                 // state box, if t/f_str
-    bool state;                                 // on or off
-    const char *p_str;                          // prompt string, or NULL to use just f/t_str
-    const char *f_str;                          // "false" string, or NULL
-    const char *t_str;                          // "true" string, or NULL
-} BoolPrompt;
-
 
 // N.B. must match bool_pr[] order
 typedef enum {
@@ -325,11 +313,24 @@ typedef enum {
     SPOTLBL_BPR,
     SPOTLBLCALL_BPR,
     SPOTPATH_BPR,
+    SPOTPATHSZ_BPR,
     FLIP_BPR,
     X11_FULLSCRN_BPR,
 
     N_BPR
 } BPIds;
+
+// define a boolean prompt
+typedef struct {
+    uint8_t page;                               // page number, 0 .. N_PAGES-1
+    SBox p_box;                                 // prompt box
+    SBox s_box;                                 // state box, if t/f_str
+    bool state;                                 // on or off
+    const char *p_str;                          // prompt string, or NULL to use just f/t_str
+    const char *f_str;                          // "false" string, or NULL
+    const char *t_str;                          // "true" string, or NULL
+    BPIds ent_mate;                             // entanglement partner, else N_BPR
+} BoolPrompt;
 
 /* bool prompts. N.B. must match BPIds order
  * N.B. some fields use two "entangled" bools to create 3 states
@@ -338,63 +339,65 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 1" -- index 0
 
-    {0, { 90, R2Y(2), 180, PR_H}, {270, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes"},
-    {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes"},
-    {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes"},
-    {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL},
+    {0, { 90, R2Y(2), 180, PR_H}, {270, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes", N_BPR},
+    {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes", N_BPR},
+    {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes", N_BPR},
+    {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL, N_BPR},
 
     // "page 2" -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes"},
-    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes"},
+    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes", N_BPR},
+    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes", N_BPR},
 
-    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:"},
-    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:"},
+    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
+    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
+    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
+    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
 
     // "page 3" -- index 2
 
-    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes"},
-    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes"},
-    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes"},
+    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes", N_BPR},
+    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes", N_BPR},
+    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes", N_BPR},
 
-    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers", 0},
+    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers", 0, N_BPR},
 
 
     // "page 4" -- index 3
 
-    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active"},
+    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active", N_BPR},
 
-    {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  70, PR_H}, false, "KX3?", "No", NULL},
-    {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  70, PR_H}, false, NULL, "4800", "38400"},
+    {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  70, PR_H}, false, "KX3?", "No", NULL, KX3BAUD_BPR},
+    {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  70, PR_H}, false, NULL, "4800", "38400", KX3ON_BPR},
                                                         // entangled: Off: F X   4800: T F   38400: T T
 
 
     // "page 5" -- index 4
 
-    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL},
-    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day"},
+    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL, DATEFMT_DMYYMD_BPR},
+    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day", DATEFMT_MDY_BPR},
                                                         // entangled: MDY: F X   DMY: T F  YMD:  T T
 
-    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In"},
+    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In", N_BPR},
 
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday", "Monday"},
-    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes"},
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday", "Monday", N_BPR},
+    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes", N_BPR},
 
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric"},
-    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N"},
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", N_BPR},
+    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N", N_BPR},
 
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", NULL},
-    {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call"},
-                                                        // entangled: None: F X  Prefix: T F  Call: T T
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", NULL, SPOTLBLCALL_BPR},
+    {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
+                                                        // entangled: No: F X  Prefix: T F  Call: T T
 
-    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3),  40, PR_H}, false, "Spot paths?", "No", "Yes"},
+    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Spot paths?", "No", NULL, SPOTPATHSZ_BPR},
+    {4, {540, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
+                                                        // entangled: No: F X  Thin: T F  Wide: T T
 
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes"},
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes", N_BPR},
 
-    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Full scrn?", "No", "Yes"},
-                                                                // state box wide enough for "Won't fit"
+    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Full scrn?", "No", "Yes", N_BPR},
+                                                        // N.B. state box must be wide enough for "Won't fit"
 
 
 
@@ -761,7 +764,7 @@ static bool boolIsRelevant (BoolPrompt *bp)
     }
 
     #if !defined(_SUPPORT_SPOTPATH)
-    if (bp == &bool_pr[SPOTPATH_BPR])
+    if (bp == &bool_pr[SPOTPATH_BPR] || bp == &bool_pr[SPOTPATHSZ_BPR])
         return (false);
     #endif
 
@@ -959,21 +962,18 @@ static void nextTabFocus()
         {       &string_pr[TEMPCORR2_SPR], NULL},
         {       &string_pr[PRESCORR2_SPR], NULL},
         { NULL, &bool_pr[KX3ON_BPR] },
-        { NULL, &bool_pr[KX3BAUD_BPR] },
         {       &string_pr[BRMIN_SPR], NULL},
         {       &string_pr[BRMAX_SPR], NULL},
 
         // page 5
 
         { NULL, &bool_pr[DATEFMT_MDY_BPR] },
-        { NULL, &bool_pr[DATEFMT_DMYYMD_BPR] },
         { NULL, &bool_pr[LOGUSAGE_BPR] },
         { NULL, &bool_pr[WEEKDAY1MON_BPR] },
         { NULL, &bool_pr[DEMO_BPR] },
         { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[BEARING_BPR] },
         { NULL, &bool_pr[SPOTLBL_BPR] },
-        { NULL, &bool_pr[SPOTLBLCALL_BPR] },
         { NULL, &bool_pr[SPOTPATH_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
@@ -1278,16 +1278,6 @@ static void eraseBPPromptState (BoolPrompt *bp)
 }
 
 
-/* display an entangled pair of bools states: show A state if off else B state
- */
-static void drawEntangledBools (BPIds A, BPIds B)
-{
-    if (bool_pr[A].state)
-        drawBPState (&bool_pr[B]);
-    else
-        drawBPState (&bool_pr[A]);
-}
-
 /* draw the virtual keyboard
  */
 static void drawKeyboard()
@@ -1328,7 +1318,7 @@ static void drawKeyboard()
 /* convert a screen coord on the virtual keyboard to its char value, if any.
  * N.B. this does NOT handle Delete or Done.
  */
-static bool s2char (SCoord &s, char *cp)
+static bool s2char (SCoord &s, char &kbchar)
 {
     // no KB on color page or onoff page
     if (cur_page == COLOR_PAGE || cur_page == ONOFF_PAGE)
@@ -1346,9 +1336,9 @@ static bool s2char (SCoord &s, char *cp)
                 if (n) {
                     // use shifted char if in top half
                     if (s.y < KB_Y0+row*KB_CHAR_H+KB_CHAR_H/2)
-                        *cp = (char)pgm_read_byte(&kp->shifted);
+                        kbchar = (char)pgm_read_byte(&kp->shifted);
                     else
-                        *cp = n;
+                        kbchar = n;
                     return (true);
                 }
             }
@@ -1357,13 +1347,74 @@ static bool s2char (SCoord &s, char *cp)
 
     // check space bar
     if (inBox (s, space_b)) {
-        *cp = ' ';
+        kbchar = ' ';
         return (true);
     }
 
     // s is not on the virtual keyboard
     return (false);
 }
+
+/* display an entangled pair of bools states: show A state if off else B state.
+ * N.B. this works because both A and B's state boxes, ie s_box, are in identical locations.
+ */
+static void drawEntangledBools (BoolPrompt *A, BoolPrompt *B)
+{
+    if (A->state)
+        drawBPState (B);
+    else
+        drawBPState (A);
+}
+
+/* perform action resulting from tapping the given BoolPrompt.
+ * handle both singles and entangled pairs.
+ */
+static void engageBoolTap (BoolPrompt *bp)
+{
+    // erase current cursor position
+    eraseCursor ();
+
+    // update state
+    if (bp->ent_mate == N_BPR) {
+
+        // just a lone bool
+        bp->state = !bp->state;
+        drawBPState (bp);
+
+        // move cursor to tapped field
+        setFocus (NULL, bp);
+        drawCursor ();
+
+    } else {
+
+        // this is one of an entangled pair. N.B. primary is always lower in memory.
+        BoolPrompt *mate = &bool_pr[bp->ent_mate];
+        BoolPrompt *pri = mate < bp ? mate : bp;
+        BoolPrompt *sec = mate < bp ? bp : mate;
+
+        // roll choice forward, regardless of which was tapped
+        // F X -> T F -> T T -> F X ...
+        if (pri->state) {
+            if (sec->state) {
+                pri->state = false;
+                sec->state = false;
+            } else {
+                sec->state = true;
+            }
+        } else {
+            pri->state = true;
+            sec->state = false;
+        }
+
+        // draw new state
+        drawEntangledBools (pri, sec);
+
+        // move cursor to primary field
+        setFocus (NULL, pri);
+        drawCursor ();
+    }
+}
+
 
 
 /* find whether s is in any string_pr.
@@ -1807,11 +1858,13 @@ static void drawCurrentPageFields()
 
     // draw the entangled pairs
     if (boolIsRelevant(&bool_pr[DATEFMT_MDY_BPR]))
-        drawEntangledBools(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
+        drawEntangledBools(&bool_pr[DATEFMT_MDY_BPR], &bool_pr[DATEFMT_DMYYMD_BPR]);
     if (boolIsRelevant(&bool_pr[KX3ON_BPR]))
-        drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
+        drawEntangledBools(&bool_pr[KX3ON_BPR], &bool_pr[KX3BAUD_BPR]);
     if (boolIsRelevant(&bool_pr[SPOTLBL_BPR]))
-        drawEntangledBools (SPOTLBL_BPR, SPOTLBLCALL_BPR);
+        drawEntangledBools (&bool_pr[SPOTLBL_BPR], &bool_pr[SPOTLBLCALL_BPR]);
+    if (boolIsRelevant(&bool_pr[SPOTPATH_BPR]))
+        drawEntangledBools (&bool_pr[SPOTPATH_BPR], &bool_pr[SPOTPATHSZ_BPR]);
 
     // draw spider header if appropriate
     if (cur_page == SPIDER_PAGE && bool_pr[CLUSTER_BPR].state && !bool_pr[CLISWSJTX_BPR].state)
@@ -2318,12 +2371,13 @@ static void initSetup()
 
     uint8_t spotops;
     if (!NVReadUInt8 (NV_MAPSPOTS, &spotops)) {
-        spotops = NVMS_PREFIX | NVMS_PATH;
+        spotops = NVMS_PREFIX | NVMS_THIN;
         NVWriteUInt8 (NV_MAPSPOTS, spotops);
     }
-    bool_pr[SPOTLBL_BPR].state = ((spotops & NVMS_PCMASK) != NVMS_NONE);
-    bool_pr[SPOTLBLCALL_BPR].state = ((spotops & NVMS_PCMASK) == NVMS_CALL);
-    bool_pr[SPOTPATH_BPR].state = (spotops & NVMS_PATH) != 0;
+    bool_pr[SPOTLBL_BPR].state =     (spotops & (NVMS_PREFIX|NVMS_CALL)) != 0;          // set if either prefix or call
+    bool_pr[SPOTLBLCALL_BPR].state = (spotops & NVMS_CALL) != 0;                        // set if call, else prefix
+    bool_pr[SPOTPATH_BPR].state =    (spotops & (NVMS_WIDE|NVMS_THIN)) != 0;            // set if either thin or wide
+    bool_pr[SPOTPATHSZ_BPR].state =  (spotops & NVMS_WIDE) != 0;                        // set if wide, else thin
 
     uint8_t dx_cmdmask;
     if (!NVReadUInt8 (NV_DXCMDUSED, &dx_cmdmask)) {
@@ -2586,12 +2640,13 @@ static bool askRun()
             tft.print((to+9)/10);
         }
 
-        // check for touch or abort box
+        // check for touch, type ESC or abort box
         SCoord s;
         TouchType tt = readCalTouchWS (s);
-        if (tt != TT_NONE || tft.getChar()) {
+        char c = tft.getChar (NULL, NULL);
+        if (tt != TT_NONE || c) {
             drainTouch();
-            if (tt != TT_NONE && inBox (s, skip_b)) {
+            if (c == 27 || (tt != TT_NONE && inBox (s, skip_b))) {
                 drawStringInBox ("Skip", skip_b, true, TX_C);
                 return (false);
             }
@@ -2668,34 +2723,32 @@ static void runSetup()
 {
     drainTouch();
 
+    SBox screen;
+    screen.x = 0;
+    screen.y = 0;
+    screen.w = tft.width();
+    screen.h = tft.height();
+
     SCoord s;
     char c;
+    UserInput ui = {
+        screen,
+        NULL,
+        false,
+        0,
+        false,
+        s,
+        c,
+    };
 
     do {
         StringPrompt *sp;
         BoolPrompt *bp;
 
         // wait for next tap or character input
-        for (;;) {
-
-            // if touch try to also find what char it might be from virtual kb
-            if (readCalTouchWS(s) != TT_NONE) {
-                if (!s2char (s, &c))
-                    c = 0;
-                break;
-            }
-
-            // if real kb input, invalidate touch location
-            c = tft.getChar();
-            if (c) {
-                s.x = s.y = 0;
-                break;
-            }
-
-            // neither, wait and repeat
-            resetWatchdog();
-            wdDelay(10);
-        }
+        (void) waitForUser(ui);
+        if (!ui.kbchar)
+            (void) s2char (ui.tap, ui.kbchar);
 
         // process special cases first
 
@@ -2788,21 +2841,12 @@ static void runSetup()
             if (!boolIsRelevant(bp))
                 continue;
 
-            // move focus here
-            eraseCursor ();
-            setFocus (NULL, bp);
-
             // toggle and redraw with new cursor position
-            bp->state = !bp->state;
-            drawBPState (bp);
-            drawCursor ();
+            engageBoolTap (bp);
 
             // check for possible secondary implications
 
-            if (bp == &bool_pr[DATEFMT_MDY_BPR]) {
-                drawEntangledBools(DATEFMT_MDY_BPR, DATEFMT_DMYYMD_BPR);
-
-            } else if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
+            if (bp == &bool_pr[X11_FULLSCRN_BPR]) {
 
                 // check for full screen that won't fit
                 if (bp->state) {
@@ -2943,18 +2987,13 @@ static void runSetup()
                 }
             }
 
-            else if (bp == &bool_pr[SPOTLBL_BPR]) {
-                // show cluster label type, or none
-                drawEntangledBools (SPOTLBL_BPR, SPOTLBLCALL_BPR);
-            }
-
           #if defined(_SUPPORT_GPIO) && defined(_SUPPORT_ENVSENSOR)
             else if (bp == &bool_pr[GPIOOK_BPR]) {
                 // toggle KX3 and env sensors
                 if (bp->state) {
                     // retain kx3 state but draw prompt
                     drawBPPrompt (&bool_pr[KX3ON_BPR]);
-                    drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
+                    drawEntangledBools(&bool_pr[KX3ON_BPR], &bool_pr[KX3BAUD_BPR]);
                     drawSPPromptValue (&string_pr[TEMPCORR_SPR]);
                     drawSPPromptValue (&string_pr[PRESCORR_SPR]);
                     drawSPPromptValue (&string_pr[TEMPCORR2_SPR]);
@@ -2991,7 +3030,7 @@ static void runSetup()
             else if (bp == &bool_pr[KX3ON_BPR]) {
                 // show/hide baud rate but honor GPIOOK
                 if (bool_pr[GPIOOK_BPR].state) {
-                    drawEntangledBools(KX3ON_BPR, KX3BAUD_BPR);
+                    drawEntangledBools(&bool_pr[KX3ON_BPR], &bool_pr[KX3BAUD_BPR]);
                 } else if (bool_pr[KX3ON_BPR].state) {
                     // maintain off if no GPIO
                     bool_pr[KX3ON_BPR].state = false;
@@ -3081,9 +3120,8 @@ static void finishSettingUp()
     NVWriteString (NV_DXLOGIN, dxlogin);
     NVWriteUInt8 (NV_LOGUSAGE, bool_pr[LOGUSAGE_BPR].state);
     NVWriteUInt8 (NV_MAPSPOTS,
-            (bool_pr[SPOTLBL_BPR].state ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_PREFIX)
-                                        : NVMS_NONE)
-            | (bool_pr[SPOTPATH_BPR].state ? NVMS_PATH : 0));
+              (bool_pr[SPOTLBL_BPR].state  ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_PREFIX) : 0)
+            | (bool_pr[SPOTPATH_BPR].state ? (bool_pr[SPOTPATHSZ_BPR].state  ? NVMS_WIDE : NVMS_THIN)   : 0));
     NVWriteUInt8 (NV_NTPSET, bool_pr[NTPSET_BPR].state);
     NVWriteString(NV_NTPHOST, ntphost);
     NVWriteUInt8 (NV_DATEMDY, bool_pr[DATEFMT_MDY_BPR].state);
@@ -3361,14 +3399,17 @@ bool useMagBearing()
     return (bool_pr[BEARING_BPR].state);
 }
 
-/* return whether to draw dx paths
+/* return Raw size of spot paths, including zero if not wanted
  */
-bool showSpotPaths()
+int getSpotPathSize()
 {
 #if defined(_SUPPORT_SPOTPATH)
-    return (bool_pr[SPOTPATH_BPR].state);
+    if (bool_pr[SPOTPATH_BPR].state)
+        return (bool_pr[SPOTPATHSZ_BPR].state ? WIDEPATHSZ : THINPATHSZ);
+    else
+        return (0);
 #else
-    return (false);
+    return (0);
 #endif
 }
 

@@ -88,15 +88,15 @@ bool plotChoiceIsAvailable (PlotChoice ch)
 
     case PLOT_CH_DXCLUSTER:     return (useDXCluster());
     case PLOT_CH_GIMBAL:        return (haveGimbal());
-    case PLOT_CH_TEMPERATURE:   return (getNBMEConnected() > 0);
-    case PLOT_CH_PRESSURE:      return (getNBMEConnected() > 0);
-    case PLOT_CH_HUMIDITY:      return (getNBMEConnected() > 0);
-    case PLOT_CH_DEWPOINT:      return (getNBMEConnected() > 0);
+    case PLOT_CH_TEMPERATURE:   return (GPIOOk() && getNBMEConnected() > 0);
+    case PLOT_CH_PRESSURE:      return (GPIOOk() && getNBMEConnected() > 0);
+    case PLOT_CH_HUMIDITY:      return (GPIOOk() && getNBMEConnected() > 0);
+    case PLOT_CH_DEWPOINT:      return (GPIOOk() && getNBMEConnected() > 0);
     case PLOT_CH_COUNTDOWN:     return (getSWEngineState(NULL,NULL) == SWE_COUNTDOWN);
+    case PLOT_CH_DEWX:          return ((brb_rotset & (1 << BRB_SHOW_DEWX)) == 0);
+    case PLOT_CH_DXWX:          return ((brb_rotset & (1 << BRB_SHOW_DXWX)) == 0);
 
     case PLOT_CH_BC:            // fallthru
-    case PLOT_CH_DEWX:          // fallthru
-    case PLOT_CH_DXWX:          // fallthru
     case PLOT_CH_FLUX:          // fallthru
     case PLOT_CH_KP:            // fallthru
     case PLOT_CH_MOON:          // fallthru
@@ -139,6 +139,7 @@ void logBRBRotSet()
     for (int i = 0; i < BRB_N; i++)
         if (brb_rotset & (1 << i))
             Serial.printf (_FX("    %c%s\n"), i == brb_mode ? '*' : ' ', brb_names[i]);
+    Serial.printf (_FX("BR: now mode %d\n"), brb_mode);
 }
 
 /* show a table of suitable plot choices in and for the given pane and allow user to choose one or more.
@@ -582,7 +583,7 @@ void showRotatingBorder ()
 
     // check BRB
     if (BRBIsRotating()) {
-        uint16_t c = ((brb_rotationT > t0 + PLOT_ROT_WARNING) || (t0&1) == 1) ? RA8875_WHITE : GRAY;
+        uint16_t c = ((brb_updateT > t0 + PLOT_ROT_WARNING) || (t0&1) == 1) ? RA8875_WHITE : GRAY;
         drawSBox (NCDXF_b, c);
     }
 
@@ -775,7 +776,7 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
                     uint8_t ug = g;
                     uint8_t ub = b;
                     uint16_t color16 = RGB565(ur,ug,ub);
-                    tft.drawSubPixel (v_b.x + img_x - xborder,
+                    tft.drawPixelRaw (v_b.x + img_x - xborder,
                                 v_b.y + v_b.h - (img_y - yborder) - 1, color16); // vertical flip
                 }
             }
@@ -802,46 +803,6 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
 out:
     client.stop();
     return (ok);
-}
-
-/* wait until:
- *   a tap occurs inside inbox;
- *   (*fp)() (IFF fp != NULL) returns true; or
- *   nothing happens for to_ms millis.
- * if tap inbox return location and true, else false for all other cases.
- * while waiting we optionally update clocks and allow some web server commands.
- */
-bool waitForTap (const SBox &inbox, bool (*fp)(void), uint32_t to_ms, bool update_clocks, SCoord &tap)
-{
-    drainTouch();
-
-    uint32_t t0 = millis();
-    for(;;) {
-
-        SCoord s;
-        if (readCalTouchWS(s) != TT_NONE) {
-            drainTouch();
-            if (inBox (s, inbox)) {
-                tap = s;
-                return(true);
-            }
-            t0 = millis();
-        }
-
-        if (timesUp (&t0, to_ms))
-            return (false);
-
-        if (fp && (*fp)())
-            return (false);
-
-        if (update_clocks)
-            updateClocks(false);
-
-        wdDelay (100);
-
-        // refresh protected region in case X11 window is moved
-        tft.drawPR();
-    }
 }
 
 /* given min and max and an approximate number of divisions desired,

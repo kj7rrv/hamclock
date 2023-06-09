@@ -141,8 +141,9 @@ bool askOTAupdate(char *new_ver)
     // draw yes/no boxes
     SBox no_b =  {INDENT, BOX_Y, BOX_W, BOX_H};
     SBox yes_b = {(uint16_t)(tft.width()-INDENT-BOX_W), BOX_Y, BOX_W, BOX_H};
-    drawStringInBox ("No", no_b, true, RA8875_WHITE);
-    drawStringInBox ("Yes", yes_b, false, RA8875_WHITE);
+    bool active_yes = false;
+    drawStringInBox ("No", no_b, !active_yes, RA8875_WHITE);
+    drawStringInBox ("Yes", yes_b, active_yes, RA8875_WHITE);
 
     // prep for potentially long wait
     closeDXCluster();           // prevent inbound msgs from clogging network
@@ -198,6 +199,18 @@ bool askOTAupdate(char *new_ver)
             tft.fillRect (count_x, count_y-30, 60, 40, RA8875_BLACK);
             tft.setCursor (count_x, count_y);
             tft.print(--count_s);
+        }
+
+        // switch active button if type tab or accept current if Enter or bale if esc
+        char c = tft.getChar(NULL,NULL);
+        if (c == '\t') {
+            active_yes = !active_yes;
+            drawStringInBox ("Yes", yes_b, active_yes, RA8875_WHITE);
+            drawStringInBox ("No", no_b, !active_yes, RA8875_WHITE);
+        } else if (c == 27) {
+            return (false);
+        } else if (c == '\r' || c == '\n') {
+            return (active_yes);
         }
 
         // check buttons

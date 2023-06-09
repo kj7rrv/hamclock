@@ -1,1 +1,1 @@
-#define	HC_VERSION	"2.91"
+#define	HC_VERSION	"2.92"

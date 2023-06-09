@@ -10,7 +10,7 @@ const char *hc_version = HC_VERSION;
 
 // clock, aux time and stopwatch boxes
 SBox clock_b = { 0, 65, 230, 49};
-SBox auxtime_b = { 0, 114, 205, 31};
+SBox auxtime_b = { 0, 113, 205, 32};
 SBox stopwatch_b = {149, 93, 38, 22};
 SBox lkscrn_b = {216, 117, 13, 20};     // size must match HC_RUNNER_W/H base size
 
@@ -85,6 +85,8 @@ const char *map_projnames[MAPP_N] = {
 // info to display in the call sign GUI location -- the real call sign is always getCallsign()
 CallsignInfo cs_info;
 static const char on_air_msg[] = "ON THE AIR";  // used by setOnAir()
+#define ONAIR_FG        RA8875_WHITE            // fg color
+#define ONAIR_BG        RA8875_RED              // bg color
 static SBox version_b;                          // show or check version, just below call
 static SBox wifi_b;                             // wifi info
 static bool rssi_ignore;                        // allow op to ignore low wifi power
@@ -333,15 +335,20 @@ void setup()
 
     for (float a = 0; a < 2*M_PIF; a += M_PIF/47) {
         uint16_t x = 250*tft.SCALESZ;
-        uint16_t y = 100*tft.SCALESZ;
+        uint16_t y = 120*tft.SCALESZ;
         int16_t dx = 100*tft.SCALESZ * cosf(a);
         int16_t dy = -100*tft.SCALESZ * sinf(a);
-        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ-2, RA8875_RED);
+        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ/2, RA8875_RED);
         x += 400;
         tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ, RA8875_RED);
         x += 400;
-        tft.drawLineRaw (x, y, x+dx, y+dy, tft.SCALESZ+2, RA8875_RED);
+        tft.drawLineRaw (x, y, x+dx, y+dy, 2*tft.SCALESZ, RA8875_RED);
     }
+
+    uint16_t x = 250*tft.SCALESZ;
+    uint16_t y = 320*tft.SCALESZ;
+    tft.drawLineRaw (x, y, x + 50, y, tft.SCALESZ, RA8875_RED);
+    tft.drawLineRaw (x + 50, y, x + 75, y + 25, tft.SCALESZ, RA8875_RED);
 
     while(1)
         wdDelay(100);
@@ -398,26 +405,15 @@ void setup()
     // prep stopwatch
     initStopwatch();
 
-    // draw initial callsign
+    // here we go
     eraseScreen();
-    free (cs_info.call);
-    cs_info.call = strdup(getCallsign());
+
+    // draw initial callsign
     cs_info.box.x = (tft.width()-512)/2;
     cs_info.box.y = 10;                 // coordinate with tftMsg()
     cs_info.box.w = 512;
     cs_info.box.h = 50;
-    if (!NVReadUInt16 (NV_CALL_FG_COLOR, &cs_info.fg_color)) {
-        cs_info.fg_color = RA8875_BLACK;
-        NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
-    }
-    if (!NVReadUInt16 (NV_CALL_BG_COLOR, &cs_info.bg_color)) {
-        cs_info.bg_color = RA8875_WHITE;
-        NVWriteUInt16 (NV_CALL_BG_COLOR, cs_info.bg_color);
-    }
-    if (!NVReadUInt8 (NV_CALL_BG_RAINBOW, &cs_info.bg_rainbow)) {
-        cs_info.bg_rainbow = 1;
-        NVWriteUInt8 (NV_CALL_BG_RAINBOW, cs_info.bg_rainbow);
-    }
+    getDefaultCallsign();
     drawCallsign (true);
 
     // draw version just below
@@ -734,7 +730,7 @@ void initScreen()
 
     // set up beacon box
     resetWatchdog();
-    drawNCDXFBox();
+    (void) drawNCDXFBox();
 
     // enable clocks
     showClocks();
@@ -771,6 +767,27 @@ static void roundLL (LatLong &ll)
 static void checkTouch()
 {
     resetWatchdog();
+
+#if defined(_SUPPORT_KBCTRL)
+    // check for keyboard control of cursor
+    bool control, shift;
+    char c = tft.getChar (&control, &shift);
+    if (c) {
+        unsigned n = 1;
+        int x, y;
+        if (shift)
+            n *= 2;
+        if (control)
+            n *= 4;
+        if (tft.warpCursor (c, n, &x, &y)) {
+            if (c == '\r' || c == '\n' || c == ' ') {
+                wifi_tt = (shift || control) ? TT_HOLD : TT_TAP;
+                wifi_tt_s.x = x;
+                wifi_tt_s.y = y;
+            }
+        }
+    }
+#endif // _IS_UNIX
 
     TouchType tt;
     SCoord s;
@@ -835,17 +852,18 @@ static void checkTouch()
     } else if (!overViewBtn(s, DX_R) && s2ll (s, ll)) {
         // new DE or DX.
         roundLL (ll);
+        int mcl;
         if (tt == TT_HOLD) {
             // map hold: update DE
             // assume op wants city, if showing
             if (names_on)
-                (void) getNearestCity (ll, ll);
+                (void) getNearestCity (ll, ll, mcl);
             newDE (ll, NULL);
         } else {
             // just an ordinary map location: update DX
             // assume op wants city, if showing
             if (names_on)
-                (void) getNearestCity (ll, ll);
+                (void) getNearestCity (ll, ll, mcl);
             newDX (ll, NULL, NULL);
         }
     } else if (inBox (s, de_title_b)) {
@@ -1401,12 +1419,41 @@ uint16_t getTextWidth (const char str[])
 }
 
 
-/* set ON AIR else normal call sign
+/* set/restore the default callsign and colors.
+ * N.B. this one sets up cs_info, we do not draw
+ */
+void getDefaultCallsign()
+{
+    free (cs_info.call);
+    cs_info.call = strdup(getCallsign());
+    if (!NVReadUInt16 (NV_CALL_FG_COLOR, &cs_info.fg_color)) {
+        cs_info.fg_color = RA8875_BLACK;
+        NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
+    }
+    if (!NVReadUInt16 (NV_CALL_BG_COLOR, &cs_info.bg_color)) {
+        cs_info.bg_color = RA8875_WHITE;
+        NVWriteUInt16 (NV_CALL_BG_COLOR, cs_info.bg_color);
+    }
+    if (!NVReadUInt8 (NV_CALL_BG_RAINBOW, &cs_info.bg_rainbow)) {
+        cs_info.bg_rainbow = 1;
+        NVWriteUInt8 (NV_CALL_BG_RAINBOW, cs_info.bg_rainbow);
+    }
+}
+
+/* set ON AIR message in callsign area else restore normal call sign
  */
 void setOnAir (bool on)
 {
-    free (cs_info.call);
-    cs_info.call = strdup (on ? on_air_msg : getCallsign());
+    if (on) {
+        free (cs_info.call);
+        cs_info.call = strdup (on_air_msg);
+        cs_info.fg_color = ONAIR_FG;
+        cs_info.bg_color = ONAIR_BG;
+        cs_info.bg_rainbow = 0;
+    } else {
+        getDefaultCallsign();
+    }
+
     drawCallsign (true);
 }
 
@@ -1890,9 +1937,9 @@ void drawAllSymbols(bool beacons_too)
     drawDXMarker(false);
     if (!overRSS(deap_c.s))
         drawDEAPMarker();
-    drawDXClusterSpotsOnMap();
     drawOnTheAirSpotsOnMap();
     drawPSKSpots();
+    drawDXClusterSpotsOnMap();
     drawSanta ();
 
     updateClocks(false);
@@ -2033,7 +2080,7 @@ void drawScreenLock()
         const uint16_t ry = tft.SCALESZ*lkscrn_b.y;
         for (uint16_t dy = 0; dy < HC_RUNNER_H; dy++)
             for (uint16_t dx = 0; dx < HC_RUNNER_W; dx++)
-                tft.drawSubPixel (rx+dx, ry+dy, pgm_read_word(&runner[dy*HC_RUNNER_W + dx]));
+                tft.drawPixelRaw (rx+dx, ry+dy, pgm_read_word(&runner[dy*HC_RUNNER_W + dx]));
 
     } else {
 
@@ -2366,6 +2413,7 @@ void eraseScreen()
 
 void resetWatchdog()
 {
+#if defined(_IS_ESP8266)
     // record longest wd feed interval so far in max_wd_dt
     static uint32_t prev_ms;
     uint32_t ms = millis();
@@ -2380,6 +2428,7 @@ void resetWatchdog()
         ESP.wdtFeed();
         yield();
     }
+#endif // _IS_ESP8266
 }
 
 /* like delay() but breaks into small chunks so we can call resetWatchdog() and update live web
@@ -2399,7 +2448,7 @@ void wdDelay(int ms)
     }
 }
 
-/* handy utility to return whether now is atleast_dt later than prev.
+/* handy utility to return whether now is atleast_dt ms later than prev.
  * if so, update *prev and return true, else return false.
  */
 bool timesUp (uint32_t *prev, uint32_t atleast_dt)
@@ -2410,7 +2459,6 @@ bool timesUp (uint32_t *prev, uint32_t atleast_dt)
         *prev = ms;
         return (true);
     }
-    resetWatchdog();
     return (false);
 }
 
@@ -2432,9 +2480,10 @@ void logState()
 
 
 /* shutdown helper that asks Are You Sure in the given box.
+ * hl_color is BLACK unless we know keyboard action got us here.
  * return answer.
  */
-static bool shutdownRUS (const SBox &b, uint16_t color)
+static bool shutdownRUS (const SBox &b, uint16_t txt_color, uint16_t hl_color)
 {
     // cursor y
     uint16_t cur_y = b.y + 7*b.h/10;
@@ -2442,31 +2491,56 @@ static bool shutdownRUS (const SBox &b, uint16_t color)
     // erase and print query
     tft.fillRect (b.x+1, b.y+1, b.w-2, b.h-2, RA8875_BLACK);    // erase but avoid boundary
     tft.setCursor (b.x+50, cur_y);
-    tft.setTextColor(color);
-    tft.print ("Are you sure? ");
+    tft.setTextColor(txt_color);
+    tft.print (F("Are you sure? "));
 
     // define yes/no boxes
     SBox y_b;
     y_b.x = tft.getCursorX();
     y_b.y = b.y;
-    y_b.w = 50;
+    y_b.w = 60;
     y_b.h = b.h;
-    tft.setCursor (y_b.x+8, cur_y);
-    tft.print ("Yes");
+    tft.setCursor (y_b.x+10, cur_y);
+    tft.print (F("Yes"));
 
     SBox n_b = y_b;
     n_b.x += y_b.w+30;
-    tft.setCursor (n_b.x+10, cur_y);
-    tft.print ("No");
+    tft.setCursor (n_b.x+15, cur_y);
+    tft.print (F("No"));
+
+    // keyboard code considers Yes to be box 0, No to be box 1
+    int kb_sel = hl_color == RA8875_BLACK ? -1 : 0;
 
     // wait for one to be tapped
+    SCoord tap_s;
+    char type_c;
+    UserInput ui = {
+        b,
+        NULL,
+        false,
+        0,
+        false,
+        tap_s,
+        type_c
+    };
     for (;;) {
-        SCoord s;
-        TouchType tt = readCalTouchWS (s);
-        if (tt != TT_NONE) {
-            if (inBox (s, y_b))
+
+        tft.drawRect (y_b.x+3, y_b.y+3, y_b.w-6, y_b.h-6, kb_sel == 0 ? hl_color : RA8875_BLACK);
+        tft.drawRect (n_b.x+3, n_b.y+3, n_b.w-6, n_b.h-6, kb_sel == 1 ? hl_color : RA8875_BLACK);
+
+        (void) waitForUser (ui);
+
+        if (type_c) {
+            if (type_c == '\r' || type_c == '\n' || type_c == ' ')
+                return (kb_sel == 0);
+            if (type_c == 'h' && kb_sel == 1)
+                kb_sel = 0;
+            if (type_c == 'l' && kb_sel == 0)
+                kb_sel = 1;
+        } else {
+            if (inBox (tap_s, y_b))
                 return (true);
-            if (inBox (s, n_b))
+            if (inBox (tap_s, n_b))
                 return (false);
         }
     }
@@ -2501,7 +2575,7 @@ static void shutdown(void)
         _SDC_REBOOT,
         _SDC_SHUTDOWN
     };
-    ShutDownCtrl sdc[] = {              // N.B. must be in order of _SDC_* enum
+    ShutDownCtrl sdctl[] = {            // N.B. must be in order of _SDC_* enum
         {"Disregard -- resume",         {x0, y,                 w, h}, RA8875_GREEN},
         {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW},
         #if defined(_IS_UNIX)
@@ -2511,32 +2585,77 @@ static void shutdown(void)
         #endif // _IS_UNIX
     };
 
+    // kb managements
+    #define _SDC_KBC     RA8875_GREEN   // selected color
+    int sdc_kbd = -1;                   // index of selected item via keyboard
+
     // number of options
     #if defined(_IS_UNIX)
         // os control only when full screen
-        unsigned n_sdc = getX11FullScreen() ? NARRAY(sdc) : NARRAY(sdc)-2;
+        int n_sdctl = getX11FullScreen() ? NARRAY(sdctl) : NARRAY(sdctl)-2;
     #else
         // only restart makes sense
-        unsigned n_sdc = NARRAY(sdc);
+        int n_sdctl = NARRAY(sdctl);
     #endif
 
     // main loop that displays choices until one is confirmed
     int selection = -1;
     do {
 
-        // display all
-        for (unsigned i = 0; i < n_sdc; i++) {
-            ShutDownCtrl *sdp = &sdc[i];
-            drawStringInBox (sdp->prompt, sdp->box, false, sdp->color);
-        }
-
         // wait for a selection
         for (selection = -1; selection < 0; ) {
-            SCoord s;
-            TouchType tt = readCalTouchWS (s);
-            if (tt != TT_NONE) {
-                for (unsigned i = 0; i < n_sdc; i++) {
-                    if (inBox (s, sdc[i].box)) {
+
+            // display all
+            for (int i = 0; i < n_sdctl; i++) {
+                ShutDownCtrl &sdc = sdctl[i];
+                drawStringInBox (sdc.prompt, sdc.box, false, sdc.color);
+                if (i == sdc_kbd)
+                    tft.drawRect (sdc.box.x+5, sdc.box.y+5, sdc.box.w-10, sdc.box.h-10, _SDC_KBC);
+            }
+
+            // wait forever for user
+            SBox screen_b;
+            screen_b.x = 0;
+            screen_b.y = 0;
+            screen_b.w = tft.width();
+            screen_b.h = tft.height();
+            SCoord tap_s;
+            char type_c;
+            UserInput ui = {
+                screen_b,
+                NULL,
+                false,
+                0,
+                false,
+                tap_s,
+                type_c
+            };
+            (void) waitForUser (ui);
+
+            // check user input
+            if (type_c) {
+
+                switch (type_c) {
+                case '\r':
+                case '\n':
+                case ' ':
+                    selection = sdc_kbd;
+                    break;
+                case 'j':
+                    sdc_kbd = (sdc_kbd + 1) % n_sdctl;
+                    break;
+                case 'k':
+                    sdc_kbd = (n_sdctl + sdc_kbd - 1) % n_sdctl;
+                    break;
+                default:
+                    break;
+                }
+
+            } else {
+
+                // check mouse
+                for (int i = 0; i < n_sdctl; i++) {
+                    if (inBox (tap_s, sdctl[i].box)) {
                         selection = i;
                         break;
                     }
@@ -2544,7 +2663,8 @@ static void shutdown(void)
             }
         }
 
-    } while (selection > 0 && !shutdownRUS (sdc[selection].box, sdc[selection].color));
+    } while (selection > 0 && !shutdownRUS (sdctl[selection].box, sdctl[selection].color,
+                                            sdc_kbd >= 0 ? _SDC_KBC : RA8875_BLACK));
 
     // engage selection action
     switch (selection) {
@@ -2562,13 +2682,13 @@ static void shutdown(void)
         doExit();
         break;                  // ;-)
     case _SDC_REBOOT:
-        drawStringInBox ("Rebooting...", sdc[3].box, true, RA8875_RED);
+        drawStringInBox ("Rebooting...", sdctl[3].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Rebooting\n"));
         (void) !system ("sudo reboot");
         for(;;);
     case _SDC_SHUTDOWN:
-        drawStringInBox ("Shutting down...", sdc[4].box, true, RA8875_RED);
+        drawStringInBox ("Shutting down...", sdctl[4].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
         Serial.print (_FX("Shutting down\n"));
         (void) !system ("sudo poweroff || sudo halt");
@@ -2687,29 +2807,60 @@ void fatalError (const char *fmt, ...)
         #else
 
             // draw boxes and wait for click in either
+            SBox screen_b;
+            screen_b.x = 0;
+            screen_b.y = 0;
+            screen_b.w = tft.width();
+            screen_b.h = tft.height();
             SBox r_b = {250, 400, 100, 50};
             SBox x_b = {450, 400, 100, 50};
             const char r_msg[] = "Restart";
             const char x_msg[] = "Exit";
             drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
             drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
+            int kb_sel = -1;    // 0 if kb chose Restart, 1 if Exit
             drainTouch();
+
+            SCoord s;
+            char kbc;
+            UserInput ui = {
+                screen_b,
+                NULL,
+                false,
+                0,
+                false,
+                s,
+                kbc
+            };
 
             for(;;) {
 
-                SCoord s;
-                while (readCalTouchWS (s) == TT_NONE)
-                    wdDelay(20);
+                tft.drawRect (r_b.x+3, r_b.y+3, r_b.w-6, r_b.h-6, kb_sel == 0 ? RA8875_GREEN : RA8875_BLACK);
+                tft.drawRect (x_b.x+3, x_b.y+3, x_b.w-6, x_b.h-6, kb_sel == 1 ? RA8875_GREEN : RA8875_BLACK);
 
-                if (inBox (s, r_b)) {
+                (void) waitForUser(ui);
+
+                bool kb_go = false;
+                if (kbc) {
+                    if (kb_sel < 0)
+                        kb_sel = 0;
+                    if (kbc == '\r' || kbc == '\n' || kbc == ' ')
+                        kb_go = true;
+                    else if (kbc == 'h' && kb_sel == 1)
+                        kb_sel = 0;
+                    else if (kbc == 'l' && kb_sel == 0)
+                        kb_sel = 1;
+                }
+
+                if ((kb_go && kb_sel == 0) || inBox (s, r_b)) {
                     drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
-                    Serial.print (_FX("Fatal error rebooting\n"));
+                    Serial.print (_FX("Fatal error: rebooting\n"));
                     doReboot();
                 }
 
-                if (inBox (s, x_b)) {
+                if ((kb_go && kb_sel == 1) || inBox (s, x_b)) {
                     drawStringInBox (x_msg, x_b, true, RA8875_WHITE);
-                    Serial.print (_FX("Fatal error exiting\n"));
+                    Serial.print (_FX("Fatal error: exiting\n"));
                     doExit();
                 }
             }

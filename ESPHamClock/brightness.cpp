@@ -38,8 +38,8 @@ bool found_phot;                                // set if initial read > 1, else
 
 // NCDXF_b or "BRB" public state
 uint8_t brb_mode;                               // one of BRB_MODE
-uint8_t brb_rotset;                             // mask of current BRB_MODE
-time_t brb_rotationT;                           // time of next rotation
+uint16_t brb_rotset;                            // mask of current BRB_MODEs
+time_t brb_updateT;                             // time of next update
 
 #define X(a,b)  b,                              // expands BRBMODES to name plus comma
 const char *brb_names[BRB_N] = {
@@ -50,9 +50,9 @@ const char *brb_names[BRB_N] = {
 // configuration values
 #define BPWM_MAX        255                     // PWM for 100% brightness
 #define BPWM_CHG        1.259                   // brightness mult per tap: 1 db = 1 JND
-#define BPWM_MIN_CHG    4                       // smallest value that increases by >= 1 when * BPWM_CHG
 #define PHOT_PIN        A0                      // Arduino name of analog pin with photo detector
 #define PHOT_MAX        1024                    // 10 bits including known range bug
+#define NO_TOL          5                       // Adc tolerance for no phot attached
 #define BPWM_BLEND      0.2F                    // fraction of new brightness to keep
 #define PHOT_BLEND      0.5F                    // fraction of new pwm to keep
 #define BPWM_COL        RA8875_WHITE            // brightness scale color
@@ -178,13 +178,28 @@ static uint16_t readPhot()
 
         resetWatchdog();
 
-        uint16_t new_phot = PHOT_MAX - analogRead (PHOT_PIN);           // brighter gives smaller value
+        static bool read_before;
+        static uint16_t smooth_adc;
 
-        // Serial.println (new_phot);
+        uint16_t raw_adc = analogRead (PHOT_PIN);              // brighter gives smaller ADC value
 
-        resetWatchdog();
+        if (!read_before) {
+            // init and spin up smoothing
+            smooth_adc = raw_adc;
+            for (int i = 0; i < 20; i++) {
+                raw_adc = analogRead (PHOT_PIN);
+                smooth_adc = PHOT_BLEND*raw_adc + (1-PHOT_BLEND)*smooth_adc;
+            }
+            read_before = true;
+        } else {
+            // blend in another reading
+            smooth_adc = PHOT_BLEND*raw_adc + (1-PHOT_BLEND)*smooth_adc;
+        }
 
-        return (PHOT_BLEND*new_phot + (1-PHOT_BLEND)*phot);             // smoothing
+        uint16_t new_phot = PHOT_MAX - smooth_adc;
+        // Serial.printf ("BR: raw_adc %d smooth_adc %d new_phot %d\n", raw_adc, smooth_adc, new_phot);
+
+        return (new_phot);
 
     #else
 
@@ -338,7 +353,7 @@ static void drawOnOffControls()
 {
         resetWatchdog();
 
-        if (getSWDisplayState() != SWD_NONE || brb_mode != BRB_SHOW_ONOFF)
+        if (brb_mode != BRB_SHOW_ONOFF || getSWDisplayState() != SWD_NONE)
             return;
 
         tft.fillRect (NCDXF_b.x+1, NCDXF_b.y+1, NCDXF_b.w-2, NCDXF_b.h-2, RA8875_BLACK);
@@ -659,7 +674,7 @@ static bool isRPiDSI()
 
 
 /* return whether the display hardware brightness can be controlled.
- * intended for external use, set flag for internal use.
+ * intended for external use, use flags for internal use.
  */
 bool brControlOk()
 {
@@ -679,7 +694,7 @@ bool brControlOk()
 }
 
 /* return whether display hardware support being turned on/off.
- * intended for external use, set flag for internal use.
+ * intended for external use, use flags for internal use.
  */
 bool brOnOffOk()
 {
@@ -733,12 +748,9 @@ void initBrightness()
         // log
         Serial.printf (_FX("BR: 0 onoff= %d dim= %d phot= %d\n"), support_onoff, support_dim, support_phot);
 
-        // check whether photo resistor is connected: discard first read then spin up the blend
-        (void) readPhot();
-        for (uint8_t i = 0; i < 10; i++)
-            (void) readPhot();
+        // check whether photo resistor is connected, not found if either shorted or open
         phot = readPhot();
-        found_phot = phot > 1;  // in case they ever fix the range bug
+        found_phot = phot > NO_TOL && phot < PHOT_MAX-NO_TOL;
         Serial.printf (_FX("BR: phot %d %s\n"), phot, found_phot ? "found" : "not found");
 
         // full on for now
@@ -803,19 +815,22 @@ void setupBrightness()
             NVWriteUInt16 (NV_PHOT_DIM, fast_phot_dim);
         }
 
-        // get display mode, reset to something benign if no longer appropriate
-        if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset) 
-                    || (brb_rotset & (1<<brb_mode)) == 0
-                    || ((brb_rotset & (1 << BRB_SHOW_ONOFF)) && !support_onoff)
-                    || ((brb_rotset & (1 << BRB_SHOW_PHOT)) && (!support_phot || !found_phot))
-                    || ((brb_rotset & (1 << BRB_SHOW_BR)) && (!support_dim || (support_phot && found_phot)))){
-            Serial.printf (_FX("BR: Resetting initial brb_reset 0x%x to 0x%x\n"),
-                        brb_rotset, 1<<BRB_SHOW_SWSTATS);
-            brb_mode = BRB_SHOW_SWSTATS;
-            brb_rotset = 1 << BRB_SHOW_SWSTATS;
-            NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
+        // check display mode
+        if ((brb_rotset & (1 << BRB_SHOW_ONOFF)) && !support_onoff) {
+            Serial.print (F("BR: Removing BRB_SHOW_ONOFF from brb_rotset\n"));
+            brb_rotset &= ~(1 << BRB_SHOW_ONOFF);
+            checkBRBRotset();
         }
-        logBRBRotSet();
+        if ((brb_rotset & (1 << BRB_SHOW_PHOT)) && (!support_phot || !found_phot)) {
+            Serial.print (F("BR: Removing BRB_SHOW_PHOT from brb_rotset\n"));
+            brb_rotset &= ~(1 << BRB_SHOW_PHOT);
+            checkBRBRotset();
+        }
+        if ((brb_rotset & (1 << BRB_SHOW_BR)) && (!support_dim || (support_phot && found_phot))) {
+            Serial.print (F("BR: Removing BRB_SHOW_BR from brb_rotset\n"));
+            brb_rotset &= ~(1 << BRB_SHOW_BR);
+            checkBRBRotset();
+        }
 }
 
 /* draw any of the brightness controls in NCDXF_b.
@@ -1014,17 +1029,20 @@ void doNCDXFBoxTouch (const SCoord &s)
         // this list of each BRB is to avoid knowing their values, nice BUT must be in same order as mitems[]
         static uint8_t mi_brb_order[BRB_N] = {
             BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR,
-            BRB_SHOW_BME76, BRB_SHOW_BME77
+            BRB_SHOW_BME76, BRB_SHOW_BME77, BRB_SHOW_DXWX, BRB_SHOW_DEWX
         };
 
+        // don't show WX if already is already in a pane
+        bool dx_anypane = findPaneForChoice (PLOT_CH_DXWX) != PANE_NONE;
+        bool de_anypane = findPaneForChoice (PLOT_CH_DEWX) != PANE_NONE;
 
         // build menu, depending on current configuration
         #define _MI_INDENT 2
         MenuItem mitems[BRB_N] = {
              {MENU_AL1OFN, (bool)(brb_rotset & (1 << BRB_SHOW_BEACONS)), 1, _MI_INDENT,
-                                brb_names[BRB_SHOW_BEACONS]},
+                        brb_names[BRB_SHOW_BEACONS]},
              {MENU_AL1OFN, (bool)(brb_rotset & (1 << BRB_SHOW_SWSTATS)), 1, _MI_INDENT,
-                                brb_names[BRB_SHOW_SWSTATS]},  // always
+                        brb_names[BRB_SHOW_SWSTATS]},
              {support_onoff ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_ONOFF)), 1, _MI_INDENT, brb_names[BRB_SHOW_ONOFF]},
              {support_phot && found_phot ? MENU_AL1OFN : MENU_IGNORE,
@@ -1035,11 +1053,15 @@ void doNCDXFBoxTouch (const SCoord &s)
                         (bool)(brb_rotset & (1 << BRB_SHOW_BME76)), 1, _MI_INDENT, brb_names[BRB_SHOW_BME76]},
              {getBMEData(BME_77,false) != NULL ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_BME77)), 1, _MI_INDENT, brb_names[BRB_SHOW_BME77]},
+             {dx_anypane ? MENU_IGNORE : MENU_AL1OFN,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_DXWX)), 1, _MI_INDENT, brb_names[BRB_SHOW_DXWX]},
+             {de_anypane ? MENU_IGNORE : MENU_AL1OFN,
+                        (bool)(brb_rotset & (1 << BRB_SHOW_DEWX)), 1, _MI_INDENT, brb_names[BRB_SHOW_DEWX]},
         };
 
         // boxes
-        SBox menu_b = NCDXF_b;                      // copy
-        menu_b.y += 20;
+        SBox menu_b = NCDXF_b;                      // copy, not ref!
+        menu_b.y += 10;
         SBox ok_b;
 
         // run menu
@@ -1055,7 +1077,7 @@ void doNCDXFBoxTouch (const SCoord &s)
                 if (mitems[i].set)
                     brb_rotset |= (1 << mi_brb_order[i]);
 
-            // if brb_mode is not in new set, just pick one
+            // if brb_mode is not already in new set, just pick one
             if ((brb_rotset & (1 << brb_mode)) == 0) {
                 for (int i = 0; i < BRB_N; i++) {
                     if (brb_rotset & (1 << i)) {
@@ -1076,12 +1098,11 @@ void doNCDXFBoxTouch (const SCoord &s)
                 getPersistentOnOffTimes (DEWeekday(), mins_on, mins_off);
         }
 
-        // show new option, even if no change in order to erase menu
-        drawNCDXFBox();
+        // immediate redraw even if no change in order to erase menu
+        brb_updateT = 0;
 
         // save
-        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
-        Serial.printf (_FX("BR: now mode %d\n"), brb_mode);
+        NVWriteUInt16 (NV_BRB_ROTSET, brb_rotset);
 
     } else {
 
@@ -1104,6 +1125,11 @@ void doNCDXFBoxTouch (const SCoord &s)
         case BRB_SHOW_BME76:
         case BRB_SHOW_BME77:
             doBMETouch (s);
+            break;
+
+        case BRB_SHOW_DEWX:     // fallthru
+        case BRB_SHOW_DXWX:     // fallthru
+            // nothing
             break;
 
         case BRB_N:

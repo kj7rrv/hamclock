@@ -437,6 +437,17 @@ bool askNewPos (const SBox &b, LatLong &op_ll, char op_grid[MAID_CHARLEN])
     char new_grid[MAID_CHARLEN];
     memset (&new_ll, 0, sizeof(new_ll));
     memset (new_grid, 0, sizeof(new_grid));
+    SCoord s;
+    char kbc;
+    UserInput ui = {
+        b,
+        NULL,
+        false,
+        NP_TIMEOUT,
+        false,
+        s,
+        kbc
+    };
     do {
 
         // always fresh
@@ -446,23 +457,13 @@ bool askNewPos (const SBox &b, LatLong &op_ll, char op_grid[MAID_CHARLEN])
         // handy current field number
         NPFieldName focus_fn = (NPFieldName)(focus_fp - fields);
 
-        // read input touch or keyboard, cancel if time out
-        uint32_t t0 = millis();
-        TouchType tt;
-        SCoord s;
-        char kbc = 0;
-        while (!cancelled
-                        && ((tt = readCalTouchWS(s)) == TT_NONE || !inBox (s, b))
-                        && (kbc = tft.getChar()) == 0) {
-            if (timesUp (&t0, NP_TIMEOUT))
-                cancelled = true;
-            wdDelay(100);
-            tft.drawPR();
-        }
-        if (cancelled)
+        // wait for user to do something or time out
+        if (!waitForUser(ui)) {
+            cancelled = true;
             continue;
+        }
 
-        // see whatever happened
+        // see what happened
         int tap = processNPTap (kbc, focus_fn, b, s);
         // Serial.printf (_FX("ask %d %c\n"), tap, isalnum(tap) ? tap : '*');
 

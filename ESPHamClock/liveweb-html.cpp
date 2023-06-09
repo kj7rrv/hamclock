@@ -231,36 +231,43 @@ char live_html[] =  R"_raw_html_(
         // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
         window.addEventListener('keydown', function(event) {
 
-            // get char name
-            let k = event.key;
+            // get char name or arrow key
+            var key;
+            switch (event.keyCode) {
+            case 37: key = 'h'; break;  // left
+            case 38: key = 'k'; break;  // up
+            case 39: key = 'l'; break;  // right
+            case 40: key = 'j'; break;  // down
+            default: key = event.key;   // other
+            }
 
             // a real space would create 'char= ' which doesn't parse so we invent Space name
-            if (k === ' ')
-                k = 'Space';
+            if (key === ' ')
+                key = 'Space';
 
             // ignore if modied
             if (event.metaKey || event.ctrlKey || event.altKey) {
                 if (event_verbose)
-                    console.log('ignoring modified ' + k);
+                    console.log('ignoring modified ' + key);
                 return;
             }
 
             // accept only certain non-alphanumeric keys
-            if (k.length > 1 && !nonan_chars.find (e => { if (e == k) return true; })) {
+            if (key.length > 1 && !nonan_chars.find (e => { if (e == key) return true; })) {
                 if (event_verbose)
-                    console.log('ignoring ' + k);
+                    console.log('ignoring ' + key);
                 return;
             }
 
             // don't let browser see tab
-            if (k === "Tab") {
+            if (key === "Tab") {
                 if (event_verbose)
                     console.log ("stopping tab");
                 event.preventDefault();
             }
 
             // compose and send
-            sendWSMsg ('set_char?char=' + k);
+            sendWSMsg ('set_char?char=' + key);
         });
 
         // respond to mobile device being rotated. resize seems to work better than orientationchange

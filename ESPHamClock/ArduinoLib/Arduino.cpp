@@ -61,17 +61,24 @@ std::string our_dir;            // our storage directory, including trailing /
  */
 uint32_t millis(void)
 {
+    #if defined(CLOCK_MONOTONIC_FAST)
+        // this is only on FreeBSD but is fully 200x faster than gettimeofday or CLOCK_MONOTONIC
+	static struct timespec t0;
+	struct timespec t;
+	clock_gettime (CLOCK_MONOTONIC_FAST, &t);
+	if (t0.tv_sec == 0)
+	    t0 = t;
+	uint32_t dt_ms = (t.tv_sec - t0.tv_sec)*1000 + (t.tv_nsec - t0.tv_nsec)/1000000;
+	return (dt_ms);
+    #else
 	static struct timeval t0;
-
 	struct timeval t;
 	gettimeofday (&t, NULL);
-
-	if (t0.tv_sec == 0 && t0.tv_usec == 0)
+	if (t0.tv_sec == 0)
 	    t0 = t;
-
 	uint32_t dt_ms = (t.tv_sec - t0.tv_sec)*1000 + (t.tv_usec - t0.tv_usec)/1000;
-	// printf ("millis %u: %ld.%06ld - %ld.%06ld\n", dt_ms, t.tv_sec, t.tv_usec, t0.tv_sec, t0.tv_usec);
 	return (dt_ms);
+    #endif
 }
 
 void delay (uint32_t ms)
@@ -365,8 +372,8 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing percentage for -t");
                     max_cpu_usage = atoi (*++av)/100.0F;
-                    if (max_cpu_usage <0.2F || max_cpu_usage>1)
-                        usage ("-t percentage must be 20 .. 100");
+                    if (max_cpu_usage <0.1F || max_cpu_usage>1)
+                        usage ("-t percentage must be 10 .. 100");
                     ac--;
                     break;
                 case 'v':
@@ -449,6 +456,10 @@ int main (int ac, char *av[])
         // performance measurements
         int cpu_us = 0, et_us = 0;      // cpu and elapsed time
         int sleep_us = 100;             // initial sleep, usecs
+        const int sleep_dt = 10;        // sleep adjustment, usecs
+        const int max_sleep = 50000;    // max sleep each loop, usecs
+
+        #define TVUSEC(tv0,tv1) (((tv1).tv_sec-(tv0).tv_sec)*1000000 + ((tv1).tv_usec-(tv0).tv_usec))
 
 	// call Arduino loop forever
         // this loop by itself would run 100% CPU so try to be a better citizen and throttle back
@@ -465,16 +476,20 @@ int main (int ac, char *av[])
 	    loop();
 
             if (max_cpu_usage < 1) {
-                // cap cpu usage by sleeping based on a simple integral controller
+                // cap cpu usage by sleeping controlled by a simple integral controller
                 if (cpu_us > et_us*max_cpu_usage) {
-                    sleep_us += 10;
-                    if (sleep_us > 10000)
-                        sleep_us = 10000;
+                    // back off
+                    if (sleep_us < max_sleep)
+                        sleep_us += sleep_dt;
                 } else {
-                    if (sleep_us >= 10)
-                        sleep_us -= 10;
+                    // more!
+                    if (sleep_us < sleep_dt)
+                        sleep_us = 0;
+                    else
+                        sleep_us -= sleep_dt;
                 }
-                usleep (sleep_us);
+                if (sleep_us > 0)
+                    usleep (sleep_us);
 
                 // get time and usage after running loop() and our usleep
                 struct rusage ru1;
@@ -483,16 +498,16 @@ int main (int ac, char *av[])
                 gettimeofday (&tv1, NULL);
 
                 // find cpu time used
-                struct timeval *ut0 = &ru0.ru_utime;
-                struct timeval *ut1 = &ru1.ru_utime;
-                struct timeval *st0 = &ru0.ru_stime;
-                struct timeval *st1 = &ru1.ru_stime;
-                int ut_us = (ut1->tv_sec - ut0->tv_sec)*1000000 + (ut1->tv_usec - ut0->tv_usec);
-                int st_us = (st1->tv_sec - st0->tv_sec)*1000000 + (st1->tv_usec - st0->tv_usec);
+                struct timeval &ut0 = ru0.ru_utime;
+                struct timeval &ut1 = ru1.ru_utime;
+                struct timeval &st0 = ru0.ru_stime;
+                struct timeval &st1 = ru1.ru_stime;
+                int ut_us = TVUSEC(ut0,ut1);
+                int st_us = TVUSEC(st0,st1);
                 cpu_us = ut_us + st_us;
 
                 // find elapsed time
-                et_us = (tv1.tv_sec - tv0.tv_sec)*1000000 + (tv1.tv_usec - tv0.tv_usec);
+                et_us = TVUSEC(tv0,tv1);
 
                 // printf ("sleep_us= %10d cpu= %10d et= %10d %g\n", sleep_us, cpu_us, et_us, fmin(100,100.0*cpu_us/et_us));
             }

@@ -57,6 +57,9 @@ static const char sf_page[] PROGMEM = "/solar-flux/solarflux-99.txt";
 #define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
 static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
 
+// world wx table update, new data every hour
+#define WWX_INTERVAL    1900                    // polling interval, secs
+
 // band conditions and voacap map, models change each hour
 #define BC_INTERVAL     (2400+randIvl(200))     // polling interval, secs
 #define VOACAP_INTERVAL (2500+randIvl(200))     // polling interval, secs
@@ -94,8 +97,8 @@ uint8_t findBCModeValue (const char *name)
 #define OTHER_MAPS_INTERVAL (1900+randIvl(200)) // polling interval, secs
 
 // DRAP plot info, new data posted every few minutes
-#define DRAPPLOT_INTERVAL    (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
-#define DRAPPLOT_COLOR  RA8875_RED              // loading message text color
+#define DRAPPLOT_INTERVAL   (DRAPMAP_INTERVAL+5) // polling interval, secs. N.B. avoid race with MAP
+#define DRAPPLOT_COLOR  RGB565(188,143,143)      // loading message text color
 static const char drap_page[] PROGMEM = "/drap/stats.txt";
 
 // NOAA RSG space weather scales
@@ -124,10 +127,10 @@ static bool moon_reverting;                     // flag for revertPlot1();
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
     {"time.google.com", 0},
     {"time.apple.com", 0},
-    {"time.nist.gov", 0},
     {"pool.ntp.org", 0},
     {"europe.pool.ntp.org", 0},
     {"asia.pool.ntp.org", 0},
+    {"time.nist.gov", 0},
 };
 #define N_NTP NARRAY(ntp_list)                  // number of possible servers
 
@@ -135,14 +138,15 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 // web site retry interval, secs
 #define WIFI_RETRY      (20+randIvl(5))
 
-// pane auto rotation period in seconds -- most are the same but wx is longer
-#define ROTATION_INTERVAL       (30+randIvl(5))                 // default pane rotation interval, s
-#define ROTATION_WX_INTERVAL    (200+randIvl(20))               // default weather interval, s
+// pane auto rotation period in seconds
+#define ROTATION_INTERVAL       (40+randIvl(5))                 // default pane rotation interval, s
 #define ROT_SLOW_DELTA          15                              // seconds to defer for high server load
+
+// slow down if hi server load
 static const char sload_page[] PROGMEM = "/loadfactor.pl";      // page to query for server load
 
 
-// time of next attempts -- 0 will refresh immediately -- reset in initWiFiRetry()
+// time of next update attempts -- 0 will refresh immediately -- reset in initWiFiRetry()
 static time_t next_sflux;
 static time_t next_ssn;
 static time_t next_xray;
@@ -166,6 +170,7 @@ static time_t next_drap;
 static time_t next_contests;
 static time_t next_psk;
 static time_t next_ota;
+static time_t next_wwx;
 
 // persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
 static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update;
@@ -200,7 +205,7 @@ static int queryServerOverLoad (void)
     // not crazy fast
     static uint32_t last_lookup_time;
     static int overload;
-    if (!timesUp (&last_lookup_time, 90000 + randIvl(30000)))
+    if (!timesUp (&last_lookup_time, 100000 + randIvl(30000)))
         return (overload);
 
     WiFiClient sl_client;
@@ -255,13 +260,12 @@ out:
     return (overload);
 }
 
-/* get pane rotation interval, depending on pane and server load
+/* get pane rotation interval, expanded for high server load.
  */
-static int getRotationInterval(PlotChoice pc)
+static int getPaneRotationInterval(void)
 {
-    int interval = (pc == PLOT_CH_DEWX || pc == PLOT_CH_DXWX) ? ROTATION_WX_INTERVAL : ROTATION_INTERVAL;
     int server_overload = queryServerOverLoad();
-    return (interval + server_overload * ROT_SLOW_DELTA);
+    return (ROTATION_INTERVAL + server_overload * ROT_SLOW_DELTA);
 }
 
 /* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
@@ -295,12 +299,12 @@ static time_t nextWiFiRetry()
 /* return when next to rotate the given pane.
  * rotations are spaced out to avoid swamping the server or supporting service.
  */
-static time_t nextPaneRotationTime(PlotPane pp, PlotChoice pc)
+static time_t nextPaneRotationTime(PlotPane pp)
 {
-    int interval = getRotationInterval(pc);
+    int interval = getPaneRotationInterval();
     time_t rot_time = now() + interval;
 
-    // find soonest rot_time that is interval from all other active panes
+    // find soonest rot_time that is at least interval away from all other active panes
     for (int i = 0; i < PANE_N*PANE_N; i++) {           // all permutations
         PlotPane ppi = (PlotPane) (i % PANE_N);
         if (ppi != pp && paneIsRotating((PlotPane)ppi)) {
@@ -587,8 +591,9 @@ void initSys()
                         best_ntp = np;
                 }
 
-                // cancel scan if tapped and found at least one good
-                if (best_ntp && (skip_skip || (readCalTouchWS(s) != TT_NONE && inBox (s, skip_b)))) {
+                // cancel scan if found at least one good and tapped or typed
+                if (best_ntp && (skip_skip || tft.getChar(NULL,NULL)
+                                   || (readCalTouchWS(s) != TT_NONE && inBox (s, skip_b)))) {
                     drawStringInBox (_FX("Skip"), skip_b, true, RA8875_WHITE);
                     Serial.printf (_FX("NTP search cancelled with %s\n"), best_ntp->server);
                     skipped_here = true;
@@ -648,15 +653,13 @@ void initSys()
         drainTouch();
         for (uint8_t ds_left = TO_DS; !skip_skip && ds_left > 0; --ds_left) {
             SCoord s;
-            if (readCalTouchWS(s) != TT_NONE && inBox(s, skip_b)) {
+            if (tft.getChar(NULL,NULL) || (readCalTouchWS(s) != TT_NONE && inBox(s, skip_b))) {
                 drawStringInBox (_FX("Skip"), skip_b, true, RA8875_WHITE);
                 break;
             }
             if ((TO_DS - (millis() - t0)/100)/10 < s_left) {
                 // just printing every ds_left/10 is too slow due to overhead
-                char buf[30];
-                snprintf (buf, sizeof(buf), _FX("Ready ... %d\r"), s_left--);
-                tftMsg (true, 0, buf);
+                tftMsg (true, 0, _FX("Ready ... %d\r"), s_left--);
             }
             wdDelay(100);
         }
@@ -1330,67 +1333,76 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
  */
 static void checkBRB (time_t t)
 {
-    // routine update of NCFDX beacons
-    updateBeacons(false, false);
+    // routine update of NCFDX map beacons
+    updateBeacons (false, false);
 
     // see if it's time to rotate
-    if (BRBIsRotating() && t > brb_rotationT) {
+    if (t > brb_updateT) {
 
-        // find next bit in rotset
-        for (unsigned i = 1; i < 8*sizeof(brb_rotset); i++) {
-            int mode_n = (brb_mode + i)%BRB_N;
-            if (brb_rotset & (1 << mode_n)) {
-
-                // set current mode and draw
-                brb_mode = mode_n;
-                drawNCDXFBox();
-
-                // sync rotation with next soonest pane, else set new
-                time_t next_rotT = 0;
-                for (int i = 0; i < PANE_N; i++) {
-                    if (paneIsRotating(i)) {
-                        if (!next_rotT || plot_rotationT[i] < next_rotT)
-                            next_rotT = plot_rotationT[i];
-                    }
+        // move brb_mode to next rotset if rotating
+        if (BRBIsRotating()) {
+            for (int i = 1; i < BRB_N; i++) {
+                int next_mode = (brb_mode + i) % BRB_N;
+                if (brb_rotset & (1 << next_mode)) {
+                    brb_mode = next_mode;
+                    Serial.printf (_FX("BR: mode rotating to %d\n"), brb_mode);
+                    break;
                 }
-                brb_rotationT = next_rotT ? next_rotT : t + getRotationInterval(PLOT_CH_NONE);
-
-                break;
             }
+        }
+
+        // update brb_mode
+        if (!drawNCDXFBox()) {
+
+            // trouble: retry
+            brb_updateT = nextWiFiRetry();
+
+        } else {
+
+            // ok: sync rotation with next soonest rotating pane if any, else use standard pane rotation
+            time_t next_rotT = 0;
+            for (int i = 0; i < PANE_N; i++) {
+                if (paneIsRotating(i)) {
+                    if (!next_rotT || plot_rotationT[i] < next_rotT)
+                        next_rotT = plot_rotationT[i];
+                }
+            }
+            if (next_rotT)
+                brb_updateT = next_rotT;
+            else
+                brb_updateT = t + getPaneRotationInterval();
         }
 
     } else {
 
-        // check if current mode needs an update
+        // check a few that need spontaneous updating
 
-        switch ((BRB_MODE)brb_mode) {
-        case BRB_SHOW_BEACONS:
-            // handled above
-            break;
+        switch (brb_mode) {
 
-        case BRB_SHOW_ONOFF:
-            // nothing to update
-            break;
-
-        case BRB_SHOW_PHOT:     // fallthru
-        case BRB_SHOW_BR:
-            // these two are handled by followBrightness() in main loop
+        case BRB_SHOW_BME76:
+        case BRB_SHOW_BME77:
+            // only if new BME
+            if (newBME280data())
+                (void) drawNCDXFBox();
             break;
 
         case BRB_SHOW_SWSTATS:
+            // only if new space stats
             if (checkSpaceStats(t))
-                drawSpaceStats();
+                (void) drawNCDXFBox();
             break;
 
-        case BRB_SHOW_BME76:    // fallthru
-        case BRB_SHOW_BME77:
-            updateBMEStats();
+        case BRB_SHOW_DEWX:
+        case BRB_SHOW_DXWX:
+            // routine drawNCDXFBox() are enough
             break;
 
-        default:
-            fatalError (_FX("checkBRB() bad brb_mode: %d"), brb_mode);
+        case BRB_SHOW_PHOT:
+        case BRB_SHOW_BR:
+            // these are updated from followBrightness() in main loop()
             break;
         }
+
     }
 }
 
@@ -1645,7 +1657,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
 
     // schedule next rotation if enabled
     if (paneIsRotating(pp))
-        plot_rotationT[pp] = nextPaneRotationTime(pp, ch);
+        plot_rotationT[pp] = nextPaneRotationTime(pp);
 
     // ok!
     return (true);
@@ -1878,6 +1890,12 @@ void updateWiFi(void)
     // freshen NCDXF_b
     checkBRB(t0);
 
+    // freshen world weather table (not the map)
+    if (t0 >= next_wwx) {
+        fetchWorldWx();
+        next_wwx = now() + WWX_INTERVAL;
+    }
+
     // freshen RSS
     if (t0 >= next_rss) {
         if (updateRSS())
@@ -2026,29 +2044,27 @@ time_t getNTPUTC(const char **server)
  */
 bool getChar (WiFiClient &client, char *cp)
 {
-    #define GET_TO 10000 // millis()
+    // wait for char, avoid calling millis() if more data are already ready
+    if (!client.available()) {
+        uint32_t t0 = millis();
+        while (!client.available()) {
+            if (!client.connected()) {
+                Serial.print (F("getChar disconnect\n"));
+                return (false);
+            }
+            if (timesUp(&t0,10000)) {
+                Serial.print (F("getChar timeout\n"));
+                return (false);
+            }
 
-    resetWatchdog();
-
-    // wait for char
-    uint32_t t0 = millis();
-    while (!client.available()) {
-        if (!client.connected()) {
-            Serial.print (F("getChar disconnect\n"));
-            return (false);
+            // N.B. do not call wdDelay -- it calls checkWebServer() most of whose handlers
+            // call back here via getTCPLine()
+            delay(2);
+            resetWatchdog();
         }
-        if (timesUp(&t0,GET_TO)) {
-            Serial.print (F("getChar timeout\n"));
-            return (false);
-        }
-
-        // N.B. do not call wdDelay -- it calls checkWebServer() most of whose handlers
-        // call back here via getTCPLine()
-        delay(10);
-        resetWatchdog();
     }
 
-    // read, which has another way to indicate failure
+    // read, which offers yet another way to indicate failure
     int c = client.read();
     if (c < 0) {
         Serial.print (F("bad getChar read\n"));
@@ -2166,6 +2182,16 @@ void sendUserAgent (WiFiClient &client)
             if (getColorDashed((ColorSelection)i))
                 n_dashed++;
 
+        // path size: 0 none, 1 thin, 2 wide
+        int path = getSpotPathSize();                   // returns 0, THINPATHSZ or WIDEPATHSZ
+        if (path)
+            path = (path == THINPATHSZ ? 1 : 2);
+
+        // label spots: 0 no, 1 prefix, 2 call
+        int spots = labelSpots();
+        if (spots)
+            spots = (plotSpotCallsigns() ? 2 : 1);
+
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV6 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok,
@@ -2179,7 +2205,8 @@ void sendUserAgent (WiFiClient &client)
             rss_interval, dayf, rr_score,
             // new for LV6:
             useMagBearing(), n_dashed, useLocalNTPHost(), 
-            0, 0, 0, 0, 0);       // TBD
+            path, spots,
+            0, 0, 0);       // TBD
     } else {
         snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
@@ -2607,7 +2634,7 @@ static bool updateDRAPPlot(const SBox &box)
         }
 
         // ok, plot it
-        if (plotXY (box, x, y, _DRAP_NPLOT, _FX("Hours"), _FX("DRAP,  max MHz"), DRAPPLOT_COLOR,
+        if (plotXY (box, x, y, _DRAP_NPLOT, _FX("Hours"), _FX("DRAP, max MHz"), DRAPPLOT_COLOR,
                                                             0, 0, y[_DRAP_NPLOT-1])) {
             // capture for getSpaceWeather()
             drap_spw = y[_DRAP_NPLOT-1];
@@ -3085,6 +3112,7 @@ void initWiFiRetry()
     next_contests = 0;
     next_psk = 0;
     next_ota = 0;
+    next_wwx = 0;
 
     // map is in memory
     // next_map = 0;
@@ -3343,13 +3371,17 @@ void drawSpaceStats()
 
     // arrays for drawNCDXFStats()
     static const char err[] = "Err";
-    char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN];
+    char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN] = {
+        "SSN",
+        "SFI",
+        "X-Ray",
+        "Kp"
+    };
     char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN];
     uint16_t colors[NCDXF_B_NFIELDS];
     int i = 0;
 
     // SSN
-    strcpy (titles[i], "SSN");
     if (ssn_spw == SPW_ERR)
         strcpy (values[i], err);
     else
@@ -3358,7 +3390,6 @@ void drawSpaceStats()
     i++;
 
     // SFI
-    strcpy (titles[i], "SFI");
     if (sflux_spw == SPW_ERR)
         strcpy (values[i], err);
     else
@@ -3367,13 +3398,11 @@ void drawSpaceStats()
     i++;
 
     // Xray
-    strcpy (titles[i], "X-Ray");
     xrayLevel(xray_spw, values[i]);
     colors[i] = RGB565(255,134,0);      // XRAY_COLOR is too alarming
     i++;
 
     // Kp
-    strcpy (titles[i], "Kp");
     if (kp_spw == SPW_ERR)
         strcpy (values[i], err);
     else

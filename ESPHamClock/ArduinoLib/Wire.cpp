@@ -82,7 +82,7 @@ bool TwoWire::openConnection()
                 printf ("I2C: %s: in use by another process\n", filename);
                 close (i2c_fd);
                 i2c_fd = -1;
-            } else if (verbose) {
+            } else {
                 printf ("I2C: %s open ok\n", filename);
             }
         } else if (verbose)
@@ -428,7 +428,7 @@ bool TwoWire::openConnection()
                 printf ("I2C: %s: in use by another process\n", filename);
                 close (i2c_fd);
                 i2c_fd = -1;
-            } else if (verbose) {
+            } else {
                 printf ("I2C: %s open ok\n", filename);
             }
         } else if (verbose)

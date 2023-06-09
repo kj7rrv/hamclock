@@ -292,14 +292,17 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
         bool displayReady() {
             return (true);
         }
-        char getChar(void) {
+        char getChar(bool *, bool *) {
             return (0);
         }
         void putChar (char c) {
             (void)(c);
         }
+        bool warpCursor (char, unsigned, int *, int *) {
+            return (false);
+        }
         int SCALESZ = 1;
-	void drawSubPixel(int16_t x, int16_t y, uint16_t color) {
+	void drawPixelRaw(int16_t x, int16_t y, uint16_t color) {
             drawPixel(x, y, color);
         }
 

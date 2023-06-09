@@ -202,7 +202,7 @@ bool Adafruit_RA8875::begin (int not_used)
             printf ("kb_lock: %s\n", strerror(errno));
             exit(1);
         }
-        kb_cqhead = kb_cqtail = 0;
+        kb_qhead = kb_qtail = 0;
 
         // set up a reentrantable lock for fb
         pthread_mutexattr_t fb_attr;
@@ -264,7 +264,7 @@ bool Adafruit_RA8875::begin (int not_used)
             printf ("Neither 24 nor 32 bit TrueColor visual found\n");
             exit(1);
         }
-#endif
+#endif // !_16BIT_FB
 
         visual = vinfo.visual;
 
@@ -349,7 +349,7 @@ bool Adafruit_RA8875::begin (int not_used)
 	    printf ("kb_lock: %s\n", strerror(errno));
 	    exit(1);
 	}
-	kb_cqhead = kb_cqtail = 0;
+	kb_qhead = kb_qtail = 0;
 
 	// set up a reentrantable lock for fb
 	pthread_mutexattr_t fb_attr;
@@ -402,7 +402,7 @@ bool Adafruit_RA8875::begin (int not_used)
 	    printf ("kb_lock: %s\n", strerror(errno));
 	    exit(1);
 	}
-        kb_cqhead = kb_cqtail = 0;
+        kb_qhead = kb_qtail = 0;
 
 	// init for kb thread
         kb_fd = -1;
@@ -907,7 +907,7 @@ void Adafruit_RA8875::drawPixels (uint16_t * p, uint32_t count, int16_t x, int16
 
 /* location is fb coord system
  */
-void Adafruit_RA8875::drawSubPixel(int16_t x, int16_t y, uint16_t color16)
+void Adafruit_RA8875::drawPixelRaw(int16_t x, int16_t y, uint16_t color16)
 {
 	fbpix_t fbpix = RGB16TOFBPIX(color16);
 	pthread_mutex_lock(&fb_lock);
@@ -955,6 +955,8 @@ uint16_t color16)
 	fbpix_t fbpix = RGB16TOFBPIX(color16);
 	pthread_mutex_lock(&fb_lock);
 	    plotLineRaw (x0, y0, x1, y1, thickness, fbpix);
+            // round cap style??
+            plotFillCircle (x1, y1, thickness/2-1, fbpix);
 	    fb_dirty = true;
 	pthread_mutex_unlock (&fb_lock);
 }
@@ -1118,11 +1120,13 @@ void Adafruit_RA8875::fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y
 void Adafruit_RA8875::plotDrawRect (int16_t x0, int16_t y0, int16_t w, int16_t h, fbpix_t fbpix)
 {
 	pthread_mutex_lock (&fb_lock);
-	    plotLineRaw (x0, y0, x0+w, y0, 1, fbpix);
-	    plotLineRaw (x0+w, y0, x0+w, y0+h, 1, fbpix);
-	    plotLineRaw (x0+w, y0+h, x0, y0+h, 1, fbpix);
-	    plotLineRaw (x0, y0+h, x0, y0, 1, fbpix);
-	    fb_dirty = true;
+            if (w > 0) {
+                plotLineRaw (x0, y0, x0+w, y0, 1, fbpix);
+                plotLineRaw (x0+w, y0, x0+w, y0+h, 1, fbpix);
+                plotLineRaw (x0+w, y0+h, x0, y0+h, 1, fbpix);
+                plotLineRaw (x0, y0+h, x0, y0, 1, fbpix);
+                fb_dirty = true;
+            }
 	pthread_mutex_unlock (&fb_lock);
 }
 
@@ -1600,16 +1604,21 @@ void Adafruit_RA8875::drawPR(void)
 }
 
 
-/* return a typed character, else 0
+/* return a typed character and current modifier keys if interested (may be NULL), else 0
  */
-char Adafruit_RA8875::getChar()
+char Adafruit_RA8875::getChar(bool *control_set, bool *shift_set)
 {
     char c = 0;
     pthread_mutex_lock (&kb_lock);
-        if (kb_cqhead != kb_cqtail) {
-            c = kb_cq[kb_cqhead];
-            if (++kb_cqhead == sizeof(kb_cq))
-                kb_cqhead = 0;
+        if (kb_qhead != kb_qtail) {
+            KBState &ks = kb_q[kb_qhead];
+            c = ks.c;
+            if (control_set)
+                *control_set = ks.control;
+            if (shift_set)
+                *shift_set = ks.shift;
+            if (++kb_qhead == KB_N)
+                kb_qhead = 0;
         }
     pthread_mutex_unlock (&kb_lock);
     return (c);
@@ -1620,9 +1629,12 @@ char Adafruit_RA8875::getChar()
 void Adafruit_RA8875::putChar (char c)
 {
     pthread_mutex_lock (&kb_lock);
-        kb_cq[kb_cqtail] = c;
-        if (++kb_cqtail == sizeof(kb_cq))
-            kb_cqtail = 0;
+        KBState &ks = kb_q[kb_qtail];
+        ks.c = c;
+        ks.control = false;
+        ks.shift = false;
+        if (++kb_qtail == KB_N)
+            kb_qtail = 0;
     pthread_mutex_unlock (&kb_lock);
 }
 
@@ -1729,6 +1741,40 @@ void Adafruit_RA8875::X11OptionsEngageNow (bool fs)
         // wait here
         while (options_engage)
             usleep (1000);
+}
+
+// _USE_X11
+void Adafruit_RA8875::encodeKeyEvent (XKeyEvent *event)
+{
+        char c = 0;
+
+        // check a few non-ascii values of interest else other chars
+        KeySym ks = XLookupKeysym (event, 0);
+        if (ks == XK_Left) {
+            c = 'h';
+        } else if (ks == XK_Down) {
+            c = 'j';
+        } else if (ks == XK_Up) {
+            c = 'k';
+        } else if (ks == XK_Right) {
+            c = 'l';
+        } else {
+            char buf[10];
+            if (XLookupString (event, buf, sizeof(buf), NULL, NULL) > 0)
+                c = buf[0];
+        }
+
+        // enqueue if recognized
+        if (c) {
+            pthread_mutex_lock (&kb_lock);
+            KBState &ks = kb_q[kb_qtail];
+            ks.c = c;
+            ks.control = (event->state & (ControlMask|Mod1Mask)) != 0;
+            ks.shift = (event->state & ShiftMask) != 0;
+            if (++kb_qtail == KB_N)
+                kb_qtail = 0;
+            pthread_mutex_unlock (&kb_lock);
+        }
 }
 
 /* thread that runs forever reacting to X11 events and painting fb_canvas whenever it changes
@@ -1874,21 +1920,13 @@ void Adafruit_RA8875::fbThread ()
 		    break;
 
                 case KeyPress:
+
                     // just record time to start repeating
                     gettimeofday (&kp0, NULL);
                     break;
 
                 case KeyRelease:
-                    {
-                        char buf[10];
-                        if (XLookupString ((XKeyEvent*)&event, buf, sizeof(buf), NULL, NULL) > 0) {
-                            pthread_mutex_lock (&kb_lock);
-                                kb_cq[kb_cqtail] = buf[0];
-                                if (++kb_cqtail == sizeof(kb_cq))
-                                    kb_cqtail = 0;
-                            pthread_mutex_unlock (&kb_lock);
-                        }
-                    }
+                    encodeKeyEvent ((XKeyEvent*)&event);
 		    break;
 
 		case ButtonPress:
@@ -1967,21 +2005,14 @@ void Adafruit_RA8875::fbThread ()
                 }
             pthread_mutex_unlock (&fb_lock);
 
-            // generate another char if key still pressed
+            // implement auto-repeat
             if (event.type == KeyPress) {
-                struct timeval tv0;
-                gettimeofday (&tv0, NULL);
-                int dt_ms = (tv0.tv_sec - kp0.tv_sec)*1000 + (tv0.tv_usec - kp0.tv_usec)/1000;
+                struct timeval tv;
+                gettimeofday (&tv, NULL);
+                int dt_ms = (tv.tv_sec - kp0.tv_sec)*1000 + (tv.tv_usec - kp0.tv_usec)/1000;
                 if (dt_ms > 400) {
-                    char buf[10];
-                    if (XLookupString ((XKeyEvent*)&event, buf, sizeof(buf), NULL, NULL) > 0) {
-                        pthread_mutex_lock (&kb_lock);
-                            kb_cq[kb_cqtail++] = buf[0];
-                            if (kb_cqtail == sizeof(kb_cq))
-                                kb_cqtail = 0;
-                        pthread_mutex_unlock (&kb_lock);
-                    }
-                    kp0 = tv0;
+                    encodeKeyEvent ((XKeyEvent*)&event);
+                    kp0 = tv;
                 }
             }
 
@@ -1999,6 +2030,43 @@ void Adafruit_RA8875::getScreenSize (int *w, int *h)
         int snum = DefaultScreen(display);
         *w = DisplayWidth(display, snum);
         *h = DisplayHeight(display, snum);
+}
+
+/* move cursor n app pixels in the given hjkl direction then pass back the resulting position.
+ * ignore dir if not one of hjkl. just return current position if n is 0.
+ * return whether cursor is actually over our window.
+ */
+// _USE_X11
+bool Adafruit_RA8875::warpCursor (char dir, unsigned n, int *xp, int *yp)
+{
+        int dx = 0, dy = 0;
+
+        if (n > 0) {
+
+            switch (dir) {
+            case 'h': dx -= n*SCALESZ; break;
+            case 'j': dy += n*SCALESZ; break;
+            case 'k': dy -= n*SCALESZ; break;
+            case 'l': dx += n*SCALESZ; break;
+            default: break;
+            }
+
+            if (dx || dy)
+                XWarpPointer (display, win, None, FB_X0, FB_Y0, FB_X0+FB_XRES, FB_Y0+FB_YRES, dx, dy);
+        }
+
+        Window root_w, child_w;
+        int root_x, root_y;
+        int win_x, win_y;
+        unsigned int mask;
+
+        if (XQueryPointer (display, win, &root_w, &child_w, &root_x, &root_y, &win_x, &win_y, &mask)) {
+            *xp = (win_x - FB_X0)/SCALESZ;
+            *yp = (win_y - FB_Y0)/SCALESZ;
+            return (true);
+        }
+
+        return (false);
 }
 
 #endif	// _USE_X11
@@ -2365,7 +2433,7 @@ void Adafruit_RA8875::kbThread ()
         // first try immediately
         findKeyboard();
 
-	// block until get kb char, then store in kb_cq
+	// block until get kb char, then store in kb_q
 	for(;;) {
 
             // look for kb occasionaly if none
@@ -2380,9 +2448,12 @@ void Adafruit_RA8875::kbThread ()
 	    int nr = read (kb_fd, buf, 1);
 	    if (nr == 1) {
 		pthread_mutex_lock (&kb_lock);
-                    kb_cq[kb_cqtail++] = buf[0];
-                    if (kb_cqtail == sizeof(kb_cq))
-                        kb_cqtail = 0;
+                    KBState &ks = kb_q[kb_qtail];
+                    ks.c = buf[0];
+                    ks.control = false;
+                    ks.shift = false;
+                    if (++kb_qtail == KB_N)
+                        kb_qtail = 0;
 		    fb_dirty = true;
 		pthread_mutex_unlock (&kb_lock);
                 // printf ("KB: %d %c\n", buf[0], buf[0]);

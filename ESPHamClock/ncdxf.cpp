@@ -170,7 +170,7 @@ static bool overBeacon (const SCoord &s, const NCDXFBeacon &nb)
 }
 
 
-/* update beacon display, typically on each 10 second period unless immediate.
+/* update map beacons, typically on each 10 second period unless immediate.
  * if erase_too then erase all beacons even if known to be off.
  */
 void updateBeacons (bool immediate, bool erase_too)
@@ -292,9 +292,12 @@ void drawBeaconKey()
 }
 
 /* draw any of the various contents in NCDXF_b depending on brb_mode.
+ * most just draw but return success for options that require fresh lookups.
  */
-void drawNCDXFBox()
+bool drawNCDXFBox()
 {
+    bool ok = true;
+
     // erase
     fillSBox (NCDXF_b, RA8875_BLACK);
 
@@ -308,6 +311,7 @@ void drawNCDXFBox()
 
     case BRB_SHOW_SWSTATS:
 
+        (void) checkSpaceStats(now());
         drawSpaceStats();
         break;
 
@@ -324,6 +328,11 @@ void drawNCDXFBox()
         drawBrightness();
         break;
 
+    case BRB_SHOW_DEWX: // fallthru
+    case BRB_SHOW_DXWX:
+        ok = drawNCDXFWx ((BRB_MODE)brb_mode);
+        break;
+
     case BRB_N:
         
         // lint
@@ -334,36 +343,42 @@ void drawNCDXFBox()
     tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, GRAY);
     tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x, NCDXF_b.y+NCDXF_b.h-1, GRAY);
     tft.drawLine (NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y+NCDXF_b.h-1, GRAY);
+
+    // ack
+    return (ok);
 }
 
-/* common template to draw space weather or BME stats in NCDXF_b.
+/* common template to draw table of stats in NCDXF_b.
  */
 void drawNCDXFStats (const char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
-                   const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
-                   const uint16_t colors[NCDXF_B_NFIELDS])
+                     const char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN],
+                     const uint16_t colors[NCDXF_B_NFIELDS])
 {
     // prep layout
-    uint16_t y = NCDXF_b.y + 2;
-    const int rect_dy = -23;
-    const int rect_h = 26;
+    uint16_t y = NCDXF_b.y;
+    const int valurect_dy = -23;
+    const int valurect_h = 26;
 
     // show each item
     for (int i = 0; i < NCDXF_B_NFIELDS; i++) {
+
+        y += 25;
+
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        tft.setTextColor (colors[i]);
+        tft.fillRect (NCDXF_b.x+1, y+valurect_dy, NCDXF_b.w-2, valurect_h, RA8875_BLACK);
+        // tft.drawRect (NCDXF_b.x+1, y+valurect_dy, NCDXF_b.w-2, valurect_h, RA8875_RED);
+        tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(values[i]))/2, y);
+        tft.print (values[i]);
+
+        y += 4;
 
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor (RA8875_WHITE);
         tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(titles[i]))/2, y);
         tft.print (titles[i]);
 
-        y += 31;
-
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
-        tft.setTextColor (colors[i]);
-        tft.fillRect (NCDXF_b.x+1, y+rect_dy, NCDXF_b.w-2, rect_h, RA8875_BLACK);
-        tft.setCursor (NCDXF_b.x + (NCDXF_b.w-getTextWidth(values[i]))/2, y);
-        tft.print (values[i]);
-
-        y += 5;
+        y += 7;
     }
 }
 
@@ -421,12 +436,26 @@ void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS])
  */
 void initBRBRotset()
 {
-    if (!NVReadUInt8 (NV_BRB_ROTSET, &brb_rotset) || brb_rotset == 0) {
+    if (!NVReadUInt16 (NV_BRB_ROTSET, &brb_rotset)) {
+        // check for old style
+        uint8_t old_rotset;
+        if (NVReadUInt8 (NV_BRB_ROTSET_OLD, &old_rotset))
+            brb_rotset = old_rotset;
+        else
+            brb_rotset = 0;
+    }
+    checkBRBRotset();
+}
+
+/* insure brb_rotset and brb_mode are set sensibly
+ */
+void checkBRBRotset()
+{
+    if (!brb_rotset) {
         brb_mode = BRB_SHOW_BEACONS;            // just pick one that is always possible
-        brb_rotset = 1 << brb_mode;    
-        NVWriteUInt8 (NV_BRB_ROTSET, brb_rotset);
+        brb_rotset = 1 << BRB_SHOW_BEACONS;    
     } else {
-        // arbitrarily set brb_mode to first bit, will be double-checked later
+        // arbitrarily set brb_mode to first set bit
         for (int i = 0; i < BRB_N; i++) {
             if (brb_rotset & (1 << i)) {
                 brb_mode = i;
@@ -434,4 +463,6 @@ void initBRBRotset()
             }
         }
     }
+    NVWriteUInt16 (NV_BRB_ROTSET, brb_rotset);
+    logBRBRotSet();
 }

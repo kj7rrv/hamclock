@@ -68,6 +68,13 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
 // hack around frame buffer readback weirdness that requires ignoring the very first pixel
 static bool first_pixel = true;
 
+#if defined(__GNUC__)
+static void demoMsg (bool ok, int n, char buf[], size_t buf_len, const char *fmt, ...)
+        __attribute__ ((format (__printf__, 5, 6)));
+#else
+static void demoMsg (bool ok, int n, char buf[], size_t buf_len, const char *fmt, ...);
+#endif
+
 
 // some color names culled from rgb.txt
 typedef struct {
@@ -755,7 +762,7 @@ static bool getWiFiDEDXInfo_helper (WiFiClient &client, char line[], size_t line
         snprintf (buf, sizeof(buf), _FX("%sWxHumidity %.1f %%\n"), prefix, wip->humidity_percent);
         client.print(buf);
 
-        x = (useMetricUnits() ? 3.6 : 2.237) * wip->wind_speed_mps; // kph or mph
+        x = (useMetricUnits() ? 3.6F : 2.237F) * wip->wind_speed_mps; // kph or mph
         snprintf (buf, sizeof(buf), _FX("%sWxWindSpd  %.1f %s\n"), prefix, x, useMetricUnits()?"kph":"mph");
         client.print(buf);
 
@@ -994,7 +1001,7 @@ static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_le
 
     // report each selected NCDXF beacon box state
     FWIFIPR (client, F("NCDXF     "));
-    for (unsigned i = 0; i < 8*sizeof(brb_rotset)-1; i++) {
+    for (unsigned i = 0; i < BRB_N; i++) {
         int j = (brb_mode + i) % BRB_N; // start list with current
         if (brb_rotset & (1 << j)) {
             if (j != brb_mode)
@@ -1003,7 +1010,7 @@ static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_le
         }
     }
     if (BRBIsRotating()) {
-        int sleft = brb_rotationT - now();
+        int sleft = brb_updateT - now();
         snprintf (buf, sizeof(buf), _FX(" rotating in %02d:%02d\n"), sleft/60, sleft%60);
     } else
         strcpy (buf, "\n");
@@ -1784,13 +1791,8 @@ static bool setWiFiTitle (WiFiClient &client, char line[], size_t line_len)
     }
 
     // or restore default if no args
-    if (!msg && !fg && !bg) {
-        free (cs_info.call);
-        cs_info.call = strdup(getCallsign());
-        NVReadUInt16 (NV_CALL_FG_COLOR, &cs_info.fg_color);
-        NVReadUInt16 (NV_CALL_BG_COLOR, &cs_info.bg_color);
-        NVReadUInt8 (NV_CALL_BG_RAINBOW, &cs_info.bg_rainbow);
-    }
+    if (!msg && !fg && !bg)
+        getDefaultCallsign();
 
 
     // engage
@@ -3338,7 +3340,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
 
     // parse
     if (!parseWebCommand (wa, line, line_len)) {
-        snprintf (line, line_len, usage);
+        strncpy (line, usage, line_len);
         return (false);
     }
 
@@ -3428,18 +3430,10 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     uint16_t new_age = psk_maxage_mins;
     if (wa.found[4]) {
         int age = atoi (wa.value[4]);
-
-        // N.B. match legal set with pskreporter.cpp
-        switch (age) {
-        case 30:        // fallthru
-        case 60:        // fallthru
-        case 120:       // fallthru
-        case 360:       // fallthru
-        case 1440:      // fallthru
+        if (maxPSKageOk(age))
             new_age = age;
-            break;
-        default:
-            strcpy (line, _FX("age: 30 60 120 360 1440"));
+        else {
+            strcpy (line, _FX("bad age"));
             return (false);
         }
     }
@@ -3460,7 +3454,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     // skip if no changes
     if (psk_mask == new_mask && psk_bands == new_bands && psk_maxage_mins == new_age
                         && psk_showdist == new_dist) {
-        snprintf (line, line_len, usage);
+        strncpy (line, usage, line_len);
         return (false);
     }
 
@@ -4037,9 +4031,14 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
         break;
 
     case DEMO_NCDXF:
-        // TODO: brightness, on/off times?
-        brb_mode = brb_mode == BRB_SHOW_SWSTATS ? BRB_SHOW_BEACONS : BRB_SHOW_SWSTATS;
-        drawNCDXFBox();
+        // cycle only states always available
+        switch (brb_mode) {
+        case BRB_SHOW_SWSTATS: brb_mode = BRB_SHOW_DXWX; break;
+        case BRB_SHOW_DXWX:    brb_mode = BRB_SHOW_DEWX; break;
+        case BRB_SHOW_DEWX:    brb_mode = BRB_SHOW_BEACONS; break;
+        default:               brb_mode = BRB_SHOW_SWSTATS; break;
+        }
+        (void) drawNCDXFBox();
         updateBeacons(true, true);
         ok = true;
         demoMsg (ok, choice, msg, msg_len, _FX("NCDXF %s"), brb_mode == BRB_SHOW_BEACONS ? "On" : "Off");
