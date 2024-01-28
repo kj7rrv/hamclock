@@ -56,7 +56,7 @@ class WiFiClient {
 	void println (float f);
 	void println (float f, int n);
 	void flush(void){};
-	String remoteIP(void);
+	IPAddress remoteIP(void);
 
     private:
 

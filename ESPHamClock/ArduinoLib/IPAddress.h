@@ -34,6 +34,14 @@ class IPAddress {
             return _address.bytes[index];
         }
 
+        // return as String
+        String toString(void) {
+            char s[50];
+            snprintf (s, sizeof(s), "%d.%d.%d.%d", _address.bytes[0], _address.bytes[1],
+                                        _address.bytes[2], _address.bytes[3]);
+            return (String(s));
+        }
+
 
 };
 

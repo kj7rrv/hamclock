@@ -51,7 +51,15 @@ extern const GFXfont Courier_Prime_Sans6pt7b;
 
 
 
+#if defined(B_AND_W)
+// this only works for 32 bit framebuffer
+#define	RGB1632(C16)    ((((uint32_t)((((C16)&0xF800)>>8)*0.3F + (((C16)&0x07E0)>>3)*0.59F + (((C16)&0x001F)<<3)*0.11F))<<16) \
+                       | (((uint32_t)((((C16)&0xF800)>>8)*0.3F + (((C16)&0x07E0)>>3)*0.59F + (((C16)&0x001F)<<3)*0.11F))<<8)  \
+                       | (((uint32_t)((((C16)&0xF800)>>8)*0.3F + (((C16)&0x07E0)>>3)*0.59F + (((C16)&0x001F)<<3)*0.11F))<<0))
+#else
 #define	RGB1632(C16)	((((uint32_t)(C16)&0xF800)<<8) | (((uint32_t)(C16)&0x07E0)<<5) | (((C16)&0x001F)<<3))
+#endif
+
 #define	RGB3216(C32)	RGB565(((C32)>>16)&0xFF, ((C32)>>8)&0xFF, ((C32)&0xFF))
 
 #define	RA8875_BLACK	RGB565(0,0,0)
@@ -267,11 +275,14 @@ class Adafruit_RA8875 {
 	GC black_gc;
 	XImage *img;
 	Pixmap pixmap;
+        Atom wmDeleteMessage;
 
         // used by X11OptionsEngageNow
         volatile bool options_engage, options_fullscreen;
 
         void encodeKeyEvent (XKeyEvent *event);
+        void captureSelection(void);
+        bool requestSelection (KeySym ks, unsigned kb_state);
 
 
 #endif // _USE_X11

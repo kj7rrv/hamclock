@@ -10,7 +10,7 @@
 
 
 // set to show all boxes for debugging
-// #define _SHOW_ALL
+// #define _SHOW_ALL                    // remove before flight
 
 
 // countdown ranges, including flashing states
@@ -255,14 +255,21 @@ static void setAlarmPin (bool set) { (void) set; }
 
 // contols common to both big clock styles
 #define BC_CDP_X        2                       // countdown period x
-#define BC_CDP_Y        420                     // countdown period y 
-#define BC_CDP_W        100                     // countdown period with 
+#define BC_CDP_Y        (480-SW_BH)             // countdown period y 
+#define BC_CDP_W        100                     // countdown period width 
+#define BC_CDP_H        SW_BH                   // countdown period height 
 #define BC_ALM_X        (BC_CDP_X+BC_CDP_W)     // x coord of alarm time box
 #define BC_ALM_Y        BC_CDP_Y                // y coord of alarm time box
+#define BC_ALM_W        SW_BW                   // alarm message width
+#define BC_ALM_H        SW_BH                   // alarm message height
 #define BC_BAD_W        200                     // bad time message width
 #define BC_BAD_H        SW_BH                   // bad time message height
 #define BC_BAD_X        (800-BC_BAD_W-2)        // x coord of bad time message
 #define BC_BAD_Y        BC_CDP_Y                // y coord of bad time message
+#define BC_SAT_W        280                     // width of satellite state
+#define BC_SAT_H        SW_BH                   // height of satellite state
+#define BC_SAT_X        ((800-BC_SAT_W)/2)      // x coord of satellite state
+#define BC_SAT_Y        BC_CDP_Y                // y coord of satellite state
 
 
 
@@ -301,9 +308,9 @@ static uint16_t sw_col;                         // color pixel
 
 // big clock info
 static SBox bcdate_b = {BAC_DATEX, BAC_DATEY, BAC_DATEW, BAC_DATEH};
-static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};      // weather
-static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, SW_BH};     // countdown remaining and control
-static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, SW_BW, SW_BH};     // alarm time and control
+static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};              // weather
+static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, BC_CDP_H};          // countdown remaining and control
+static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, BC_ALM_W, BC_ALM_H};       // alarm time and control
 static uint16_t bc_bits;                        // see SWBCBits
 static uint32_t bc_prev_wx;                     // time of prev drawn wx, millis
 static uint32_t bc_wxdt = BAC_WXGDT;            // weather update interval, millis
@@ -566,6 +573,63 @@ static void determineCDVisuals (uint32_t ms_left, SWCDState &cds, uint16_t &colo
     }
 }
 
+/* draw the satellite indicator, if want
+ */
+static void drawSatIndicator(bool force)
+{
+    // unused for now
+    (void) force;
+
+    // get sat info if want and defined
+    SatNow sn;
+    if (!(bc_bits & SW_BCSATBIT) || !getSatNow(sn))
+        return;
+
+    // prep for drawStringInBox
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    SBox sat_b;
+    sat_b.x = BC_SAT_X;
+    sat_b.y = BC_SAT_Y;
+    sat_b.w = BC_SAT_W;
+    sat_b.h = BC_SAT_H;
+
+    if (sn.raz == SAT_NOAZ)
+
+        drawStringInBox (_FX("No rise"), sat_b, false, sw_col);
+
+    else if (sn.saz == SAT_NOAZ)
+
+        drawStringInBox (_FX("No set"), sat_b, false, sw_col);
+
+    else {
+
+        // draw circumstances
+
+        // decide whether up or down
+        float dt;                               // hours to begin with
+        const char *prompt;
+        if (sn.rdt < 0 || sn.rdt > sn.sdt) {
+            // up now, show time to set
+            dt = sn.sdt;
+            prompt = "sets in";
+        } else {
+            // down now, show time to rise
+            dt = sn.rdt;
+            prompt = "rises in";
+        }
+
+        // format time
+        int a, b;
+        char sep;
+        formatSexa (dt, a, sep, b);
+
+        // draw
+        char buf[50];
+        snprintf (buf, sizeof(buf), "%s %s %d%c%02d", sn.name, prompt, a, sep, b);
+        drawStringInBox (buf, sat_b, false, sw_col);
+    }
+}
+
 /* draw alarm_hrmn, pin and label if requested in various ways depending on sws_display
  */
 static void drawAlarmIndicator (bool label_too)
@@ -603,10 +667,6 @@ static void drawAlarmIndicator (bool label_too)
         } else if (alarm_state == ALMS_RINGING) {
             drawStringInBox ("Alarm!", bcalarm_b, true, sw_col);
         }
-
-        #if defined(_SHOW_ALL)
-            drawSBox (bcalarm_b, RA8875_WHITE);
-        #endif
     }
 }
 
@@ -781,13 +841,13 @@ static void drawBCAwareness (bool force)
             tft.setCursor (BC_BAD_X, BC_BAD_Y+27);
             tft.setTextColor (RA8875_RED);
             if (clock_ok) {
-                static const char msg[] = "Time is offset";
+                const char *msg = _FX("Time is offset");
                 tft.print (msg);
-                Serial.printf ("SW: %s\n", msg);
+                Serial.printf (_FX("SW: %s\n"), msg);
             } else {
-                static const char msg[] = "Time unlocked";
+                const char *msg = _FX("Time is unknown");
                 tft.print (msg);
-                Serial.printf ("SW: %s\n", msg);
+                Serial.printf (_FX("SW: %s\n"), msg);
             }
         }
     }
@@ -831,10 +891,6 @@ static void drawBCDateInfo (int hr, int dy, int wd, int mo)
         // UTC + TZ
         tft.printf ("UTC%+g", de_tz.tz_secs/3600.0F);
     }
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bcdate_b, RA8875_WHITE);
-    #endif
 }
 
 /* refresh DE weather in bcwx_b, return whether successful
@@ -856,100 +912,33 @@ static bool drawBCDEWxInfo(void)
 }
 
 /* draw space weather in upper right.
- * just numbers, plus prompts if all
  */
-static void drawBCSpaceWxInfo(bool all)
+static void drawBCSpaceWxInfo (bool all)
 {
-    // freshen, draw if new or all
-    if (!checkSpaceStats(now()) && !all)
-        return;
+    if (checkSpaceStats() || all)
+        drawSpaceStats(sw_col);   
+}
 
-    // collect info
-    SPWxValue ssn, flux, kp, swind, drap;
-    NOAASpaceWx noaaspw;
-    float path[PROP_MAP_N];
-    char xray[10];
-    time_t noaaspw_age, xray_age, path_age;
-    getSpaceWeather (ssn, flux, kp, swind, drap, noaaspw, noaaspw_age, xray, xray_age, path, path_age);
-
-    // prep
-    tft.setTextColor (sw_col);
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    const char *err = "Err";
-    char buf[20];
-
-    // justification columns and row size
-    #define _SX_LEFT_X   660
-    #define _SX_RIGHT_X  796
-    #define _SX_CENTER_X ((_SX_LEFT_X+_SX_RIGHT_X)/2)
-    #define _SX_VALUE_W  (_SX_RIGHT_X-_SX_CENTER_X+2)
-    uint16_t y = 0;
-    uint16_t dy = 32;
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (ssn.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", ssn.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (flux.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", flux.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    strcpy (buf, xray);
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (kp.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", kp.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    // labels if needed
-    if (all) {
-        y = 0;
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("SSN");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("SFI");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("X-Ray");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("Kp");
-    }
-
-    printFreeHeap (F("drawBCSpaceWxInfo"));
+/* mark each control or indicator box for debugging big clock layout
+ */
+static void drawBCShowAll()
+{
+    #if defined(_SHOW_ALL)
+        drawSBox (bccd_b, RA8875_RED);
+        drawSBox (bcalarm_b, RA8875_RED);
+        drawSBox (bcdate_b, RA8875_RED);
+        tft.drawRect (BC_BAD_X, BC_BAD_Y, BC_BAD_W, BC_BAD_H, RA8875_RED);
+        tft.drawRect (BC_SAT_X, BC_SAT_Y, BC_SAT_W, BC_SAT_H, RA8875_RED);
+    #endif
 }
 
 /* draw the digital Big Clock 
  */
 static void drawDigitalBigClock (bool all)
 {
+    // debug
+    drawBCShowAll();
+
     // persist to avoid drawing the same digits again
     static time_t prev_am, prev_t0;                             // previous am/pm and report time
     static uint8_t prev_mnten, prev_mnunit;                     // previous mins tens and unit
@@ -1115,6 +1104,7 @@ static void drawDigitalBigClock (bool all)
 
     // update awareness
     drawBCAwareness (all);
+    drawSatIndicator(all);
 
     // init countdown if first call
     if (all) {
@@ -1129,10 +1119,6 @@ static void drawDigitalBigClock (bool all)
     // update space weather if desired
     if (bc_bits & SW_BCSPWXBIT)
         drawBCSpaceWxInfo(all);
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bccd_b, RA8875_WHITE);
-    #endif
 }
 
 /* draw the digital time portion of the analog clock.
@@ -1156,7 +1142,9 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
     if (all || hr != prev_hr || mn != prev_mn) {
 
         tft.fillRect (x0, BACD_DY-45, 140, 50, RA8875_BLACK);
-        // tft.drawRect (x0, BACD_DY-45, 140, 50, RA8875_RED);
+        #if defined(_SHOW_ALL)
+            tft.drawRect (x0, BACD_DY-45, 140, 50, RA8875_RED);
+        #endif
 
         // convert to 12 hours, don't print leading zero
         int hr12 = hr%12;
@@ -1180,13 +1168,17 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
         bool new_tens = (sc/10) != (prev_sc/10);
         if (all || new_tens) {
             tft.fillRect (prev_stx, BACD_DY-45, 60, 50, RA8875_BLACK);
-            // tft.drawRect (prev_stx, BACD_DY-45, 60, 50, RA8875_RED);
+            #if defined(_SHOW_ALL)
+                tft.drawRect (prev_stx, BACD_DY-45, 60, 50, RA8875_RED);
+            #endif
             tft.setCursor (prev_stx, BACD_DY);
             tft.print (sc/10);
             prev_sux = tft.getCursorX();
         } else {
             tft.fillRect (prev_sux, BACD_DY-45, 30, 50, RA8875_BLACK);
-            // tft.drawRect (prev_sux, BACD_DY-45, 30, 50, RA8875_RED);
+            #if defined(_SHOW_ALL)
+                tft.drawRect (prev_sux, BACD_DY-45, 30, 50, RA8875_RED);
+            #endif
         }
 
         // always draw unit digit
@@ -1201,6 +1193,9 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
  */
 static void drawAnalogBigClock (bool all)
 {
+    // debug
+    drawBCShowAll();
+
     // persistent time measures
     static time_t prev_am, prev_lt0;                    // detect change of am/pm and secs
     static uint8_t prev_mo, prev_dy;                    // previously drawn date info
@@ -1232,16 +1227,17 @@ static void drawAnalogBigClock (bool all)
     int mo = month(lt0);
     bool am = hr < 12;
 
-    // face geometry, scale down if showing digital too
+    // face geometry, smaller if showing sat or digital too
     bool add_digital = (bc_bits & SW_ANWDBIT) != 0;
-    int bac_y0    = add_digital ? BACD_Y0   : BAC_Y0;
-    int bac_mnr   = add_digital ? BACD_MNR  : BAC_MNR;
-    int bac_scr   = add_digital ? BACD_SCR  : BAC_SCR;
-    int bac_hrr   = add_digital ? BACD_HRR  : BAC_HRR;
-    int bac_fr    = add_digital ? BACD_FR   : BAC_FR;
-    int bac_bezr  = add_digital ? BACD_BEZR : BAC_BEZR;
-    int bac_htr   = add_digital ? BACD_HTR  : BAC_HTR;
-    int bac_mtr   = add_digital ? BACD_MTR  : BAC_MTR;
+    bool shrink = (bc_bits & SW_BCSATBIT) != 0 || add_digital;
+    int bac_y0    = shrink ? BACD_Y0   : BAC_Y0;
+    int bac_mnr   = shrink ? BACD_MNR  : BAC_MNR;
+    int bac_scr   = shrink ? BACD_SCR  : BAC_SCR;
+    int bac_hrr   = shrink ? BACD_HRR  : BAC_HRR;
+    int bac_fr    = shrink ? BACD_FR   : BAC_FR;
+    int bac_bezr  = shrink ? BACD_BEZR : BAC_BEZR;
+    int bac_htr   = shrink ? BACD_HTR  : BAC_HTR;
+    int bac_mtr   = shrink ? BACD_MTR  : BAC_MTR;
 
     // refresh if desired or new date (since we never erase the date)
     if (all || ((bc_bits & SW_BCDATEBIT) && (am != prev_am || dy != prev_dy || mo != prev_mo))) {
@@ -1430,6 +1426,7 @@ static void drawAnalogBigClock (bool all)
 
     // update awareness
     drawBCAwareness (all);
+    drawSatIndicator(all);
 
     // init countdown if first call
     if (all) {
@@ -1440,11 +1437,6 @@ static void drawAnalogBigClock (bool all)
     // numeric time too if desired
     if (add_digital)
         drawAnalogDigital (all, hr, mn, sc);
-
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bccd_b, RA8875_WHITE);
-    #endif
 
     // update DE or space weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
@@ -1504,13 +1496,6 @@ static void drawSWState()
         }
 
         drawAlarmIndicator  (true);
-
-        #if defined(_SHOW_ALL)
-            drawSBox (alarm_up_b, RA8875_WHITE);
-            drawSBox (alarm_dw_b, RA8875_WHITE);
-            drawSBox (cdtime_up_b, RA8875_WHITE);
-            drawSBox (cdtime_dw_b, RA8875_WHITE);
-        #endif
 
         break;
 
@@ -1684,6 +1669,7 @@ static void runBCMenu (const SCoord &s)
             MI_ALL_SDT,
             MI_ALL_CDW,
             MI_ALL_ALM,
+            MI_ALL_SAT,
             MI_ALL_SWX,
             MI_ALL_SPW,
         MI_BLK1,
@@ -1713,8 +1699,10 @@ static void runBCMenu (const SCoord &s)
             {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 5, SEC_INDENT, "Date info"},
             {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Count down"},
             {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Alarm"},
-            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 8, SEC_INDENT, "DE WX"},
-            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 8, SEC_INDENT, "Space WX"},
+            {isSatDefined() ? MENU_TOGGLE : MENU_IGNORE, !!(bc_bits & SW_BCSATBIT),
+                                8, SEC_INDENT, "Satellite"},
+            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 9, SEC_INDENT, "DE WX"},
+            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 9, SEC_INDENT, "Space WX"},
         {MENU_BLANK, false, 9, PRI_INDENT, NULL},
         {MENU_TOGGLE, false, 10, PRI_INDENT, "Exit Big Clock"},
         {MENU_BLANK, false, 11, PRI_INDENT, NULL},
@@ -1804,6 +1792,11 @@ static void runBCMenu (const SCoord &s)
     else
         bc_bits &= ~SW_BCSPWXBIT;
 
+    if (menu.items[MI_ALL_SAT].set)
+        bc_bits |= SW_BCSATBIT;
+    else
+        bc_bits &= ~SW_BCSATBIT;
+
     if (menu.items[MI_ANA_FIL].set)
         bc_bits |= SW_ANCOLHBIT;
     else
@@ -1820,9 +1813,9 @@ static void runBCMenu (const SCoord &s)
  */
 static void checkSWPageTouch()
 {
-    // check for touch at all
+    // out fast if nothing to do
     SCoord s;
-    if (readCalTouchWS(s) == TT_NONE || screenIsLocked())
+    if (screenIsLocked() || (readCalTouchWS(s) == TT_NONE && checkKBWarp(s) == TT_NONE))
         return;
 
     // update idle timer, ignore if this tap is restoring full brightness
@@ -2169,12 +2162,12 @@ bool runStopwatch()
     // always check alarm clock regardless of display state
     if (alarm_state == ALMS_ARMED && checkAlarm()) {
         // record time and indicate alarm has just gone off
-        alarm_ringtime = now();
+        alarm_ringtime = myNow();
         alarm_state = ALMS_RINGING;
         showAlarmRinging();
     }
     if (alarm_state == ALMS_RINGING) {
-        if (alarmPinIsSet() || now() - alarm_ringtime >= ALM_RINGTO/1000) {
+        if (alarmPinIsSet() || myNow() - alarm_ringtime >= ALM_RINGTO/1000) {
             // op hit the cancel pin or timed out
             alarm_state = ALMS_ARMED;
             if (sws_display == SWD_NONE)

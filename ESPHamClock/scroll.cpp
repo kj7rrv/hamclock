@@ -3,7 +3,7 @@
 
 #include "HamClock.h"
 
-#define SCR_DX          (PLOTBOX_W-20)          // x offset from box left to center of both scroll arrows
+#define SCR_DX          (PLOTBOX_W-26)          // x offset from box left to center of both scroll arrows
 #define SCRUP_DY        9                       // y offset from box top to center of up arrow
 #define SCRDW_DY        23                      // y offset from box top to center of down arrow
 #define SCR_W           6                       // scrol arrow width
@@ -67,3 +67,23 @@ bool checkScrollDownTouch (const SCoord &s, const SBox &b)
 {
     return (s.x > b.x + 3*b.w/4 && s.y > b.y + SCRUP_DY + SCR_H/2 && s.y < b.y + SCRDW_DY + SCR_H/2);
 }
+
+
+/* convert any upper case letter in str to lower case IN PLACE
+ */
+void strtolower (char *str)
+{
+        for (char c = *str; c != '\0'; c = *++str)
+            if (isupper(c))
+                *str = tolower(c);
+}
+
+/* convert any lower case letter in str to upper case IN PLACE
+ */
+void strtoupper (char *str)
+{
+        for (char c = *str; c != '\0'; c = *++str)
+            if (islower(c))
+                *str = toupper(c);
+}
+

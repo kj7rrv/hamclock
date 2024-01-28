@@ -112,7 +112,7 @@ Dir::Dir()
 Dir::~Dir()
 {
         if (_trace_littlefs)
-            printf ("dir %p: Dir destructor\n", dir);
+            printf ("Dir destructor\n");
         if (dir)
             closedir(dir);
 }

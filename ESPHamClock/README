@@ -1,7 +1,16 @@
 Project web site: http://www.clearskyinstitute.com/ham/HamClock
 
-On UNIX systems, type make for size options, then sudo make install.
-On ESP, load into Arduino API, prep as per web page (above), point to this directory then Sketch -> Compile
+Executive summary for UNIX systems:
+    type `make' for size and style options
+    make <size>
+    sudo make install
+
+Executive summary for ESP8266 Huzzah:
+    install and run Arduino IDE
+    configure as per "ESP8266 Notes" tab at above web page
+    open ESPHamClock.ino in IDE
+    Sketch -> Compile
+    Sketch -> Upload
 
 
 *********************************************************************************************

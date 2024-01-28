@@ -1,35 +1,34 @@
-
 #include "HamClock.h"
-
+                
 #if defined(_SUPPORT_ZONES)
-
-/* manage a list of fixed lat/lng vertices with screen coords updated as required.
- * this would normally just be one list per poly but sometimes the polygon wraps when drawing.
- * rather than create parallel arrays for the second poly, we combine both into the same list.
- * vertices with s[1].x == 0 form the first polygon, the rest form the second. corresponding
- * bounding boxes are in bound_b[0] and [1]. This does cause the static arrays to use somewhat
- * more memory so might revisit some day.
- */
-
-/* one zone polygone vertex
- */
+                
+/* manage a list of fixed lat/lng zones with screen coord polygons updated for the current projection.
+ * since some zones may wrap or otherwise be split, we may need to create two polygons per zone.
+ * vertices with s[0].x != 0 form the first polygon, the second are those with s[1].x != 0.
+ * corresponding bounding boxes are in bound_b[0] and [1].
+ */             
+                
+/* one zone polygon vertex 
+ */             
 typedef struct {
-    int16_t lat, lng;                   // degs N E *100
-    SCoord s[2];                        // corresponding _raw_ screen coord, 2nd poly if s[1].x > 0
-} ZoneVertex;
-
+    const int16_t lat, lng;             // degs N E *100
+    SCoord s[2];                        // Raw coord, two polygons whichever .x != 0
+} ZoneVertex;           
+                        
 /* collection of vertices comprising a zone collection
- */
+ */                 
 typedef struct {
-    uint16_t zone_n;                    // zone number
+    const uint16_t zone_n;              // zone number
     int16_t lat_lbl, lng_lbl;           // label, same encoding as ZoneVertex
     ZoneVertex *verts;                  // ploygon vertices, can be 2 lists
     uint16_t n_verts;
     SCoord s_lbl;                       // app screen coord of label
     SBox bound_b[2];                    // app screen coord bounding box, [1].x != only if required
-} ZonePoly;
-
-
+} ZonePoly;     
+                
+#define LATC2DEG(l)     ((l) * 0.01F)   // ZoneVertex latitude compressed to degrees    
+#define LNGC2DEG(l)     ((l) * 0.01F)   // ZoneVertex longitude compressed to degrees   
+                    
 static ZoneVertex cqz01[] = {
     { 9000, -10900},
     { 8905, -10900},
@@ -27859,8 +27858,6 @@ static ZonePoly ituzones[] = {
     {89,    -5200,  13000,  ituz89, 172},
     {90,     3700,  16500,  ituz90, 123},
 };
-/* continuation of file created with mkzones.pl
- */
 
 
 /*
@@ -27907,13 +27904,19 @@ static int pnpoly (int npoly, ZoneVertex *poly, int poly_i, const SCoord &s)
 {
     int i, j, c = 0;
 
-    // collect just poly_i into si
-    SCoord si[npoly];
+    // collect just poly_i into si as canonical coords
+    StackMalloc si_mem(npoly*sizeof(SCoord));
+    SCoord *si = (SCoord *) si_mem.getMem();
     int nsi = 0;
-    for (i = 0; i < npoly; i++)
-        if (poly[i].s[poly_i].x)
-            si[nsi++] = poly[i].s[poly_i];
+    for (i = 0; i < npoly; i++) {
+        if (poly[i].s[poly_i].x) {
+            SCoord &s = si[nsi++];
+            s.x = poly[i].s[poly_i].x/tft.SCALESZ;
+            s.y = poly[i].s[poly_i].y/tft.SCALESZ;
+        }
+    }
 
+    // check bounds
     for (i = 0, j = nsi-1; i < nsi; j = i++) {
         if ( ((si[i].y>s.y) != (si[j].y>s.y)) &&
             (s.x < ((float)si[j].x-si[i].x) * (s.y-si[i].y) / (si[j].y-si[i].y) + si[i].x) )
@@ -27934,128 +27937,193 @@ void updateZoneSCoords (ZoneID id)
     ZonePoly *zpoly = id == ZONE_CQ ? cqzones : ituzones;
     int n_z = id == ZONE_CQ ? NARRAY(cqzones) : NARRAY(ituzones);
 
+    // handy full-res values
+    const uint16_t map_ytop = tft.SCALESZ*map_b.y;                      // handy raw map top
+    const uint16_t map_ycenter = tft.SCALESZ*(map_b.y + map_b.h/2);     // handy raw map y center
+    const uint16_t map_ybottom = tft.SCALESZ*(map_b.y + map_b.h - 1);   // handy raw map bottom
+    const uint16_t map_xleft = tft.SCALESZ*map_b.x;                     // handy raw map x left edge
+    const uint16_t map_xcenter = tft.SCALESZ*(map_b.x + map_b.w/2);     // handy raw map x center
+    const uint16_t map_xright = tft.SCALESZ*(map_b.x + map_b.w - 1);    // handy raw map x right edge
+    const uint16_t map_ho2 = tft.SCALESZ*map_b.h/2;                     // handy raw map height
+    const uint16_t map_wo2 = tft.SCALESZ*map_b.w/2;                     // handy raw map width-over-2
+
     // for each polygon
-    const ZonePoly *end_zp = &zpoly[n_z];
+    const ZonePoly *end_zp = &zpoly[n_z];                         // zp loop sentinel
     for (ZonePoly *zp = zpoly; zp < end_zp; zp++) {
 
         // set label screen coord in app coords
-        ll2s (deg2rad(zp->lat_lbl * 0.01F), deg2rad(zp->lng_lbl) * 0.01F, zp->s_lbl, 1);
+        ll2s (deg2rad(LATC2DEG(zp->lat_lbl)), deg2rad(LNGC2DEG(zp->lng_lbl)), zp->s_lbl, 1);
 
-        // toggle polly at each wrap
-        int poly = 0;
+        // start with first polygon list and handy way to swap
+        int poly_s = 0;
+        #define SWAP_POLYGON()  do { poly_s = 1 - poly_s; } while(0)
+        #define END_POLYGON(p)  do { (p) = {0, 0}; } while(0)
 
-        // loop through each vertex assigning screen coords and finding bounding boxes (2nd if wraps)
-        uint16_t map_y = tft.SCALESZ*map_b.y;                       // handy raw map top
-        uint16_t map_h = tft.SCALESZ*map_b.h;                       // handy raw map height
-        uint16_t map_wo2 = tft.SCALESZ*map_b.w/2;                   // handy raw map width-over-2
-        uint16_t map_xleft = tft.SCALESZ*map_b.x;                   // handy raw map x left edge
-        uint16_t map_xcenter = tft.SCALESZ*(map_b.x + map_b.w/2);   // handy raw map x center
-        uint16_t map_xright = tft.SCALESZ*(map_b.x + map_b.w - 1);  // handy raw map x right edge
-        uint16_t map_ycenter = tft.SCALESZ*(map_b.y + map_b.h/2);   // handy raw map y center
-        uint16_t map_bottom = tft.SCALESZ*(map_b.y + map_b.h - 1);  // handy raw map bottom
-        uint16_t min_x[2] = {0,0}, max_x[2] = {0,0};            // x bb for each poly
-        uint16_t min_y[2] = {0,0}, max_y[2] = {0,0};            // y bb for each poly
-        bool azim1_drop = false;                                // force dropping an azim1 poly
-        bool bb_init[2] = {false, false};                       // whether we have started each bb
-        ZoneVertex *prev_vp = NULL;                             // prev to check for wrap
-        ZoneVertex *end_vp = &zp->verts[zp->n_verts];
-        for (ZoneVertex *vp = zp->verts; vp < end_vp; vp++) {
+        // convert each vertex to screen coords and watch for wraps
+        // printf ("********* mapping %d zone %d\n", id, zp->zone_n);
+        for (int vn = 0; vn < zp->n_verts; vn++) {
 
-            // find vertex screen coord in full raw coords, still undefined as to which poly
-            SCoord vs;
-            ll2sRaw (deg2rad(vp->lat * 0.01F), deg2rad(vp->lng * 0.01F), vs, 1);
+            // handy ref
+            SCoord &sc0 = zp->verts[vn].s[poly_s];              // current vertex current polygon
+            SCoord &sc1 = zp->verts[vn].s[1 - poly_s];          // current vertex opposite polygon
 
-            // check for wrap depending on projection
+            // find vertex screen coord in full raw coords
+            ll2sRaw (deg2rad(LATC2DEG(zp->verts[vn].lat)), deg2rad(LNGC2DEG(zp->verts[vn].lng)), sc0, 1);
 
-            if (map_proj == MAPP_AZIMUTHAL) {
-                if (prev_vp && (vs.x < map_xcenter) != (prev_vp->s[poly].x < map_xcenter)) {
-                    // spans hemispheres: extend to top-bottom edges
-                    if (prev_vp->s[poly].y < map_ycenter)
-                        prev_vp->s[poly].y = map_y;
-                    else
-                        prev_vp->s[poly].y = map_bottom;
-                    if (vs.y < map_ycenter)
-                        vs.y = map_y;
-                    else
-                        vs.y = map_bottom;
+            // end other poly at this index for now
+            END_POLYGON(sc1);
 
-                    // swap poly
-                    poly = 1 - poly;
+            // no path yet if this is the first vertex
+            if (vn == 0)
+                continue;
+
+            // more handy refs
+            SCoord &sp0 = zp->verts[vn-1].s[poly_s];            // previous vertex current polygon
+            SCoord &sp1 = zp->verts[vn-1].s[1 - poly_s];        // previous vertex opposite polygon
+
+            // check for wraps, depending on projection
+
+            switch ((MapProjection)map_proj) {
+
+            case MAPP_AZIMUTHAL: {
+
+                // find half-width at this y
+                float y_frac = ((float)sp0.y - (float)map_ycenter)/map_ho2;
+                int hw = map_ho2 * sqrtf (1 - y_frac*y_frac);
+
+                // break into two polygons if wraps around edges
+                if (abs ((int)sp0.x - (int)sc0.x) > hw) {
+                    uint16_t tb_edge = sc0.y < map_ycenter ? map_ytop : map_ybottom;
+                    sp0.y = tb_edge;                            // extend previous vertex to edge
+                    sp1 = {sc0.x, tb_edge};                     // start new poly at current edge
+                    sc1 = sc0;                                  // then back to current position
+                    END_POLYGON(sc0);                           // end current poly
+                    SWAP_POLYGON();                             // continue with new polygon
                 }
-            } else if (map_proj == MAPP_MERCATOR) {
-                if (prev_vp && abs((int)vs.x - (int)prev_vp->s[poly].x) > map_wo2) {
-                    // too wide: extend to left-right edges
-                    if (prev_vp->s[poly].x < map_xcenter) {
-                        prev_vp->s[poly].x = map_xleft;
-                        vs.x = map_xright;
-                    } else {
-                        prev_vp->s[poly].x = map_xright;
-                        vs.x = map_xleft;
+
+                }
+                break;
+
+            case MAPP_MOLL: {
+
+                // find half-width at this y
+                float y_frac = ((float)sp0.y - (float)map_ycenter)/map_ho2;
+                int hw = map_wo2 * sqrtf (1 - y_frac*y_frac);   // Moll is 2:1 ellipse
+
+                // break into two polygons if wraps around edges
+                if (abs ((int)sp0.x - (int)sc0.x) > hw) {
+                    uint16_t tb_edge = sc0.y < map_ycenter ? map_ytop : map_ybottom;
+                    sp0.y = tb_edge;                            // extend previous vertex to edge
+                    sp1 = {sc0.x, tb_edge};                     // start new poly at current edge
+                    sc1 = sc0;                                  // then back to current position
+                    END_POLYGON(sc0);                           // end current poly
+                    SWAP_POLYGON();                             // continue with new polygon
+                }
+
+                }
+                break;
+
+            case MAPP_AZIM1: {
+
+                // discard zones near the antipodal horizon
+                float dx = (int)sc0.x - (int)map_xcenter;
+                float dy = (int)sc0.y - (int)map_ycenter;
+                float max_rr = 0.95F*map_ho2*map_ho2;
+                if (dx*dx + dy*dy > max_rr) {
+                    // reset all vertices then abandon remainder of this zone
+                    for (int ve = 0; ve <= zp->n_verts; ve++) {
+                        END_POLYGON (zp->verts[ve].s[poly_s]);
+                        END_POLYGON (zp->verts[ve].s[1-poly_s]);
                     }
-
-                    // swap poly
-                    poly = 1 - poly;
+                    vn = zp->n_verts;
                 }
-            } else if (map_proj == MAPP_AZIM1) {
 
-                // discard zones near the antipodal horizon -- don't bother swapping poly
-                int dx = abs((int)vs.x - (int)map_xcenter);
-                int dy = abs((int)vs.y - (int)map_ycenter);
-                int max_rr = 0.95F*map_h/2*map_h/2;    // 0.95 r^2
-                if (dx*dx + dy*dy > max_rr)
-                    azim1_drop = true;
+                }
+                break;
+
+            case MAPP_MERCATOR:
+
+                // break into two polygons if wraps around edges
+                if (abs ((int)sp0.x - (int)sc0.x) > map_wo2) {
+                    uint16_t p_edge = sp0.x < map_xcenter ? map_xleft : map_xright;     // prev edge
+                    uint16_t c_edge = sc0.x < map_xcenter ? map_xleft : map_xright;     // current edge
+                    sp0.x = p_edge;                             // extend previous vertex to prev edge
+                    sp1 = {c_edge, sc0.y};                      // start new poly at current edge
+                    sc1 = sc0;                                  // then back to current position
+                    END_POLYGON(sc0);                           // end current poly
+                    SWAP_POLYGON();                             // continue with new polygon
+                }
+
+                break;
+
+            default:
+                fatalError (_FX("updateZoneSCoords() map_proj %d"), map_proj);
             }
-
-            // save in corresponding poly, erase opposite
-            vp->s[poly] = vs;
-            vp->s[1-poly] = {0, 0};
-
-            // shrink-wrap around the current poly
-            if (bb_init[poly]) {
-                if (vp->s[poly].x < min_x[poly]) min_x[poly] = vp->s[poly].x;
-                if (vp->s[poly].x > max_x[poly]) max_x[poly] = vp->s[poly].x;
-                if (vp->s[poly].y < min_y[poly]) min_y[poly] = vp->s[poly].y;
-                if (vp->s[poly].y > max_y[poly]) max_y[poly] = vp->s[poly].y;
-            } else {
-                min_x[poly] = max_x[poly] = vp->s[poly].x;
-                min_y[poly] = max_y[poly] = vp->s[poly].y;
-                bb_init[poly] = true;
-            }
-
-            // 1 back
-            prev_vp = vp;
-        }
-
-        // find each app bb
-        uint16_t bb0_w = (max_x[0] - min_x[0])/tft.SCALESZ;
-        uint16_t bb0_h = (max_y[0] - min_y[0])/tft.SCALESZ;
-        uint16_t bb1_w = (max_x[1] - min_x[1])/tft.SCALESZ;
-        uint16_t bb1_h = (max_y[1] - min_y[1])/tft.SCALESZ;
-
-        zp->bound_b[0] = {min_x[0], min_y[0], bb0_w, bb0_h};
-        zp->bound_b[1] = {min_x[1], min_y[1], bb1_w, bb1_h};
-
-        // #define _PRINT_ZONES
-        #ifdef _PRINT_ZONES
-            const char *z_name = zpoly == cqzones ? "CQ" : "ITU";
-            printf ("%s Zone %d bb: [%3d, %3d]  %3d x %3d;  [%3d, %3d]  %3d x %3d\n", z_name, zp->zone_n,
-                    zp->bound_b[0].x, zp->bound_b[0].y, zp->bound_b[0].w, zp->bound_b[0].h,
-                    zp->bound_b[1].x, zp->bound_b[1].y, zp->bound_b[1].w, zp->bound_b[1].h);
-            printf ("%s Zone %d: poly 0\n", z_name, zp->zone_n);
-            for (int i = 0; i < zp->n_verts; i++)
-                if (zp->verts[i].s[0].x)
-                    printf ("%d %d\n", zp->verts[i].s[0].x, zp->verts[i].s[0].y);
-            printf ("%s Zone %d: poly 1\n", z_name, zp->zone_n);
-            for (int i = 0; i < zp->n_verts; i++)
-                if (zp->verts[i].s[1].x)
-                    printf ("%d %d\n", zp->verts[i].s[1].x, zp->verts[i].s[1].y);
-        #endif
-
-        if (azim1_drop) {
-            zp->bound_b[0] = zp->bound_b[1] = {0, 0, 0, 0};
-            // printf ("drop azim1 zone %d\n", zp->zone_n);
         }
     }
+
+    // spin again to find bounding boxes of each polygon
+    // N.B. vertex screen coords are raw but we want canonical coords for the bb.
+    for (ZonePoly *zp = zpoly; zp < end_zp; zp++) {
+
+        // check each polynomial
+        for (int p = 0; p < 2; p++) {
+
+            // init min/max
+            uint16_t min_x = 50000U;
+            uint16_t max_x = 0;
+            uint16_t min_y = 50000U;
+            uint16_t max_y = 0;
+
+            // shrink wrap around each vertex -- N.B. there may not be any!
+            const ZoneVertex *end_vp = &zp->verts[zp->n_verts];             // vp loop sentinel
+            bool found_s = false;
+            for (ZoneVertex *vp = zp->verts; vp < end_vp; vp++) {
+                const SCoord &s = vp->s[p];
+                if (s.x) {
+                    if (s.x < min_x) min_x = s.x;
+                    if (s.x > max_x) max_x = s.x;
+                    if (s.y < min_y) min_y = s.y;
+                    if (s.y > max_y) max_y = s.y;
+                    found_s = true;
+                }
+            }
+
+            // set bb in app coords
+            if (found_s) {
+                min_x /= tft.SCALESZ;
+                max_x /= tft.SCALESZ;
+                min_y /= tft.SCALESZ;
+                max_y /= tft.SCALESZ;
+                uint16_t bb_w = max_x - min_x;
+                uint16_t bb_h = max_y - min_y;
+                zp->bound_b[p] = {min_x, min_y, bb_w, bb_h};
+            } else {
+                zp->bound_b[p] = {0, 0, 0, 0};
+            }
+        }
+    }
+
+    // #define _PRINT_ZONES
+    #ifdef _PRINT_ZONES
+    for (ZonePoly *zp = zpoly; zp < end_zp; zp++) {
+        // if (zp->zone_n != 32)
+            // continue;
+        const char *z_name = zpoly == cqzones ? "CQ" : "ITU";
+        Serial.printf ("%s Zone %d bb0: [%3d, %3d]  %3d x %3d  bb1: [%3d, %3d]  %3d x %3d\n",
+                    z_name, zp->zone_n,
+                    zp->bound_b[0].x, zp->bound_b[0].y, zp->bound_b[0].w, zp->bound_b[0].h,
+                    zp->bound_b[1].x, zp->bound_b[1].y, zp->bound_b[1].w, zp->bound_b[1].h);
+        Serial.printf ("%s Zone %d: poly 0\n", z_name, zp->zone_n);
+        for (int i = 0; i < zp->n_verts; i++)
+            if (zp->verts[i].s[0].x)
+                Serial.printf ("  %4d %4d\n",zp->verts[i].s[0].x/tft.SCALESZ,zp->verts[i].s[0].y/tft.SCALESZ);
+        Serial.printf ("%s Zone %d: poly 1\n", z_name, zp->zone_n);
+        for (int i = 0; i < zp->n_verts; i++)
+            if (zp->verts[i].s[1].x)
+                Serial.printf ("  %4d %4d\n",zp->verts[i].s[1].x/tft.SCALESZ,zp->verts[i].s[1].y/tft.SCALESZ);
+    }
+    #endif
 }
 
 /* given a zone id and screen coord, return enclosing zone number.
@@ -28067,7 +28135,7 @@ bool findZoneNumber (ZoneID id, const SCoord &s, int *zone_n)
     int n_z = id == ZONE_CQ ? NARRAY(cqzones) : NARRAY(ituzones);
 
     // special case for itu polar zones in mercator projection so they can have a 1-d poly -- see mkzones
-    if (map_proj == MAPP_MERCATOR && mapgrid_choice == MAPGRID_ITUZONES) {
+    if (map_proj == MAPP_MERCATOR && id == ZONE_ITU) {
         if (s.y > map_b.y + 170*map_b.h/180) {
             // zone 74 is south of -80
             *zone_n = 74;
@@ -28081,9 +28149,9 @@ bool findZoneNumber (ZoneID id, const SCoord &s, int *zone_n)
     }
 
     // scan each polygon, fast check with bb then confirm within.
-    // if none, find closest label
+    // if none, still find closest label
     int closest_n = -1;
-    int closest_r = 10000;
+    int closest_r = 50000;
     const ZonePoly *end_zp = &zpoly[n_z];
     for (const ZonePoly *zp = zpoly; zp < end_zp; zp++) {
 
@@ -28110,9 +28178,8 @@ bool findZoneNumber (ZoneID id, const SCoord &s, int *zone_n)
 }
 
 
-/* draw the specifed zone.
+/* draw the specifed zone or all if n_only < 0.
  * N.B. we assume the screen coords are up to date via updateZoneSCoords().
- * draw all zones if n_only < 0 else only the specified zone.
  */
 void drawZone (ZoneID id, uint16_t color, int n_only)
 {
@@ -28122,36 +28189,43 @@ void drawZone (ZoneID id, uint16_t color, int n_only)
     // note whether to draw all
     bool all_zones = n_only < 0;
 
-    // scan each polygon
+    // draw both polygons in each vertex
     const ZonePoly *end_zp = &zpoly[n_z];
     for (const ZonePoly *zp = zpoly; zp < end_zp; zp++) {
 
-        // must have bounding box
+        // must have primary bounding box
         if ((all_zones || zp->zone_n == n_only) && zp->bound_b[0].x) {
 
-            // print each visible segment
-            SCoord s00 = {0, 0};
-            SCoord s01 = {0, 0};
-            const ZoneVertex *end_vp = &zp->verts[zp->n_verts];
-            for (ZoneVertex *vp = zp->verts; vp < end_vp; vp++) {
-                if (s00.x > 0 && segmentSpanOkRaw (s00, vp->s[0], 0) && memcmp(&s00,&(vp->s[0]),sizeof(s00)))
-                    tft.drawLineRaw (s00.x, s00.y, vp->s[0].x, vp->s[0].y, 1, color);
-                s00 = vp->s[0];
-                if (s01.x > 0 && segmentSpanOkRaw (s01, vp->s[1], 0) && memcmp(&s01,&(vp->s[1]),sizeof(s01)))
-                    tft.drawLineRaw (s01.x, s01.y, vp->s[1].x, vp->s[1].y, 1, color);
-                s01 = vp->s[1];
+            // draw each visible segment in either polygon
+            for (int vn = 1; vn < zp->n_verts; vn++) {          // N.B. fence railings, not posts
+
+                SCoord &sc0 = zp->verts[vn].s[0];               // current vertex first polygon
+                SCoord &sc1 = zp->verts[vn].s[1];               // current vertex second polygon
+                SCoord &sp0 = zp->verts[vn-1].s[0];             // previous vertex first polygon
+                SCoord &sp1 = zp->verts[vn-1].s[1];             // previous vertex second polygon
+
+                if (sp0.x > 0 && sc0.x > 0 && segmentSpanOkRaw (sp0, sc0, 0))
+                    tft.drawLineRaw (sp0.x, sp0.y, sc0.x, sc0.y, 1, color);
+                if (sp1.x > 0 && sc1.x > 0 && segmentSpanOkRaw (sp1, sc1, 0))
+                    tft.drawLineRaw (sp1.x, sp1.y, sc1.x, sc1.y, 1, color);
             }
+
+            #ifdef DEBUG_ZONES_BB       // #define this in HamClock.h for initEarthMap() also
+            if (!all_zones) {
+                drawSBox (zp->bound_b[0], RA8875_RED);
+                if (zp->bound_b[1].x)
+                    drawSBox (zp->bound_b[1], RA8875_GREEN);
+            }
+            #endif
         }
 
         // add label only if drawing all
         if (all_zones) {
             SBox label_b;
-            if (overMap(zp->s_lbl) && !overAnySymbol(zp->s_lbl)) {
-                char zn[20];
-                snprintf (zn, sizeof(zn), "%d", zp->zone_n);
-                setMapTagBox (zn, zp->s_lbl, 0, label_b);
-                drawMapTag (zn, label_b);
-            }
+            char zn[20];
+            snprintf (zn, sizeof(zn), "%d", zp->zone_n);
+            setMapTagBox (zn, zp->s_lbl, 0, label_b);
+            drawMapTag (zn, label_b);
         }
     }
 }

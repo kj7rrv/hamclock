@@ -40,7 +40,6 @@ TwoWire Wire;
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
-
 static bool verbose = false;
 
 
@@ -103,7 +102,8 @@ void TwoWire::closeConnection()
                 printf ("I2C: close\n");
             ::close (i2c_fd);
             i2c_fd = -1;
-        }
+        } else if (verbose)
+	    printf ("I2C: already closed\n");
 }
 
 /* set addr if different
@@ -119,7 +119,7 @@ void TwoWire::setAddr (uint8_t addr)
         if (verbose)
             printf ("I2C: setAddr(0x%02X)\n", addr);
 
-        if (ioctl(i2c_fd, I2C_SLAVE, dev_addr) < 0) {
+        if (ioctl(i2c_fd, I2C_SLAVE_FORCE, dev_addr) < 0) {
             printf ("I2C: setAddr(0x%02X): %s\n", addr, strerror(errno));
             // mark as failed for subsequent use
             closeConnection ();
@@ -205,14 +205,14 @@ size_t TwoWire::write(const uint8_t *data, size_t quantity)
 }
 
 
-/* if sendStop is true, don't do anything, requestFrom() will send n_txdata.
- * if !sendStop then send all buffered bytes to the I2C device specified in beginTransmission() then STOP.
+/* if sendStop then send all buffered bytes to the I2C device specified in beginTransmission() then STOP.
+ * else don't do anything, we expect requestFrom() will send n_txdata.
  * see twi_writeTO() for return codes:
- * return 0: ok
- * return 1: ?
- * return 2: received NACK on transmit of address
- * return 3: received NACK on transmit of data
- * return 4: line busy
+ *   return 0: ok
+ *   return 1: ?
+ *   return 2: received NACK on transmit of address
+ *   return 3: received NACK on transmit of data
+ *   return 4: line busy
  * _IIC_LINUX
  */
 uint8_t TwoWire::endTransmission(bool sendStop)
@@ -227,27 +227,23 @@ uint8_t TwoWire::endTransmission(bool sendStop)
         if (verbose)
             printf ("I2C: endTransmission: %d bytes\n", n_txdata);
 
-        // null case
-        if (n_txdata == 0)
-            return (0);
-
         if (!sendStop)
             return (0); // feign success for now
 
-        // send
-        int nw = ::write (i2c_fd, txdata, n_txdata);
-        bool ok = (nw == n_txdata);
+	struct i2c_rdwr_ioctl_data work_queue;
+	struct i2c_msg msg[1];
 
-        // check return
-        if (!ok) {
-            if (nw == 0)
-                printf ("I2C: endTransmission() EOF, n %d\n", n_txdata);
-            else if (nw < 0) {
-                // printf ("I2C: endTransmission() n %d: %s\n", n_txdata, strerror(errno));
-                closeConnection ();         // might reset the bus
-            } else
-                printf ("I2C: endTransmission() short: %d of %d\n", nw, n_txdata);
-        }
+	work_queue.nmsgs = 1;
+	work_queue.msgs = msg;
+
+	work_queue.msgs[0].addr = dev_addr;
+	work_queue.msgs[0].len = n_txdata;
+	work_queue.msgs[0].flags = 0;   // write
+	work_queue.msgs[0].buf = txdata;
+
+	bool ok = ioctl(i2c_fd, I2C_RDWR, &work_queue) >= 0;
+        if (!ok)
+	    printf ("I2C: endTransmission %d failed: %s\n", n_txdata, strerror(errno));
 
         // regardless, we tried
         n_txdata = 0;
@@ -255,13 +251,14 @@ uint8_t TwoWire::endTransmission(bool sendStop)
         // done
         transmitting = false;
 
-        return (ok ? 0 : 1);
+        return (ok ? 0 : 2);
 }
 
 
 
 /* ask the I2C slave at the given address to send n bytes.
  * returns the actual number received.
+ * N.B. we presume the register to be read has aleady been sent.
  * N.B. if n_txdata > 0, we send that first without a STOP, then read
  * _IIC_LINUX
  */
@@ -273,20 +270,8 @@ uint8_t TwoWire::requestFrom(uint8_t addr, uint8_t nbytes)
             return (0);
         }
 
-        if (verbose)
-            printf ("I2C: requestFrom %d bytes\n", nbytes);
-
-        // clamp size
-        if (nbytes > MAX_RXBUF) {
-            printf ("I2C: requestFrom(0x%02X,%d) too many, clamping to %d\n", addr, nbytes, MAX_RXBUF);
-            nbytes = MAX_RXBUF;
-        }
-
         // insure correct addr
         setAddr(addr);
-
-        // n read
-        int nr;
 
         // send then recv without intermediate STOP if txdata still not sent
         if (n_txdata > 0) {
@@ -308,44 +293,46 @@ uint8_t TwoWire::requestFrom(uint8_t addr, uint8_t nbytes)
             work_queue.msgs[1].buf = rxdata;
 
             if (ioctl(i2c_fd,I2C_RDWR,&work_queue) < 0) {
-                printf ("I2C_RDWR failed: %s\n", strerror(errno));
-                nr = 0;
+                printf ("I2C: requestFrom W %d R %d failed: %s\n", n_txdata, nbytes, strerror(errno));
+                n_rxdata = 0;
             } else {
-                nr = nbytes;
+                if (verbose)
+		    printf ("I2C: requestFrom W %d R %d ok: %s\n", n_txdata, nbytes, strerror(errno));
+                n_rxdata = nbytes;
             }
 
             // did our best to send
             n_txdata = 0;
+	    transmitting = false;
 
         } else {
 
-            // null case
-            if (nbytes == 0)
-                return (0);
+            struct i2c_rdwr_ioctl_data work_queue;
+            struct i2c_msg msg[1];
 
-            // rx
-            nr = ::read (i2c_fd, rxdata, nbytes);
+            work_queue.nmsgs = 1;
+            work_queue.msgs = msg;
 
-            // check return
-            if (nr < 0) {
-                // printf ("I2C: requestFrom(0x%02X,%d): %s\n", addr, nbytes, strerror(errno));
-                nr = 0;
-                closeConnection ();         // might reset the bus
-            } else if (nr == 0)
-                printf ("I2C: requestFrom(0x%02X,%d) EOF\n", addr, nbytes);
-            else if (nr < nbytes)
-                printf ("I2C: requestFrom(0x%02X,%d) short: %d\n", addr, nbytes, nr);
+            work_queue.msgs[0].addr = addr;
+            work_queue.msgs[0].len = nbytes;
+            work_queue.msgs[0].flags = I2C_M_RD;
+            work_queue.msgs[0].buf = rxdata;
 
+            if (ioctl(i2c_fd,I2C_RDWR,&work_queue) < 0) {
+                printf ("I2C: requestFrom R %d failed: %s\n", nbytes, strerror(errno));
+                n_rxdata = 0;
+            } else {
+		if (verbose)
+		    printf ("I2C: requestFrom R %d ok: %s\n", nbytes, strerror(errno));
+                n_rxdata = nbytes;
+            }
         }
-
-        // save
-        n_rxdata = nr;
 
         // prep for reading
         n_retdata = 0;
 
         // report actual
-        return (nr);
+        return (n_rxdata);
 }
 
 

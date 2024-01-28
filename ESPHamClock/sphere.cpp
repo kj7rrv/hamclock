@@ -21,7 +21,7 @@ void solveSphere (float A, float b, float cc, float sc, float *cap, float *Bp)
         float cb = cosf(b);
         float sb = sinf(b);
         float cA = cosf(A);
-        float ca = fminf (fmaxf (cb*cc + sb*sc*cA, -1), 1);
+        float ca = CLAMPF (cb*cc + sb*sc*cA, -1, 1);
 
         if (cap)
             *cap = ca;

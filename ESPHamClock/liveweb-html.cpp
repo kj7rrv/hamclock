@@ -227,28 +227,35 @@ char live_html[] =  R"_raw_html_(
             }
         }
 
+        // send the given key to the hamclock
+        function sendKey (k) {
+            if (event_verbose)
+                console.log('sending ' + k);
+            sendWSMsg ('set_char?char=' + k);
+        }
+
 
         // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
         window.addEventListener('keydown', function(event) {
 
-            // get char name or arrow key
+            // get char name or map arrow keys to vi
             var key;
-            switch (event.keyCode) {
-            case 37: key = 'h'; break;  // left
-            case 38: key = 'k'; break;  // up
-            case 39: key = 'l'; break;  // right
-            case 40: key = 'j'; break;  // down
-            default: key = event.key;   // other
+            switch (event.key) {
+            case 'ArrowLeft':  key = 'h'; break;
+            case 'ArrowDown':  key = 'j'; break;
+            case 'ArrowUp':    key = 'k'; break;
+            case 'ArrowRight': key = 'l'; break;
+            default:           key = event.key;
             }
 
-            // a real space would create 'char= ' which doesn't parse so we invent Space name
+            // a real space would send 'char= ' which doesn't parse so we invent Space name
             if (key === ' ')
                 key = 'Space';
 
-            // ignore if modied
+            // ignore if modified
             if (event.metaKey || event.ctrlKey || event.altKey) {
                 if (event_verbose)
-                    console.log('ignoring modified ' + key);
+                    console.log('ignoring modifier ' + key);
                 return;
             }
 
@@ -266,8 +273,7 @@ char live_html[] =  R"_raw_html_(
                 event.preventDefault();
             }
 
-            // compose and send
-            sendWSMsg ('set_char?char=' + key);
+            sendKey (key);
         });
 
         // respond to mobile device being rotated. resize seems to work better than orientationchange
@@ -308,8 +314,10 @@ char live_html[] =  R"_raw_html_(
         // called one time after page has loaded
         function onLoad() {
 
-            // create websocket
-            ws = new WebSocket ("ws://" + location.host);       // back to same
+            // create websocket back to same location replacing last component of our path with "live-ws"
+            let ws_proto = (location.protocol === "https:") ? "wss://" : "ws://";       // tnx WK2X
+            let ws_host = location.host + location.pathname.replace(/\/[^\/]*$/, "/live-ws");
+            ws = new WebSocket ( ws_proto + ws_host);
             ws.binaryType = "arraybuffer";
             ws.onopen = function () {
                 if (ws_verbose)
@@ -433,6 +441,13 @@ char live_html[] =  R"_raw_html_(
                 // compose and send
                 let msg = 'set_mouse?x=' + m.x + '&y=' + m.y;
                 sendWSMsg (msg);
+            });
+
+            document.addEventListener('paste', e=>{
+                let str = e.clipboardData.getData('text/plain');
+                for (let i = 0; i < str.length; i++) {
+                    sendKey(str[i]);
+                }
             });
 
 

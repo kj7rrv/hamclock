@@ -97,21 +97,21 @@ static void sendXMLRPCCmd (WiFiClient &client, const char cmd[], const char valu
 
     // copy each to mem
     StackMalloc hdr_fmt_mem(sizeof(hdr_fmt));
-    strcpy_P (hdr_fmt_mem.getMem(), hdr_fmt);
+    strcpy_P ((char *) hdr_fmt_mem.getMem(), hdr_fmt);
     StackMalloc body_fmt_mem(sizeof(body_fmt));
-    strcpy_P (body_fmt_mem.getMem(), body_fmt);
+    strcpy_P ((char *) body_fmt_mem.getMem(), body_fmt);
 
     // format body
     #define _BODY_SIZ (sizeof(body_fmt)+150)       // guard with %.Xs in body_fmt[]
     StackMalloc body_mem(_BODY_SIZ);
-    char *body_buf = body_mem.getMem();
-    int body_l = snprintf (body_buf, _BODY_SIZ, body_fmt_mem.getMem(), cmd, type, value, type);
+    char *body_buf = (char *) body_mem.getMem();
+    int body_l = snprintf (body_buf, _BODY_SIZ, (const char *) body_fmt_mem.getMem(), cmd, type, value, type);
 
     // format complete message
     #define _MSG_SIZ (sizeof(hdr_fmt)+20+body_l)
     StackMalloc msg_mem(_MSG_SIZ);
-    char *msg_buf = msg_mem.getMem();
-    snprintf (msg_buf, _MSG_SIZ, hdr_fmt_mem.getMem(), body_l, body_buf);
+    char *msg_buf = (char *) msg_mem.getMem();
+    snprintf (msg_buf, _MSG_SIZ, (char *) hdr_fmt_mem.getMem(), body_l, body_buf);
 
     // send
     Serial.printf (_FX("FLRIG: %s %s %s\n"), cmd, value, type);
@@ -357,7 +357,7 @@ static uint32_t sendOneString (float correction, const char str[])
     hi_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
     bool hipri_ok = sched_setscheduler (0, SCHED_FIFO, &hi_param) == 0;
     if (!hipri_ok)
-        printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
+        Serial.printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
 
     // get starting time
     struct timespec t0, t1;
@@ -409,7 +409,7 @@ static void sendOneMessage (const char cmd[])
         ns1 = sendOneString (correction, cmd);
     }
 
-    printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
+    Serial.printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
 
 }
 

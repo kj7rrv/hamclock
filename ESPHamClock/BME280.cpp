@@ -11,12 +11,11 @@
 #define I2CADDR_1       0x76                    // always at [0] in data arrays below
 #define I2CADDR_2       0x77                    // always at [1] in data arrays below
 
-// polling management. total display period eventually approaches N_BME_READINGS * SLOWEST_DT
-#define GOSLOWER        (5*60000L)              // take data more slowly after up this long, millis()
-#define GOSLOWEST       (60*60000L)             // take data even more slowly after up this long, millis()
-#define INITIAL_DT      (5*1000L)               // initial sensing period until GOSLOWER, millis()
-#define SLOWER_DT       (60*1000L)              // sensing period after GOSLOWER, millis()
-#define SLOWEST_DT      (900*1000L)             // sensing period after GOSLOWEST, millis()
+// polling management. polls at START_DT at first then slows to FINAL_DT after steady-state period
+#define MAX_BME_AGE     (24*3600L)              // max age to plot, seconds
+#define START_DT        (1*1000L)               // initial polling period, millis
+#define FINAL_DT        (1000L*MAX_BME_AGE/N_BME_READINGS)      // final period, millis
+#define SS_PERIOD       (3600*1000L)            // time to reach steady state, millis
 
 // data management.
 static const uint8_t bme_i2c[MAX_N_BME] = {I2CADDR_1, I2CADDR_2};    // N.B. match BME_76 and BME_77 indices
@@ -24,12 +23,12 @@ static BMEData *bme_data[MAX_N_BME];            // malloced queues, if found
 static Adafruit_BME280 bme_io[MAX_N_BME];       // one for each potential sensor
 
 // time management.
-static uint32_t readDT = INITIAL_DT;            // period between readings, millis();
+static uint32_t readDT = START_DT;              // period between readings, millis();
 static uint32_t last_reading;                   // last time either sensor was read, millis()
 static bool new_data;                           // whether new data has been read but not displayed
 
 // appearance
-#define TEMP_COLOR      0xFBEF
+#define TEMP_COLOR      RGB565(250,127,120);
 #define PRES_COLOR      RA8875_YELLOW
 #define HUM_COLOR       RA8875_CYAN
 #define DP_COLOR        RA8875_GREEN
@@ -147,7 +146,7 @@ static bool readSensor (int device)
             dp->p[dp->q_head] = BMEPACK_inHg(p / 3386.39 + getBMEPresCorr(device));     // Pascals to in Hg
         }
         dp->h[dp->q_head] = BMEPACK_H(h);
-        dp->u[dp->q_head] = now();
+        dp->u[dp->q_head] = myNow();
 
         // Serial.printf (_FX("BME %u %x %7.2f %7.2f %7.2f\n"), dp->u[dp->q_head], dp->i2c,
                             // BMEUNPACK_T(dp->t[dp->q_head]), BMEUNPACK_P(dp->p[dp->q_head]),
@@ -191,11 +190,11 @@ float dewPoint (float T, float RH)
 
     // want C
     if (!useMetricUnits())
-        T = 5.0F/9.0F*(T-32);           // F to C
+        T = FAH2CEN(T);
     float H = (log10f(RH)-2)/0.4343F + (17.62F*T)/(243.12F+T);
     float Dp = 243.12F*H/(17.62F-H);
     if (!useMetricUnits())
-        Dp = 9.0F/5.0F*Dp + 32;         // C to F
+        Dp = CEN2FAH(Dp);
     return (Dp);
 }
 
@@ -251,30 +250,22 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
             return;
         }
 
-        // x axis depends on time span
-        const char *xlabel;
-        float time_scale;
-        if (readDT >= SLOWEST_DT ) {
-            xlabel = "Hours";
-            time_scale = -3600.0F;
-        } else {
-            xlabel = "Minutes";
-            time_scale = -60.0F;
-        }
-
         // build linear x and y
         StackMalloc x_mem(N_BME_READINGS*sizeof(float));
         StackMalloc y_mem(N_BME_READINGS*sizeof(float));
         float *x = (float *) x_mem.getMem();
         float *y = (float *) y_mem.getMem();
-        time_t t0 = now();
+        time_t t0 = myNow();
         uint8_t nxy = 0;                                        // count entries with valid times
         resetWatchdog();
         float value_now = 0;                                    // latest value is last
         for (int j = 0; j < N_BME_READINGS; j++) {
             uint8_t qj = (dp->q_head + j) % N_BME_READINGS;     // oldest .. newest == qhead .. qhead-1
             if (dp->u[qj] > 0) {                                // skip if time not set
-                x[nxy] = (t0 - dp->u[qj])/time_scale;           // minutes ago .. beware unsigned time_t
+                int age_s = t0 - dp->u[qj];                     // n seconds old
+                if (age_s > MAX_BME_AGE)
+                    continue;                                   // limit plot age
+                x[nxy] = age_s;                                 // rescaled after we know total period
                 if (ch == PLOT_CH_DEWPOINT) {
                     value_now = y[nxy] = dewPoint (BMEUNPACK_T(dp->t[qj]), BMEUNPACK_H(dp->h[qj]));
                 } else if (ch == PLOT_CH_TEMPERATURE) {
@@ -288,6 +279,21 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
             }
         }
 
+        // x axis depends on time span
+        int period_s = x[0];                                    // oldest age first
+        const char *xlabel;
+        float time_scale;
+        if (period_s >= 3600) {
+            xlabel = _FX("Hours");
+            time_scale = -1/3600.0F;
+        } else {
+            xlabel = _FX("Minutes");
+            time_scale = -1/60.0F;
+        }
+        for (int j = 0; j < nxy; j++)
+            x[j] *= time_scale;
+        // Serial.printf (_FX("BME %10ld s %d  %6.2f .. %6.2f\n"), readDT/1000, nxy, x[0], x[nxy-1]);
+
         // prep plot box
         SBox plbox = box;                                       // start assuming whole
         if (getNBMEConnected() > 1) {
@@ -299,12 +305,15 @@ void drawOneBME280Pane (const SBox &box, PlotChoice ch)
         // plot in plbox, showing a bit more precision for imperial pressure
         if (ch == PLOT_CH_PRESSURE && !useMetricUnits()) {
             char buf[32];
-            snprintf (buf, sizeof(buf), "%.2f", value_now);
+            snprintf (buf, sizeof(buf), _FX("%.2f"), value_now);
             plotXYstr (plbox, x, y, nxy, xlabel, title, color, 0, 0, buf);
         } else {
             plotXY (plbox, x, y, nxy, xlabel, title, color, 0, 0, value_now);
         }
     }
+
+    // looks better to updatr border immediately
+    showRotatingBorder();
 }
 
 /* try to connect to sensors, reset brb_mode and brb_rotset to something benign if no longer appropriate
@@ -345,6 +354,7 @@ void readBME280 ()
 {
     resetWatchdog();
 
+    // reset here assuming both pane and BCB boxes had their chance
     new_data = false;
 
     if (getNBMEConnected() == 0 || !clockTimeOk())
@@ -358,16 +368,12 @@ void readBME280 ()
         if (readSensors()) {
 
             // gradually slow
-            switch (readDT) {
-            case INITIAL_DT:
-                if (t0 > GOSLOWER)
-                    readDT = SLOWER_DT;
-                break;
-            case SLOWER_DT:
-                if (t0 > GOSLOWEST)
-                    readDT = SLOWEST_DT;
-                break;
-            }
+            time_t up = getUptime (NULL, NULL, NULL, NULL);
+            if (up > SS_PERIOD/1000)
+                readDT = FINAL_DT;
+            else
+                readDT = START_DT + up*(1000L*(FINAL_DT-START_DT)/SS_PERIOD);
+            // Serial.printf (_FX("BME up %d s readDT %ld s\n"), up, readDT/1000);
         }
     }
 }
@@ -422,10 +428,10 @@ void drawBMEStats()
     const char *name = NULL;
     if (brb_mode == BRB_SHOW_BME76) {
         dp = getBMEData (BME_76, false);
-        name = "@76";
+        name = _FX("@76");
     } else if (brb_mode == BRB_SHOW_BME77) {
         dp = getBMEData (BME_77, false);
-        name = "@77";
+        name = _FX("@77");
     } else {
         fatalError (_FX("drawBMEStats() brb_mode %d no data"), brb_mode);
         return; // lint
@@ -437,26 +443,26 @@ void drawBMEStats()
     // fill fields for drawNCDXFStats()
     int i = 0;
 
-    snprintf (titles[i], sizeof(titles[i]), "Temp%s", name);
-    snprintf (values[i], sizeof(values[i]), "%.1f", BMEUNPACK_T(dp->t[qi]));
+    snprintf (titles[i], sizeof(titles[i]), _FX("Temp%s"), name);
+    snprintf (values[i], sizeof(values[i]), _FX("%.1f"), BMEUNPACK_T(dp->t[qi]));
     colors[i] = TEMP_COLOR;
     i++;
 
-    strcpy (titles[i], "Humidity");
-    snprintf (values[i], sizeof(values[i]), "%.1f", BMEUNPACK_H(dp->h[qi]));
+    strcpy (titles[i], _FX("Humidity"));
+    snprintf (values[i], sizeof(values[i]), _FX("%.1f"), BMEUNPACK_H(dp->h[qi]));
     colors[i] = HUM_COLOR;
     i++;
 
-    strcpy (titles[i], "Dew Pt");
-    snprintf (values[i], sizeof(values[i]), "%.1f", dewPoint(BMEUNPACK_T(dp->t[qi]),BMEUNPACK_H(dp->h[qi])));
+    strcpy (titles[i], _FX("Dew Pt"));
+    snprintf (values[i], sizeof(values[i]), _FX("%.1f"), dewPoint(BMEUNPACK_T(dp->t[qi]),BMEUNPACK_H(dp->h[qi])));
     colors[i] = DP_COLOR;
     i++;
 
-    strcpy (titles[i], "Pressure");
+    strcpy (titles[i], _FX("Pressure"));
     if (useMetricUnits())
-        snprintf (values[i], sizeof(values[i]), "%.0f", BMEUNPACK_P(dp->p[qi]));
+        snprintf (values[i], sizeof(values[i]), _FX("%.0f"), BMEUNPACK_P(dp->p[qi]));
     else
-        snprintf (values[i], sizeof(values[i]), "%.2f", BMEUNPACK_P(dp->p[qi]));
+        snprintf (values[i], sizeof(values[i]), _FX("%.2f"), BMEUNPACK_P(dp->p[qi]));
     colors[i] = PRES_COLOR;
     i++;
 
@@ -464,7 +470,7 @@ void drawBMEStats()
         fatalError (_FX("drawBMEStats wrong count"));
 
     // do it
-    drawNCDXFStats (titles, values, colors);
+    drawNCDXFStats (RA8875_BLACK, titles, values, colors);
 }
 
 /* handle a touch in NCDXF_b known to be showing BME stats

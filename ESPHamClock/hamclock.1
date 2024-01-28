@@ -1,0 +1,111 @@
+.TH hamclock 1
+.na
+.nh
+
+.SH NAME
+hamclock \- a kiosk-style application showing information useful to the amateur radio operator
+
+.SH SYNOPSIS
+hamclock [options]
+
+.SH DESCRIPTION
+HamClock displays information for the amateur radio operator including:
+.RS 5
+.IP \(bu
+setting your location, known as DE, and a second location, known as DX, in several ways
+.IP \(bu
+the current UTC, local time and weather at DE and DX
+.IP \(bu
+several live space weather indices with time histories
+.IP \(bu
+satellite tracking and pass predictions
+.IP \(bu
+VOACAP propagation modeling point-to-point and global MUF
+.IP \(bu
+short and long path beam headings and distance from DE to DX
+.IP \(bu
+Mercator, Azimuthal and Mollweide map projections centered on DE
+.IP \(bu
+Lunar position data and EME planning tool
+.IP \(bu
+NCDXF beacon schedule
+.IP \(bu
+Big Clock, stopwatch, alarm clock and station ID count-down timer
+.IP \(bu
+rig and rotator control using flrig or hamlib
+.IP \(bu
+list and plot DX Spider cluster, RBN, WSPR, PSK, POTA and SOTA spots
+.IP \(bu
+read and display local weather data from one or two connected BME280 I2C sensors
+.RE
+
+.SH OPTIONS
+The following list of command line options is current as of this writing.
+To see all options, run hamclock with any illegal option such as -help.
+.RS 5
+.TP 10
+-a l
+set gimbal trace level
+.TP
+-b h
+set backend host to h; default is clearskyinstitute.com
+.TP
+-d d
+set working directory to d; default is $HOME/.hamclock/
+.TP
+-e p
+set RESTful web server port to p; default is 8080
+.TP
+-f o
+force display full screen initially to "on" or "off"
+.TP
+-g  
+init DE using geolocation with current public IP; requires -k
+.TP
+-h  
+print this help summary then exit
+.TP
+-i i
+init DE using geolocation with IP i; requires -k
+.TP
+-k  
+go immediately to normal mode, ie, don't offer Setup or wait for Skips
+.TP
+-l l
+set Mercator or Mollweide center longitude to l degrees, +E; requires -k
+.TP
+-m  
+enable demo mode
+.TP
+-o  
+write diagnostic log to stdout instead of in /Users/ecdowney/.hamclock/
+.TP
+-s d
+start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS
+.TP
+-t p
+throttle max cpu to p percent; default is 80
+.TP
+-v
+show version info then exit
+.TP
+-w p
+set live web server port to p; default is 8081
+.RE
+
+
+.SH HISTORY
+HamClock was introduced in QST October 2017. 
+At that time it only worked on a standalone hardware configuration consisting of an Espressif ESP8266
+microcontroller and 800x480 LCD touch display. 
+In 2020 it was ported to the Raspberry Pi platform or any other UNIX-like operating system
+running the X11 Window display system.
+In 2022 it was ported again to be a web server that can be displayed and controlled
+using any browser, with no need for X11.
+All configurations continue to be supported although the ESP is loosing favor.
+
+.SH AUTHOR
+Elwood Downey, ecdowney@clearskyinstitute.com
+
+.SH SEE ALSO
+HamClock has an extensive support page at https://clearskyinstitute.com/ham/HamClock
