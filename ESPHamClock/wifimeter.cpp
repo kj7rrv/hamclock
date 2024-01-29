@@ -141,7 +141,7 @@ int runWiFiMeter(bool warn, bool &ignore_on)
                                                                                     RA8875_BLACK);
         // read and update
         if (readWiFiRSSI(rssi)) {
-            rssi = fminf (WN_MAX_DB, fmaxf (WN_MIN_DB, rssi));
+            rssi = CLAMPF (rssi, WN_MIN_DB, WN_MAX_DB);
             uint16_t rssi_x = rssi_b.x+1 + (rssi_b.w-3)*(rssi - WN_MIN_DB)/(WN_MAX_DB-WN_MIN_DB);
             tft.fillTriangle (rssi_x, rssi_b.y+rssi_b.h+1,
                                 rssi_x-WN_TRIS, rssi_b.y+rssi_b.h+2*WN_TRIS,

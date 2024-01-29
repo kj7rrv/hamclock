@@ -23,12 +23,13 @@ static const char v_page[] PROGMEM = "/version.pl";
 #define PBAR_INDENT     30                              // left and right indent
 #define PBAR_H          30                              // progress bar height
 #define PBAR_W          (tft.width()-2*PBAR_INDENT)     // progress bar width
-#define FLASHBPS        60000                           // approx flash rate, b/s
 
 static uint16_t pbar_x0, pbar_y0;                       // lower left of progress bar
 
 
 #if defined(_IS_ESP8266)
+
+#define FLASHBPS        60000                           // approx flash rate, b/s
 
 /* called by ESPhttpUpdate during download with bytes so far and total.
  */
@@ -73,7 +74,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
     char line[100];
     bool found_newer = false;
 
-    Serial.print (backend_host); Serial.println (v_page);
+    Serial.printf (_FX("%s/%s\n"), backend_host, _FX_helper(v_page));
     if (wifiOk() && v_client.connect (backend_host, BACKEND_PORT)) {
         resetWatchdog();
 

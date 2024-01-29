@@ -233,6 +233,8 @@ bool Adafruit_RA8875::begin (int not_used)
         XInitThreads();
 
 	// connect to X server
+        char *dpyenv = getenv ("DISPLAY");
+        printf ("DISPLAY=%s\n", dpyenv ? dpyenv : "<none>");
         display = XOpenDisplay(NULL);
 	if (!display) {
 	    printf ("Can not open X Windows display\n");
@@ -299,7 +301,7 @@ bool Adafruit_RA8875::begin (int not_used)
 
 	// create window with initial size, user might resize later
 	XSetWindowAttributes wa;
-	wa.bit_gravity = NorthWestGravity;
+	wa.bit_gravity = StaticGravity;
 	wa.background_pixel = black_pixel;
 	unsigned long value_mask = CWBitGravity | CWBackPixel;
         win = XCreateWindow(display, root, 0, 0, fb_si.xres, fb_si.yres, 0, visdepth, InputOutput,
@@ -337,7 +339,11 @@ bool Adafruit_RA8875::begin (int not_used)
 
 	// enable desired X11 events
         XSelectInput (display, win, KeyPressMask | KeyReleaseMask | PointerMotionMask | LeaveWindowMask
-                | ButtonReleaseMask | ButtonPressMask | ExposureMask | StructureNotifyMask);
+            | ButtonReleaseMask | ButtonPressMask | ExposureMask | StructureNotifyMask);
+
+        // listen for close
+        wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
+        XSetWMProtocols(display, win, &wmDeleteMessage, 1);
 
 	// prep for mouse and keyboard info
 	if (pthread_mutex_init (&mouse_lock, NULL)) {
@@ -1619,6 +1625,7 @@ char Adafruit_RA8875::getChar(bool *control_set, bool *shift_set)
                 *shift_set = ks.shift;
             if (++kb_qhead == KB_N)
                 kb_qhead = 0;
+            // printf ("getChar= 0x%x %c\n", c, c);
         }
     pthread_mutex_unlock (&kb_lock);
     return (c);
@@ -1743,26 +1750,98 @@ void Adafruit_RA8875::X11OptionsEngageNow (bool fs)
             usleep (1000);
 }
 
+/* called with KeySym and XKeyEvent state to request PRIMARY or CLIPBOARD selection for pasting.
+ * return whether the kb command really was for a paste operation.
+ */
+// _USE_X11
+bool Adafruit_RA8875::requestSelection (KeySym ks, unsigned kb_state)
+{
+        if (ks == XK_v) {
+
+            // try CLIPBOARD
+            unsigned m1 = ControlMask;                  // xterm uses control-v
+            if (kb_state == m1) {
+                // request CLIPBOARD buffer conversion -- will soon generate SelectionNotify if any
+                Atom bufid   = XInternAtom(display, "CLIPBOARD", False),
+                     fmtid   = XInternAtom(display, "STRING", False),
+                     propid  = XInternAtom(display, "XSEL_DATA", False);
+                // printf ("ask for CLIPBOARD\n");
+                (void) XConvertSelection (display, bufid, fmtid, propid, win, CurrentTime);
+                return (true);
+            }
+
+            // try PRIMARY
+            unsigned m2 = Mod2Mask;                     // macOS uses command-v
+            unsigned m3 = ShiftMask|ControlMask;        // gtk shift-control-v
+            if (kb_state == m2 || kb_state == m3) {
+                // request PRIMARY buffer conversion -- will soon generate SelectionNotify if any
+                Atom bufid   = XInternAtom(display, "PRIMARY", False),
+                     fmtid   = XInternAtom(display, "STRING", False),
+                     propid  = XInternAtom(display, "XSEL_DATA", False);
+                // printf ("ask for PRIMARY\n");
+                (void) XConvertSelection (display, bufid, fmtid, propid, win, CurrentTime);
+                return (true);
+            }
+        }
+
+        // nope, nothing special
+        return (false);
+}
+
+/* called on receipt of SelectionNotify to capture the PRIMARY selection and push onto keyboard queue.
+ * https://stackoverflow.com/questions/27378318/c-get-string-from-clipboard-on-linux/44992938#44992938
+ */
+// _USE_X11
+void Adafruit_RA8875::captureSelection()
+{
+        unsigned char *result;
+        unsigned long ressize, restail;
+        int resbits;
+        Atom fmtid   = XInternAtom(display, "STRING", False),
+             propid  = XInternAtom(display, "XSEL_DATA", False);
+
+        if (Success == XGetWindowProperty (display, win, propid, 0, 100, False,
+                                AnyPropertyType, &fmtid, &resbits, &ressize, &restail, &result)
+                        && resbits == 8) { // means result is array of char
+
+            // inject selection into kb q
+            for (unsigned i = 0; i < ressize; i++)
+                putChar (result[i]);
+
+            XFree(result);
+        }
+}
+
 // _USE_X11
 void Adafruit_RA8875::encodeKeyEvent (XKeyEvent *event)
 {
         char c = 0;
+        char buf[10];
 
-        // check a few non-ascii values of interest else other chars
+        // check a few values of interest
         KeySym ks = XLookupKeysym (event, 0);
-        if (ks == XK_Left) {
+        switch (ks) {
+        case XK_Left:           // convert to vi's h
             c = 'h';
-        } else if (ks == XK_Down) {
+            break;
+        case XK_Down:           // convert to vi's j
             c = 'j';
-        } else if (ks == XK_Up) {
+            break;
+        case XK_Up:             // convert to vi's k
             c = 'k';
-        } else if (ks == XK_Right) {
+            break;
+        case XK_Right:          // convert to vi's l
             c = 'l';
-        } else {
-            char buf[10];
-            if (XLookupString (event, buf, sizeof(buf), NULL, NULL) > 0)
-                c = buf[0];
+            break;
+        case XK_v:              // might be paste
+            if (requestSelection (XK_v, event->state))
+                return;
+            break;
         }
+
+        // if nothing yet try a string
+        if (!c && XLookupString (event, buf, sizeof(buf), NULL, NULL) > 0)
+            c = buf[0];
 
         // enqueue if recognized
         if (c) {
@@ -1774,6 +1853,7 @@ void Adafruit_RA8875::encodeKeyEvent (XKeyEvent *event)
             if (++kb_qtail == KB_N)
                 kb_qtail = 0;
             pthread_mutex_unlock (&kb_lock);
+            // printf ("encode key= 0x%x %c\n", c, c);
         }
 }
 
@@ -1881,7 +1961,7 @@ void Adafruit_RA8875::fbThread ()
             // X11 options are deferred until explicitly enabled; reset options_engage after each use.
             if (options_engage) {
 
-                printf ("options_engage: %d\n", options_fullscreen);
+                // printf ("options_engage: %d\n", options_fullscreen);
 
                 // add or remove _NET_WM_STATE_FULLSCREEN from _NET_WM_STATE
                 // see https://specifications.freedesktop.org/wm-spec
@@ -1917,17 +1997,29 @@ void Adafruit_RA8875::fbThread ()
 				event.xexpose.width, event.xexpose.height, event.xexpose.x, event.xexpose.y);
 		    break;
 
-                case KeyPress:
+                case SelectionNotify:
+                    // printf ("SelectionNotify\n");
 
-                    // just record time to start repeating
+                    if (event.xselection.property)
+                        captureSelection();
+                    break;
+
+                case KeyPress:
+                    // printf ("KeyPress\n");
+
+                    // just record time to start repeating, get actual key when released
                     gettimeofday (&kp0, NULL);
                     break;
 
                 case KeyRelease:
+                    // printf ("KeyRelease\n");
+
                     encodeKeyEvent ((XKeyEvent*)&event);
 		    break;
 
 		case ButtonPress:
+                    // printf ("ButtonPress   %ld.%06ld\n", mouse_tv.tv_sec, mouse_tv.tv_usec);
+
 		    pthread_mutex_lock (&mouse_lock);
 			mouse_x = event.xbutton.x;
 			mouse_y = event.xbutton.y;
@@ -1937,11 +2029,11 @@ void Adafruit_RA8875::fbThread ()
                     // record time of mouse situation change for cursor fade
                     gettimeofday (&mouse_tv, NULL);
 
-                    // printf ("press   %ld.%06ld\n", mouse_tv.tv_sec, mouse_tv.tv_usec);
-
 		    break;
 
 		case ButtonRelease:
+                    // printf ("ButtonRelease  %ld.%06ld\n", mouse_tv.tv_sec, mouse_tv.tv_usec);
+
 		    pthread_mutex_lock (&mouse_lock);
 			mouse_x = event.xbutton.x;
 			mouse_y = event.xbutton.y;
@@ -1951,11 +2043,10 @@ void Adafruit_RA8875::fbThread ()
                     // record time of mouse situation change for cursor fade
                     gettimeofday (&mouse_tv, NULL);
 
-                    // printf ("release %ld.%06ld\n", mouse_tv.tv_sec, mouse_tv.tv_usec);
-
 		    break;
 
                 case LeaveNotify:
+                    // printf ("LeaveNotify\n");
 
                     // indicate mouse not valid
 		    pthread_mutex_lock (&mouse_lock);
@@ -1966,10 +2057,11 @@ void Adafruit_RA8875::fbThread ()
 
 
                 case MotionNotify:
+                    // printf ("MotionNotify %d %d\n", event.xmotion.x, event.xmotion.y);
 
 		    pthread_mutex_lock (&mouse_lock);
-			mouse_x = event.xbutton.x;
-			mouse_y = event.xbutton.y;
+			mouse_x = event.xmotion.x;
+			mouse_y = event.xmotion.y;
 		    pthread_mutex_unlock (&mouse_lock);
 
                     // record time of mouse situation change for cursor fade
@@ -1991,6 +2083,13 @@ void Adafruit_RA8875::fbThread ()
                     // invalidate staging area to get a full refresh
                     memset (fb_stage, ~0, fb_nbytes);
 		    break;
+
+                case ClientMessage:
+                    if ((Atom)event.xclient.data.l[0] == wmDeleteMessage) {
+                        XCloseDisplay(display);
+                        exit(0);
+                    }
+                    break;
 		}
 	    }
 
@@ -2030,41 +2129,50 @@ void Adafruit_RA8875::getScreenSize (int *w, int *h)
         *h = DisplayHeight(display, snum);
 }
 
-/* move cursor n app pixels in the given hjkl direction then pass back the resulting position.
- * ignore dir if not one of hjkl. just return current position if n is 0.
- * return whether cursor is actually over our window.
+/* move cursor n app pixels in the given hjkl direction then pass back the resulting position if interested.
+ * ignore dir if not one of hjkl. just pass back current position if n is 0.
+ * return whether cursor really is over our window.
  */
 // _USE_X11
 bool Adafruit_RA8875::warpCursor (char dir, unsigned n, int *xp, int *yp)
 {
-        int dx = 0, dy = 0;
-
-        if (n > 0) {
-
-            switch (dir) {
-            case 'h': dx -= n*SCALESZ; break;
-            case 'j': dy += n*SCALESZ; break;
-            case 'k': dy -= n*SCALESZ; break;
-            case 'l': dx += n*SCALESZ; break;
-            default: break;
-            }
-
-            if (dx || dy)
-                XWarpPointer (display, win, None, FB_X0, FB_Y0, FB_X0+FB_XRES, FB_Y0+FB_YRES, dx, dy);
-        }
-
         Window root_w, child_w;
         int root_x, root_y;
         int win_x, win_y;
         unsigned int mask;
 
-        if (XQueryPointer (display, win, &root_w, &child_w, &root_x, &root_y, &win_x, &win_y, &mask)) {
-            *xp = (win_x - FB_X0)/SCALESZ;
-            *yp = (win_y - FB_Y0)/SCALESZ;
-            return (true);
+        // get current position at full resolution
+        if (!XQueryPointer (display, win, &root_w, &child_w, &root_x, &root_y, &win_x, &win_y, &mask)) {
+            printf ("XQueryPointer failed\n");
+            return (false);
         }
 
-        return (false);
+        int new_x = win_x, new_y = win_y;
+
+        // move by n app positions
+        switch (dir) {
+        case 'h': new_x = win_x-n*SCALESZ; break;       // left
+        case 'j': new_y = win_y+n*SCALESZ; break;       // down
+        case 'k': new_y = win_y-n*SCALESZ; break;       // up
+        case 'l': new_x = win_x+n*SCALESZ; break;       // right
+        default: break;
+        }
+
+        // beware wrap
+        new_x = FB_X0 + ((new_x-FB_X0 + FB_XRES)%FB_XRES);
+        new_y = FB_Y0 + ((new_y-FB_Y0 + FB_YRES)%FB_YRES);
+
+        // printf ("warp from %d %d  to  %d %d\n", win_x, win_y, new_x, new_y);
+
+        // move cursor using deltas, we've already insured the move will be in bounds
+        XWarpPointer (display, None, None, 0, 0, 0, 0, new_x-win_x, new_y-win_y);
+
+        // pass back in app coords if interested
+        if (xp) *xp = (new_x-FB_X0)/SCALESZ;
+        if (yp) *yp = (new_y-FB_Y0)/SCALESZ;
+
+        // worked ok
+        return (true);
 }
 
 #endif	// _USE_X11

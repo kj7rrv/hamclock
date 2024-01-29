@@ -298,6 +298,9 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
         void putChar (char c) {
             (void)(c);
         }
+        bool getMouse (uint16_t *, uint16_t *) {
+            return (false);
+        }
         bool warpCursor (char, unsigned, int *, int *) {
             return (false);
         }

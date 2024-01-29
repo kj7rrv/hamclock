@@ -1,5 +1,6 @@
 #include "WiFiUdp.h"
 
+static bool verbose;
 
 WiFiUDP::WiFiUDP()
 {
@@ -16,7 +17,7 @@ bool WiFiUDP::begin(int port)
         // create UDP socket
 	sockfd = ::socket(AF_INET, SOCK_DGRAM, 0);
 	if (sockfd < 0)  {
-	    printf ("socket: %s\n", strerror(errno));
+	    printf ("UDP: socket(): %s\n", strerror(errno));
 	    return (false);
 	}
 
@@ -27,17 +28,17 @@ bool WiFiUDP::begin(int port)
         sin.sin_port = htons(port);
         sin.sin_addr.s_addr = htonl(INADDR_ANY);
         int one = 1;
-        setsockopt (sockfd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+        (void) setsockopt (sockfd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
         one = 1;
-        setsockopt (sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        (void) setsockopt (sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
         if (bind(sockfd, (struct sockaddr*)&sin, sizeof(sin)) < 0) {
-            ::close (sockfd);
-            sockfd = -1;
-	    printf ("bind: %s\n", strerror(errno));
+	    printf ("UDP: bind(%d): %s\n", port, strerror(errno));
+            stop();
 	    return (false);
 	}
 
-        printf ("new UDP socket %d port %d\n", sockfd, port);
+        if (verbose)
+            printf ("UDP: new socket %d port %d\n", sockfd, port);
 
 	return (true);
 }
@@ -50,7 +51,7 @@ bool WiFiUDP::beginMulticast (IPAddress ifIP, IPAddress mcIP, int port)
         // create UDP socket
 	sockfd = ::socket(AF_INET, SOCK_DGRAM, 0);
 	if (sockfd < 0)  {
-	    printf ("socket: %s\n", strerror(errno));
+	    printf ("UDP: socket(mcIP): %s\n", strerror(errno));
 	    return (false);
 	}
 
@@ -63,9 +64,8 @@ bool WiFiUDP::beginMulticast (IPAddress ifIP, IPAddress mcIP, int port)
         mcast_group.sin_port = htons(port);
         mcast_group.sin_addr.s_addr = inet_addr(mca);
         if (bind(sockfd, (struct sockaddr*)&mcast_group, sizeof(mcast_group)) < 0) {
-            ::close (sockfd);
-            sockfd = -1;
-	    printf ("bind: %s\n", strerror(errno));
+	    printf ("UDP: bind(mcIP): %s\n", strerror(errno));
+            stop();
 	    return (false);
 	}
 
@@ -74,13 +74,13 @@ bool WiFiUDP::beginMulticast (IPAddress ifIP, IPAddress mcIP, int port)
         mreq.imr_multiaddr = mcast_group.sin_addr;
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-            ::close (sockfd);
-            sockfd = -1;
-	    printf ("IP_ADD_MEMBERSHIP: %s\n", strerror(errno));
+	    printf ("UDP: IP_ADD_MEMBERSHIP: %s\n", strerror(errno));
+            stop();
 	    return (false);
         }
 
-        printf ("new multicast socket %d\n", sockfd);
+        if (verbose)
+            printf ("UDP: new multicast socket %d\n", sockfd);
 
         // ok
         return (true);
@@ -115,15 +115,15 @@ void WiFiUDP::beginPacket (const char *host, int port)
         snprintf (port_str, sizeof(port_str), "%d", port);
         int error = ::getaddrinfo (host, port_str, &hints, &aip);
         if (error) {
-            printf ("WiFiUDP: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
+            printf ("UDP: getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
+            stop();
             return;
         }
         
         /* connect */
         if (connect (sockfd, aip->ai_addr, aip->ai_addrlen) < 0) {
-            printf ("WiFiUDP: connect(%s,%d): %s\n", host, port, strerror(errno));
-            freeaddrinfo (aip);
-            return;
+            printf ("UDP: connect(%s,%d): %s\n", host, port, strerror(errno));
+            stop();
         }
 
         /* clean up */
@@ -135,13 +135,23 @@ void WiFiUDP::write (uint8_t *buf, int n)
         if (sockfd < 0)
             return;
 
-	w_n = n;	// save original count
+        // init no
+	w_n = 0;
 
 	sendto_n = ::write(sockfd, buf, n);
-	if (sendto_n < 0) {
-	    printf ("sendto: %s\n", strerror(errno));
+        if (sendto_n != n) {
+	    printf ("UDP: sendto(%d): only sent %d\n", n, sendto_n);
+            stop();
 	    return;
 	}
+	if (sendto_n < 0) {
+	    printf ("UDP: sendto(%d): %s\n", n, strerror(errno));
+            stop();
+	    return;
+	}
+
+        // save
+	w_n = n;
 }
 
 bool WiFiUDP::endPacket()
@@ -152,6 +162,9 @@ bool WiFiUDP::endPacket()
 
 int WiFiUDP::parsePacket()
 {
+        if (sockfd < 0)
+            return (0);
+
 	struct timeval tv;
 	fd_set rset;
 	tv.tv_sec = 0;		// don't block
@@ -162,7 +175,8 @@ int WiFiUDP::parsePacket()
 	// use select() so we can time out, just using read could hang forever
 	int s = ::select (sockfd+1, &rset, NULL, NULL, &tv);
 	if (s < 0) {
-	    printf ("UDP select error: %s\n", strerror(errno));
+	    printf ("UDP: select(poll): %s\n", strerror(errno));
+            stop();
 	    return (0);
 	}
 	if (s == 0)
@@ -171,7 +185,8 @@ int WiFiUDP::parsePacket()
         socklen_t rlen = sizeof(remoteip);
 	r_n = ::recvfrom(sockfd, r_buf, sizeof(r_buf), 0, (struct sockaddr *)&remoteip, &rlen);
 	if (r_n < 0) {
-	    printf ("recvfrom: %s\n", strerror(errno));
+	    printf ("UDP: recvfrom(): %s\n", strerror(errno));
+            stop();
 	    return (0);
 	}
 	return (r_n);
@@ -187,7 +202,8 @@ void WiFiUDP::stop()
 {
 	if (sockfd >= 0) {
 	    ::close (sockfd);
-            printf ("closing socket %d\n", sockfd);
+            if (verbose)
+                printf ("UDP: closing socket %d\n", sockfd);
 	    sockfd = -1;
 	}
 }

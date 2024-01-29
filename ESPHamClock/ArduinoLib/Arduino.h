@@ -101,6 +101,7 @@ extern int restful_port;
 extern int backend_port;
 extern bool skip_skip;
 extern bool init_iploc;
+extern bool want_kbcursor;
 extern bool no_web_touch;
 extern const char *init_locip;
 extern int gimbal_trace_level;
