@@ -37,6 +37,7 @@ SBox NCDXF_b = {740, 0, 60, PLOTBOX_H};
 // common "skip" button in several places
 SBox skip_b    = {730,10,55,35};
 bool skip_skip;
+bool want_kbcursor;
 
 // special options to force initing DE using our IP or given IP
 bool init_iploc;
@@ -45,10 +46,6 @@ const char *init_locip;
 // maidenhead label boxes
 SBox maidlbltop_b;
 SBox maidlblright_b;
-
-// graphical button sizes
-#define GB_W    14
-#define GB_H    34
 
 // satellite pass horizon
 SCircle satpass_c;
@@ -75,7 +72,7 @@ const char *grid_styles[MAPGRID_N] = {
 };
 
 // map projections
-uint8_t map_proj;
+uint8_t map_proj;                               // one of MapProjection
 #define X(a,b)  b,                              // expands MAPPROJS to name plus comma
 const char *map_projnames[MAPP_N] = {
     MAPPROJS
@@ -514,7 +511,7 @@ void setup()
     dx_info_b.x = 1;
     dx_info_b.y = 295;
     dx_info_b.w = de_info_b.w;
-    dx_info_b.h = 181;
+    dx_info_b.h = 184;
     uint16_t dxvspace = dx_info_b.h/DX_INFO_ROWS;
     askdx_b.x = dx_info_b.x+1;
     askdx_b.y = dx_info_b.y + dxvspace;
@@ -528,7 +525,7 @@ void setup()
     dxsrss_b.w = dx_info_b.w/2;
     dxsrss_b.h = dxvspace;
     dx_maid_b.x = dx_info_b.x;
-    dx_maid_b.y = dx_info_b.y+(DX_INFO_ROWS-2)*dx_info_b.h/DX_INFO_ROWS;
+    dx_maid_b.y = dx_info_b.y + 3*dxvspace;
     dx_maid_b.w = dx_info_b.w/2;
     dx_maid_b.h = dxvspace;
     if (!NVReadUInt8(NV_DX_SRSS, &dxsrss)) {
@@ -554,9 +551,9 @@ void setup()
     }
 
     // sat pass circle
-    satpass_c.r = dx_info_b.h/3 - 1;
+    satpass_c.r = dx_info_b.h/3 - 3;
     satpass_c.s.x = dx_info_b.x + dx_info_b.w/2;
-    satpass_c.s.y = dx_info_b.y + dx_info_b.h - satpass_c.r - 1;
+    satpass_c.s.y = dx_info_b.y + dx_info_b.h - satpass_c.r - 4;
 
 
     // init portion of dx info used for satellite name
@@ -567,9 +564,9 @@ void setup()
 
     // set up RSS state and banner box
     rss_bnr_b.x = map_b.x;
-    rss_bnr_b.y = map_b.y + map_b.h - 2*GB_H;
+    rss_bnr_b.y = map_b.y + map_b.h - 68;
     rss_bnr_b.w = map_b.w;
-    rss_bnr_b.h = 2*GB_H;
+    rss_bnr_b.h = 68;
     NVReadUInt8 (NV_RSS_ON, &rss_on);
     if (!NVReadUInt8 (NV_RSS_INTERVAL, &rss_interval) || rss_interval < RSS_MIN_INT) {
         rss_interval = RSS_DEF_INT;
@@ -678,7 +675,7 @@ void drawOneTimeDX()
         drawSatPass();
     } else {
         // fresh
-        tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);
+        tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK); // avoid borders
 
         // title
         selectFontStyle (BOLD_FONT, SMALL_FONT);
@@ -766,38 +763,21 @@ static void checkTouch()
 {
     resetWatchdog();
 
-#if defined(_SUPPORT_KBCTRL)
-    // check for keyboard control of cursor
-    bool control, shift;
-    char c = tft.getChar (&control, &shift);
-    if (c) {
-        unsigned n = 1;
-        int x, y;
-        if (shift)
-            n *= 2;
-        if (control)
-            n *= 4;
-        if (tft.warpCursor (c, n, &x, &y)) {
-            if (c == '\r' || c == '\n' || c == ' ') {
-                wifi_tt = (shift || control) ? TT_HOLD : TT_TAP;
-                wifi_tt_s.x = x;
-                wifi_tt_s.y = y;
-            }
-        }
-    }
-#endif // _IS_UNIX
-
     TouchType tt;
     SCoord s;
 
-    // check for remote and local touch, else get out fast
+    // check for remote and local touch
     if (wifi_tt != TT_NONE) {
+        // save and reset remote touch.
+        // N.B. remote touches never turn on brightness
         s = wifi_tt_s;
         tt = wifi_tt;
         wifi_tt = TT_NONE;
-        // remote touches never turn on brightness
     } else {
+        // check tap and kb
         tt = readCalTouch (s);
+        if (tt == TT_NONE)
+            tt = checkKBWarp (s);
         if (tt == TT_NONE)
             return;
         // don't do anything else if this tap just turned on brightness
@@ -875,7 +855,8 @@ static void checkTouch()
         if (TZMenu (de_tz, de_ll)) {
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
-            scheduleMoonPane();
+            scheduleNewMoon();
+            scheduleNewSDO();
             scheduleNewBC();
         }
         drawDEInfo();   // erase regardless
@@ -898,32 +879,34 @@ static void checkTouch()
         drawDXInfo ();
         scheduleNewBC();
         scheduleNewVOACAPMap(prop_map);
-    } else if (inBox (s, desrss_b)) {
-        // N.B. this must come before askde_b because it overlaps
-        if (de_time_fmt == DETIME_INFO) {
+    } else if (inBox (s, askde_b)) {
+        // N.B. askde overlaps the desrss box
+        if (de_time_fmt == DETIME_INFO && inBox (s, desrss_b)) {
             desrss = !desrss;
             NVWriteUInt8 (NV_DE_SRSS, desrss);
             drawDEInfo();
+        } else {
+            char maid[MAID_CHARLEN];
+            getNVMaidenhead (NV_DE_GRID, maid);
+            if (askNewPos (askde_b, ll = de_ll, maid))
+                newDE (ll, maid);
+            else
+                drawDEInfo();
         }
-    } else if (!dx_info_for_sat && inBox (s, dxsrss_b)) {
-        // N.B. this must come before askdx_b because it overlaps
-        dxsrss = (dxsrss+1)%DXSRSS_N;
-        NVWriteUInt8 (NV_DX_SRSS, dxsrss);
-        drawDXInfo();
-    } else if (de_time_fmt == DETIME_INFO && inBox (s, askde_b)) {
-        char maid[MAID_CHARLEN];
-        getNVMaidenhead (NV_DE_GRID, maid);
-        if (askNewPos (askde_b, ll = de_ll, maid))
-            newDE (ll, maid);
-        else
-            drawDEInfo();
     } else if (!dx_info_for_sat && inBox (s, askdx_b)) {
-        char maid[MAID_CHARLEN];
-        getNVMaidenhead (NV_DX_GRID, maid);
-        if (askNewPos (askdx_b, ll = dx_ll, maid))
-            newDX (ll, maid, NULL);
-        else
+        // N.B. askdx overlaps the dxsrss box
+        if (inBox (s, dxsrss_b)) {
+            dxsrss = (dxsrss+1)%DXSRSS_N;
+            NVWriteUInt8 (NV_DX_SRSS, dxsrss);
             drawDXInfo();
+        } else {
+            char maid[MAID_CHARLEN];
+            getNVMaidenhead (NV_DX_GRID, maid);
+            if (askNewPos (askdx_b, ll = dx_ll, maid)) {
+                newDX (ll, maid, NULL);
+            } else
+                drawDXInfo();
+        }
     } else if (!dx_info_for_sat && inCircle(s, dx_marker_c)) {
         newDX (dx_ll, NULL, NULL);
     } else if (checkPlotTouch(s, PANE_1, tt)) {
@@ -967,10 +950,10 @@ static void checkTouch()
  */
 void normalizeLL (LatLong &ll)
 {
-    ll.lat_d = fminf(fmaxf(ll.lat_d,-90),90);           // clamp
+    ll.lat_d = CLAMPF(ll.lat_d,-90,90);                 // clamp lat
     ll.lat = deg2rad(ll.lat_d);
 
-    ll.lng_d = fmodf(ll.lng_d+(2*360+180),360)-180;     // wrap
+    ll.lng_d = fmodf(ll.lng_d+(2*360+180),360)-180;     // wrap lng
     ll.lng = deg2rad(ll.lng_d);
 }
 
@@ -1053,7 +1036,7 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     // sat path will change, stop gimbal and require op to start
     stopGimbalNow();
 
-    if (map_proj != MAPP_MERCATOR) {
+    if (map_proj == MAPP_AZIMUTHAL || map_proj == MAPP_AZIM1 ) {
 
         // must start over because everything moves to keep new DE centered
 
@@ -1065,7 +1048,7 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
 
     } else {
 
-        // for mercator we try harder to just update the minimum .. lazy way is just call initScreen
+        // for mercator|moll we try harder to just update the minimum .. lazy way is just call initEarthMap
 
         // erase current markers
         eraseDXPath();
@@ -1095,7 +1078,8 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     NVWriteFloat (NV_DE_LNG, de_ll.lng_d);
 
     // more updates that depend on DE regardless of projection
-    scheduleMoonPane();
+    scheduleNewMoon();
+    scheduleNewSDO();
     scheduleNewBC();
     scheduleNewVOACAPMap(prop_map);
     sendDXClusterDELLGrid();
@@ -1354,7 +1338,7 @@ void drawDXPath ()
 
 #else // UNIX
 
-    // walk great circle path from DE through DX
+    // walk great circle path from DE through DX with segment lengths PATH_SEGLEN
     float ca, B;
     SCoord s0 = {0, 0}, s1;
     uint16_t short_col = getMapColor(SHORTPATH_CSPR);
@@ -1365,16 +1349,20 @@ void drawDXPath ()
     for (float b = 0; b < 2*M_PIF; b += deg2rad(PATH_SEGLEN)) {
         solveSphere (bear, b, sdelat, cdelat, &ca, &B);
         ll2sRaw (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s1, 1);
-        bool show = b < dist ? (!sp_dashed || dash_toggle) : (!lp_dashed || dash_toggle);
-        if (s0.x && show && segmentSpanOkRaw (s0, s1, 1))
-            tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, tft.SCALESZ, b < dist ? short_col : long_col);
+        bool show_seg = b < dist ? (!sp_dashed || dash_toggle) : (!lp_dashed || dash_toggle);
+        if (s0.x) {
+            if (segmentSpanOkRaw (s0, s1, 1)) {
+                if (show_seg)
+                    tft.drawLineRaw (s0.x, s0.y, s1.x, s1.y, tft.SCALESZ, b < dist ? short_col : long_col);
+            } else {
+                s1.x = 0;
+            }
+        }
         s0 = s1;
         dash_toggle = !dash_toggle;
     }
 
 #endif // USE_GPATH
-
-    // printFreeHeap (F("drawDXPath"));
 }
 
 /* return whether we are waiting for a DX path to linger.
@@ -1506,7 +1494,7 @@ void drawSBox (const SBox &box, uint16_t color)
 
 /* draw the given string in the given color anchored at x0,y0 with optional black shadow.
  */
-static void shadowString (const char *str, bool shadow, uint16_t color, uint16_t x0, uint16_t y0)
+void shadowString (const char *str, bool shadow, uint16_t color, uint16_t x0, uint16_t y0)
 {
     if (shadow && color != RA8875_BLACK) {
         tft.setTextColor (RA8875_BLACK);
@@ -1765,7 +1753,7 @@ time_t getUptime (uint16_t *days, uint8_t *hrs, uint8_t *mins, uint8_t *secs)
     static time_t start_s;
 
     // get time now from NTP
-    time_t now_s = now();
+    time_t now_s = myNow();
     if (now_s < 1490000000L)            // March 2017
         return (0);                     // not ready yet
 
@@ -1856,14 +1844,7 @@ static bool overMaidKey (const SCoord &s)
                         && (inBox(s,maidlbltop_b) || inBox(s,maidlblright_b)) );
 }
 
-/* return whether coordinate s is over an active map scale
- */
-static bool overMapScale (const SCoord &s)
-{
-    return (mapScaleIsUp() && inBox(s,mapscale_b));
-}
-
-/* return whether s is over the active portion of map, ie, depending on the current projection.
+/* return whether s is over the map globe, depending on the current projection.
  */
 static bool overActiveMap (const SCoord &s)
 {
@@ -1889,10 +1870,24 @@ static bool overActiveMap (const SCoord &s)
 
     } else if (map_proj == MAPP_MERCATOR) {
         return (inBox(s,map_b));
+
+    } else if (map_proj == MAPP_MOLL) {
+        // normalize ellipse boundry to unit circle
+        float dx = (float)(s.x - (map_b.x + map_b.w/2))/(map_b.w/2);
+        float dy = (float)(s.y - (map_b.y + map_b.h/2))/(map_b.h/2);
+        return (dx*dx + dy*dy < 1);
+
     } else {
         fatalError (_FX("overActiveMap bogus projection %d"), map_proj);
         return (false);         // lint 
     }
+}
+
+/* return whether coordinate s is over an active map scale
+ */
+bool overMapScale (const SCoord &s)
+{
+    return (mapScaleIsUp() && inBox(s,mapscale_b));
 }
 
 /* return whether coordinate s is over a usable map location
@@ -1900,23 +1895,6 @@ static bool overActiveMap (const SCoord &s)
 bool overMap (const SCoord &s)
 {
     return (overActiveMap(s) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overMapScale(s));
-}
-
-/* return whether coordinate s is over any symbol
- */
-bool overAnySymbol (const SCoord &s)
-{
-    return (inCircle(s, de_c)
-                || (showDEAPMarker() && inCircle(s, deap_c))
-                || (showDEMarker() && inCircle(s, de_c))
-                || (showDXMarker() && inCircle(s, dx_c))
-                || inCircle (s, sun_c) || inCircle (s, moon_c)
-                || overAnyBeacon(s)
-                || overAnyPSKSpots(s)
-                || overAnyDXClusterSpots(s)
-                || overAnyOnTheAirSpots(s)
-                || inBox(s,santa_b)
-                || overMapScale(s));
 }
 
 
@@ -1941,8 +1919,9 @@ void drawAllSymbols(bool beacons_too)
     if (!overRSS(deap_c.s))
         drawDEAPMarker();
     drawOnTheAirSpotsOnMap();
-    drawPSKSpots();
     drawDXClusterSpotsOnMap();
+    drawADIFSpotsOnMap();
+    drawFarthestPSKSpots();
     drawSanta ();
 
     updateClocks(false);
@@ -2156,7 +2135,7 @@ static void setDXPrefixOverride (const char *ovprefix)
     dx_prefix_use_override = true;
 }
 
-/* extract the prefix from the given call sign
+/* extract the prefix from the given call sign -- this is magic
  */
 void call2Prefix (const char *call, char prefix[MAX_PREF_LEN])
 {
@@ -2215,9 +2194,9 @@ static void drawDXCursorPrefix()
     }
 }
 
-/* this function positions a box to contain short text beneath a symbol at location s with radius r.
- * the preferred position is centered below, but it will be moved to avoid going off the map.
- * N.B. s is assumed to be on the map already.
+/* this function positions a box to contain short text beneath a symbol at location s that has radius r,
+ * where s is assumed to be over map. the preferred position is centered below s, but it may be moved
+ * to either side to avoid going off the map.
  * N.B. r == 0 is a special case to mean center the text exactly at s, not beneath it.
  * N.B. coordinate with drawMapTag()
  */
@@ -2232,100 +2211,60 @@ void setMapTagBox (const char *tag, const SCoord &s, uint16_t r, SBox &box)
     box.w = cw+2;
     box.h = ch+2;
 
-    // start at preferred location
-    box.x = s.x - box.w/2;
-    box.y = s.y + (r ? r : -box.h/2);           // center if r is 0
+    // set at preferred location
+    box.x = s.x - box.w/2;                      // center horizontally at s
+    box.y = s.y + (r ? r : -box.h/2);           // below but if r is 0 then center vertically at s
 
-    // check
-    if (map_proj == MAPP_MERCATOR) {
+    // but beware edges
 
-        // check left-right
-        if (box.x < map_b.x) {
-            // too far left: shift to right inline with symbol
-            box.x = s.x + r;
-            box.y = s.y - box.h/2;
-        } else if (box.x + box.w >= map_b.x + map_b.w) {
-            // too far right: shift to left inline with symbol
+    // handy
+    const uint16_t rx = box.x + box.w;                      // right box x
+    const uint16_t by = box.y + box.h;                      // bottom box y
+    const uint16_t mc = map_b.x + map_b.w/2;                // map center
+    const bool is_nt = box.y < map_b.y + 2*box.h;           // is near top map edge
+    const bool is_nb = box.y > map_b.y + map_b.h - 2*box.h; // is near bottom map edge
+
+    if (is_nb && (!overActiveMap(SCoord{box.x,by}) || !overActiveMap(SCoord{rx,by}))) {
+        // near the bottom: move box above s
+        box.y = s.y - r - box.h;
+
+    } else if (is_nt && !overActiveMap(SCoord{box.x,box.y})) {
+        // near the top and off on the left: move box so left edge is under s
+        box.x = s.x;
+
+    } else if (is_nt && !overActiveMap(SCoord{rx,box.y})) {
+        // near the top and off on the right: move box so right edge is under s
+        box.x = s.x - box.w;
+
+    } else if (!overActiveMap(SCoord{box.x,box.y})) {
+        // too far left: center box to the right of s
+        box.x = s.x + r;
+        box.y = s.y - box.h/2;
+
+    } else if (!overActiveMap(SCoord{rx,box.y})) {
+        // too far right: center box to the left of s
+        box.x = s.x - r - box.w;
+        box.y = s.y - box.h/2;
+    } else if (map_proj == MAPP_AZIMUTHAL && (box.x < mc) != (rx < mc)) {
+        // sides are in opposite hemispheres: shift to same side as s
+        if (s.x < mc) {
+            // center box to the left of s
             box.x = s.x - r - box.w;
             box.y = s.y - box.h/2;
-        }
-
-        // check too low
-        if (box.y + box.h >= map_b.y + map_b.h) {
-            // too low -- center above symbol
-            box.y = s.y - r - box.h;
-        }
-        // can't be too high because we assume s is over map and label is below
-
-    } else {
-
-        // find center and size of appropriate sphere
-        int sph_r = map_b.h/2;
-        int sph_y0 = map_b.y + map_b.h/2;
-        int sph_x0 = 0;
-        if (map_proj == MAPP_AZIMUTHAL)
-            sph_x0 = map_b.x + (s.x < map_b.x+map_b.w/2 ? map_b.w/4 : 3*map_b.w/4);
-        else if (map_proj == MAPP_AZIM1)
-            sph_x0 = map_b.x + map_b.w/2;
-        else
-            fatalError (_FX("Bogus map_proj %d in setMapTagBox()"), map_proj);
-
-        // find cardinal distances from sph center to each box edge
-        int l_dx = (int)(box.x) - sph_x0;
-        int r_dx = (int)(box.x + box.w) - sph_x0;
-        int t_dy = (int)(box.y) - sph_y0;
-        int b_dy = (int)(box.y + box.h) - sph_y0;
-
-        // find fraction of radii from sph center to each box corner compared to sph radius
-        float tl_rfrac = sqrtf (l_dx*l_dx + t_dy*t_dy) / sph_r;
-        float tr_rfrac = sqrtf (r_dx*r_dx + t_dy*t_dy) / sph_r;
-        float bl_rfrac = sqrtf (l_dx*l_dx + b_dy*b_dy) / sph_r;
-        float br_rfrac = sqrtf (r_dx*r_dx + b_dy*b_dy) / sph_r;
-
-        if (b_dy > 4*sph_r/5) {
-            // near bottom
-            if (br_rfrac > 1 || bl_rfrac > 1) {
-                // shift above
-                box.y = s.y - r - box.h;
-            }
-        } else if (b_dy > 0) {
-            // below center
-            if (br_rfrac > 1) {
-                // too far right -- shift left
-                box.x = s.x - r - box.w;
-                box.y = s.y - box.h/2;
-            } else if (bl_rfrac > 1) {
-                // too far left -- shift right
-                box.x = s.x + r;
-                box.y = s.y - box.h/2;
-            }
-        } else if (b_dy > -4*sph_r/5) {
-            // above center
-            if (tr_rfrac > 1) {
-                // too far right -- shift left
-                box.x = s.x - r - box.w;
-                box.y = s.y - box.h/2;
-            } else if (tl_rfrac > 1) {
-                // too far left -- shift right
-                box.x = s.x + r;
-                box.y = s.y - box.h/2;
-            }
         } else {
-            // near top
-            if (tr_rfrac > 1 || tl_rfrac > 1) {
-                // shift below -- was centered if r is 0
-                box.y = s.y + r;
-            }
+            // center box to the right of s
+            box.x = s.x + r;
+            box.y = s.y - box.h/2;
         }
     }
 }
 
-/* draw a string within the given box set by setMapTagBox.
+/* draw a string within the given box set by setMapTagBox, using the optional color (default white).
  * actually this is no longer a box but text with a shifted background -- more moxy!
  * still, knowing the box has been positioned well allows for this masking.
  * N.B. coordinate with setMapTagBox()
  */
-void drawMapTag (const char *tag, const SBox &box)
+void drawMapTag (const char *tag, const SBox &box, uint16_t txt_color, uint16_t bg_color)
 {
     // small font
     selectFontStyle (LIGHT_FONT, FAST_FONT);
@@ -2334,27 +2273,37 @@ void drawMapTag (const char *tag, const SBox &box)
     uint16_t x0 = box.x+1;
     uint16_t y0 = box.y+1;
 
-    // draw background by shifting tag around
-    char bkg_str[10];
-    snprintf (bkg_str, sizeof(bkg_str), "%0*d", (int)strlen(tag), 0);
-    tft.setTextColor (RA8875_BLACK);
+#if BUILD_W > 800
+
+    // draw background by shifting O's around
+    int tag_len = strlen(tag);
+    StackMalloc bkg_str(tag_len+1);
+    char *bkg = (char*) bkg_str.getMem();
+    memset (bkg, 'O', tag_len);
+    bkg[tag_len] = '\0';
+    tft.setTextColor (bg_color);
     for (int16_t dx = -1; dx <= 1; dx++) {
         for (int16_t dy = -1; dy <= 1; dy++) {
             if (dx || dy) {
                 tft.setCursor (x0+dx, y0+dy);
-                tft.print(bkg_str);
+                tft.print(bkg);
             }
         }
     }
 
-    // larger sizes use hi-res fonts which leave a few bit turds
-#if BUILD_W > 800
+    // avoid some bit turds in the center of the Os
     for (unsigned i = 0; i < strlen(tag); i++)
-        tft.fillRect (x0+i*6,y0,5,7,RA8875_BLACK);
+        tft.fillRect (x0+i*6,y0,5,7,bg_color);
+
+#else
+
+    // just too small for finessing
+    fillSBox (box, bg_color);
+    
 #endif
 
     // draw text
-    tft.setTextColor (RA8875_WHITE);
+    tft.setTextColor (txt_color);
     tft.setCursor (x0, y0);
     tft.print((char*)tag);
 }
@@ -2387,6 +2336,14 @@ bool inCircle (const SCoord &s, const SCircle &c)
     uint16_t dx = (s.x >= c.s.x) ? s.x - c.s.x : c.s.x - s.x;
     uint16_t dy = (s.y >= c.s.y) ? s.y - c.s.y : c.s.y - s.y;
     return (4*dx*dx + 4*dy*dy <= 4*c.r*(c.r+1)+1);
+}
+
+/* return whether any part of b1 and b2 overlap.
+ */
+bool boxesOverlap (const SBox &b1, const SBox &b2)
+{
+    return ((b1.x + b1.w >= b2.x && b1.x <= b2.x + b2.w)
+         && (b1.y + b1.h >= b2.y && b1.y <= b2.y + b2.h));
 }
 
 /* erase the given SCircle
@@ -2735,14 +2692,31 @@ void doExit()
  */
 void fatalError (const char *fmt, ...)
 {
-    #define FE_LINEH    35              // line height
-    // format message
-    StackMalloc msg_buf(2000);
-    char *msg = (char *) msg_buf.getMem();
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf (msg, msg_buf.getSize(), fmt, ap);
-    va_end(ap);
+    // format message, accommodate really long strings
+    const int mem_inc = 500;
+    int mem_len = 0;
+    char *msg = NULL;
+    int msg_len;
+    for(bool stop = false; !stop;) {
+        msg = (char *) realloc (msg, mem_len += mem_inc);
+        if (!msg) {
+            // go back to last successful size then stop
+            msg = (char *) malloc (mem_len -= mem_inc);
+            if (!msg) {
+                // no mem at all, at least show fmt
+                Serial.printf (fmt);
+                doExit();
+            }
+            stop = true;
+        }
+        va_list ap;
+        va_start(ap, fmt);
+        msg_len = vsnprintf (msg, mem_len, fmt, ap);
+        va_end(ap);
+        // stop when all fits
+        if (msg_len < mem_len - 10)
+            break;
+    }
 
     // log for sure
     Serial.printf ("Fatal: %s\n", msg);
@@ -2761,30 +2735,28 @@ void fatalError (const char *fmt, ...)
         eraseScreen();
 
         // prep display
-        uint16_t y = 0;
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
         tft.setTextColor (RA8875_WHITE);
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
+        const uint16_t line_h = 34;                     // line height
+        const uint16_t char_w = 12;                     // char width, approx is ok
+        uint16_t y = line_h;                            // walking y coord of font baseline
+        tft.setCursor (0, y);
 
-        // display msg, scroll if contains newlines, beware long lines
-        char *mp = msg;
-        do {
-            char *nl = strchr (mp, '\n');
-            if (nl)
-                *nl = '\0';
-            size_t line_l = strlen(mp);
-            size_t chars_printed = 0;
-            while (chars_printed < line_l) {
-                char *line_cpy = strdup (mp+chars_printed);             // copy because ...
-                (void) maxStringW (line_cpy, tft.width()-10);           // ... may shorten in-place
-                tft.setCursor (0, y += FE_LINEH);
-                tft.print(line_cpy);
-                chars_printed += strlen(line_cpy);
-                free (line_cpy);
+        // display msg with both line and page wrap to insure seeing end
+        for (char *mp = msg; *mp; mp++) {
+            if (tft.getCursorX() > tft.width() - char_w || *mp == '\n') {
+                // drop down a line or wrap back to top, then erase
+                if ((y += line_h) > tft.height() - 3*line_h)
+                    y = line_h;
+                tft.setCursor (0, y);
+                tft.fillRect (0, y - line_h + 3, tft.width(), line_h, RA8875_BLACK);
             }
-            mp += line_l;
-            if (nl)
-                mp++;
-        } while (strlen(mp) > 0 && y < 480-FE_LINEH);
+            if (*mp != '\n')
+                tft.print (*mp);
+        }
+
+        // button font
+        selectFontStyle (LIGHT_FONT, SMALL_FONT);
 
         #if defined(_IS_ESP8266)
 
@@ -2873,6 +2845,7 @@ void fatalError (const char *fmt, ...)
     }
 
     // bye bye
+    free (msg);
     doExit();
 }
 
@@ -2895,7 +2868,7 @@ void getWorstMem (int *heap, int *stack)
  */
 const char *_FX_helper(const char *flash_string)
 {
-    #define N_PTRS 5
+    #define N_PTRS 6
     static char *ram_string[N_PTRS];
     static uint8_t nxt_i;
 
@@ -2904,8 +2877,7 @@ const char *_FX_helper(const char *flash_string)
     nxt_i = (nxt_i + 1) % N_PTRS;
 
     // convert and copy 
-    strcpy_P (*sp = (char *) realloc (*sp, strlen_P(flash_string)+1), flash_string);
-    return (*sp);
+    return strcpy_P (*sp = (char *) realloc (*sp, strlen_P(flash_string)+1),   flash_string);
 }
 
 #endif
@@ -2922,13 +2894,26 @@ void printFreeHeap (const __FlashStringHelper *label)
 
     // log..
     // getFreeHeap() is close to binary search of max malloc
-    Serial.printf (_FX("Up %lu s: "), millis()/1000U); // N.B. do not use getUptime here, it loops NTP
-    Serial.print (label);
-    Serial.printf (_FX("(), free heap %d, stack size %d\n"), free_heap, stack_used);
+    // N.B. do not use getUptime here, it loops NTP
+    String l(label);
+    Serial.printf (_FX("MEM %s(): free heap %d, stack size %d\n"), l.c_str(), free_heap, stack_used);
 
     // record worst
     if (free_heap < worst_heap)
         worst_heap = free_heap;
     if (stack_used > worst_stack)
         worst_stack = stack_used;
+}
+
+/* return a high contrast text color to overlay the given background color
+ * https://www.w3.org/TR/AERT#color-contrast
+ */
+uint16_t getGoodTextColor (uint16_t bg_col)
+{
+    uint8_t r = RGB565_R(bg_col);
+    uint8_t g = RGB565_G(bg_col);
+    uint8_t b = RGB565_B(bg_col);
+    int perceived_brightness = 0.299*r + 0.587*g + 0.114*b;
+    uint16_t text_col = perceived_brightness > 70 ? RA8875_BLACK : RA8875_WHITE;
+    return (text_col);
 }

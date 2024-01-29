@@ -798,7 +798,7 @@ static void solarCir (time_t t0, const LatLong &ll, AstroCir &cir)
         range (&gha, 2*M_PI);
         cir.gha = gha;
 
-        // TODO vel
+        // vel added by caller
         cir.vel = 0;
 }
 
@@ -858,7 +858,12 @@ void getSolarCir (time_t t0, const LatLong &ll, AstroCir &cir)
         refract (REF_PRESS, REF_TEMP, alt, &alt);
         cir.el = alt;
 
-        // TODO: vel
+        // vel
+        AstroCir cir_dt;
+        const int dt = 3600*12;                                 // significant change in float dist
+        time_t t1 = t0 + dt;
+        solarCir (t1, ll, cir_dt);
+        cir.vel = 1.496e11*(cir_dt.dist - cir.dist)/dt;         // constant is m/AU
 }
 
 

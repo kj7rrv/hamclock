@@ -1,15 +1,16 @@
 Project web site: http://www.clearskyinstitute.com/ham/HamClock
 
-Summary for UNIX systems:
-    type make for size options
-    make desired size
+Executive summary for UNIX systems:
+    type `make' for size and style options
+    make <size>
     sudo make install
 
-Summary for ESP8266 Huzzah:
+Executive summary for ESP8266 Huzzah:
     install and run Arduino IDE
-    setup Huzzah board as per web page (above)
-    load ESPHamClock.ino
+    configure as per "ESP8266 Notes" tab at above web page
+    open ESPHamClock.ino in IDE
     Sketch -> Compile
+    Sketch -> Upload
 
 
 *********************************************************************************************

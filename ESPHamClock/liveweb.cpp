@@ -67,7 +67,7 @@ static void bye (const char *fmt, ...);
  */
 static void bye (const char *fmt, ...)
 {
-    printf ("LIVE: ");
+    Serial.printf ("LIVE: ");
 
     va_list ap;
     va_start (ap, fmt);
@@ -85,9 +85,9 @@ static void wifiSTBWrite_helper (void *context, void *data, int size)
     ws_cli_conn_t *client = (ws_cli_conn_t *)context;
     int n_sent = ws_sendframe_bin (client, (const char *) data, size);
     if (n_sent != size)
-        printf ("LIVE: client %s: wrong png write len: %d != %d\n", ws_getaddress(client), n_sent, size);
+        Serial.printf ("LIVE: client %s: wrong png write len: %d != %d\n", ws_getaddress(client), n_sent, size);
     if (live_verbose > 1) {
-        printf ("LIVE: sent image %d bytes\n", size);
+        Serial.printf ("LIVE: sent image %d bytes\n", size);
         if (live_verbose > 2) {
             FILE *fp = fopen ("/tmp/live.png", "w");
             fwrite (data, size, 1, fp);
@@ -119,9 +119,9 @@ static uint8_t *getSIPixels (ws_cli_conn_t *client)
         pixels = found_sip->pixels;
     else {
         if (ws_close_client (client) < 0)
-            printf ("LIVE: client %s: failed to close after missing pixels\n", ws_getaddress(client));
+            Serial.printf ("LIVE: client %s: failed to close after missing pixels\n", ws_getaddress(client));
         else
-            printf ("LIVE: client %s: closed because missing pixels\n", ws_getaddress(client));
+            Serial.printf ("LIVE: client %s: closed because missing pixels\n", ws_getaddress(client));
     }
 
     // unlock
@@ -160,7 +160,7 @@ static void updateExistingClient (ws_cli_conn_t *client)
     if (live_verbose > 1) {
         struct timeval tv1;
         gettimeofday (&tv1, NULL);
-        printf ("LIVE: client %s: copying img and reading new pixels took %ld usec\n", ws_getaddress(client),
+        Serial.printf ("LIVE: client %s: copying img and reading new pixels took %ld usec\n", ws_getaddress(client),
                                 TVDELUS (tv0,tv1));
     }
 
@@ -263,7 +263,7 @@ static void updateExistingClient (ws_cli_conn_t *client)
     if (live_verbose > 1) {
         struct timeval tv1;
         gettimeofday (&tv1, NULL);
-        printf ("LIVE: client %s: built %d regions from %d blocks in %ld usec\n",
+        Serial.printf ("LIVE: client %s: built %d regions from %d blocks in %ld usec\n",
                         ws_getaddress(client), n_regns, n_bloks, TVDELUS (tv0, tv1));
     }
 
@@ -283,13 +283,13 @@ static void updateExistingClient (ws_cli_conn_t *client)
         hdr[5+3*i] = locs[i].y;
         hdr[6+3*i] = locs[i].l;
         if (live_verbose > 2)
-            printf ("   %d,%d %dx%d\n", locs[i].x*BLOK_W, locs[i].y*BLOK_H, locs[i].l*BLOK_W, BLOK_H);
+            Serial.printf ("   %d,%d %dx%d\n", locs[i].x*BLOK_W, locs[i].y*BLOK_H, locs[i].l*BLOK_W, BLOK_H);
     }
 
     // always send header
     unsigned n_hdrsent = ws_sendframe_bin (client, (const char *) hdr, hdr_l);
     if (n_hdrsent != hdr_l)
-        printf ("LIVE: client %s: wrong header write %u != %d\n", ws_getaddress(client), n_hdrsent, hdr_l);
+        Serial.printf ("LIVE: client %s: wrong header write %u != %d\n", ws_getaddress(client), n_hdrsent, hdr_l);
 
     // followed by one image containing one column BLOK_W wide of all changed regions
     stbi_write_png_to_func (wifiSTBWrite_helper, client, BLOK_W*n_bloks, BLOK_H,
@@ -298,12 +298,12 @@ static void updateExistingClient (ws_cli_conn_t *client)
     if (live_verbose > 1) {
         struct timeval tv1;
         gettimeofday (&tv1, NULL);
-        printf ("LIVE: client %s: write hdr %d bytes and update took %ld usec\n",
+        Serial.printf ("LIVE: client %s: write hdr %d bytes and update took %ld usec\n",
                         ws_getaddress(client), hdr_l, TVDELUS (tv0,tv1));
     }
 
-    if (live_verbose)
-        printf ("LIVE: client %s: sent update with %d regions %d blocks\n",
+    if (live_verbose > 1)
+        Serial.printf ("LIVE: client %s: sent update with %d regions %d blocks\n",
                         ws_getaddress(client), n_regns, n_bloks);
 
     // finished with temps
@@ -329,7 +329,7 @@ static void sendClientPNG (ws_cli_conn_t *client)
     stbi_write_png_to_func (wifiSTBWrite_helper, client, BUILD_W, BUILD_H, COMP_RGB, pixels, LIVE_RBYTES);
 
     if (live_verbose)
-        printf ("LIVE: client %s: sent full PNG\n", ws_getaddress(client));
+        Serial.printf ("LIVE: client %s: sent full PNG\n", ws_getaddress(client));
 }
 
 /* client running liveweb-html.cpp is asking for a complete screen capture as png file.
@@ -360,7 +360,7 @@ static void setLiveChar (ws_cli_conn_t *client, char args[], size_t args_len)
 
     // ignore if no_web_touch
     if (no_web_touch) {
-        printf ("Ignoring set_char\n");
+        Serial.printf ("Ignoring set_char\n");
         return;
     }
 
@@ -371,11 +371,11 @@ static void setLiveChar (ws_cli_conn_t *client, char args[], size_t args_len)
     // parse
     if (!parseWebCommand (wa, args, args_len)) {
 
-        printf ("LIVE: set_char garbled: %s\n", args);
+        Serial.printf ("LIVE: set_char garbled: %s\n", args);
 
     } else if (!wa.found[0]) {
 
-        printf ("LIVE: set_char missing char\n");
+        Serial.printf ("LIVE: set_char missing char\n");
 
     } else {
 
@@ -397,11 +397,11 @@ static void setLiveChar (ws_cli_conn_t *client, char args[], size_t args_len)
             else if (strcmp (str, "Space") == 0)
                 c = ' ';
             else
-                printf ("LIVE: Unknown char name: %s\n", str);
+                Serial.printf ("LIVE: Unknown char name: %s\n", str);
         } else {
             // literal
             if (strl != 1 || !isprint(str[0]))
-                printf ("LIVE: Unknown char 0x%02X\n", str[0]);
+                Serial.printf ("LIVE: Unknown char 0x%02X\n", str[0]);
             else
                 c = str[0];
         }
@@ -411,7 +411,7 @@ static void setLiveChar (ws_cli_conn_t *client, char args[], size_t args_len)
             // insert into getChar queue
             tft.putChar(c);
             if (live_verbose)
-                printf ("LIVE: set_char %d %c\n", c, c);
+                Serial.printf ("LIVE: set_char %d %c\n", c, c);
         }
     }
 }
@@ -424,7 +424,7 @@ static void setLiveTouch (ws_cli_conn_t *client, char args[], size_t args_len)
 
     // ignore if no_web_touch
     if (no_web_touch) {
-        printf ("Ignoring set_touch\n");
+        Serial.printf ("Ignoring set_touch\n");
         return;
     }
 
@@ -438,11 +438,11 @@ static void setLiveTouch (ws_cli_conn_t *client, char args[], size_t args_len)
     // parse
     if (!parseWebCommand (wa, args, args_len)) {
 
-        printf ("LIVE: set_touch garbled: %s\n", args);
+        Serial.printf ("LIVE: set_touch garbled: %s\n", args);
 
     } else if (!wa.found[0] || !wa.found[1]) {
 
-        printf ("LIVE: set_touch missing x,y\n");
+        Serial.printf ("LIVE: set_touch missing x,y\n");
 
     } else {
 
@@ -450,7 +450,7 @@ static void setLiveTouch (ws_cli_conn_t *client, char args[], size_t args_len)
         int x = atoi(wa.value[0]);
         int y = atoi(wa.value[1]);
         if (x < 0 || x >= tft.width() || y < 0 || y >= tft.height()) {
-            printf ("LIVE: require 0 .. %d .. %d and 0 .. %d .. %d\n", x, tft.width()-1, y, tft.height()-1);
+            Serial.printf ("LIVE: require 0 .. %d .. %d and 0 .. %d .. %d\n", x, tft.width()-1, y, tft.height()-1);
 
         } else {
 
@@ -463,7 +463,7 @@ static void setLiveTouch (ws_cli_conn_t *client, char args[], size_t args_len)
             wifi_tt = h ? TT_HOLD : TT_TAP;
 
             if (live_verbose)
-                printf ("LIVE: set_touch %d %d %d\n", wifi_tt_s.x, wifi_tt_s.y, wifi_tt);
+                Serial.printf ("LIVE: set_touch %d %d %d\n", wifi_tt_s.x, wifi_tt_s.y, wifi_tt);
         }
     }
 }
@@ -482,11 +482,11 @@ static void setLiveMouse (ws_cli_conn_t *client, char args[], size_t args_len)
     // parse
     if (!parseWebCommand (wa, args, args_len)) {
 
-        printf ("LIVE: set_mouse garbled: %s\n", args);
+        Serial.printf ("LIVE: set_mouse garbled: %s\n", args);
 
     } else if (!wa.found[0] || !wa.found[1]) {
 
-        printf ("LIVE: set_mouse missing x,y\n");
+        Serial.printf ("LIVE: set_mouse missing x,y\n");
 
     } else {
 
@@ -495,7 +495,7 @@ static void setLiveMouse (ws_cli_conn_t *client, char args[], size_t args_len)
         int y = atoi(wa.value[1]);
         tft.setMouse (x, y);
         if (live_verbose)
-            printf ("LIVE: set_mouse %d %d\n", x, y);
+            Serial.printf ("LIVE: set_mouse %d %d\n", x, y);
             
     }
 }
@@ -513,7 +513,7 @@ static void sendLiveHTML (FILE *sockfp)
     fprintf (sockfp, "%s\r\n", live_html);
 
     if (live_verbose)
-        printf ("LIVE: sent live.html\n");
+        Serial.printf ("LIVE: sent live.html\n");
 }
 
 /* called when browser wants favicon.ico
@@ -529,7 +529,7 @@ static void sendLiveFavicon (FILE *sockfp)
     writeFavicon (sockfp);
 
     if (live_verbose)
-        printf ("LIVE: sent favicon\n");
+        Serial.printf ("LIVE: sent favicon\n");
 }
 
 /* callback when browser asks for a new websocket connection.
@@ -540,7 +540,7 @@ static void ws_onopen(ws_cli_conn_t *client)
     // protect list while manipulating -- N.B. unlock before returning!
     pthread_mutex_lock (&si_lock);
 
-    printf ("LIVE: client %s: new websocket request\n", ws_getaddress(client));
+    Serial.printf ("LIVE: client %s: new websocket request\n", ws_getaddress(client));
 
     // scan for unused entry to reuse
     SessionInfo *new_sip = NULL;
@@ -579,7 +579,7 @@ static void ws_onopen(ws_cli_conn_t *client)
  */
 static void ws_onclose (ws_cli_conn_t *client)
 {
-    printf ("LIVE: client %s: disconnected\n", ws_getaddress(client));
+    Serial.printf ("LIVE: client %s: disconnected\n", ws_getaddress(client));
 
     // remove from si_list
     for (int i = 0; i < si_n; i++) {
@@ -595,7 +595,7 @@ static void ws_onclose (ws_cli_conn_t *client)
     }
 
     // if get here, client was not found in si_list
-    printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
+    Serial.printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
 }
 
 /* callback when browser sends us a message on a websocket
@@ -628,7 +628,7 @@ static void ws_onmessage (ws_cli_conn_t *client, const unsigned char *msg, uint6
         size_t cmd_name_len = strlen(cmd_name);
         if (strncmp (cmd, cmd_name, cmd_name_len) == 0) {
             if (live_verbose > 1)
-                printf ("LIVE: running %s\n", cmd);
+                Serial.printf ("LIVE: running %s\n", cmd);
             char *args = cmd + cmd_name_len;
             (*commands[i].cmd_fp) (client, args, strlen(args));
             found = true;
@@ -637,7 +637,7 @@ static void ws_onmessage (ws_cli_conn_t *client, const unsigned char *msg, uint6
 
     // check
     if (!found)
-        printf ("LIVE: ignoring unknown ws command: %s\n", cmd);
+        Serial.printf ("LIVE: ignoring unknown ws command: %s\n", cmd);
 }
 
 /* called when we receive a "normal" client message, ie, one that is not from a web socket.
@@ -648,12 +648,12 @@ static void ws_not (FILE *sockfp, const char *header)
     // first line should be the GET containing the desired page
     char fn[50];
     if (sscanf (header, "GET /%49s", fn) != 1) {
-        printf ("LIVE: expecting GET http header but got: '%s'\n", header);
+        Serial.printf ("LIVE: expecting GET http header but got: '%s'\n", header);
         return;
     }
 
     if (live_verbose)
-        printf ("LIVE: ws_not GET %s\n", fn);
+        Serial.printf ("LIVE: ws_not GET %s\n", fn);
 
     // dispatch according to GET file
     if (strcmp (fn, "live.html") == 0)
@@ -661,7 +661,7 @@ static void ws_not (FILE *sockfp, const char *header)
     else if (strcmp (fn, "favicon.ico") == 0)
         sendLiveFavicon (sockfp);
     else {
-        printf ("LIVE: unknown GET %s\n", fn);
+        Serial.printf ("LIVE: unknown GET %s\n", fn);
         fprintf (sockfp, "HTTP/1.0 400 Bad request\r\n");
         fprintf (sockfp, "Content-Type: text/plain; charset=us-ascii\r\n");
         fprintf (sockfp, "Connection: close\r\n\r\n");
@@ -692,7 +692,7 @@ void initLiveWeb (bool verbose)
         // actually start stuff unless not wanted
         if (liveweb_port < 0) {
             if (live_verbose)
-                printf ("LIVE: live web is disabled\n");
+                Serial.printf ("LIVE: live web is disabled\n");
         } else {
             // start websocket server
             struct ws_events evs;
@@ -702,7 +702,7 @@ void initLiveWeb (bool verbose)
             evs.onnonws   = ws_not;
             ws_socket (&evs, liveweb_port, 1, 1000);
             if (live_verbose)
-                printf ("LIVE: started server thread on port %d\n", liveweb_port);
+                Serial.printf ("LIVE: started server thread on port %d\n", liveweb_port);
         }
     }
 }
