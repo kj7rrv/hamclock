@@ -17,7 +17,7 @@
  * if y_min < y_max:  force min to y_min and max to y_max
  * if y_min > y_max:  force min to y_min but auto scale max from data
  * return whether had anything to plot.
- * N.B. if both labels are NULL, use same labels and limits as previous call as an "overlay"
+ * N.B. if both [xy]labels are NULL, use same limits as previous call as an "overlay"
  * N.B. special y axis labeling hack when ylabel contains the string "Ray"
  * N.B. special plot format hack when ylabel contains "Kp"
  */
@@ -25,7 +25,7 @@ bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
 uint16_t color, float y_min, float y_max, float label_value)
 {
     char buf[32];
-    snprintf (buf, sizeof(buf), "%.*f", label_value >= 1000 ? 0 : 1, label_value);
+    snprintf (buf, sizeof(buf), "%.*f", label_value >= 100 ? 0 : 1, label_value);
     return (plotXYstr (box, x, y, nxy, xlabel, ylabel, color, y_min, y_max, buf));
 }
 
@@ -194,43 +194,50 @@ uint16_t color, float y_min, float y_max, char *label_str)
 
     }
 
-    uint16_t last_px = 0, last_py = 0;
+    // finally the data
+    uint16_t prev_px = 0, prev_py = 0;
+    bool prev_lacuna = false;           // avoid adjacent lacunas, eg, env plots
+    const float lacuna_dx = 5*dx/nxy;   // define as a gap at least 5x average spacing
     resetWatchdog();
     for (int i = 0; i < nxy; i++) {
         // Serial.printf ("kp %2d: %g %g\n", i, x[i], y[i]);
         if (kp_plot) {
             // plot Kp values vertical bars colored depending on strength
-            uint16_t w = (box.w-LGAP-2)/nxy;
             uint16_t h = y[i]*(box.h-BGAP-TGAP)/maxy;
-            uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-2-w)*(x[i]-minx)/dx);
-            uint16_t py = (uint16_t)(box.y + TGAP + 1 + (box.h-BGAP-TGAP)*(1 - (y[i]-miny)/dy));
-            uint16_t co = y[i] < 4.5 ? RGB565(0x91,0xd0,0x51) : 
-                          y[i] < 5.5 ? RGB565(0xf6,0xeb,0x16) :
-                          y[i] < 6.5 ? RGB565(0xfe,0xc8,0x04) :
-                          y[i] < 7.5 ? RGB565(0xff,0x96,0x02) :
-                          y[i] < 8.5 ? RGB565(0xff,0x00,0x00) :
-                          RGB565(0xc7,0x01,0x00);
-            if (h > 0)
+            if (h > 0) {
+                uint16_t w = (box.w-LGAP-2)/nxy;
+                uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-2-w)*(x[i]-minx)/dx);
+                uint16_t py = (uint16_t)(box.y + TGAP + 1 + (box.h-BGAP-TGAP)*(1 - (y[i]-miny)/dy));
+                uint16_t co = y[i] < 4.5 ? RGB565(0x91,0xd0,0x51) : 
+                              y[i] < 5.5 ? RGB565(0xf6,0xeb,0x16) :
+                              y[i] < 6.5 ? RGB565(0xfe,0xc8,0x04) :
+                              y[i] < 7.5 ? RGB565(0xff,0x96,0x02) :
+                              y[i] < 8.5 ? RGB565(0xff,0x00,0x00) :
+                                           RGB565(0xc7,0x01,0x00);
                 tft.fillRect (px, py, w, h, co);
+            }
         } else {
-            // other plots are connect-the-dots
+            // other plots are connect-the-dots but watch for lacuna
             uint16_t px = (uint16_t)(box.x+LGAP+1 + (box.w-LGAP-3)*(x[i]-minx)/dx);   // stay inside border
             uint16_t py = (uint16_t)(box.y + TGAP + (box.h-BGAP-TGAP)*(1 - (y[i]-miny)/dy));
-            if (i > 0 && (last_px != px || last_py != py))
-                tft.drawLine (last_px, last_py, px, py, color);            // avoid bug with 0-length lines
-            else if (nxy == 1)
+            if (nxy == 1) {
                 tft.drawLine (box.x+LGAP, py, box.x+box.w-1, py, color);   // one value clear across
-            last_px = px;
-            last_py = py;
+            } else if (i > 0) {
+                bool is_lacuna = (x[i]-x[i-1]) > lacuna_dx;
+                if ((prev_px != px || prev_py != py) && (!is_lacuna || !prev_lacuna))
+                    tft.drawLine (prev_px, prev_py, px, py, color);        // avoid bug with 0-length lines
+                prev_lacuna = is_lacuna;
+            }
+            prev_px = px;
+            prev_py = py;
         }
     }
 
     // draw plot border
     tft.drawRect (box.x+LGAP, box.y+TGAP, box.w-LGAP, box.h-BGAP-TGAP+1, BORDER_COLOR);
 
-    if (!overlay) {
-
-        // overlay large center value on top in gray
+    // overlay large center value on top in gray
+    if (label_str) {
         tft.setTextColor(BRGRAY);
         selectFontStyle (BOLD_FONT, LARGE_FONT);
         uint16_t lw, lh;
@@ -280,7 +287,7 @@ void plotWX (const SBox &box, uint16_t color, const WXInfo &wi)
     // large temperature with degree symbol and units
     tft.setTextColor(color);
     selectFontStyle (BOLD_FONT, LARGE_FONT);
-    f = useMetricUnits() ? wi.temperature_c : 9*wi.temperature_c/5+32;
+    f = useMetricUnits() ? wi.temperature_c : CEN2FAH(wi.temperature_c);
     snprintf (buf, sizeof(buf), "%.0f %c", f, useMetricUnits() ? 'C' : 'F');
     w = maxStringW (buf, box.w-attr_w);
     tft.setCursor (box.x+(box.w-attr_w-w)/2, box.y+dy);
@@ -447,13 +454,14 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
 
         // find row and desired bg color
         uint16_t y = PBOT_Y - PLOT_H*(p_row+1)/PLOT_ROWS;
-        uint16_t rect_col = p_row == prop_map ? (busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE))
-                                              : RA8875_BLACK;
+        uint16_t rect_col = (prop_map.active && p_row == (int)prop_map.band)
+                                ? (busy > 0 ? DYELLOW : (busy < 0 ? RA8875_RED : RA8875_WHITE))
+                                : RA8875_BLACK;
 
         // show
         tft.fillRect (box.x+1, y+1, 2*PFONT_W, PFONT_H+3, rect_col);
         tft.setCursor (box.x+2, y + 2);
-        tft.print (propMap2Band((PropMapSetting)p_row));
+        tft.print (propMap2Band((PropMapBand)p_row));
     }
 
     // find utc and DE hour now. these will be the matrix row in plot column 0.

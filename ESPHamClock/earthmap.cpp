@@ -64,10 +64,10 @@ static void getGridColorCache()
     uint8_t b = RGB565_B(GRIDC);
     uint8_t h, s, v;
     rgbtohsv (&h, &s, &v, r, g, b);
-    h = h < 30 || h > 180 ? 130 : 0;      // green if red else red
-    s = 255;
-    v = 255;
-    GRIDC00 = HSV565(h,s,v);
+
+    // highlight with contrasting brightness
+    v += 64;                                   // relies on 8 bit to roll over
+    GRIDC00 = HSV565 (h, s, v);
 }
 
 /* erase the DE symbol by restoring map contents.
@@ -105,8 +105,7 @@ void eraseDEAPMarker()
     eraseSCircle (deap_c);
 }
 
-/* return whether to display the DE antipode:
- *   over map and not AZIM1 and not showing sat
+/* return whether to display the DE antipode
  */
 bool showDEAPMarker()
 {
@@ -288,6 +287,12 @@ static void drawMaidGridKey()
 }
 
 #if defined(_IS_UNIX)
+
+// MouseLoc geometry
+#define ML_LINEDY       9                       // line height, pixels
+#define ML_NLINES       12                      // allow this many lines in box
+#define ML_MAXCHARS     9                       // max chars wide
+#define ML_INDENT       2                       // nominal indentation
 
 /* draw lat/long with given step sizes (used for ll and maidenhead).
  * UNIX only
@@ -521,16 +526,14 @@ static void drawMapGrid()
  */
 static void drawMLAge (time_t t, uint16_t tx, int dy, uint16_t &ty)
 {
-        // get age in seconds but never negative
-        time_t n = now();
-        int dt_s = n > t ? n - t : 0;
+    // get age in seconds but never negative
+    time_t n = myNow();
+    time_t age_s = n > t ? n - t : 0;
 
-        // show in nice units
-        tft.setCursor (tx, ty += dy);
-        if (dt_s < 3600)
-            tft.printf ("Age %4dm", (dt_s+30)/60);
-        else
-            tft.printf ("Age%4dhr", (dt_s+1800)/3600);
+    // show in nice units
+    char str[10];
+    tft.setCursor (tx, ty += dy);
+    tft.printf ("Age  %s", formatAge4 (age_s, str, sizeof(str)));
 }
 
 /* drawMouseLoc() helper to show DE distance and bearing to given location.
@@ -573,16 +576,27 @@ static void drawMLWX (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
 {
     WXInfo wi;
     if (getWorldWx (ll, wi)) {
-        float tmp = useMetricUnits() ? wi.temperature_c : 9*wi.temperature_c/5+32;
-        float spd = (useMetricUnits() ? 3.6F : 2.237F) * wi.wind_speed_mps; // kph or mph
+
+        // temperature in desired units
+        float tmp = useMetricUnits() ? wi.temperature_c : CEN2FAH(wi.temperature_c);
         tft.setCursor (tx, ty += dy);
         tft.printf ("Temp%4.0f%c", tmp, useMetricUnits() ? 'C' : 'F');
 
-        // width of combination wind direction and speed varies too much for one printf
-        char wbuf[30];
-        snprintf (wbuf, sizeof(wbuf), "%s@%.0f", wi.wind_dir_name, spd);
-        tft.setCursor (tx, ty += dy);
-        tft.printf ("Wnd%6s", wbuf);
+        // conditions else wind
+        int clen = strlen(wi.conditions);
+        if (clen > 0) {
+            tft.setCursor (tx, ty += dy);
+            if (clen > ML_MAXCHARS)
+                clen = ML_MAXCHARS;
+            tft.printf ("%*s%.*s", (ML_MAXCHARS-clen)/2, "", ML_MAXCHARS, wi.conditions);
+        } else {
+            // width of combination wind direction and speed varies too much for one printf
+            float spd = (useMetricUnits() ? 3.6F : 2.237F) * wi.wind_speed_mps; // kph or mph
+            char wbuf[30];
+            snprintf (wbuf, sizeof(wbuf), "%s@%.0f", wi.wind_dir_name, spd);
+            tft.setCursor (tx, ty += dy);
+            tft.printf ("Wnd%6s", wbuf);
+        }
     }
 }
 
@@ -592,9 +606,22 @@ static void drawMLWX (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
  */
 static void drawMLLMT (const LatLong &ll, uint16_t tx, int dy, uint16_t &ty)
 {
-    time_t t = now() + getTZ(ll);
+    time_t t = myNow() + getTZ(ll);
     tft.setCursor (tx, ty += dy);
     tft.printf ("LMT %02d:%02d", hour(t), minute(t));
+}
+
+/* drawMouseLoc() helper to show frequency.
+ * update ty by dy for each row used.
+ * UNIX only
+ */
+static void drawMLFreq (long hz, uint16_t tx, int dy, uint16_t &ty)
+{
+    tft.setCursor (tx, ty += dy);
+    if (hz < 30000000L)
+        tft.printf ("kHz %5ld", hz/1000);
+    else
+        tft.printf ("MHz %5ld", hz/1000000L);
 }
 
 /* draw local information about the current cursor position over the world map.
@@ -609,10 +636,6 @@ static void drawMouseLoc()
     // draw just below map View button
     uint16_t tx = view_btn_b.x;                         // current text x coord
     uint16_t ty = view_btn_b.y + view_btn_b.h;          // current text y coord
-    const int LINE_DY = 9;                              // line height, pixels
-    const int N_LINES = 12;                             // allow this many lines in box
-    const int MAX_CHARS = 9;                            // max chars wide
-    const int TEXT_INDENT = 2;                          // nominal indentation
 
     // size and location of names bar
     const uint16_t names_y = view_btn_b.y;
@@ -651,7 +674,7 @@ static void drawMouseLoc()
     // erase menu area if going to show new data or clean up for azm not over hemispheres
     static bool was_overmap;
     if (overmap || (map_proj != MAPP_MERCATOR && was_overmap))
-        tft.fillRect (tx, ty, view_btn_b.w-1, LINE_DY*N_LINES+1, RA8875_BLACK);
+        tft.fillRect (tx, ty, view_btn_b.w-1, ML_LINEDY*ML_NLINES+1, RA8875_BLACK);
     was_overmap = overmap;
 
     // that's it if mouse is not over map
@@ -685,113 +708,112 @@ static void drawMouseLoc()
         // PSK, WSPR or RBN spot
 
         // adjust for text 
-        char buf[MAX_CHARS+1];
+        char buf[ML_MAXCHARS+1];
         uint16_t tw;
         ty += 1;
 
         // show tx info
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, psk_rp->txcall);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, psk_rp->txcall);
         tw = getTextWidth(buf);
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty);
         tft.printf (buf);
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, psk_rp->txgrid);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, psk_rp->txgrid);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
 
         // show rx info
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, psk_rp->rxcall);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, psk_rp->rxcall);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, psk_rp->rxgrid);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, psk_rp->rxgrid);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
 
         // show mode
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, psk_rp->mode);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, psk_rp->mode);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
 
         // show freq
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("kHz%6d", psk_rp->Hz/1000);
+        drawMLFreq (psk_rp->Hz, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show age
-        drawMLAge (psk_rp->posting, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLAge (psk_rp->posting, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show snr
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
         tft.printf ("SNR %5d", psk_rp->snr);
 
         // show distance and bearing
-        drawMLDB (psk_rp->ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLDB (psk_rp->dx_ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show weather
-        drawMLWX (psk_rp->ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLWX (psk_rp->dx_ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // border in band color
-        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
+        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, ML_LINEDY*ML_NLINES+1,
                         getBandColor(psk_rp->Hz));
 
-    } else if (getClosestDXCluster (ll, &dxc_s, &dxc_ll) || getClosestOnTheAirSpot (ll, &dxc_s, &dxc_ll)) {
+    } else if (getClosestDXCluster (ll, &dxc_s, &dxc_ll) || getClosestOnTheAirSpot (ll, &dxc_s, &dxc_ll)
+                        || getClosestADIFSpot (ll, &dxc_s, &dxc_ll)) {
 
-        // DX Cluster or POTA/SOTA spot
+        // DX Cluster or POTA/SOTA or ADIF spot
 
         // adjust for text 
-        char buf[MAX_CHARS+1];
+        char buf[ML_MAXCHARS+1];
         uint16_t tw;
         ty += 1;
 
         // show tx info
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.dx_call);
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, dxc_s.dx_call);
         tw = getTextWidth(buf);
         tft.setCursor (tx + (view_btn_b.w-tw)/2, ty);
         tft.printf (buf);
         snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.dx_grid);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
 
-        // show rx info -- list info if from OnTheAir
-        snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.de_call);
+        // show rx info
+        snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, dxc_s.de_call);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
         snprintf (buf, sizeof(buf), "%.*s", 4, dxc_s.de_grid);
         tw = getTextWidth(buf);
-        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+        tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
         tft.printf (buf);
 
         // show mode if known
         if (strlen (dxc_s.mode) > 0) {
-            snprintf (buf, sizeof(buf), "%.*s", MAX_CHARS, dxc_s.mode);
+            snprintf (buf, sizeof(buf), "%.*s", ML_MAXCHARS, dxc_s.mode);
             tw = getTextWidth(buf);
-            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += LINE_DY);
+            tft.setCursor (tx + (view_btn_b.w-tw)/2, ty += ML_LINEDY);
             tft.printf (buf);
         } else
-            ty += LINE_DY;
+            ty += ML_LINEDY;
 
         // show freq
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
-        tft.printf ("kHz%6.0f", dxc_s.kHz);
+        drawMLFreq (dxc_s.kHz*1000, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show spot age
-        drawMLAge (dxc_s.spotted, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLAge (dxc_s.spotted, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show local time
-        drawMLLMT (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLLMT (dxc_ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show distance and bearing
-        drawMLDB (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLDB (dxc_ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show weather
-        drawMLWX (dxc_ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLWX (dxc_ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // border in band color
-        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
+        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, ML_LINEDY*ML_NLINES+1,
                         getBandColor(1000*dxc_s.kHz));
 
     } else {
@@ -802,52 +824,114 @@ static void drawMouseLoc()
         ty += 1;
 
         // show lat/long
-        tft.setCursor (tx+TEXT_INDENT, ty);
+        tft.setCursor (tx+ML_INDENT, ty);
         tft.printf ("Lat %4.0f%c", fabsf(ll.lat_d), ll.lat_d < 0 ? 'S' : 'N');
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
         tft.printf ("Lng %4.0f%c", fabsf(ll.lng_d), ll.lng_d < 0 ? 'W' : 'E');
 
         // show maid
         char maid[MAID_CHARLEN];
         ll2maidenhead (maid, ll);
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
         tft.printf ("Grid %4.4s", maid);
 
         // zones
         if (cqzone_n) {
-            tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+            tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
             tft.printf (_FX("CQ  %5d"), cqzone_n);
         }
         if (ituzone_n) {
-            tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+            tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
             tft.printf (_FX("ITU %5d"), ituzone_n);
         }
 
         // prefix, else blank
-        tft.setCursor (tx+TEXT_INDENT, ty += LINE_DY);
+        tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
         char prefix[MAX_PREF_LEN+1];
         if (nearestPrefix (city ? city_ll : ll, prefix))
             tft.printf ("Pfx %5s", prefix);
 
         // blank so wx is on same rows on all formats
-        ty += LINE_DY;
+        ty += ML_LINEDY;
 
         // show local time
-        drawMLLMT (ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLLMT (ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show distance and bearing
-        drawMLDB (ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLDB (ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // show weather
-        drawMLWX (ll, tx+TEXT_INDENT, LINE_DY, ty);
+        drawMLWX (ll, tx+ML_INDENT, ML_LINEDY, ty);
 
         // border
-        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, LINE_DY*N_LINES+1,
+        tft.drawRect (view_btn_b.x, view_btn_b.y + view_btn_b.h, view_btn_b.w-1, ML_LINEDY*ML_NLINES+1,
                         RA8875_WHITE);
     }
 }
 
-#endif // _IS_UNIX
+#else   // _IS_ESP8266
+
+/* given lat/lng and cos of angle from terminator, return earth map pixel.
+ * only used by ESP, all others draw at higher resolution.
+ * ESP only
+ */
+static uint16_t getEarthMapPix (LatLong ll, float cos_t)
+{
+    // indices into pixel array at this location
+    uint16_t ex = (uint16_t)((EARTH_W*(ll.lng_d+180)/360)+0.5F) % EARTH_W;
+    uint16_t ey = (uint16_t)((EARTH_H*(90-ll.lat_d)/180)+0.5F) % EARTH_H;
+
+    // final color
+    uint16_t pix_c;
+
+    // decide color
+    if (!night_on || cos_t > 0) {
+        // < 90 deg: full sunlit
+        getMapDayPixel (ey, ex, &pix_c);
+    } else if (cos_t > GRAYLINE_COS) {
+        // blend from day to night
+        uint16_t day_c, night_c;
+        getMapDayPixel (ey, ex, &day_c);
+        getMapNightPixel (ey, ex, &night_c);
+        uint8_t day_r = RGB565_R(day_c);
+        uint8_t day_g = RGB565_G(day_c);
+        uint8_t day_b = RGB565_B(day_c);
+        uint8_t night_r = RGB565_R(night_c);
+        uint8_t night_g = RGB565_G(night_c);
+        uint8_t night_b = RGB565_B(night_c);
+        float fract_night = powf(cos_t/GRAYLINE_COS, GRAYLINE_POW);
+        float fract_day = 1 - fract_night;
+        uint8_t twi_r = (fract_day*day_r + fract_night*night_r);
+        uint8_t twi_g = (fract_day*day_g + fract_night*night_g);
+        uint8_t twi_b = (fract_day*day_b + fract_night*night_b);
+        pix_c = RGB565 (twi_r, twi_g, twi_b);
+    } else {
+        // full night side
+        getMapNightPixel (ey, ex, &pix_c);
+    }
+
+    return (pix_c);
+}
+
+/* return whether coordinate s is over any symbol
+ * ESP only
+ */
+static bool overAnySymbol (const SCoord &s)
+{
+    return (inCircle(s, de_c)
+                || (showDEAPMarker() && inCircle(s, deap_c))
+                || (showDEMarker() && inCircle(s, de_c))
+                || (showDXMarker() && inCircle(s, dx_c))
+                || inCircle (s, sun_c) || inCircle (s, moon_c)
+                || overAnyBeacon(s)
+                || overAnyFarthestPSKSpots(s)
+                || overAnyOnTheAirSpots(s)
+                || overAnyADIFSpots(s)
+                || inBox(s,santa_b)
+                || overMapScale(s));
+}
+
+#endif  // _IS_ESP8266
 
 /* draw some fake stars for the azimuthal projection
  */
@@ -886,6 +970,22 @@ static void drawAzmStars()
                 uint16_t c = random(256);
                 c = RGB565(c,c,c);
                 tft.drawPixel (map_b.x+x, map_b.y+y, c);
+                n_stars++;
+            }
+        }
+        break;
+
+    case MAPP_MOLL:
+        while (n_stars < N_AZMSTARS) {
+            // Mollweide edge is a 2x1 ellipse
+            float dx_frac = (500.0F - random(1000))/501.0F;      // (-1 .. 1)
+            float dy_frac = (500.0F - random(1000))/501.0F;      // (-1 .. 1)
+            if (dx_frac*dx_frac + dy_frac*dy_frac > 1) {
+                uint16_t star_x = roundf (map_b.x + (1+dx_frac)*map_b.w/2);
+                uint16_t star_y = roundf (map_b.y + (1+dy_frac)*map_b.h/2);
+                uint16_t c = random(256);
+                c = RGB565(c,c,c);
+                tft.drawPixel (star_x, star_y, c);
                 n_stars++;
             }
         }
@@ -933,7 +1033,7 @@ static void drawMapMenuButton()
     tft.fillRect (view_btn_b.x, view_btn_b.y, view_btn_b.w-1, view_btn_b.h-1, RA8875_BLACK);
     tft.drawRect (view_btn_b.x, view_btn_b.y, view_btn_b.w-1, view_btn_b.h-1, RA8875_WHITE);
 
-    char style_mem[NV_MAPSTYLE_LEN];
+    char style_mem[NV_COREMAPSTYLE_LEN];
     const char *str = getMapStyle (style_mem);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     uint16_t str_w = getTextWidth(str);
@@ -995,7 +1095,7 @@ void drawMapMenu()
     #if defined(_SUPPORT_ZONES)
                     MI_GRD_CQZ, MI_GRD_ITU,
     #endif
-        MI_PRJ_TTL, MI_PRJ_MER, MI_PRJ_AZM, MI_PRJ_AZ1,
+        MI_PRJ_TTL, MI_PRJ_MER, MI_PRJ_AZM, MI_PRJ_AZ1, MI_PRJ_MOL,
         MI_RSS_YES,
         MI_NON_YES,
     #if defined(_SUPPORT_CITIES)
@@ -1007,12 +1107,12 @@ void drawMapMenu()
     #define SEC_INDENT 8
     MenuItem mitems[MI_N] = {
         {MENU_LABEL, false, 0, PRI_INDENT, "Style:"},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_COUNTRIES]},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_TERRAIN]},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_DRAP]},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_MUF]},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_AURORA]},
-            {MENU_1OFN, false, 1, SEC_INDENT, map_styles[CM_WX]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_COUNTRIES]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_TERRAIN]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_DRAP]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_MUF]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_AURORA]},
+            {MENU_1OFN, false, 1, SEC_INDENT, coremap_names[CM_WX]},
             {MENU_IGNORE, false, 1, SEC_INDENT, NULL},     // MI_STY_PRP: see below
         {MENU_LABEL, false, 0, PRI_INDENT, "Grid:"},
             {MENU_1OFN, false, 2, SEC_INDENT, "None"},
@@ -1028,6 +1128,7 @@ void drawMapMenu()
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_MERCATOR]},
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_AZIMUTHAL]},
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_AZIM1]},
+            {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_MOLL]},
         {MENU_TOGGLE, false, 4, PRI_INDENT, "RSS"},
         {MENU_TOGGLE, false, 5, PRI_INDENT, "Night"},
     #if defined(_SUPPORT_CITIES)
@@ -1038,8 +1139,14 @@ void drawMapMenu()
     // init selections with current states
 
     // if showing a propmap list in menu as selected else core map
-    char propband[NV_MAPSTYLE_LEN];             // must be persistent for life time of runMenu()
-    if (prop_map == PROP_MAP_OFF) {
+    StackMalloc propband_mem (NV_COREMAPSTYLE_LEN);
+    char *propband = (char *) propband_mem.getMem();     // N.B. must be persistent for lifetime of runMenu()
+    if (prop_map.active) {
+        // add propmap item to menu selected, leaving others all unselected
+        mitems[MI_STY_PRP].type = MENU_1OFN;
+        mitems[MI_STY_PRP].set = true;
+        mitems[MI_STY_PRP].label = getMapStyle (propband);
+    } else {
         // select current map, leave MI_STY_PRP as ignored
         mitems[MI_STR_CRY].set = core_map == CM_COUNTRIES;
         mitems[MI_STY_TER].set = core_map == CM_TERRAIN;
@@ -1047,11 +1154,6 @@ void drawMapMenu()
         mitems[MI_STY_MUF].set = core_map == CM_MUF;
         mitems[MI_STY_AUR].set = core_map == CM_AURORA;
         mitems[MI_STY_WXX].set = core_map == CM_WX;
-    } else {
-        // add propmap item and select
-        mitems[MI_STY_PRP].type = MENU_1OFN;
-        mitems[MI_STY_PRP].set = true;
-        mitems[MI_STY_PRP].label = getMapStyle (propband);
     }
 
     mitems[MI_GRD_NON].set = mapgrid_choice == MAPGRID_OFF;
@@ -1067,6 +1169,7 @@ void drawMapMenu()
     mitems[MI_PRJ_MER].set = map_proj == MAPP_MERCATOR;
     mitems[MI_PRJ_AZM].set = map_proj == MAPP_AZIMUTHAL;
     mitems[MI_PRJ_AZ1].set = map_proj == MAPP_AZIM1;
+    mitems[MI_PRJ_MOL].set = map_proj == MAPP_MOLL;
 
     mitems[MI_RSS_YES].set = rss_on;
     mitems[MI_NON_YES].set = night_on;
@@ -1094,7 +1197,7 @@ void drawMapMenu()
         menuRedrawOk (ok_b, MENU_OK_BUSY);
 
         // schedule a new map if style changed
-        bool prop_turned_off = prop_map != PROP_MAP_OFF && !mitems[MI_STY_PRP].set;
+        bool prop_turned_off = prop_map.active && !mitems[MI_STY_PRP].set;
         if (mitems[MI_STR_CRY].set && (prop_turned_off || core_map != CM_COUNTRIES))
             scheduleNewCoreMap (CM_COUNTRIES);
         else if (mitems[MI_STY_TER].set && (prop_turned_off || core_map != CM_TERRAIN))
@@ -1154,6 +1257,10 @@ void drawMapMenu()
             map_proj = MAPP_AZIM1;
             NVWriteUInt8 (NV_MAPPROJ, map_proj);
             full_redraw = true;
+        } else if (mitems[MI_PRJ_MOL].set && map_proj != MAPP_MOLL) {
+            map_proj = MAPP_MOLL;
+            NVWriteUInt8 (NV_MAPPROJ, map_proj);
+            full_redraw = true;
         }
 
         // check for change night option
@@ -1190,9 +1297,6 @@ void drawMapMenu()
         // restart map if enough has changed
         if (full_redraw)
             initEarthMap();
-
-        // update state
-        logState();
     }
 
     if (!menu_ok || !full_redraw) {
@@ -1279,12 +1383,18 @@ void drawMoreEarth()
 {
     resetWatchdog();
 
+    #if defined (_IS_ESP8266)
     // handy health indicator and update timer
     digitalWrite(LIFE_LED, !digitalRead(LIFE_LED));
+    #endif // _IS_ESP8266
 
     // refresh circumstances at start of each map scan but not very first call after initEarthMap()
-    if (moremap_s.y == map_b.y && moremap_s.x != 0)
+    if (moremap_s.y == map_b.y && moremap_s.x != 0) {
         updateCircumstances();
+        #if defined(DEBUG_ZONES_BB)
+            fillSBox (map_b, RA8875_BLACK);
+        #endif // DEBUG_ZONES_BB
+    }
     
     uint16_t last_x = map_b.x + EARTH_W - 1;
 
@@ -1350,11 +1460,11 @@ void drawMoreEarth()
 
         drawMapGrid();
         drawSatPathAndFoot();
-        drawSatNameOnRow (0);
         if (waiting4DXPath())
             drawDXPath();
         drawPSKPaths ();
         drawAllSymbols(true);
+        drawSatNameOnRow (0);
         drawMouseLoc();
 
         // draw now
@@ -1372,7 +1482,7 @@ void drawMoreEarth()
         struct timeval tv1;
         gettimeofday (&tv1, NULL);
         if (tv0.tv_sec != 0)
-            printf ("****** map %ld us\n", TVDELUS (tv0, tv1));
+            Serial.printf ("****** map %ld us\n", TVDELUS (tv0, tv1));
         tv0 = tv1;
     #endif // TIME_MAP_DRAW
 
@@ -1402,6 +1512,7 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
     switch ((MapProjection)map_proj) {
 
     case MAPP_AZIMUTHAL: {
+
         // sph tri between de, dx and N pole
         float ca, B;
         solveSphere (ll.lng - de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &ca, &B);
@@ -1425,6 +1536,7 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
         } break;
 
     case MAPP_AZIM1: {
+
         // sph tri between de, dx and N pole
         float ca, B;
         solveSphere (ll.lng - de_ll.lng, M_PI_2F-ll.lat, sdelat, cdelat, &ca, &B);
@@ -1458,6 +1570,10 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
             s.y = e;
         } break;
 
+    case MAPP_MOLL:
+        ll2sMollweide (ll, s, edge, 1);
+        break;
+
     default:
         fatalError (_FX("ll2s() bad map_proj %d"), map_proj);
     }
@@ -1465,6 +1581,8 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
 }
 
 
+/* same but with explicit lat/lng in rads
+ */
 void ll2sRaw (float lat, float lng, SCoord &s, uint8_t edge)
 {
     LatLong ll;
@@ -1541,6 +1659,10 @@ void ll2sRaw (const LatLong &ll, SCoord &s, uint8_t edge)
         if (s.y > e)
             s.y = e;
         } break;
+
+    case MAPP_MOLL:
+        ll2sMollweide (ll, s, edge, tft.SCALESZ);
+        break;
 
     default:
         fatalError (_FX("ll2sRaw() bad map_proj %d"), map_proj);
@@ -1624,6 +1746,11 @@ bool s2ll (const SCoord &s, LatLong &ll)
 
         } break;
 
+    case MAPP_MOLL:
+
+        return (s2llMollweide (s, ll));
+        break;
+
     default:
         fatalError (_FX("s2ll() bad map_proj %d"), map_proj);
     }
@@ -1641,51 +1768,6 @@ float lngDiff (float dlng)
         fdiff = 360 - fdiff;
     return (fdiff);
 }
-
-#if defined(_IS_ESP8266)
-
-/* given lat/lng and cos of angle from terminator, return earth map pixel.
- * only used by ESP, all others draw at higher resolution.
- */
-static uint16_t getEarthMapPix (LatLong ll, float cos_t)
-{
-    // indices into pixel array at this location
-    uint16_t ex = (uint16_t)((EARTH_W*(ll.lng_d+180)/360)+0.5F) % EARTH_W;
-    uint16_t ey = (uint16_t)((EARTH_H*(90-ll.lat_d)/180)+0.5F) % EARTH_H;
-
-    // final color
-    uint16_t pix_c;
-
-    // decide color
-    if (!night_on || cos_t > 0) {
-        // < 90 deg: full sunlit
-        getMapDayPixel (ey, ex, &pix_c);
-    } else if (cos_t > GRAYLINE_COS) {
-        // blend from day to night
-        uint16_t day_c, night_c;
-        getMapDayPixel (ey, ex, &day_c);
-        getMapNightPixel (ey, ex, &night_c);
-        uint8_t day_r = RGB565_R(day_c);
-        uint8_t day_g = RGB565_G(day_c);
-        uint8_t day_b = RGB565_B(day_c);
-        uint8_t night_r = RGB565_R(night_c);
-        uint8_t night_g = RGB565_G(night_c);
-        uint8_t night_b = RGB565_B(night_c);
-        float fract_night = powf(cos_t/GRAYLINE_COS, GRAYLINE_POW);
-        float fract_day = 1 - fract_night;
-        uint8_t twi_r = (fract_day*day_r + fract_night*night_r);
-        uint8_t twi_g = (fract_day*day_g + fract_night*night_g);
-        uint8_t twi_b = (fract_day*day_b + fract_night*night_b);
-        pix_c = RGB565 (twi_r, twi_g, twi_b);
-    } else {
-        // full night side
-        getMapNightPixel (ey, ex, &pix_c);
-    }
-
-    return (pix_c);
-}
-
-#endif
 
 
 /* draw at the given screen location, if it's over the map.
@@ -1712,7 +1794,7 @@ void drawMapCoord (const SCoord &s)
         if (!s2ll(s, lls))
             return;
 
-        // a latitude cache really helps Mercator performance; anything help Azimuthal??
+        // a latitude cache really helps Mercator performance; anything help others?
         static float slat_c, clat_c;
         static SCoord s_c;
         if (map_proj != MAPP_MERCATOR || s.y != s_c.y) {
@@ -1806,18 +1888,21 @@ void drawMapCoord (const SCoord &s)
             float theta = rad2deg(B);                               // theta angle of ring around DE
             float th_cutoff = 0;                                    // theta thickness
 
-            switch (map_proj) {
+            switch ((MapProjection)map_proj) {
             case MAPP_MERCATOR:
                 th_cutoff = 2 * cosf(lls.lat);                      // pole sweeps subtend tiny angles
                 if (radius < RADIAL_GRID || radius > 180 - RADIAL_GRID)
                     th_cutoff += 2;                                 // insure thicker at DE and antipode
                 break;
+            case MAPP_MOLL:                                         // fallthru
             case MAPP_AZIMUTHAL:
                 th_cutoff = 1+ca*ca;                                // fat @ 0 .. thin at 90 .. fat @ 180
                 break;
             case MAPP_AZIM1:
                 th_cutoff = ca + 1.5F;                              // thinner all the way to 180
                 break;
+            default:
+                fatalError(_FX("drawMapCoord() bogus map_proj %d"), map_proj);
             }
 
             if (fmodf (radius+90, RADIAL_GRID) < 1 || fmodf (theta+180, THETA_GRID) < th_cutoff) {
@@ -1979,7 +2064,7 @@ void drawDXInfo ()
 
     // erase and init
     tft.graphicsMode();
-    tft.fillRect (dx_info_b.x, dx_info_b.y+2*vspace, dx_info_b.w, dx_info_b.h-2*vspace+1, RA8875_BLACK);
+    tft.fillRect (dx_info_b.x, dx_info_b.y+2*vspace, dx_info_b.w, dx_info_b.h-2*vspace-1, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     tft.setTextColor (DX_COLOR);
 
@@ -2045,7 +2130,7 @@ void drawDXInfo ()
             tft.setTextColor(DX_COLOR);
             selectFontStyle (LIGHT_FONT, SMALL_FONT);
             bw = getTextWidth (prefix);
-            tft.setCursor (dxsrss_b.x+(dxsrss_b.w-bw)/2, dxsrss_b.y + 28);
+            tft.setCursor (dxsrss_b.x+(dxsrss_b.w-bw)/2, dxsrss_b.y + 29);
             tft.print (prefix);
         }
     } else {
@@ -2152,7 +2237,8 @@ bool segmentSpanOkRaw (const SCoord &s0, const SCoord &s1, uint16_t border)
         return (false);         // too hi
     if (map_proj == MAPP_AZIMUTHAL && ((s0.x < map_x+map_w/2) != (s1.x < map_x+map_w/2)))
         return (false);         // crosses azimuthal hemisphere
-    if (overViewBtn(raw2appSCoord(s0),border/tft.SCALESZ) || overViewBtn(raw2appSCoord(s1),border/tft.SCALESZ))
+    if (overViewBtn(raw2appSCoord(s0),border/tft.SCALESZ)
+                                || overViewBtn(raw2appSCoord(s1),border/tft.SCALESZ))
         return (false);         // over the view button
     if (!overMap(raw2appSCoord(s0)) || !overMap(raw2appSCoord(s1)))
         return (false);         // off the map entirely

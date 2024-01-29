@@ -8,7 +8,7 @@
 .PHONY: clean clobber help
 
 # build flags common to all options and architectures
-CXXFLAGS = -IArduinoLib -IwsServer/include -I. -g -O2 -Wall -DARDUINO=100 -pthread -std=c++0x
+CXXFLAGS = -IArduinoLib -IwsServer/include -I. -g -O2 -Wall -DARDUINO=100 -pthread -std=c++17
 LDXXFLAGS = -LArduinoLib -LwsServer -g -pthread
 LIBS = -lpthread -larduino -lws
 CXX = g++
@@ -19,11 +19,17 @@ ifeq ($(shell uname -s), Darwin)
     LDXXFLAGS += -L/opt/X11/lib
 endif
 
-# FreeBSD needs libgpio libexecinfo
+# FreeBSD needs libgpio libexecinfo and local xorg
 ifeq ($(shell uname -s), FreeBSD)
-    LIBS += -lgpio -lexecinfo
+    CXXFLAGS += -I/usr/local/include
+    LDXXFLAGS += -L/usr/local/lib
+    LIBS += -lgpio -lexecinfo -lm
 endif
 
+# Linux needs libgpiod
+ifeq ($(shell find /usr/lib -name libgpiod.a | wc -l), 1)
+    LIBS += -lgpiod
+endif
 
 
 OBJS = \
@@ -34,8 +40,10 @@ OBJS = \
 	Germano-Regular-16.o \
 	OTAupdate.o \
 	P13.o \
+	adif.o \
 	asknewpos.o \
 	astro.o \
+	blinker.o \
 	brightness.o \
 	calibrate.o \
 	clocks.o \
@@ -48,6 +56,7 @@ OBJS = \
 	favicon.o \
 	gimbal.o \
 	gpsd.o \
+	grayline.o \
         kd3tree.o \
 	liveweb.o \
 	liveweb-html.o \
@@ -55,12 +64,14 @@ OBJS = \
 	maidenhead.o \
 	mapmanage.o \
 	menu.o \
+	mollweide.o \
 	moon_imgs.o \
 	moonpane.o \
 	ncdxf.o \
 	nvram.o \
 	ontheair.o \
 	plot.o \
+	plotmap.o \
 	plotmgmnt.o \
 	prefixes.o \
 	pskreporter.o \
@@ -100,7 +111,6 @@ help:
 
 # remove old objects before building new ones to be sure the proper flags are used
 $(OBJS): clean
-
 
 # X11 versions
 

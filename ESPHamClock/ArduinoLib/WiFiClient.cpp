@@ -134,7 +134,7 @@ bool WiFiClient::connect(const char *host, int port)
 
         /* connect */
         if (connect_to (sockfd, aip->ai_addr, aip->ai_addrlen, 5000) < 0) {
-            printf ("WiFiCl: connect(%s,%d): %s\n", host,port,strerror(errno));
+            printf ("WiFiCl: connect(%s:%d): %s\n", host, port, strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (false);
@@ -286,6 +286,11 @@ void WiFiClient::print (String s)
 	write (sp, n);
 }
 
+void WiFiClient::print (const char *str)
+{
+	write ((const uint8_t *) str, strlen(str));
+}
+
 void WiFiClient::print (float f)
 {
 	char buf[32];
@@ -310,6 +315,12 @@ void WiFiClient::println (String s)
 	const uint8_t *sp = (const uint8_t *) s.c_str();
 	int n = strlen ((char*)sp);
 	write (sp, n);
+	write ((const uint8_t *) "\r\n", 2);
+}
+
+void WiFiClient::println (const char *str)
+{
+	write ((const uint8_t *) str, strlen(str));
 	write ((const uint8_t *) "\r\n", 2);
 }
 
@@ -341,15 +352,16 @@ void WiFiClient::println (uint32_t i)
 	write ((const uint8_t *) buf, n);
 }
 
-String WiFiClient::remoteIP()
+IPAddress WiFiClient::remoteIP()
 {
 	struct sockaddr_in sa;
 	socklen_t len = sizeof(sa);
 
 	getpeername(socket, (struct sockaddr *)&sa, &len);
-	struct in_addr ipAddr = sa.sin_addr;
+	struct in_addr ip_addr = sa.sin_addr;
 
-	char str[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN);
-	return (String(str));
+	char *s = inet_ntoa (ip_addr);
+        int oct0, oct1, oct2, oct3;
+        sscanf (s, "%d.%d.%d.%d", &oct0, &oct1, &oct2, &oct3);
+	return (IPAddress(oct0,oct1,oct2,oct3));
 }

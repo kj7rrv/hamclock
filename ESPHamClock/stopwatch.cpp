@@ -10,149 +10,112 @@
 
 
 // set to show all boxes for debugging
-// #define _SHOW_ALL
+// #define _SHOW_ALL                    // remove before flight
+
+#define SW_CD_BLINKHZ   2                       // LED warning blink rate
 
 
 // countdown ranges, including flashing states
 typedef enum {
     SWCDS_OFF,                          // idle or dark
     SWCDS_RUNOK,                        // more than SW_CD_WARNDT remaining
-    SWCDS_WARN_ON,                      // > 0 but < SW_CD_WARNDT remaining
-    SWCDS_TIMEOUT_ON,                   // timed out
+    SWCDS_WARN,                         // > 0 but < SW_CD_WARNDT remaining
+    SWCDS_TIMEOUT,                      // timed out
 } SWCDState;
 
 
-/* only systems with GPIO can control LEDs and have start switch for countdown control.
- * ESP has a few GPIO but not enough for everything the Pi can do so this was left off.
+
+/* info to manage the stopwatch blinker threads
  */
-#if defined(_SUPPORT_GPIO) && defined(_IS_UNIX)
+static volatile ThreadBlinker sw_cd_blinker_red;
+static volatile ThreadBlinker sw_cd_blinker_grn;
+static volatile MCPPoller sw_cd_reset;
+static volatile MCPPoller sw_alarmoff;
 
 /* return all IO lines to benign state
  */
 void SWresetIO()
 {
-    if (!GPIOOk())
-        return;
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return;
-    gpio.setAsInput (SW_RED_GPIO);
-    gpio.setAsInput (SW_GRN_GPIO);
-    gpio.setAsInput (SW_COUNTDOWN_GPIO);
-    gpio.setAsInput (SW_ALARMOUT_GPIO);
-    gpio.setAsInput (SW_ALARMOFF_GPIO);
+    disableBlinker (sw_cd_blinker_red);
+    disableBlinker (sw_cd_blinker_grn);
+    disableMCPPoller (sw_cd_reset);
+    disableMCPPoller (sw_alarmoff);
+
+    mcp.pinMode (SW_CD_RED_PIN, INPUT);
+    mcp.pinMode (SW_CD_GRN_PIN, INPUT);
+    mcp.pinMode (SW_ALARMOUT_PIN, INPUT);
+    mcp.pinMode (SW_ALARMOFF_PIN, INPUT);
 
 }
 
-/* set the LEDs to indicate the given countdown range
+/* set the LEDs to indicate the given countdown range state
  */
-static void setLEDState (SWCDState cds)
+static void setCDLEDState (SWCDState cds)
 {
-    // ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return;
-
-    // access pins
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return;
-
-    gpio.setAsOutput (SW_GRN_GPIO);
-    gpio.setAsOutput (SW_RED_GPIO);
-
     switch (cds) {
-    case SWCDS_RUNOK:              // fallthru
-    case SWCDS_WARN_ON: 
-        // green on
-        gpio.setLo (SW_GRN_GPIO);
-        gpio.setHi (SW_RED_GPIO);
-        break;
     case SWCDS_OFF:
         // both off
-        gpio.setHi (SW_GRN_GPIO);
-        gpio.setHi (SW_RED_GPIO);
+        setBlinkerRate (sw_cd_blinker_grn, BLINKER_OFF_HZ);
+        setBlinkerRate (sw_cd_blinker_red, BLINKER_OFF_HZ);
         break;
-    case SWCDS_TIMEOUT_ON:
-        // red on
-        gpio.setHi (SW_GRN_GPIO);
-        gpio.setLo (SW_RED_GPIO);
+    case SWCDS_RUNOK:
+        // green on
+        setBlinkerRate (sw_cd_blinker_grn, BLINKER_ON_HZ);
+        setBlinkerRate (sw_cd_blinker_red, BLINKER_OFF_HZ);
+        break;
+    case SWCDS_WARN: 
+        // green blinking, red on
+        setBlinkerRate (sw_cd_blinker_grn, SW_CD_BLINKHZ);
+        setBlinkerRate (sw_cd_blinker_red, BLINKER_ON_HZ);
+        break;
+    case SWCDS_TIMEOUT:
+        // red blinking
+        setBlinkerRate (sw_cd_blinker_grn, BLINKER_OFF_HZ);
+        setBlinkerRate (sw_cd_blinker_red, SW_CD_BLINKHZ);
         break;
     }
 }
 
 /* return whether the countdown pin has toggled low,
- * ie, this is an edge-triggered state.
+ * ie, this is an edge-triggered state in order that it does not stay active if used with a PTT switch.
  */
-static bool countdownPinIsTrue()
+static bool countdownSwitchIsTrue()
 {
-    // ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return (false);
-
-    static bool prev_pin_state;
+    static bool prev_pin_true;
     static bool prev_pin_known;
 
-    // read pin
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return (false);
-    gpio.setAsInput (SW_COUNTDOWN_GPIO);
-    bool pin_state = gpio.readPin(SW_COUNTDOWN_GPIO);
+    // read pin, active low
+    bool pin_true = !readMCPPoller (sw_cd_reset);
 
     // init history if first time
     if (!prev_pin_known) {
-        prev_pin_state = pin_state;
+        prev_pin_true = pin_true;
         prev_pin_known = true;
     }
 
     // return whether went low
-    if (pin_state != prev_pin_state) {
-        prev_pin_state = pin_state;
-        return (!pin_state);
+    if (pin_true != prev_pin_true) {
+        prev_pin_true = pin_true;
+        return (pin_true);
     } else
         return (false);
 }
 
-/* return state of alarm clock reset input pin.
- * N.B. pin is active-low
- */
-static bool alarmPinIsSet(void)
-{
-    // ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return (false);
 
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return (false);
-    gpio.setAsInput (SW_ALARMOFF_GPIO);
-    return (!gpio.readPin(SW_ALARMOFF_GPIO));
+/* return state of alarm clock reset switch.
+ */
+static bool alarmSwitchIsTrue(void)
+{
+    // pin is active-low
+    return (!readMCPPoller (sw_alarmoff));
 }
 
 /* control the alarm clock output pin
  */
 static void setAlarmPin (bool set)
 {
-    // ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return;
-
-    GPIO& gpio = GPIO::getGPIO();
-    gpio.setAsOutput (SW_ALARMOUT_GPIO);
-    gpio.setHiLo (SW_ALARMOUT_GPIO, set);
+    mcp.digitalWrite (SW_ALARMOUT_PIN, set);
 }
-
-#else // !_SUPPORT_GPIO
-
-// dummies
-static void setLEDState (SWCDState cds) { (void) cds; }
-static bool countdownPinIsTrue() { return (false); }
-static bool alarmPinIsSet(void) {return (false); }
-static void setAlarmPin (bool set) { (void) set; }
-
-#endif // _SUPPORT_GPIO
-
-
 
 
 // stopwatch params
@@ -199,7 +162,7 @@ static void setAlarmPin (bool set) { (void) set; }
 #define SW_CDP_X        ALM_EX                  // countdown period display box x
 #define SW_CDP_W        ALM_W                   // countdown period display box width
 #define SW_CD_WARNDT    60000                   // countdown warning time, ms
-#define SW_AGEDT        30000                   // countdown aged period, ms
+#define SW_CD_AGEDT     30000                   // countdown aged period, ms
 
 // big analog clock params
 #define BAC_X0          400                     // x center
@@ -255,14 +218,21 @@ static void setAlarmPin (bool set) { (void) set; }
 
 // contols common to both big clock styles
 #define BC_CDP_X        2                       // countdown period x
-#define BC_CDP_Y        420                     // countdown period y 
-#define BC_CDP_W        100                     // countdown period with 
+#define BC_CDP_Y        (480-SW_BH)             // countdown period y 
+#define BC_CDP_W        100                     // countdown period width 
+#define BC_CDP_H        SW_BH                   // countdown period height 
 #define BC_ALM_X        (BC_CDP_X+BC_CDP_W)     // x coord of alarm time box
 #define BC_ALM_Y        BC_CDP_Y                // y coord of alarm time box
+#define BC_ALM_W        SW_BW                   // alarm message width
+#define BC_ALM_H        SW_BH                   // alarm message height
 #define BC_BAD_W        200                     // bad time message width
 #define BC_BAD_H        SW_BH                   // bad time message height
 #define BC_BAD_X        (800-BC_BAD_W-2)        // x coord of bad time message
 #define BC_BAD_Y        BC_CDP_Y                // y coord of bad time message
+#define BC_SAT_W        280                     // width of satellite state
+#define BC_SAT_H        SW_BH                   // height of satellite state
+#define BC_SAT_X        ((800-BC_SAT_W)/2)      // x coord of satellite state
+#define BC_SAT_Y        BC_CDP_Y                // y coord of satellite state
 
 
 
@@ -301,9 +271,9 @@ static uint16_t sw_col;                         // color pixel
 
 // big clock info
 static SBox bcdate_b = {BAC_DATEX, BAC_DATEY, BAC_DATEW, BAC_DATEH};
-static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};      // weather
-static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, SW_BH};     // countdown remaining and control
-static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, SW_BW, SW_BH};     // alarm time and control
+static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};              // weather
+static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, BC_CDP_H};          // countdown remaining and control
+static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, BC_ALM_W, BC_ALM_H};       // alarm time and control
 static uint16_t bc_bits;                        // see SWBCBits
 static uint32_t bc_prev_wx;                     // time of prev drawn wx, millis
 static uint32_t bc_wxdt = BAC_WXGDT;            // weather update interval, millis
@@ -326,8 +296,6 @@ static void saveSWNV()
     if (alarm_state != ALMS_OFF)
         acode += ALM_TOVFLOW;
     NVWriteUInt16 (NV_ALARMCLOCK, acode);
-
-    logState();
 }
 
 /* return ms countdown time remaining, if any
@@ -540,29 +508,78 @@ static void drawSWTime(uint32_t t)
  */
 static void determineCDVisuals (uint32_t ms_left, SWCDState &cds, uint16_t &color)
 {
+    // all good if beyond the warning time
     if (ms_left >= SW_CD_WARNDT) {
         cds = SWCDS_RUNOK;
         color = RA8875_GREEN;
         return;
     }
 
+    // flash the GUI color but just rely on threadBlinker to handle the LED
     bool flash_on = (millis()%500) < 250;               // flip at 2 Hz
     if (ms_left > 0) {
-        if (flash_on) {
-            cds = SWCDS_WARN_ON;
-            color = DYELLOW;
-        } else {
-            cds = SWCDS_OFF;
-            color = RA8875_BLACK;
-        }
+        color = flash_on ? DYELLOW : RA8875_BLACK;
+        cds = SWCDS_WARN;
     } else {
-        if (flash_on) {
-            cds = SWCDS_TIMEOUT_ON;
-            color = RA8875_RED;
+        color = flash_on ? RA8875_RED : RA8875_BLACK;
+        cds = SWCDS_TIMEOUT;
+    }
+}
+
+/* draw the satellite indicator, if want
+ */
+static void drawSatIndicator(bool force)
+{
+    // unused for now
+    (void) force;
+
+    // get sat info if want and defined
+    SatNow sn;
+    if (!(bc_bits & SW_BCSATBIT) || !getSatNow(sn))
+        return;
+
+    // prep for drawStringInBox
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    SBox sat_b;
+    sat_b.x = BC_SAT_X;
+    sat_b.y = BC_SAT_Y;
+    sat_b.w = BC_SAT_W;
+    sat_b.h = BC_SAT_H;
+
+    if (sn.raz == SAT_NOAZ)
+
+        drawStringInBox (_FX("No rise"), sat_b, false, sw_col);
+
+    else if (sn.saz == SAT_NOAZ)
+
+        drawStringInBox (_FX("No set"), sat_b, false, sw_col);
+
+    else {
+
+        // draw circumstances
+
+        // decide whether up or down
+        float dt;                               // hours to begin with
+        const char *prompt;
+        if (sn.rdt < 0 || sn.rdt > sn.sdt) {
+            // up now, show time to set
+            dt = sn.sdt;
+            prompt = "sets in";
         } else {
-            cds = SWCDS_OFF;
-            color = RA8875_BLACK;
+            // down now, show time to rise
+            dt = sn.rdt;
+            prompt = "rises in";
         }
+
+        // format time
+        int a, b;
+        char sep;
+        formatSexa (dt, a, sep, b);
+
+        // draw
+        char buf[50];
+        snprintf (buf, sizeof(buf), "%s %s %d%c%02d", sn.name, prompt, a, sep, b);
+        drawStringInBox (buf, sat_b, false, sw_col);
     }
 }
 
@@ -580,7 +597,7 @@ static void drawAlarmIndicator (bool label_too)
     uint16_t a_mn = alarm_hrmn%60;
 
     if (sws_display == SWD_MAIN) {
-        snprintf (buf, sizeof(buf), "%02d:%02d", a_hr, a_mn);
+        snprintf (buf, sizeof(buf), "DE  %02d:%02d", a_hr, a_mn);       // coord with up/down touch
         drawStringInBox (buf, alarm_hrmn_b, false, sw_col);
         if (label_too) {
             const char *lbl = "?";
@@ -603,10 +620,6 @@ static void drawAlarmIndicator (bool label_too)
         } else if (alarm_state == ALMS_RINGING) {
             drawStringInBox ("Alarm!", bcalarm_b, true, sw_col);
         }
-
-        #if defined(_SHOW_ALL)
-            drawSBox (bcalarm_b, RA8875_WHITE);
-        #endif
     }
 }
 
@@ -650,7 +663,7 @@ static void drawCDTimeRemaining(bool force)
     determineCDVisuals (ms_left, cds, color);
 
     // set LEDS
-    setLEDState (cds);
+    setCDLEDState (cds);
 
     if (sws_display == SWD_MAIN) {
 
@@ -661,7 +674,7 @@ static void drawCDTimeRemaining(bool force)
 
         // determine whether to display inverted
         static bool prev_inv;
-        bool inv = cds == SWCDS_RUNOK || cds == SWCDS_WARN_ON || cds == SWCDS_TIMEOUT_ON;
+        bool inv = cds == SWCDS_RUNOK || cds == SWCDS_WARN || cds == SWCDS_TIMEOUT;
 
         // update the countdown button if different or force
         if (force || inv != prev_inv) {
@@ -781,13 +794,13 @@ static void drawBCAwareness (bool force)
             tft.setCursor (BC_BAD_X, BC_BAD_Y+27);
             tft.setTextColor (RA8875_RED);
             if (clock_ok) {
-                static const char msg[] = "Time is offset";
+                const char *msg = _FX("Time is offset");
                 tft.print (msg);
-                Serial.printf ("SW: %s\n", msg);
+                Serial.printf (_FX("SW: %s\n"), msg);
             } else {
-                static const char msg[] = "Time unlocked";
+                const char *msg = _FX("Time is unknown");
                 tft.print (msg);
-                Serial.printf ("SW: %s\n", msg);
+                Serial.printf (_FX("SW: %s\n"), msg);
             }
         }
     }
@@ -831,10 +844,6 @@ static void drawBCDateInfo (int hr, int dy, int wd, int mo)
         // UTC + TZ
         tft.printf ("UTC%+g", de_tz.tz_secs/3600.0F);
     }
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bcdate_b, RA8875_WHITE);
-    #endif
 }
 
 /* refresh DE weather in bcwx_b, return whether successful
@@ -856,100 +865,33 @@ static bool drawBCDEWxInfo(void)
 }
 
 /* draw space weather in upper right.
- * just numbers, plus prompts if all
  */
-static void drawBCSpaceWxInfo(bool all)
+static void drawBCSpaceWxInfo (bool all)
 {
-    // freshen, draw if new or all
-    if (!checkSpaceStats(now()) && !all)
-        return;
+    if (checkSpaceStats() || all)
+        drawSpaceStats(sw_col);   
+}
 
-    // collect info
-    SPWxValue ssn, flux, kp, swind, drap;
-    NOAASpaceWx noaaspw;
-    float path[PROP_MAP_N];
-    char xray[10];
-    time_t noaaspw_age, xray_age, path_age;
-    getSpaceWeather (ssn, flux, kp, swind, drap, noaaspw, noaaspw_age, xray, xray_age, path, path_age);
-
-    // prep
-    tft.setTextColor (sw_col);
-    selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    const char *err = "Err";
-    char buf[20];
-
-    // justification columns and row size
-    #define _SX_LEFT_X   660
-    #define _SX_RIGHT_X  796
-    #define _SX_CENTER_X ((_SX_LEFT_X+_SX_RIGHT_X)/2)
-    #define _SX_VALUE_W  (_SX_RIGHT_X-_SX_CENTER_X+2)
-    uint16_t y = 0;
-    uint16_t dy = 32;
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (ssn.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", ssn.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (flux.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", flux.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    strcpy (buf, xray);
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    y += dy;
-    tft.fillRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    // tft.drawRect (_SX_CENTER_X, y-dy+4, _SX_VALUE_W, dy, RA8875_BLACK);
-    if (kp.value == SPW_ERR) {
-        strcpy (buf, err);
-    } else {
-        snprintf (buf, sizeof(buf), "%.1f", kp.value);
-    }
-    tft.setCursor (_SX_RIGHT_X - getTextWidth (buf), y);
-    tft.print (buf);
-
-
-    // labels if needed
-    if (all) {
-        y = 0;
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("SSN");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("SFI");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("X-Ray");
-        tft.setCursor (_SX_LEFT_X, y += dy);
-        tft.print ("Kp");
-    }
-
-    printFreeHeap (F("drawBCSpaceWxInfo"));
+/* mark each control or indicator box for debugging big clock layout
+ */
+static void drawBCShowAll()
+{
+    #if defined(_SHOW_ALL)
+        drawSBox (bccd_b, RA8875_RED);
+        drawSBox (bcalarm_b, RA8875_RED);
+        drawSBox (bcdate_b, RA8875_RED);
+        tft.drawRect (BC_BAD_X, BC_BAD_Y, BC_BAD_W, BC_BAD_H, RA8875_RED);
+        tft.drawRect (BC_SAT_X, BC_SAT_Y, BC_SAT_W, BC_SAT_H, RA8875_RED);
+    #endif
 }
 
 /* draw the digital Big Clock 
  */
 static void drawDigitalBigClock (bool all)
 {
+    // debug
+    drawBCShowAll();
+
     // persist to avoid drawing the same digits again
     static time_t prev_am, prev_t0;                             // previous am/pm and report time
     static uint8_t prev_mnten, prev_mnunit;                     // previous mins tens and unit
@@ -1115,6 +1057,7 @@ static void drawDigitalBigClock (bool all)
 
     // update awareness
     drawBCAwareness (all);
+    drawSatIndicator(all);
 
     // init countdown if first call
     if (all) {
@@ -1129,10 +1072,6 @@ static void drawDigitalBigClock (bool all)
     // update space weather if desired
     if (bc_bits & SW_BCSPWXBIT)
         drawBCSpaceWxInfo(all);
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bccd_b, RA8875_WHITE);
-    #endif
 }
 
 /* draw the digital time portion of the analog clock.
@@ -1156,7 +1095,9 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
     if (all || hr != prev_hr || mn != prev_mn) {
 
         tft.fillRect (x0, BACD_DY-45, 140, 50, RA8875_BLACK);
-        // tft.drawRect (x0, BACD_DY-45, 140, 50, RA8875_RED);
+        #if defined(_SHOW_ALL)
+            tft.drawRect (x0, BACD_DY-45, 140, 50, RA8875_RED);
+        #endif
 
         // convert to 12 hours, don't print leading zero
         int hr12 = hr%12;
@@ -1180,13 +1121,17 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
         bool new_tens = (sc/10) != (prev_sc/10);
         if (all || new_tens) {
             tft.fillRect (prev_stx, BACD_DY-45, 60, 50, RA8875_BLACK);
-            // tft.drawRect (prev_stx, BACD_DY-45, 60, 50, RA8875_RED);
+            #if defined(_SHOW_ALL)
+                tft.drawRect (prev_stx, BACD_DY-45, 60, 50, RA8875_RED);
+            #endif
             tft.setCursor (prev_stx, BACD_DY);
             tft.print (sc/10);
             prev_sux = tft.getCursorX();
         } else {
             tft.fillRect (prev_sux, BACD_DY-45, 30, 50, RA8875_BLACK);
-            // tft.drawRect (prev_sux, BACD_DY-45, 30, 50, RA8875_RED);
+            #if defined(_SHOW_ALL)
+                tft.drawRect (prev_sux, BACD_DY-45, 30, 50, RA8875_RED);
+            #endif
         }
 
         // always draw unit digit
@@ -1201,6 +1146,9 @@ static void drawAnalogDigital (bool all, int hr, int mn, int sc)
  */
 static void drawAnalogBigClock (bool all)
 {
+    // debug
+    drawBCShowAll();
+
     // persistent time measures
     static time_t prev_am, prev_lt0;                    // detect change of am/pm and secs
     static uint8_t prev_mo, prev_dy;                    // previously drawn date info
@@ -1232,16 +1180,17 @@ static void drawAnalogBigClock (bool all)
     int mo = month(lt0);
     bool am = hr < 12;
 
-    // face geometry, scale down if showing digital too
+    // face geometry, smaller if showing sat or digital too
     bool add_digital = (bc_bits & SW_ANWDBIT) != 0;
-    int bac_y0    = add_digital ? BACD_Y0   : BAC_Y0;
-    int bac_mnr   = add_digital ? BACD_MNR  : BAC_MNR;
-    int bac_scr   = add_digital ? BACD_SCR  : BAC_SCR;
-    int bac_hrr   = add_digital ? BACD_HRR  : BAC_HRR;
-    int bac_fr    = add_digital ? BACD_FR   : BAC_FR;
-    int bac_bezr  = add_digital ? BACD_BEZR : BAC_BEZR;
-    int bac_htr   = add_digital ? BACD_HTR  : BAC_HTR;
-    int bac_mtr   = add_digital ? BACD_MTR  : BAC_MTR;
+    bool shrink = (bc_bits & SW_BCSATBIT) != 0 || add_digital;
+    int bac_y0    = shrink ? BACD_Y0   : BAC_Y0;
+    int bac_mnr   = shrink ? BACD_MNR  : BAC_MNR;
+    int bac_scr   = shrink ? BACD_SCR  : BAC_SCR;
+    int bac_hrr   = shrink ? BACD_HRR  : BAC_HRR;
+    int bac_fr    = shrink ? BACD_FR   : BAC_FR;
+    int bac_bezr  = shrink ? BACD_BEZR : BAC_BEZR;
+    int bac_htr   = shrink ? BACD_HTR  : BAC_HTR;
+    int bac_mtr   = shrink ? BACD_MTR  : BAC_MTR;
 
     // refresh if desired or new date (since we never erase the date)
     if (all || ((bc_bits & SW_BCDATEBIT) && (am != prev_am || dy != prev_dy || mo != prev_mo))) {
@@ -1430,6 +1379,7 @@ static void drawAnalogBigClock (bool all)
 
     // update awareness
     drawBCAwareness (all);
+    drawSatIndicator(all);
 
     // init countdown if first call
     if (all) {
@@ -1440,11 +1390,6 @@ static void drawAnalogBigClock (bool all)
     // numeric time too if desired
     if (add_digital)
         drawAnalogDigital (all, hr, mn, sc);
-
-
-    #if defined(_SHOW_ALL)
-        drawSBox (bccd_b, RA8875_WHITE);
-    #endif
 
     // update DE or space weather if desired and all or new
     if ((bc_bits & SW_BCWXBIT) && (timesUp(&bc_prev_wx, bc_wxdt) || all))
@@ -1469,14 +1414,14 @@ static void drawSWState()
             drawStringInBox (run_lbl, A_b, false, sw_col);
             drawStringInBox (reset_lbl, B_b, false, sw_col);
             drawSWCDPeriod();
-            setLEDState (SWCDS_OFF);
+            setCDLEDState (SWCDS_OFF);
             break;
         case SWE_RUN:
             drawStringInBox (cd_lbl, countdown_lbl_b, false, sw_col);
             drawStringInBox (stop_lbl, A_b, false, sw_col);
             drawStringInBox (lap_lbl, B_b, false, sw_col);
             drawSWCDPeriod();
-            setLEDState (SWCDS_OFF);
+            setCDLEDState (SWCDS_OFF);
             break;
         case SWE_STOP:
             drawSWTime(stop_dt);        // show stopped time
@@ -1484,7 +1429,7 @@ static void drawSWState()
             drawStringInBox (run_lbl, A_b, false, sw_col);
             drawStringInBox (reset_lbl, B_b, false, sw_col);
             drawSWCDPeriod();
-            setLEDState (SWCDS_OFF);
+            setCDLEDState (SWCDS_OFF);
             break;
         case SWE_LAP:
             drawSWTime(stop_dt);        // show lap hold time
@@ -1492,7 +1437,7 @@ static void drawSWState()
             drawStringInBox (reset_lbl, A_b, false, sw_col);
             drawStringInBox (resume_lbl, B_b, false, sw_col);
             drawSWCDPeriod();
-            setLEDState (SWCDS_OFF);
+            setCDLEDState (SWCDS_OFF);
             break;
         case SWE_COUNTDOWN:
             drawStringInBox (cd_lbl, countdown_lbl_b, true, sw_col);
@@ -1504,13 +1449,6 @@ static void drawSWState()
         }
 
         drawAlarmIndicator  (true);
-
-        #if defined(_SHOW_ALL)
-            drawSBox (alarm_up_b, RA8875_WHITE);
-            drawSBox (alarm_dw_b, RA8875_WHITE);
-            drawSBox (cdtime_up_b, RA8875_WHITE);
-            drawSBox (cdtime_dw_b, RA8875_WHITE);
-        #endif
 
         break;
 
@@ -1561,9 +1499,6 @@ static void drawSWMainPage()
     // state
     sws_display = SWD_MAIN;
 
-    // log with server
-    logState();
-
     // init sw digits all illegal so they all get drawn first time
     memset (swdigits, 255, sizeof(swdigits));
 
@@ -1583,7 +1518,7 @@ static void drawSWMainPage()
  */
 static bool checkExternalTurnOff()
 {
-    return (alarmPinIsSet() || alarm_state != ALMS_RINGING);
+    return (alarmSwitchIsTrue() || alarm_state != ALMS_RINGING);
 }
 
 /* called to indicate the alarm has gone off.
@@ -1630,7 +1565,7 @@ static void showAlarmRinging()
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         drawStringInBox (" Cancel ", dismiss_b, false, BRGRAY);
 
-        // wait for tap or timeout anywhere in pane
+        // wait for tap anywhere in pane or time out
         SCoord s;
         char c;
         UserInput ui = {
@@ -1684,6 +1619,7 @@ static void runBCMenu (const SCoord &s)
             MI_ALL_SDT,
             MI_ALL_CDW,
             MI_ALL_ALM,
+            MI_ALL_SAT,
             MI_ALL_SWX,
             MI_ALL_SPW,
         MI_BLK1,
@@ -1713,8 +1649,10 @@ static void runBCMenu (const SCoord &s)
             {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 5, SEC_INDENT, "Date info"},
             {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Count down"},
             {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Alarm"},
-            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 8, SEC_INDENT, "DE WX"},
-            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 8, SEC_INDENT, "Space WX"},
+            {isSatDefined() ? MENU_TOGGLE : MENU_IGNORE, !!(bc_bits & SW_BCSATBIT),
+                                8, SEC_INDENT, "Satellite"},
+            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 9, SEC_INDENT, "DE WX"},
+            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 9, SEC_INDENT, "Space WX"},
         {MENU_BLANK, false, 9, PRI_INDENT, NULL},
         {MENU_TOGGLE, false, 10, PRI_INDENT, "Exit Big Clock"},
         {MENU_BLANK, false, 11, PRI_INDENT, NULL},
@@ -1804,6 +1742,11 @@ static void runBCMenu (const SCoord &s)
     else
         bc_bits &= ~SW_BCSPWXBIT;
 
+    if (menu.items[MI_ALL_SAT].set)
+        bc_bits |= SW_BCSATBIT;
+    else
+        bc_bits &= ~SW_BCSATBIT;
+
     if (menu.items[MI_ANA_FIL].set)
         bc_bits |= SW_ANCOLHBIT;
     else
@@ -1820,9 +1763,9 @@ static void runBCMenu (const SCoord &s)
  */
 static void checkSWPageTouch()
 {
-    // check for touch at all
+    // out fast if nothing to do
     SCoord s;
-    if (readCalTouchWS(s) == TT_NONE || screenIsLocked())
+    if (screenIsLocked() || (readCalTouchWS(s) == TT_NONE && checkKBWarp(s) == TT_NONE))
         return;
 
     // update idle timer, ignore if this tap is restoring full brightness
@@ -1845,7 +1788,7 @@ static void checkSWPageTouch()
             countdown_period -= (countdown_period % 60000);             // insure whole minute
             saveSWNV();
             if (sws_engine == SWE_COUNTDOWN)
-                setSWEngineState (sws_engine, countdown_period);         // engage new value immediately
+                setSWEngineState (sws_engine, countdown_period);        // engage new value immediately
             else
                 drawSWCDPeriod();                                       // just display new value
 
@@ -1857,7 +1800,7 @@ static void checkSWPageTouch()
                 countdown_period -= (countdown_period % 60000);         // insure whole minute
                 saveSWNV();
                 if (sws_engine == SWE_COUNTDOWN)
-                    setSWEngineState (sws_engine, countdown_period);     // engage new value immediately
+                    setSWEngineState (sws_engine, countdown_period);    // engage new value immediately
                 else
                     drawSWCDPeriod();                                   // just display new value
             }
@@ -1867,7 +1810,7 @@ static void checkSWPageTouch()
             // increase alarm hour or minute
             uint16_t a_hr = alarm_hrmn/60;
             uint16_t a_mn = alarm_hrmn%60;
-            if (s.x < alarm_up_b.x + alarm_up_b.w/2) {
+            if (s.x < alarm_up_b.x + 7*alarm_up_b.w/12) {                // coordinate with drawAlarmIndicator
                 a_hr = (a_hr + 1) % 24;
             } else {
                 if (++a_mn == 60) {
@@ -1885,7 +1828,7 @@ static void checkSWPageTouch()
             // decresae alarm hour or minute
             uint16_t a_hr = alarm_hrmn/60;
             uint16_t a_mn = alarm_hrmn%60;
-            if (s.x < alarm_up_b.x + alarm_up_b.w/2) {
+            if (s.x < alarm_up_b.x + 7*alarm_up_b.w/12) {                // coordinate with drawAlarmIndicator
                 a_hr = (a_hr + 23) % 24;
             } else {
                 if (a_mn == 0) {
@@ -2000,7 +1943,6 @@ static void checkSWPageTouch()
             Serial.println(F("SW: BigClock enter"));
             sws_display = (bc_bits & SW_BCDIGBIT) ? SWD_BCDIGITAL : SWD_BCANALOG;
             drawBigClock (true);
-            logState();
         }
 
     } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
@@ -2055,8 +1997,16 @@ void initStopwatch()
         alarm_state = ALMS_ARMED;
     }
 
-    // insure output pins are off
-    setLEDState (SWCDS_OFF);
+    // init pins
+    mcp.pinMode (SW_ALARMOUT_PIN, OUTPUT);
+    mcp.digitalWrite (SW_ALARMOUT_PIN, LOW);            // off low
+
+    startBinkerThread (sw_cd_blinker_grn, SW_CD_GRN_PIN, true); // on is low
+    startBinkerThread (sw_cd_blinker_red, SW_CD_RED_PIN, true); // on is low
+    startMCPPoller (sw_cd_reset, SW_CD_RESET_PIN, 2);
+    startMCPPoller (sw_alarmoff, SW_ALARMOFF_PIN, 2);
+
+    setCDLEDState (SWCDS_OFF);
     setAlarmPin (false);
 }
 
@@ -2158,23 +2108,23 @@ bool runStopwatch()
     resetWatchdog();
 
     // always honor countdown switch regardless of display state
-    if (countdownPinIsTrue())
+    if (countdownSwitchIsTrue())
         setSWEngineState (SWE_COUNTDOWN, countdown_period);
 
     // check for aged countdown runout
     if (sws_engine == SWE_COUNTDOWN && getCountdownLeft() == 0
-                                && millis()-start_t > countdown_period + SW_AGEDT)
+                                && millis()-start_t > countdown_period + SW_CD_AGEDT)
         setSWEngineState (SWE_RESET, 0);
 
     // always check alarm clock regardless of display state
     if (alarm_state == ALMS_ARMED && checkAlarm()) {
         // record time and indicate alarm has just gone off
-        alarm_ringtime = now();
+        alarm_ringtime = myNow();
         alarm_state = ALMS_RINGING;
         showAlarmRinging();
     }
     if (alarm_state == ALMS_RINGING) {
-        if (alarmPinIsSet() || now() - alarm_ringtime >= ALM_RINGTO/1000) {
+        if (alarmSwitchIsTrue() || myNow() - alarm_ringtime >= ALM_RINGTO/1000) {
             // op hit the cancel pin or timed out
             alarm_state = ALMS_ARMED;
             if (sws_display == SWD_NONE)
@@ -2248,7 +2198,7 @@ bool setSWEngineState (SWEngineState new_sws, uint32_t ms)
 {
     switch (new_sws) {
     case SWE_RESET:
-        setLEDState (SWCDS_OFF);
+        setCDLEDState (SWCDS_OFF);
         if (sws_engine == SWE_RESET)
             return (true);                      // ignore if no change
         sws_engine = SWE_RESET;

@@ -1,37 +1,17 @@
-/*!
- * @file Adafruit_BME280.cpp
- *
- * @mainpage Adafruit BME280 humidity, temperature & pressure sensor
- *
- * @section intro_sec Introduction
- *
- *  Driver for the BME280 humidity, temperature & pressure sensor
- *
- * These sensors use I2C or SPI to communicate, 2 or 4 pins are required
- * to interface.
- *
- * Designed specifically to work with the Adafruit BME280 Breakout
- * ----> http://www.adafruit.com/products/2652
- *
- *  Adafruit invests time and resources providing this open source code,
- *  please support Adafruit and open-source hardware by purchasing
- *  products from Adafruit!
- *
- * @section author Author
- *
- * Written by Kevin "KTOWN" Townsend for Adafruit Industries.
- *
- * @section license License
- *
- * BSD license, all text here must be included in any redistribution.
- * See the LICENSE file for details.
- *
- */
+/* Adafruit's BME280 driver reworked to use our atomic Wire.
+ */ 
 
 #include "Adafruit_BME280.h"
 #include "Arduino.h"
 #include <SPI.h>
 #include <Wire.h>
+
+
+// dummies for SPI
+#define digitalRead(x) x
+#define digitalWrite(x,y) (void)x
+#define pinMode(x,y) (void)x
+
 
 /*!
  *  @brief  class constructor
@@ -229,10 +209,7 @@ uint8_t Adafruit_BME280::spixfer(uint8_t x) {
  */
 void Adafruit_BME280::write8(byte reg, byte value) {
   if (_cs == -1) {
-    _wire->beginTransmission((uint8_t)_i2caddr);
-    _wire->write((uint8_t)reg);
-    _wire->write((uint8_t)value);
-    _wire->endTransmission();
+    (void) _wire->write8 (_i2caddr, reg, value);
   } else {
     if (_sck == -1)
       _spi->beginTransaction(SPISettings(500000, MSBFIRST, SPI_MODE0));
@@ -254,11 +231,7 @@ uint8_t Adafruit_BME280::read8(byte reg) {
   uint8_t value;
 
   if (_cs == -1) {
-    _wire->beginTransmission((uint8_t)_i2caddr);
-    _wire->write((uint8_t)reg);
-    _wire->endTransmission();
-    _wire->requestFrom((uint8_t)_i2caddr, (byte)1);
-    value = _wire->read();
+    (void) _wire->read8 (_i2caddr, reg, value);
   } else {
     if (_sck == -1)
       _spi->beginTransaction(SPISettings(500000, MSBFIRST, SPI_MODE0));
@@ -281,11 +254,7 @@ uint16_t Adafruit_BME280::read16(byte reg) {
   uint16_t value;
 
   if (_cs == -1) {
-    _wire->beginTransmission((uint8_t)_i2caddr);
-    _wire->write((uint8_t)reg);
-    _wire->endTransmission();
-    _wire->requestFrom((uint8_t)_i2caddr, (byte)2);
-    value = (_wire->read() << 8) | _wire->read();
+    (void) _wire->read16 (_i2caddr, reg, value);
   } else {
     if (_sck == -1)
       _spi->beginTransaction(SPISettings(500000, MSBFIRST, SPI_MODE0));
@@ -315,7 +284,9 @@ uint16_t Adafruit_BME280::read16_LE(byte reg) {
  *   @param reg the register address to read from
  *   @returns the 16 bit data value read from the device
  */
-int16_t Adafruit_BME280::readS16(byte reg) { return (int16_t)read16(reg); }
+int16_t Adafruit_BME280::readS16(byte reg) {
+  return (int16_t)read16(reg);
+}
 
 /*!
  *   @brief  Reads a signed little endian 16 bit value over I2C or SPI
@@ -335,16 +306,7 @@ uint32_t Adafruit_BME280::read24(byte reg) {
   uint32_t value;
 
   if (_cs == -1) {
-    _wire->beginTransmission((uint8_t)_i2caddr);
-    _wire->write((uint8_t)reg);
-    _wire->endTransmission();
-    _wire->requestFrom((uint8_t)_i2caddr, (byte)3);
-
-    value = _wire->read();
-    value <<= 8;
-    value |= _wire->read();
-    value <<= 8;
-    value |= _wire->read();
+    (void) _wire->read24 (_i2caddr, reg, value);
   } else {
     if (_sck == -1)
       _spi->beginTransaction(SPISettings(500000, MSBFIRST, SPI_MODE0));

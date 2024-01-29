@@ -21,6 +21,15 @@ static float max_cpu_usage = DEF_CPU_USAGE;
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
 
+// list of diagnostic files, newest first
+const char *diag_files[N_DIAG_FILES] = {
+    "diagnostic-log.txt",
+    "diagnostic-log-0.txt",
+    "diagnostic-log-1.txt",
+    "diagnostic-log-2.txt"
+};
+
+
 // how we were made
 #if defined(_USE_FB0)
   #if defined(_CLOCK_1600x960)
@@ -61,8 +70,9 @@ std::string our_dir;            // our storage directory, including trailing /
  */
 uint32_t millis(void)
 {
-    #if defined(CLOCK_MONOTONIC_FAST)
+    #if defined(CLOCK_MONOTONIC_FAST_XXXX)
         // this is only on FreeBSD but is fully 200x faster than gettimeofday or CLOCK_MONOTONIC
+        // as of 14-RELEASE now this one is slow -- use normal gettimeofday
 	static struct timespec t0;
 	struct timespec t;
 	clock_gettime (CLOCK_MONOTONIC_FAST, &t);
@@ -114,13 +124,12 @@ static void mvLog (const char *from, const char *to)
  */
 static void makeDiagFile()
 {
-        // save previous few
-        mvLog ("diagnostic-log-1.txt", "diagnostic-log-2.txt"); 
-        mvLog ("diagnostic-log-0.txt", "diagnostic-log-1.txt"); 
-        mvLog ("diagnostic-log.txt",   "diagnostic-log-0.txt"); 
+        // roll previous few
+        for (int i = N_DIAG_FILES-1; i > 0; --i)
+            mvLog (diag_files[i-1], diag_files[i]);
 
         // reopen stdout as new log
-        std::string new_log = our_dir + "diagnostic-log.txt";
+        std::string new_log = our_dir + diag_files[0];
         const char *new_log_fn = new_log.c_str();
         int logfd = open (new_log_fn, O_WRONLY|O_CREAT, 0664);
         if (logfd < 0 || ::dup2(logfd, 1) < 0 || ::dup2(logfd, 2) < 0) {
@@ -226,11 +235,28 @@ static void setUsrDateTime (const char *iso8601)
         usr_datetime = mktime (&tms);
 }
 
+/* log easy OS info
+ */
+static void logOS()
+{
+        const char osf[] = "/etc/os-release";
+        FILE *fp = fopen (osf, "r");
+        if (fp) {
+            char line[100];
+            printf ("%s:\n", osf);
+            while (fgets (line, sizeof(line), fp))
+                printf ("    %s", line);        // line already includes \n
+            fclose(fp);
+        }
+
+        (void) system ("uname -a");
+}
+
 /* show version info
  */
 static void showVersion()
 {
-        fprintf (stderr, "Version %s\n", HC_VERSION);
+        fprintf (stderr, "Version %s\n", hc_version);
         fprintf (stderr, "built as %s\n", our_make);
 }
 
@@ -255,22 +281,24 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, "Usage: %s [options]\n", me);
         fprintf (stderr, "Options:\n");
         fprintf (stderr, " -a l : set gimbal trace level\n");
-        fprintf (stderr, " -b h : set backend host to h; default is %s\n", backend_host);
+        fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,backend_port);
         fprintf (stderr, " -c   : disable all touch events from web interface\n");
         fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", restful_port);
+        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", RESTFUL_PORT);
+
         fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
         fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
-        fprintf (stderr, " -h   : print this help summary\n");
+        fprintf (stderr, " -h   : print this help summary then exit\n");
         fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
-        fprintf (stderr, " -k   : don't offer Setup or wait for Skips\n");
-        fprintf (stderr, " -l l : set Mercator center longitude to l degrees, +E; requires -k\n");
+        fprintf (stderr, " -k   : start immediately in normal mode, ie, don't offer Setup or wait for Skips\n");
+        fprintf (stderr, " -l l : set Mercator or Mollweide center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
         fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
-        fprintf (stderr, " -v   : show version info and exit\n");
-        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n", liveweb_port);
+        fprintf (stderr, " -v   : show version info then exit\n");
+        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",LIVEWEB_PORT);
+        fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
 
         exit(1);
 }
@@ -295,11 +323,20 @@ static void crackArgs (int ac, char *av[])
                     gimbal_trace_level = atoi(*++av);
                     ac--;
                     break;
-                case 'b':
-                    if (ac < 2)
-                        usage ("missing host name for -b");
-                    backend_host = *++av;
-                    ac--;
+                case 'b': {
+                        if (ac < 2)
+                            usage ("missing host name for -b");
+                        char *bh = strdup(*++av);           // copy so we don't modify av[]
+                        backend_host = bh;
+                        char *colon = strchr (bh, ':');
+                        if (colon) {
+                            *colon = '\0';
+                            backend_port = atoi(colon+1);
+                            if (backend_port < 1 || backend_port > 65535)
+                                usage ("-b port must be [1,65355]");
+                        }
+                        ac--;
+                    }
                     break;
                 case 'c':
                     no_web_touch = true;
@@ -314,8 +351,8 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing RESTful port number for -e");
                     restful_port = atoi(*++av);
-                    if (restful_port > 65535)
-                        usage ("-e port must be <= 65535");
+                    if (restful_port != -1 && (restful_port < 1 || restful_port > 65535))
+                        usage ("-e port must be -1 or [1,65355]");
                     ac--;
                     break;
                 case 'f':
@@ -323,9 +360,9 @@ static void crackArgs (int ac, char *av[])
                         usage ("missing arg for -f");
                     } else {
                         char *oo = *++av;
-                        if (strcmp (oo, "on") == 0)
+                        if (strcmp (oo, "on") == 0 || strcmp (oo, "yes") == 0)
                             full_screen = true;
-                        else if (strcmp (oo, "off") == 0)
+                        else if (strcmp (oo, "off") == 0 || strcmp (oo, "no") == 0)
                             full_screen = false;
                         else
                             usage ("-f requires on or off");
@@ -384,12 +421,15 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing web port number for -w");
                     liveweb_port = atoi(*++av);
-                    if (liveweb_port > 65535)
-                        usage ("-w port must be <= 65535");
+                    if (liveweb_port != -1 && (liveweb_port < 1 || liveweb_port > 65535))
+                        usage ("-w port must be -1 or [1,65535");
                     ac--;
                     break;
                 case 'x':
                     usage ("-x is no longer supported -- replaced with direct web \"make\" targets");
+                    break;
+                case 'y':
+                    want_kbcursor = true;
                     break;
                 default:
                     usage ("unknown option: %c", *s);
@@ -448,6 +488,9 @@ int main (int ac, char *av[])
         printf ("built as %s\n", our_make);
         printf ("working directory is %s\n", our_dir.c_str());
         printf ("ruid %d euid %d\n", getuid(), geteuid());
+
+        // log os release, if available
+        logOS();
 
 	// call Arduino setup one time
         printf ("Calling Arduino setup()\n");

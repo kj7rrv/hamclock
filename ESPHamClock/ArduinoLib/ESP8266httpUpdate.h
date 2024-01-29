@@ -24,7 +24,7 @@ class ESPhttpUpdate
         void prError (const char *fmt, ...);
 
         // rolling list of several malloced lines
-        #define MAXERRLINES 10
+        #define MAXERRLINES 20
         int err_lines_head;                     // index of next == oldest
         char *err_lines_q[MAXERRLINES];
 

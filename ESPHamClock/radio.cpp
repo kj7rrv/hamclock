@@ -97,21 +97,21 @@ static void sendXMLRPCCmd (WiFiClient &client, const char cmd[], const char valu
 
     // copy each to mem
     StackMalloc hdr_fmt_mem(sizeof(hdr_fmt));
-    strcpy_P (hdr_fmt_mem.getMem(), hdr_fmt);
+    strcpy_P ((char *) hdr_fmt_mem.getMem(), hdr_fmt);
     StackMalloc body_fmt_mem(sizeof(body_fmt));
-    strcpy_P (body_fmt_mem.getMem(), body_fmt);
+    strcpy_P ((char *) body_fmt_mem.getMem(), body_fmt);
 
     // format body
     #define _BODY_SIZ (sizeof(body_fmt)+150)       // guard with %.Xs in body_fmt[]
     StackMalloc body_mem(_BODY_SIZ);
-    char *body_buf = body_mem.getMem();
-    int body_l = snprintf (body_buf, _BODY_SIZ, body_fmt_mem.getMem(), cmd, type, value, type);
+    char *body_buf = (char *) body_mem.getMem();
+    int body_l = snprintf (body_buf, _BODY_SIZ, (const char *) body_fmt_mem.getMem(), cmd, type, value, type);
 
     // format complete message
     #define _MSG_SIZ (sizeof(hdr_fmt)+20+body_l)
     StackMalloc msg_mem(_MSG_SIZ);
-    char *msg_buf = msg_mem.getMem();
-    snprintf (msg_buf, _MSG_SIZ, hdr_fmt_mem.getMem(), body_l, body_buf);
+    char *msg_buf = (char *) msg_mem.getMem();
+    snprintf (msg_buf, _MSG_SIZ, (char *) hdr_fmt_mem.getMem(), body_l, body_buf);
 
     // send
     Serial.printf (_FX("FLRIG: %s %s %s\n"), cmd, value, type);
@@ -174,7 +174,7 @@ static char cleanup_cmds[] = ";SB0;FR0;FT0;RT0;XT0;RC;";
 static char setfreq_fmt[] = ";FA%011.0f;";
 
 
-#if defined(_GPIO_ESP)
+#if defined(_NATIVE_GPIO_ESP)
 
 
 /**********************************************************************************
@@ -196,7 +196,7 @@ static char setfreq_fmt[] = ";FA%011.0f;";
 static void sendOneBit (uint8_t hi)
 {
     uint32_t t0 = ESP.getCycleCount();
-    digitalWrite (Elecraft_GPIO, !hi);
+    digitalWrite (Elecraft_PIN, !hi);
     uint32_t bit_time = ESP.getCpuFreqMHz()*1000000UL/getKX3Baud();
     while (ESP.getCycleCount()-t0 < bit_time)
         continue;
@@ -206,7 +206,7 @@ static void sendOneBit (uint8_t hi)
  */
 static void prepIO()
 {
-    pinMode(Elecraft_GPIO, OUTPUT);
+    pinMode(Elecraft_PIN, OUTPUT);
     sendOneBit (1);
 }
 
@@ -269,7 +269,10 @@ void setRadioSpot (float kHz)
     sendOneMessage (buf);
 }
 
-#elif defined(_SUPPORT_GPIO)
+
+
+
+#elif defined(_NATIVE_GPIO_FREEBSD) || defined(_NATIVE_GPIO_LINUX)
 
 
 
@@ -289,7 +292,6 @@ void setRadioSpot (float kHz)
 
 
 #include <time.h>
-#include "GPIO.h"
 
 /* return our gpio pins to quiescent state
  */
@@ -297,10 +299,7 @@ void radioResetIO()
 {
     if (!GPIOOk())
         return;
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return;
-    gpio.setAsInput(Elecraft_GPIO);
+    mcp.pinMode (MCP_FAKE_KX3, INPUT);
 }
 
 /* send one bit @ getKX3Baud(), bit time multiplied by correction factor.
@@ -317,12 +316,11 @@ static void sendOneBit (int hi, float correction)
     clock_gettime (CLOCK_MONOTONIC, &t0);
 
     // set bit (remember: Elecraft wants inverted mark/sense)
-    GPIO& gpio = GPIO::getGPIO();
-    gpio.setHiLo (Elecraft_GPIO, !hi);
+    mcp.digitalWrite (MCP_FAKE_KX3, !hi);
 
     // wait for one bit duration with modified correction including nominal correction
     uint32_t baud = getKX3Baud();
-    float overhead = 1.0F - 0.08F*baud/38400;          // measured on pi 4
+    float overhead = 1.0F - 0.04F*baud/38400;          // measured on pi 4
     unsigned long bit_ns = 1000000000UL/baud*overhead*correction;
     unsigned long dt_ns;
     do {
@@ -336,8 +334,7 @@ static void sendOneBit (int hi, float correction)
 static void prepIO()
 {
     // init Elecraft pin
-    GPIO& gpio = GPIO::getGPIO();
-    gpio.setAsOutput(Elecraft_GPIO);
+    mcp.pinMode (MCP_FAKE_KX3, OUTPUT);
     sendOneBit (1, 1.0F);
 }
 
@@ -357,7 +354,7 @@ static uint32_t sendOneString (float correction, const char str[])
     hi_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
     bool hipri_ok = sched_setscheduler (0, SCHED_FIFO, &hi_param) == 0;
     if (!hipri_ok)
-        printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
+        Serial.printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
 
     // get starting time
     struct timespec t0, t1;
@@ -409,7 +406,7 @@ static void sendOneMessage (const char cmd[])
         ns1 = sendOneString (correction, cmd);
     }
 
-    printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
+    Serial.printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
 
 }
 
@@ -444,18 +441,25 @@ void setRadioSpot (float kHz)
     sendOneMessage (buf);
 }
 
-#endif // _SUPPORT_GPIO
+#endif // _NATIVE_GPIO_FREEBSD || _NATIVE_GPIO_LINUX
+
+
 
 #else  // !_SUPPORT_KX3
 
 
-/* same for system without any gpio
+
+/* for systems without any gpio
  */
 void setRadioSpot (float kHz)
 {
     // always try rigctld and flrig
     setRigctldFreq (kHz);
     setFlrigFreq (kHz);
+}
+
+void radioResetIO(void)
+{
 }
 
 #endif // _SUPPORT_KX3

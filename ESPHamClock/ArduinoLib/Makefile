@@ -8,6 +8,8 @@ CXX = g++
 
 OBJS = \
 	Adafruit_BME280.o \
+	Adafruit_LTR329_LTR303.o \
+	Adafruit_MCP23X17.o \
 	Adafruit_RA8875.o \
 	Arduino.o \
 	CourierPrimeSans6.o \
@@ -16,7 +18,6 @@ OBJS = \
 	ESP.o \
 	ESP8266WiFi.o \
 	ESP8266httpUpdate.o \
-        GPIO.o \
         LittleFS.o \
 	Serial.o \
         SPI.o \
@@ -24,7 +25,8 @@ OBJS = \
 	WiFiClient.o \
 	WiFiServer.o \
 	WiFiUdp.o \
-        Wire.o
+        Wire.o \
+	i2cdriver.o
 
 default:
 	@echo "This Makefile is not intended for stand-alone use -- use only from HamClock's main Makefile"

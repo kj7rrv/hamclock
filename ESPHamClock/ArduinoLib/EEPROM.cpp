@@ -18,13 +18,15 @@
 
 class EEPROM EEPROM;
 
+static bool verbose;
+
 EEPROM::EEPROM()
 {
         fp = NULL;
         filename = NULL;
 }
 
-void EEPROM::begin (int s)
+const char *EEPROM::getFilename(void)
 {
         // establish file name
 	if (!filename) {
@@ -40,6 +42,14 @@ void EEPROM::begin (int s)
 	    filename = strdup (newfn.c_str());
 	}
 
+        return (filename);
+}
+
+void EEPROM::begin (int s)
+{
+        // establish filename
+        filename = getFilename();
+
         // start over if called again
         if (fp) {
             fclose(fp);
@@ -53,22 +63,26 @@ void EEPROM::begin (int s)
         // open RW, create if new owned by real user
 	fp = fopen (filename, "r+");
         if (fp) {
-            printf ("EEPROM %s: open ok\n", filename);
+            if (verbose)
+                printf ("EEPROM %s: open ok\n", filename);
         } else {
             fp = fopen (filename, "w+");
-            if (fp)
-                printf ("EEPROM %s: create ok\n", filename);
-            else {
-                fatalError ("EEPROM %s:\ncreate failed:\n%s\n", filename, strerror(errno));
-                // never returns
+            if (fp) {
+                if (verbose)
+                    printf ("EEPROM %s: create ok\n", filename);
+            } else {
+                fprintf (stderr, "%s: %s\n", filename, strerror(errno));
+                exit(1);
             }
         }
         (void) !fchown (fileno(fp), getuid(), getgid());
 
         // check lock
-        if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0)
-            fatalError ("Another instance of HamClock has been detected.\n"
+        if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0) {
+            fprintf (stderr, "Another instance of HamClock has been detected.\n"
                         "Only one at a time is allowed or use -d, -e and -w to make each unique.\n");
+            exit(1);
+        }
 
         // malloc memory, init as zeros
         n_data_array = s;
@@ -78,7 +92,6 @@ void EEPROM::begin (int s)
 	char line[64];
 	unsigned int a, b;
 	while (fp && fgets (line, sizeof(line), fp)) {
-	    // sscanf (line, "%x %x", &a, &b); printf ("R: %08X %02X\n", a, b);
 	    if (sscanf (line, "%x %x", &a, &b) == 2 && a < n_data_array)
                 data_array[a] = b;
         }

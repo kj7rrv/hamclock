@@ -46,6 +46,7 @@ int gimbal_trace_level = 1;
 #define ELSTEP          5                               // small el manual step size
 #define ELSTEP2         10                              // large el manual step size
 #define ERR_DWELL       5000                            // error message display period, ms
+#define BEAM_W          15                              // angular width of map beam
 
 // possible axis states
 typedef enum {
@@ -181,7 +182,7 @@ static bool askHamlib (const char *cmd, char rsp[], size_t rsp_len)
     uint16_t ll;
     while (!found_RPRT && rsp_n < rsp_len && getTCPLine (hamlib_client, rsp+rsp_n, rsp_len-rsp_n, &ll)) {
         GIMBAL_TRACE (2, (_FX("GBL: reply %s\n"), rsp+rsp_n));
-        if (sscanf (rsp+rsp_n, "RPRT %d", &RPRT) == 1)
+        if (sscanf (rsp+rsp_n, _FX("RPRT %d"), &RPRT) == 1)
             found_RPRT = true;
         rsp_n += ll;
     }
@@ -214,7 +215,7 @@ static bool getAzEl(const SBox &box)
 
     // crack
     float new_az, new_el;
-    if (!findHamlibRspValue (rsp, "Azimuth", &new_az) || !findHamlibRspValue (rsp, "Elevation", &new_el)) {
+    if (!findHamlibRspValue (rsp, _FX("Azimuth"), &new_az) || !findHamlibRspValue (rsp, _FX("Elevation"), &new_el)) {
         Serial.printf (_FX("GBL: no az or el from get_pos: %s\n"), rsp);
         plotMessage (box, RA8875_RED, _FX("unexpected get_pos response"));
         wdDelay (ERR_DWELL);
@@ -266,15 +267,15 @@ static bool getAzEl(const SBox &box)
 static void getAzElAux()
 {
     StackMalloc rsp_mem(2000);
-    char *rsp = rsp_mem.getMem();
+    char *rsp = (char *) rsp_mem.getMem();
 
     if (!askHamlib (_FX("+\\dump_caps\n"), rsp, rsp_mem.getSize()))
         return;
 
-    (void) findHamlibRspValue (rsp, "Min Azimuth", &az_min);
-    (void) findHamlibRspValue (rsp, "Max Azimuth", &az_max);
-    (void) findHamlibRspValue (rsp, "Min Elevation", &el_min);
-    (void) findHamlibRspValue (rsp, "Max Elevation", &el_max);
+    (void) findHamlibRspValue (rsp, _FX("Min Azimuth"), &az_min);
+    (void) findHamlibRspValue (rsp, _FX("Max Azimuth"), &az_max);
+    (void) findHamlibRspValue (rsp, _FX("Min Elevation"), &el_min);
+    (void) findHamlibRspValue (rsp, _FX("Max Elevation"), &el_max);
 
     if (el_max == 0)
         el_state = ELS_NONE;
@@ -293,7 +294,7 @@ static bool setAzEl()
 
     snprintf (cmd, sizeof(cmd), _FX("+\\set_pos %g %g\n"), az_target, el_target);
     if (!askHamlib (cmd, rsp, sizeof(rsp))) {
-        Serial.printf ("GBL: %s\n", rsp);
+        Serial.printf (_FX("GBL: %s\n"), rsp);
         return (false);
     }
 
@@ -341,11 +342,11 @@ static bool connectHamlib (const SBox &box)
 
     // get model if possible
     if (!askHamlib (_FX("+\\get_info\n"), buf, sizeof(buf)))
-        strcpy (buf, "Unknown");
+        strcpy (buf, _FX("Unknown"));
     char *name;
-    if (!findHamlibRspKey (buf, "Info", &name)) 
+    if (!findHamlibRspKey (buf, _FX("Info"), &name)) 
         name = (char*) "Unknown";
-    snprintf (title, sizeof(title), "%.*s", (int)(sizeof(title)-1), name);
+    snprintf (title, sizeof(title), _FX("%.*s"), (int)(sizeof(title)-1), name);
 
     // init target to current position
     if (!getAzEl(box)) {
@@ -462,16 +463,16 @@ static void drawAxisInfo (const SBox &box, float target_value, float value_now, 
     if (y0 == AZ_Y) {
         uint16_t s_y = y0 + CHAR_H/2 + 2;
         tft.drawCircle (s_x, s_y, s_r, GRAY);
-        uint16_t l_dx = s_r*sinf(deg2rad(value_now));
-        uint16_t l_dy = s_r*cosf(deg2rad(value_now));
+        int16_t l_dx = s_r*sinf(deg2rad(value_now));
+        int16_t l_dy = s_r*cosf(deg2rad(value_now));
         tft.drawLine (s_x, s_y, s_x+l_dx, s_y-l_dy, 1, state_color);
     } else if (y0 == EL_Y) {
         uint16_t s_y = y0 + 3*CHAR_H/4;
         tft.drawCircle (s_x, s_y, s_r, GRAY);
         tft.drawLine (s_x-s_r, s_y, s_x+s_r, s_y, GRAY);
         tft.fillRect (s_x-s_r, s_y+1, 2*s_r+1, s_r, RA8875_BLACK);
-        uint16_t l_dx = s_r*cosf(deg2rad(value_now));
-        uint16_t l_dy = s_r*sinf(deg2rad(value_now));
+        int16_t l_dx = s_r*cosf(deg2rad(value_now));
+        int16_t l_dy = s_r*sinf(deg2rad(value_now));
         tft.drawLine (s_x, s_y, s_x+l_dx, s_y-l_dy, 1, state_color);
     }
 
@@ -546,7 +547,7 @@ static bool elNowChanged()
 /* draw current state of gimbal in box.
  * N.B. we assume initGimbalGUI() has already been called.
  */
-static void updateGUI(const SBox &box)
+static void updateGimbalGUI(const SBox &box)
 {
     // find az state description
     uint16_t color = 0;
@@ -621,6 +622,33 @@ static void updateGUI(const SBox &box)
     drawUpOver();
 }
 
+/* draw a beam on the main map along az_now; not on ESP
+ */
+static void drawGimbalBeam()
+{
+#if defined(_IS_UNIX)
+
+    // draw an expanding set if wavefronts in direection of az_now
+
+    float ca, B;
+    uint16_t col = getMapColor (ROTATOR_CSPR);
+    float wave_step = deg2rad (4.0F/tft.SCALESZ);               // show wave front lines
+    float az_0 = el_state != ELS_NONE && el_now > 90 ? az_now + 180 : az_now; // account for up over
+    for (float b = 0; b < M_PIF; b += wave_step) {              // show only forward direction
+        SCoord s1, s2 = {0, 0};
+        for (int i = 0; i <= BEAM_W; i++) {
+            float beam_az = az_0 + (i-BEAM_W/2.0F);
+            solveSphere (deg2rad(beam_az), b, sdelat, cdelat, &ca, &B);
+            ll2sRaw (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s1, 1);
+            if (s2.x != 0 && segmentSpanOkRaw (s1, s2, 1))
+                tft.drawLineRaw (s1.x, s1.y, s2.x, s2.y, 1, col);
+            s2 = s1;
+        }
+    }
+
+#endif // _IS_UNIX
+}
+
 static void drawArrow (const SBox &b, ArrowDir d)
 {
     uint16_t x_c = b.x + b.w/2;         // x center
@@ -655,8 +683,8 @@ static void drawArrow (const SBox &b, ArrowDir d)
  */
 static void initUpOver()
 {
-    #define SAT_EL_RSERR  0.2F                  // approx el gap due to err in predicted rise/set times
-    float az, el, range, rate, riseaz, setaz;
+    // approx el gap due to err in predicted rise/set times
+    #define SAT_EL_RSERR  0.2F 
 
     // assume no
     sat_upover = false;
@@ -665,26 +693,29 @@ static void initUpOver()
     if (el_state == ELS_NONE || el_max <= 90)
         return;
 
-    if (getSatAzElNow (NULL, &az, &el, &range, &rate, &riseaz, &setaz, NULL, NULL) && riseaz != SAT_NOAZ) {
-        if (el < SAT_MIN_EL - SAT_EL_RSERR) {
+    SatNow satnow;
+    if (getSatNow (satnow) && satnow.raz != SAT_NOAZ) {
+        if (satnow.el < SAT_MIN_EL - SAT_EL_RSERR) {
 
             // sat not up so determine upover using next rise/set locations
-            sat_upover = setaz == SAT_NOAZ ? false : passesThruEOT (riseaz, setaz, isSatMoon());
+            sat_upover = satnow.saz == SAT_NOAZ ? false : passesThruEOT (satnow.raz, satnow.saz, isSatMoon());
             upover_pending = false;
-            GIMBAL_TRACE (1, (_FX("GBL: UPOVER %d el %g rise %g set %g\n"), sat_upover, el, riseaz, setaz));
+            GIMBAL_TRACE (1, (_FX("GBL: UPOVER %d el %g raz %g saz %g\n"), sat_upover, satnow.el, satnow.raz,
+                                                                                        satnow.saz));
 
-        } else if (el < SAT_MIN_EL + SAT_EL_RSERR) {
+        } else if (satnow.el < SAT_MIN_EL + SAT_EL_RSERR) {
 
             // defer until out of abiguous range
             upover_pending = true;
-            GIMBAL_TRACE (1, (_FX("GBL: UPOVER pending el %g\n"), el));
+            GIMBAL_TRACE (1, (_FX("GBL: UPOVER pending el %g\n"), satnow.el));
 
         } else {
 
-            // sat is up now so determine upover using az now and set locations for remainder of pass
-            sat_upover = setaz == SAT_NOAZ ? false : passesThruEOT (az, setaz, isSatMoon());
+            // sat is up now so determine upover using az now and set az at end of pass
+            sat_upover = satnow.saz == SAT_NOAZ ? false : passesThruEOT (satnow.az, satnow.saz, isSatMoon());
             upover_pending = false;
-            GIMBAL_TRACE (1, (_FX("GBL: UPOVER %d el %g az %g set %g\n"), sat_upover, el, az, setaz));
+            GIMBAL_TRACE (1, (_FX("GBL: UPOVER %d el %g az %g saz %g\n"), sat_upover, satnow.el, satnow.az,
+                                                                                        satnow.saz));
         }
     }
 }
@@ -801,7 +832,7 @@ static void initGimbalGUI(const SBox &box)
     drawStopButton(user_stop);
     drawTrackButton(true, NULL);
 
-    // insure all previous values appear invalid so updateGUI will draw them
+    // insure all previous values appear invalid so updateGimbalGUI will draw them
     pgaz_target = 999;
     pgel_target = 999;
     pgaz_now = 999;
@@ -809,6 +840,37 @@ static void initGimbalGUI(const SBox &box)
     pgaz_state = AZS_UNKNOWN;
     pgel_state = ELS_UNKNOWN;
 }
+
+static void toggleAutoTrack(void)
+{
+    auto_track = !auto_track;
+    if (auto_track) {
+        Serial.println (F("GBL: track on"));
+        // this is the only command that automatically turns off Stop
+        if (user_stop)
+            user_stop = false;
+        initUpOver();
+        setAzEl();  // "unstop"
+    } else {
+        // always Stop when turning off Auto
+        Serial.println (F("GBL: track off"));
+        user_stop = true;
+        stopGimbalNow();
+    }
+}
+
+static void toggleStop(void)
+{
+    user_stop = !user_stop;
+    if (user_stop) {
+        Serial.println (F("GBL: stop on"));
+        stopGimbalNow();
+    } else {
+        Serial.println (F("GBL: stop off"));
+        setAzEl();  // "unstop"
+    }
+}
+
 
 /* call any time to stop all motion immediately.
  * safe to call under any circumstances.
@@ -818,7 +880,7 @@ void stopGimbalNow()
     if (connectionOk()) {
         char buf[100];
         if (!askHamlib (_FX("+\\stop\n"), buf, sizeof(buf)))
-            Serial.printf ("GBL: %s\n", buf);
+            Serial.printf (_FX("GBL: %s\n"), buf);
     }
 
     az_target = az_now;
@@ -850,7 +912,10 @@ bool haveGimbal()
  */
 void updateGimbal (const SBox &box)
 {
-    // not crazy often
+    // draw beam every time
+    drawGimbalBeam();
+
+    // other stuff not crazy often
     static uint32_t prev_ms;
     if (!timesUp(&prev_ms, UPDATE_MS))
         return;
@@ -877,15 +942,15 @@ void updateGimbal (const SBox &box)
         if (el_state != ELS_NONE) {
 
             // try getting sat location
-            float az, el, range, rate, riseaz, setaz;
-            if (getSatAzElNow (NULL, &az, &el, &range, &rate, &riseaz, &setaz, NULL, NULL)) {
+            SatNow satnow;
+            if (getSatNow (satnow)) {
 
                 // sat is defined but we also require current time
                 if (!goodTime()) {
 
                     auto_track = false;
                     stopGimbalNow();
-                    drawTrackButton(false, "Not UTC");
+                    drawTrackButton(false, _FX("Not UTC"));
 
                 } else {
 
@@ -897,32 +962,32 @@ void updateGimbal (const SBox &box)
                     if (!upover_pending) {
 
                         // decide how to track
-                        if (el < SAT_MIN_EL && riseaz == SAT_NOAZ) {
+                        if (satnow.el < SAT_MIN_EL && satnow.raz == SAT_NOAZ) {
                             // down now and doesn't rise
                             stopGimbalNow();
-                            drawTrackButton(false, "No Rise");
+                            drawTrackButton(false, _FX("No Rise"));
                             return;
                         }
 
-                        if (el < SAT_MIN_EL) {
+                        if (satnow.el < SAT_MIN_EL) {
                             // sat not up yet so sit on horizon at its rise az
                             if (sat_upover) {
-                                az_target = fmodf (riseaz + 180 + 360, 360);
+                                az_target = fmodf (satnow.raz + 180 + 360, 360);
                                 el_target = 180;
                             } else {
-                                az_target = riseaz;
+                                az_target = satnow.raz;
                                 el_target = 0;
                             }
 
                         } else if (sat_upover) {
                             // avoid wrap by running upside down
-                            az_target = fmodf (az + 180 + 360, 360);
-                            el_target = 180 - el;
+                            az_target = fmodf (satnow.az + 180 + 360, 360);
+                            el_target = 180 - satnow.el;
 
                         } else {
                             // no mods required
-                            az_target = az;
-                            el_target = el;
+                            az_target = satnow.az;
+                            el_target = satnow.el;
                         }
 
                         // az came in 0..360, fix into gimbal coords if necessary
@@ -950,13 +1015,15 @@ void updateGimbal (const SBox &box)
             float dist, bear;
             propDEPath (false, dx_ll, &dist, &bear);
             az_target = rad2deg(bear);
+            if (el_state != ELS_NONE && el_now > 90)
+                az_target = fmodf (az_target + 180 + 720, 360);
         }
 
     } // else move to location commanded from GUI
 
     if (!user_stop && (azTargetChanged() || elTargetChanged()))
         setAzEl();
-    updateGUI(box);
+    updateGimbalGUI(box);
 }
 
 /* handle a touch in our pane.
@@ -986,29 +1053,9 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
 
     // check manual controls
     if (inBox (s, stop_b)) {
-        user_stop = !user_stop;
-        if (user_stop) {
-            Serial.println (F("GBL: stop on"));
-            stopGimbalNow();
-        } else {
-            Serial.println (F("GBL: stop off"));
-            setAzEl();  // "unstop"
-        }
+        toggleStop();
     } else if (inBox (s, auto_b)) {
-        auto_track = !auto_track;
-        if (auto_track) {
-            Serial.println (F("GBL: track on"));
-            // this is the only command that automatically turns off Stop
-            if (user_stop)
-                user_stop = false;
-            initUpOver();
-            setAzEl();  // "unstop"
-        } else {
-            // always Stop when turning off Auto
-            Serial.println (F("GBL: track off"));
-            user_stop = true;
-            stopGimbalNow();
-        }
+        toggleAutoTrack();
     } else if (inBox (s, azccw_b)) {
         az_target = (auto_track ? az_now : az_target) - AZSTEP;
         az_target -= fmodf (az_target, AZSTEP);
@@ -1083,19 +1130,78 @@ bool checkGimbalTouch (const SCoord &s, const SBox &box)
     return (true);
 }
 
-/* get gimbal state: whether pane is showing, has el axis, is tracking and pos
+/* get gimbal state: whether pane is showing, has el axis, stopped and auto.
  * return whether configured at all
  */
-bool getGimbalState (bool &vis_now, bool &has_el, bool &tracking, float &az, float &el)
+bool getGimbalState (bool &conn, bool &vis_now, bool &has_el, bool &is_stop, bool &is_auto,
+float &az, float &el)
 {
-    if (!getRotctld (NULL, NULL))
+    if (!haveGimbal())
         return (false);
 
     vis_now = findPaneChoiceNow (PLOT_CH_GIMBAL) != PANE_NONE;
     has_el = el_state != ELS_NONE;
-    tracking = auto_track;
+    conn = connectionOk();
+    is_stop = user_stop;
+    is_auto = auto_track;
     az = az_now;
     el = el_now;
 
+    return (true);
+}
+
+/* external rotator command using the given strings.
+ * state=[un]stop|[un]auto
+ * return true else false with brief reason ynot.
+ */
+bool commandRotator (const char *new_state, const char *new_az, const char *new_el, char ynot[])
+{
+    if (!haveGimbal()) {
+        strcpy (ynot, _FX("Rotator not enabled"));
+        return (false);
+    }
+    if (!connectionOk()) {
+        strcpy (ynot, _FX("Rotator not connected"));
+        return (false);
+    }
+
+    if (new_state) {
+        if (strcmp (new_state, _FX("auto")) == 0) {
+            if (!auto_track)
+                toggleAutoTrack();
+        } else if (strcmp (new_state, _FX("unauto")) == 0) {
+            if (auto_track)
+                toggleAutoTrack();
+        } else if (strcmp (new_state, _FX("stop")) == 0) {
+            if (!user_stop)
+                toggleStop();
+        } else if (strcmp (new_state, _FX("unstop")) == 0) {
+            if (user_stop)
+                toggleStop();
+        } else {
+            strcpy (ynot, _FX("state must be stop, unstop, auto or unauto"));
+            return (false);
+        }
+    }
+
+    if (new_az) {
+        float cmd_az = atof (new_az);
+        if (cmd_az < az_min || cmd_az > az_max) {
+            snprintf (ynot, 100, _FX("az must be %g .. %g\n"), az_min, az_max);
+            return (false);
+        }
+        az_target = cmd_az;
+    }
+
+    if (new_el) {
+        float cmd_el = atof (new_el);
+        if (cmd_el < el_min || cmd_el > el_max) {
+            snprintf (ynot, 100, _FX("el must be %g .. %g\n"), el_min, el_max);
+            return (false);
+        }
+        el_target = cmd_el;
+    }
+
+    // ok!
     return (true);
 }

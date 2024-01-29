@@ -6,29 +6,6 @@
 
 static const char wx_base[] = "/wx.pl";
 
-/* convert wind direction in degs to name, return whether in range.
- */
-static bool windDeg2Name (float deg, char dirname[4])
-{
-    const char *name;
-
-    if (deg < 0)          name = _FX("?");
-    else if (deg < 22.5)  name = _FX("N");
-    else if (deg < 67.5)  name = _FX("NE");
-    else if (deg < 112.5) name = _FX("E");
-    else if (deg < 157.5) name = _FX("SE");
-    else if (deg < 202.5) name = _FX("S");
-    else if (deg < 247.5) name = _FX("SW");
-    else if (deg < 292.5) name = _FX("W");
-    else if (deg < 337.5) name = _FX("NW");
-    else if (deg <= 360)  name = _FX("N");
-    else                  name = _FX("?");
-
-    strcpy (dirname, name);
-
-    return (dirname[0] != '?');
-}
-
 
 /* display the given location weather in NCDXF_b or err.
  */
@@ -51,7 +28,7 @@ static void drawNCDXFBoxWx (BRB_MODE m, const WXInfo &wi, bool ok)
     }
 
     if (ok) {
-        float v = useMetricUnits() ? wi.temperature_c : 9*wi.temperature_c/5+32;        // C or F
+        float v = useMetricUnits() ? wi.temperature_c : CEN2FAH(wi.temperature_c);
         snprintf (values[0], sizeof(values[0]), _FX("%.1f"), v);
         snprintf (values[1], sizeof(values[1]), _FX("%.1f"), wi.humidity_percent);
         snprintf (values[2], sizeof(values[2]), _FX("%s"), wi.wind_dir_name);
@@ -60,7 +37,7 @@ static void drawNCDXFBoxWx (BRB_MODE m, const WXInfo &wi, bool ok)
     }
 
     // show it
-    drawNCDXFStats (titles, values, colors);
+    drawNCDXFStats (RA8875_BLACK, titles, values, colors);
 }
 
 /* look up current weather info for the given location.
@@ -68,6 +45,17 @@ static void drawNCDXFBoxWx (BRB_MODE m, const WXInfo &wi, bool ok)
  */
 bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
 {
+    // keep one of each de/dx cached
+    #define CACHE_DT (10*60)
+    static WXInfo wi_cached[2];
+    static LatLong ll_cached[2];
+    static time_t time_cached[2];
+    if (memcmp (&ll_cached[is_de], &ll, sizeof(ll)) == 0 && myNow() - time_cached[is_de] < CACHE_DT) {
+        *wip = wi_cached[is_de];
+        Serial.printf (_FX("WX: used cached %s value\n"), is_de ? "DE" : "DX");
+        return (true);
+    }
+
     WiFiClient wx_client;
     char line[100];
 
@@ -76,7 +64,7 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
     resetWatchdog();
 
     // get
-    if (wifiOk() && wx_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && wx_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -154,6 +142,11 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
         // ok!
         ok = true;
 
+        // keep for possible reuse
+        memcpy (&wi_cached[is_de], wip, sizeof(WXInfo));
+        ll_cached[is_de] = ll;
+        time_cached[is_de] = myNow();
+
     } else {
 
         strcpy (ynot, _FX("WX connection failed"));
@@ -166,7 +159,6 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
 out:
     wx_client.stop();
     resetWatchdog();
-    printFreeHeap (F("getCurrentWX"));
     return (ok);
 }
 
@@ -247,6 +239,30 @@ bool drawNCDXFWx (BRB_MODE m)
 
 static const char ww_page[] = "/worldwx/wx.txt";        // URL for world weather table
 
+
+/* convert wind direction in degs to name, return whether in range.
+ */
+static bool windDeg2Name (float deg, char dirname[4])
+{
+    const char *name;
+
+    if (deg < 0)          name = _FX("?");
+    else if (deg < 22.5)  name = _FX("N");
+    else if (deg < 67.5)  name = _FX("NE");
+    else if (deg < 112.5) name = _FX("E");
+    else if (deg < 157.5) name = _FX("SE");
+    else if (deg < 202.5) name = _FX("S");
+    else if (deg < 247.5) name = _FX("SW");
+    else if (deg < 292.5) name = _FX("W");
+    else if (deg < 337.5) name = _FX("NW");
+    else if (deg <= 360)  name = _FX("N");
+    else                  name = _FX("?");
+
+    strcpy (dirname, name);
+
+    return (dirname[0] != '?');
+}
+
 /* wwtable is a 2d table n_wwcols x n_wwrows.
  *   width:  columns are latitude [-90,90] in steps of 180/(n_wwcols-1).
  *   height: rows are longitude [-180..180) in steps of 360/n_wwrows.
@@ -279,7 +295,7 @@ bool getWorldWx (const LatLong &ll, WXInfo &wi)
         return (false);
     }
 
-    // return. TODO: interpolate??
+    // return.
     wi = wwtable[row_i*n_wwcols + col_i];
     return (true);
 }
@@ -297,7 +313,7 @@ void fetchWorldWx(void)
     n_wwrows = n_wwcols = 0;
 
     // get
-    if (wifiOk() && ww_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && ww_client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // query web page
@@ -313,7 +329,7 @@ void fetchWorldWx(void)
 
         // skip response header
         if (!httpSkipHeader (ww_client)) {
-            printf ("WWX: header timeout");
+            Serial.printf ("WWX: header timeout");
             goto out;
         }
 
@@ -347,19 +363,19 @@ void fetchWorldWx(void)
 
                 // confirm regular spacing
                 if (n_lngcols > 0 && lng != prev_lng) {
-                    printf ("WWX: irregular lng: %d x %d  lng %g != %g\n",
+                    Serial.printf ("WWX: irregular lng: %d x %d  lng %g != %g\n",
                                 n_wwrows, n_lngcols, lng, prev_lng);
                     goto out;
                 }
                 if (n_lngcols > 1 && lat != prev_lat + del_lat) {
-                    printf ("WWX: irregular lat: %d x %d    lat %g != %g + %g\n",
+                    Serial.printf ("WWX: irregular lat: %d x %d    lat %g != %g + %g\n",
                                 n_wwrows, n_lngcols,  lat, prev_lat, del_lat);
                     goto out;
                 }
 
                 // convert wind direction to name
                 if (!windDeg2Name (windir, wx.wind_dir_name)) {
-                    printf ("WWX: bogus wind direction: %g\n", windir);
+                    Serial.printf ("WWX: bogus wind direction: %g\n", windir);
                     goto out;
                 }
 
@@ -385,7 +401,7 @@ void fetchWorldWx(void)
                     // we know n cols after completing the first lng block, all remaining must equal this 
                     n_wwcols = n_lngcols;
                 } else if (n_lngcols != n_wwcols) {
-                    printf ("WWX: inconsistent columns %d != %d after %d rows\n",
+                    Serial.printf ("WWX: inconsistent columns %d != %d after %d rows\n",
                                                 n_lngcols, n_wwcols, n_wwrows);
                     goto out;
                 }
@@ -398,21 +414,21 @@ void fetchWorldWx(void)
 
             } else {
 
-                printf ("WWX: bogus line %d: %s\n", line_n, line);
+                Serial.printf ("WWX: bogus line %d: %s\n", line_n, line);
                 goto out;
             }
         }
 
         // final check
         if (n_wwrows != 360/del_lng || n_wwcols != 1 + 180/del_lat) {
-            printf ("WWX: incomplete table: rows %d != 360/%g   cols %d != 1 + 180/%g\n",
+            Serial.printf ("WWX: incomplete table: rows %d != 360/%g   cols %d != 1 + 180/%g\n",
                                         n_wwrows, del_lng,  n_wwcols, del_lat);
             goto out;
         }
 
         // yah!
         ok = true;
-        printf ("WWX: table %d lat x %d lng\n", n_wwcols, n_wwrows);
+        Serial.printf ("WWX: table %d lat x %d lng\n", n_wwcols, n_wwrows);
 
     out:
 
@@ -435,6 +451,10 @@ void fetchWorldWx(void)
  */
 bool getWorldWx (const LatLong &ll, WXInfo &wi)
 {
+    // lint
+    (void)ll;
+    (void)wi;
+
     return (false);
 }
 
