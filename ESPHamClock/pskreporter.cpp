@@ -440,12 +440,14 @@ bool updatePSKReporter (const SBox &box)
             // parse. N.B. match sscanf sizes with elements
             PSKReport new_r;
             memset (&new_r, 0, sizeof(new_r));
+            long posting_temp;
             if (sscanf (line, "%ld,%9[^,],%19[^,],%9[^,],%19[^,],%19[^,],%ld,%d",
-                            &new_r.posting, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
+                            &posting_temp, new_r.txgrid, new_r.txcall, new_r.rxgrid, new_r.rxcall,
                             new_r.mode, &new_r.Hz, &new_r.snr) != 8) {
                 Serial.printf (_FX("PSK: %s\n"), line);
                 goto out;
             }
+            new_r.posting = posting_temp;
 
             // RBN does not provide txgrid but it must be us -- TODO really?
             if (isrbn)

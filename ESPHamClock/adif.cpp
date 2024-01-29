@@ -6,8 +6,10 @@
 
 #include "HamClock.h"
 
-#define ADIF_COLOR      RGB565 (255,228,225)            // misty rose
+// #define _TRACE                                       // debug RBF
 
+
+#define ADIF_COLOR      RGB565 (255,228,225)            // misty rose
 
 #if defined(_IS_ESP8266)
 #define MAX_SPOTS         20                            // use less precious ESP mem
@@ -15,14 +17,9 @@
 #define MAX_SPOTS         1000                          // scroll is only wide enough for 3 digits
 #endif
 
-#define OK2SCDW    (top_vis<n_adif_spots-DXMAX_VIS)     // whether ok to scroll down (fwd in time)
-#define OK2SCUP    (top_vis > 0)                        // whether ok to scroll up (backward in time)
-
-
 bool from_set_adif;                                     // set when spots are loaded via RESTful set_adif
 static DXClusterSpot *adif_spots;                       // malloced list
-static int n_adif_spots;                                // n entries in adif_spots[]
-static int top_vis;                                     // adif_spots[] index showing at top of pane
+static ScrollState adif_ss = {DXMAX_VIS, 0, 0};         // scrolling controller
 
 typedef uint8_t crc_t;                                  // CRC data type
 static crc_t prev_crc;                                  // detect crc change from one file to the next
@@ -60,11 +57,13 @@ typedef struct {
 } ADIFParser;
 
 // YYYYMMDD HHMM[SS]
-static bool parseDT2UNIX (const char *date, const char *tim, time_t &unix)
+static bool parseDT2UNIX (const char *date, const char *tim, const char *call, time_t &unix)
 {
     int yr, mo, dd, hh, mm, ss = 0;
-    if (sscanf (date, _FX("%4d%2d%2d"), &yr, &mo, &dd) != 3 || sscanf (tim, _FX("%2d%2d%2d"), &hh, &mm, &ss) < 2)
+    if (sscanf (date, _FX("%4d%2d%2d"), &yr, &mo, &dd) != 3 || sscanf (tim, _FX("%2d%2d%2d"), &hh, &mm, &ss) < 2) {
+        Serial.printf (_FX("ADIF: bogus date %s time %s for %s\n"), date, tim, call);
         return (false);
+    }
 
     tmElements_t tm;
     tm.Year = yr - 1970;                                // 1970-based
@@ -164,17 +163,17 @@ static void quietStrncpy (char *to, char *from, int len)
  */
 static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
 {
-    if (strcasecmp (adif.name, _FX("OPERATOR")) == 0 || strcasecmp (adif.name, _FX("STATION_CALLSIGN")) == 0) {
+    if (!strcasecmp (adif.name, _FX("OPERATOR")) || !strcasecmp (adif.name, _FX("STATION_CALLSIGN"))) {
         quietStrncpy (spot.de_call, adif.value, sizeof(spot.de_call));
 
 
 
-    } else if (strcasecmp (adif.name, _FX("MY_GRIDSQUARE")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("MY_GRIDSQUARE"))) {
         quietStrncpy (spot.de_grid, adif.value, sizeof(spot.de_grid));
 
 
 
-    } else if (strcasecmp (adif.name, _FX("MY_LAT")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("MY_LAT"))) {
         float lat = 0;
         if (!parseADIFLocation (adif.value, lat) || lat < -M_PI_2F || lat > M_PI_2F) {
             Serial.printf (_FX("ADIF: bogus MY_LAT %s for %s\n"), adif.value, spot.dx_call);
@@ -193,7 +192,7 @@ static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
 
 
 
-    } else if (strcasecmp (adif.name, _FX("MY_LON")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("MY_LON"))) {
         float lon = 0;
         if (!parseADIFLocation (adif.value, lon) || lon < -M_PIF || lon > M_PIF) {
             Serial.printf (_FX("ADIF: bogus MY_LON %s for %s\n"), adif.value, spot.dx_call);
@@ -211,38 +210,36 @@ static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
         }
 
 
-    } else if (strcasecmp (adif.name, _FX("CALL")) == 0 || strcasecmp (adif.name, _FX("CONTACTED_OP")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("CALL")) || !strcasecmp (adif.name, _FX("CONTACTED_OP"))) {
         quietStrncpy (spot.dx_call, adif.value, sizeof(spot.dx_call));
 
 
 
-    } else if (strcasecmp (adif.name, _FX("QSO_DATE")) == 0) {
-        // crack if have both, else save for later
+    } else if (!strcasecmp (adif.name, _FX("QSO_DATE"))) {
+        // crack and reset if have both date and time, else save for later
         if (adif.date_or_time[0]) {
-            if (!parseDT2UNIX (adif.value, adif.date_or_time, spot.spotted)) {
-                Serial.printf (_FX("ADIF: bogus date %s time %s for %s\n"),
-                                adif.value, adif.date_or_time, spot.dx_call);
+            bool parse_ok = parseDT2UNIX (adif.value, adif.date_or_time, spot.dx_call, spot.spotted);
+            adif.date_or_time[0] = '\0';
+            if (!parse_ok)
                 return;
-            }
         } else
             quietStrncpy (adif.date_or_time, adif.value, sizeof(adif.date_or_time));
 
 
 
-    } else if (strcasecmp (adif.name, _FX("TIME_ON")) == 0) {
-        // crack if have both, else save for later
+    } else if (!strcasecmp (adif.name, _FX("TIME_ON"))) {
+        // crack and reset if have both date and time, else save for later
         if (adif.date_or_time[0]) {
-            if (!parseDT2UNIX (adif.date_or_time, adif.value, spot.spotted)) {
-                Serial.printf (_FX("ADIF: bogus date %s time %s for %s\n"),
-                                adif.date_or_time, adif.value, spot.dx_call);
+            bool parse_ok = parseDT2UNIX (adif.date_or_time, adif.value, spot.dx_call, spot.spotted);
+            adif.date_or_time[0] = '\0';
+            if (!parse_ok)
                 return;
-            }
         } else
             quietStrncpy (adif.date_or_time, adif.value, sizeof(adif.date_or_time));
 
 
 
-    } else if (strcasecmp (adif.name, _FX("BAND")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("BAND"))) {
         // ignore if kHz already set
         if (spot.kHz == 0) {
             if (!parseADIFBand (adif.value, spot.kHz)) {
@@ -253,16 +250,16 @@ static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
 
 
 
-    } else if (strcasecmp (adif.name, _FX("FREQ")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("FREQ"))) {
         spot.kHz = 1e3 * atof(adif.value); // ADIF stores MHz
 
 
 
-    } else if (strcasecmp (adif.name, _FX("MODE")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("MODE"))) {
         quietStrncpy (spot.mode, adif.value, sizeof(spot.mode));
 
 
-    } else if (strcasecmp (adif.name, _FX("GRIDSQUARE")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("GRIDSQUARE"))) {
         LatLong ll;
         if (maidenhead2ll (ll, adif.value)) {
             quietStrncpy (spot.dx_grid, adif.value, sizeof(spot.dx_grid));
@@ -276,7 +273,7 @@ static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
 
 
 
-    } else if (strcasecmp (adif.name, _FX("LAT")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("LAT"))) {
         float lat = 0;
         if (!parseADIFLocation (adif.value, lat) || lat < -M_PI_2F || lat > M_PI_2F) {
             Serial.printf (_FX("ADIF: bogus LAT %s for %s\n"), adif.value, spot.dx_call);
@@ -295,7 +292,7 @@ static void addADIFFIeld (ADIFParser &adif, DXClusterSpot &spot)
 
 
 
-    } else if (strcasecmp (adif.name, _FX("LON")) == 0) {
+    } else if (!strcasecmp (adif.name, _FX("LON"))) {
         float lon = 0;
         if (!parseADIFLocation (adif.value, lon) || lon < -M_PIF || lon > M_PIF) {
             Serial.printf (_FX("ADIF: bogus LON %s for %s\n"), adif.value, spot.dx_call);
@@ -320,12 +317,10 @@ static bool spotLooksGood (DXClusterSpot &spot)
 {
     if (spot.dx_call[0] && spot.dx_grid[0] && (spot.dx_lat != 0 || spot.dx_lng != 0)
                             && spot.mode[0] && spot.kHz != 0 && spot.spotted != 0) {
-
         // all good, just tidy up call a bit
         strtoupper (spot.dx_call);
         return (true);
     }
-
     return (false);
 }
 
@@ -356,8 +351,8 @@ static void updateCRC (crc_t &crc, uint8_t byte)
  *   MODE
  *   GRIDSQUARE or LAT and LON
  *   OPERATOR STATION_CALLSIGN else getCallsign()
- *   MY_GRIDSQUARE else NV_DE_GRID
- *   MY_LAT and MY_LON else de_ll
+ *   MY_GRIDSQUARE else use NV_DE_GRID
+ *   MY_LAT and MY_LON else use de_ll
  *
  */
 static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot, int n_ynot)
@@ -409,9 +404,9 @@ static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot
             adif.ps = ADIFPS_INLENGTH;
         } else if (c == '>') {
             // bogus unless EOH or EOF
-            if (strcasecmp (adif.name, _FX("EOH")) == 0) {
+            if (!strcasecmp (adif.name, _FX("EOH"))) {
                 adif.ps = ADIFPS_STARTSPOT;
-            } else if (strcasecmp (adif.name, _FX("EOR")) == 0) {
+            } else if (!strcasecmp (adif.name, _FX("EOR"))) {
                 // yah! finished if spot is good else start fresh
                 if (spotLooksGood(spot))
                     adif.ps = ADIFPS_FINISHED;
@@ -541,25 +536,23 @@ static const char *expandENV (const char *fn)
 static void drawAllVisADIFSpots (const SBox &box)
 {
     // show all visible adif_spots
-    for (int i = top_vis; i < n_adif_spots; i++) {
-        int row = i - top_vis;
-        if (row >= 0 && row < DXMAX_VIS)
-            drawSpotOnList (box, adif_spots[i], row);
+    int min_i, max_i;
+    if (adif_ss.getVisIndices (min_i, max_i) > 0) {
+        for (int i = min_i; i <= max_i; i++)
+            drawSpotOnList (box, adif_spots[i], adif_ss.getDisplayRow(i));
     }
 
     // show scroll controls
-    drawScrollUp (box, ADIF_COLOR, top_vis, OK2SCUP);
-    drawScrollDown (box, ADIF_COLOR, n_adif_spots - top_vis - DXMAX_VIS, OK2SCDW);
+    adif_ss.drawScrollDownControl (box, ADIF_COLOR);
+    adif_ss.drawScrollUpControl (box, ADIF_COLOR);
 }
 
 /* shift the visible list to show older spots, if appropriate
  */
 static void scrollADIFUp (const SBox &box)
 {
-    if (OK2SCUP) {
-        top_vis -= (DXMAX_VIS - 1);           // retain 1 for context
-        if (top_vis < 0)
-            top_vis = 0;
+    if (adif_ss.okToScrollUp ()) {
+        adif_ss.scrollUp ();
         drawAllVisADIFSpots (box);
     }
 }
@@ -568,29 +561,18 @@ static void scrollADIFUp (const SBox &box)
  */
 static void scrollADIFDown (const SBox &box)
 {
-    if (OK2SCDW) {
-        top_vis += (DXMAX_VIS - 1);           // retain 1 for context
-        if (top_vis > n_adif_spots - DXMAX_VIS)
-            top_vis = n_adif_spots - DXMAX_VIS;
+    if (adif_ss.okToScrollDown()) {
+        adif_ss.scrollDown ();
         drawAllVisADIFSpots (box);
     }
-}
-
-/* scroll down to newest
- */
-static void scrollToBottom(void)
-{
-    top_vis = n_adif_spots - DXMAX_VIS;
-    if (top_vis < 0)
-        top_vis = 0;
 }
 
 static void resetADIFSpots(void)
 {
     free (adif_spots);
     adif_spots = NULL;
-    n_adif_spots = 0;
-    scrollToBottom();
+    adif_ss.n_data = 0;
+    adif_ss.top_vis = 0;
     prev_crc = 0;
 }
 
@@ -630,27 +612,29 @@ static void drawADIFPane (const SBox &box, const char *filename)
  */
 static void addADIFSpot (const DXClusterSpot &spot)
 {
-    // printf ("new spot: %s %s %s %s %g %g %s %g %ld\n", 
-    //          spot.de_call, spot.de_grid, spot.dx_call, spot.dx_grid, spot.dx_lat,
-    //          spot.dx_lng, spot.mode, spot.kHz, spot.spotted);
+    #if defined(_TRACE)
+        printf ("new spot: %s %s %s %s %g %g %s %g %ld\n", 
+            spot.de_call, spot.de_grid, spot.dx_call, spot.dx_grid, spot.dx_lat,
+            spot.dx_lng, spot.mode, spot.kHz, spot.spotted);
+    #endif
 
     // if already full, just discard spot if older than oldest
-    if (n_adif_spots == MAX_SPOTS && spot.spotted < adif_spots[0].spotted)
+    if (adif_ss.n_data == MAX_SPOTS && spot.spotted < adif_spots[0].spotted)
         return;
 
     // assuming file probably has oldest entries first then each spot is probably newer than any so far,
     // so work back from the end to find the newest older entry
     int new_i;                                  // will be the index of the newest entry older than spot
-    for (new_i = n_adif_spots; --new_i >= 0 && spot.spotted < adif_spots[new_i].spotted; )
+    for (new_i = adif_ss.n_data; --new_i >= 0 && spot.spotted < adif_spots[new_i].spotted; )
         continue;
 
-    if (n_adif_spots == MAX_SPOTS) {
+    if (adif_ss.n_data == MAX_SPOTS) {
         // adif_spots is already full: make room by shifting out the oldest up through new_i
         memmove (adif_spots, &adif_spots[1], new_i * sizeof(DXClusterSpot));
     } else {
         // make room by moving existing entries newer than new_i
-        memmove (&adif_spots[new_i+2], &adif_spots[new_i+1], (n_adif_spots-new_i-1)*sizeof(DXClusterSpot));
-        n_adif_spots += 1;                      // we've made room for spot
+        memmove (&adif_spots[new_i+2], &adif_spots[new_i+1], (adif_ss.n_data-new_i-1)*sizeof(DXClusterSpot));
+        adif_ss.n_data += 1;                   // we've made room for spot
         new_i += 1;                             // put it 1 past the older entry 
     }
 
@@ -685,7 +669,7 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
-    n_adif_spots = 0;
+    adif_ss.n_data = 0;
 
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
@@ -709,18 +693,18 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     // note these spots came from a file
     from_set_adif = false;
 
-    // scroll all the way down unless likely the same list
+    // scroll all the way up unless likely the same list
     Serial.printf (_FX("ADIF: crc %d previous %d\n"), adif.crc, prev_crc);
     if (adif.crc != prev_crc) {
-        scrollToBottom();
+        adif_ss.scrollToNewest();
         prev_crc = adif.crc;
     }
 
     // shrink back to just what we need
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, n_adif_spots * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, adif_ss.n_data * sizeof(DXClusterSpot));
 
     // ok
-    return (n_adif_spots);
+    return (adif_ss.n_data);
 }
 
 
@@ -738,7 +722,7 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
-    n_adif_spots = 0;
+    adif_ss.n_data = 0;
 
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
@@ -766,15 +750,15 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     // scroll all the way down unless likely the same list
     Serial.printf (_FX("ADIF: crc %d previous %d\n"), adif.crc, prev_crc);
     if (adif.crc != prev_crc) {
-        scrollToBottom();
+        adif_ss.scrollToNewest();
         prev_crc = adif.crc;
     }
 
     // shrink back to just what we need
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, n_adif_spots * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, adif_ss.n_data * sizeof(DXClusterSpot));
 
     // ok
-    return (n_adif_spots);
+    return (adif_ss.n_data);
 }
 
 
@@ -842,7 +826,7 @@ void drawADIFSpotsOnMap()
     if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE)
         return;
 
-    for (int i = 0; i < n_adif_spots; i++) {
+    for (int i = 0; i < adif_ss.n_data; i++) {
         DXClusterSpot &si = adif_spots[i];
         setDXCSpotPosition (si);
         drawDXPathOnMap (si);
@@ -862,7 +846,7 @@ bool overAnyADIFSpots(const SCoord &s)
         if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE)
             return (false);
 
-        for (uint8_t i = 0; i < n_adif_spots; i++)
+        for (uint8_t i = 0; i < adif_ss.n_data; i++)
             // N.B. inCircle works even though map_c is in Raw coords because on ESP they equal canonical
             if (labelSpots() ? inBox (s, adif_spots[i].dx_map.map_b)
                              : (dotSpots() ? inCircle (s, adif_spots[i].dx_map.map_c) : false))
@@ -882,13 +866,13 @@ bool checkADIFTouch (const SCoord &s, const SBox &box)
     if (s.y < box.y + PANETITLE_H) {
 
         // scroll up?
-        if (checkScrollUpTouch (s, box)) {
+        if (adif_ss.checkScrollUpTouch (s, box)) {
             scrollADIFUp (box);
             return (true);
         }
 
         // scroll down?
-        if (checkScrollDownTouch (s, box)) {
+        if (adif_ss.checkScrollDownTouch (s, box)) {
             scrollADIFDown (box);
             return (true);
         }
@@ -911,7 +895,7 @@ bool checkADIFTouch (const SCoord &s, const SBox &box)
  */
 bool getClosestADIFSpot (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
 {
-    return (getClosestDXC (adif_spots, n_adif_spots, ll, sp, llp));
+    return (getClosestDXC (adif_spots, adif_ss.n_data, ll, sp, llp));
 }
 
 /* call to clean up if not in use, get out fast if nothing to do.

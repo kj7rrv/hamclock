@@ -1,8 +1,45 @@
-/* handy routines to draw the scroll controls used in several panes.
+/* handy class to manage the scroll controls used in several panes.
+ *
+ * assumes data array is sorted oldest first. displayed list can either show newest entry
+ * on top or bottom row, depending on scrollTopToBottom(). If newest is shown at the bottom, then 
+ * scrolling Up means show Older entries; if newest is shown on top, then Up means show Newer entries.
+ *
+ * state variables:
+ *
+ *  max_vis: maximum rows in the displayed list
+ *  top_vis: index into the data array containing the newest entry to be displayed
+ *  n_data:  the number of entries in the data array
+ *
+ *  example: n_data 7, max_vis 3, scrolled to show newest data
+ *
+ *    if scrollTopToBottom() is true:
+ *  
+ *    top_vis  6 |  A  |   ------|        display row 0, ie, top row
+ *             5 |  B  |       max_vis    display row 1
+ *             4 |  C  |   ------|        display row 2
+ *             3 |  D  |   
+ *             2 |  E  |   
+ *             1 |  F  | 
+ *             0 |  G  |   oldest data array entry at index 0
+ *               -------
+ *  
+ *    else scrollTopToBottom() is falae:
+ *  
+ *    top_vis  6 |  A  |   ------|        display row 2
+ *             5 |  B  |       max_vis    display row 1
+ *             4 |  C  |   ------|        display row 0, ie, top row
+ *             3 |  D  |   
+ *             2 |  E  |   
+ *             1 |  F  | 
+ *             0 |  G  |   oldest data array entry at index 0
+ *               -------
+ *
  */
 
 #include "HamClock.h"
 
+
+// control layout geometry
 #define SCR_DX          (PLOTBOX_W-26)          // x offset from box left to center of both scroll arrows
 #define SCRUP_DY        9                       // y offset from box top to center of up arrow
 #define SCRDW_DY        23                      // y offset from box top to center of down arrow
@@ -10,10 +47,14 @@
 #define SCR_H           10                      // scrol arrow height
 
 
-/* draw, else erase, the up scroll control;
+/* draw or erase the up scroll control as needed.
  */
-void drawScrollUp (const SBox &box, uint16_t color, int n, bool draw)
+void ScrollState::drawScrollUpControl (const SBox &box, uint16_t color) const
 {
+        bool draw = okToScrollUp();
+
+        // up arrow
+
         const uint16_t x0 = box.x + SCR_DX;                   // top point
         const uint16_t y0 = box.y + SCRUP_DY - SCR_H/2;
         const uint16_t x1 = box.x + SCR_DX - SCR_W/2;         // LL
@@ -28,16 +69,20 @@ void drawScrollUp (const SBox &box, uint16_t color, int n, bool draw)
             tft.setCursor (x2+3, y0+2);
             selectFontStyle (LIGHT_FONT, FAST_FONT);
             tft.setTextColor (color);
-            tft.print (n);
+            tft.print (nMoreAbove());
         }
 
         tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? color : RA8875_BLACK);
 }
 
-/* draw, else erase, the down scroll control.
+/* draw, else erase, the down scroll control and associated count n.
  */
-void drawScrollDown (const SBox &box, uint16_t color, int n, bool draw)
+void ScrollState::drawScrollDownControl (const SBox &box, uint16_t color) const
 {
+        bool draw = okToScrollDown();
+
+        // down arrow 
+
         const uint16_t x0 = box.x + SCR_DX - SCR_W/2;         // UL
         const uint16_t y0 = box.y + SCRDW_DY - SCR_H/2;
         const uint16_t x1 = box.x + SCR_DX + SCR_W/2;         // UR
@@ -52,21 +97,183 @@ void drawScrollDown (const SBox &box, uint16_t color, int n, bool draw)
             tft.setCursor (x1+3, y0+2);
             selectFontStyle (LIGHT_FONT, FAST_FONT);
             tft.setTextColor (color);
-            tft.print (n);
+            tft.print (nMoreBeneath());
         }
 
         tft.fillTriangle (x0, y0, x1, y1, x2, y2, draw ? color : RA8875_BLACK);
 }
 
-bool checkScrollUpTouch (const SCoord &s, const SBox &b)
+
+
+
+/* return whether tap at s within box b means to scroll up
+ */
+bool ScrollState::checkScrollUpTouch (const SCoord &s, const SBox &b) const
 {
     return (s.x > b.x + 3*b.w/4 && s.y <= b.y + SCRUP_DY + SCR_H/2);
 }
 
-bool checkScrollDownTouch (const SCoord &s, const SBox &b)
+/* return whether tap at s within box b means to scroll down
+ */
+bool ScrollState::checkScrollDownTouch (const SCoord &s, const SBox &b) const
 {
     return (s.x > b.x + 3*b.w/4 && s.y > b.y + SCRUP_DY + SCR_H/2 && s.y < b.y + SCRDW_DY + SCR_H/2);
 }
+
+
+/* move top_vis towards older data, ie, towards the beginning of the data array
+ */
+void ScrollState::moveTowardsOlder()
+{
+    top_vis -= max_vis - 1;         // leave one for context
+    int llimit = max_vis - 1;
+    if (top_vis < llimit)
+        top_vis = llimit;
+}
+
+/* move top_vis towards newer data, ie, towards the end of the data array
+ */
+void ScrollState::moveTowardsNewer()
+{
+    top_vis += max_vis - 1;         // leave one for context
+    int ulimit = n_data - 1;
+    if (top_vis > ulimit)
+        top_vis = ulimit;
+}
+
+
+
+/* modify top_vis to expose data below the visible list
+ */
+void ScrollState::scrollDown (void)
+{
+    if (scrollTopToBottom())
+        moveTowardsOlder();
+    else
+        moveTowardsNewer();
+}
+
+/* modify top_vis to expose data above the visible list
+ */
+void ScrollState::scrollUp (void)
+{
+    if (scrollTopToBottom())
+        moveTowardsNewer();
+    else
+        moveTowardsOlder();
+}
+
+
+
+
+/* return whether there is more data beneath the displayed list
+ */
+bool ScrollState::okToScrollDown (void) const
+{
+    return (nMoreBeneath() > 0);
+
+}
+
+/* return whether there is more data aboce the displayed list
+ */
+bool ScrollState::okToScrollUp (void) const
+{
+    return (nMoreAbove() > 0);
+}
+
+
+
+
+
+/* return the additional number of spots not shown above the current list
+ */
+int ScrollState::nMoreAbove (void) const
+{
+    int n;
+    if (scrollTopToBottom())
+        n = n_data - top_vis - 1;
+    else
+        n = top_vis - max_vis + 1;
+    return (n);
+}
+
+/* return the additional number of spots not shown below the current list
+ */
+int ScrollState::nMoreBeneath (void) const
+{
+    int n;
+    if (scrollTopToBottom())
+        n = top_vis - max_vis + 1;
+    else
+        n = n_data - top_vis - 1;
+    return (n);
+}
+
+/* scroll to position the newest entry at the head of the list.
+ */
+void ScrollState::scrollToNewest (void)
+{
+    top_vis = n_data - 1;
+    if (top_vis < 0)
+        top_vis = 0;
+}
+
+/* given a display row index, which always start with 0 on top, find the corresponding data array index.
+ * return whether atually within range.
+ */
+bool ScrollState::findDataIndex (int display_row, int &array_index) const
+{
+    int ok;
+
+    if (scrollTopToBottom()) {
+        int i = top_vis - display_row;
+        ok = i >= 0;
+        if (ok)
+            array_index = i;
+    } else {
+        int i = top_vis - max_vis + 1 + display_row;
+        ok = i < n_data;
+        if (ok)
+            array_index = i;
+    }
+
+    return (ok);
+}
+
+/* pass back the min and max array indices currently visible and return total row count.
+ */
+int ScrollState::getVisIndices (int &min_i, int &max_i) const
+{
+    max_i = top_vis;                            // list "head" is always newest being displayed
+    min_i = top_vis - max_vis + 1;              // list "tail" is oldest
+    if (min_i < 0)                              // but might not be enough to fill the list
+        min_i = 0;
+    int n = max_i - min_i + 1;                  // inclusive
+    if (n > n_data)                             // check for overflow
+        n = 0;
+    return (n);
+}
+
+/* given a data array index ala getVisIndices, return the display row number starting with 0 on top
+ */
+int ScrollState::getDisplayRow (int array_index) const
+{
+    int i;
+
+    if (scrollTopToBottom())
+        i = top_vis - array_index;
+    else
+        i = array_index - (top_vis - (max_vis-1));
+
+    return (i);
+}
+
+
+
+
+/*******************************
+ * what are these doing here??
+ *******************************/
 
 
 /* convert any upper case letter in str to lower case IN PLACE

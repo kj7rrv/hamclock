@@ -26,7 +26,7 @@ EEPROM::EEPROM()
         filename = NULL;
 }
 
-void EEPROM::begin (int s)
+const char *EEPROM::getFilename(void)
 {
         // establish file name
 	if (!filename) {
@@ -41,6 +41,14 @@ void EEPROM::begin (int s)
 
 	    filename = strdup (newfn.c_str());
 	}
+
+        return (filename);
+}
+
+void EEPROM::begin (int s)
+{
+        // establish filename
+        filename = getFilename();
 
         // start over if called again
         if (fp) {

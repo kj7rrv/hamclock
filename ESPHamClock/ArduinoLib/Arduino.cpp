@@ -249,7 +249,7 @@ static void logOS()
             fclose(fp);
         }
 
-        system ("uname -a");
+        (void) system ("uname -a");
 }
 
 /* show version info
@@ -284,7 +284,8 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,backend_port);
         fprintf (stderr, " -c   : disable all touch events from web interface\n");
         fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", restful_port);
+        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", RESTFUL_PORT);
+
         fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
         fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
         fprintf (stderr, " -h   : print this help summary then exit\n");
@@ -296,7 +297,7 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
         fprintf (stderr, " -v   : show version info then exit\n");
-        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",liveweb_port);
+        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",LIVEWEB_PORT);
         fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
 
         exit(1);
@@ -350,8 +351,8 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing RESTful port number for -e");
                     restful_port = atoi(*++av);
-                    if (restful_port < 1 || restful_port > 65535)
-                        usage ("-e port must be [1,65355]");
+                    if (restful_port != -1 && (restful_port < 1 || restful_port > 65535))
+                        usage ("-e port must be -1 or [1,65355]");
                     ac--;
                     break;
                 case 'f':
@@ -420,8 +421,8 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing web port number for -w");
                     liveweb_port = atoi(*++av);
-                    if (liveweb_port > 65535)
-                        usage ("-w port must be <= 65535");
+                    if (liveweb_port != -1 && (liveweb_port < 1 || liveweb_port > 65535))
+                        usage ("-w port must be -1 or [1,65535");
                     ac--;
                     break;
                 case 'x':

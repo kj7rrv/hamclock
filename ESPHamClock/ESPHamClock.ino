@@ -273,6 +273,10 @@ static void showDefines(void)
         _PR_MAC(_SUPPORT_SPOTPATH);
     #endif
 
+    #if defined(_SUPPORT_DXCPLOT)
+        _PR_MAC(_SUPPORT_DXCPLOT);
+    #endif
+
     #if defined(_SUPPORT_CITIES)
         _PR_MAC(_SUPPORT_CITIES);
     #endif
@@ -283,6 +287,10 @@ static void showDefines(void)
 
     #if defined(_SUPPORT_ADIFILE)
         _PR_MAC(_SUPPORT_ADIFILE);
+    #endif
+
+    #if defined(_SUPPORT_SCROLLLEN)
+        _PR_MAC(_SUPPORT_SCROLLLEN);
     #endif
 }
 
@@ -2508,17 +2516,21 @@ void postDiags (void)
 
     // build filename relative to hamclock server root dir and id
     char fn[300];
-    snprintf (fn, sizeof(fn), "/ham/HamClock/diagnostic-logs/dl-%ld-%s-%u.txt", myNow(),
+    snprintf (fn, sizeof(fn), "/ham/HamClock/diagnostic-logs/dl-%lld-%s-%u.txt", (long long)myNow(),
                                                 remote_addr, ESP.getChipId());
 
-    // get total size for content length
+    // get total size of all diag files for content length
+    struct stat s;
     int cl = 0;
     for (int i = 0; i < N_DIAG_FILES; i++) {
         std::string dp = our_dir + diag_files[i];
-        struct stat s;
         if (stat (dp.c_str(), &s) == 0)
             cl += s.st_size;
     }
+
+    // add eeprom file
+    if (stat (EEPROM.getFilename(), &s) == 0)
+        cl += s.st_size;
 
     Serial.printf ("DP: %d %s\n", cl, fn);
 
@@ -2534,9 +2546,9 @@ void postDiags (void)
         sendUserAgent (pd);
         pd.print ("\r\n");
 
-        // just concat each file
-        for (int i = 0; i < N_DIAG_FILES; i++) {
-            std::string dp = our_dir + diag_files[i];
+        // just concat each file including eeprom
+        for (int i = 0; i <= N_DIAG_FILES; i++) {                       // 1 more for eeprom
+            std::string dp = i < N_DIAG_FILES ? our_dir + diag_files[i] : EEPROM.getFilename();
             FILE *fp = fopen (dp.c_str(), "r");
             if (fp) {
                 Serial.printf ("DP:   %s\n", dp.c_str());

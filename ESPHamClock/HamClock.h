@@ -45,10 +45,18 @@
   #define _SUPPORT_PHOT
 #endif
 
-// spot path plotting not on ESP because paths can't be drawn in raster mode
+// spot path plotting of any kind not on ESP because paths can't be drawn in raster mode.
+// cluster spots on ESP can't be plotted because no location is available.
 #if !defined(_IS_ESP8266)
     #define _SUPPORT_SPOTPATH
+    #define _SUPPORT_DXCPLOT
 #endif
+
+// no scrolling on ESP
+#if !defined(_IS_ESP8266)
+    #define _SUPPORT_SCROLLLEN
+#endif
+
 
 // roaming cities is not supported on ESP because it is touch only
 #if !defined(_IS_ESP8266)
@@ -127,6 +135,7 @@
 // community modules
 #include <Arduino.h>
 #include <TimeLib.h>
+#include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <IPAddress.h>
 #include <WiFiClient.h>
@@ -172,10 +181,6 @@ typedef struct {
 
 // path segment length, degrees
 #define PATH_SEGLEN     2
-
-// tcp ports
-#define RESTFUL_PORT    8080
-#define LIVEWEB_PORT    8081
 
 // default menu timeout, millis
 #define MENU_TO         30000
@@ -896,12 +901,6 @@ extern bool onDXWatchList (const char *call);
 
 
 
-#if defined(_IS_ESP8266)
-extern bool overAnyDXClusterSpots(const SCoord &s);
-#endif
-
-
-
 
 
 
@@ -1225,11 +1224,48 @@ extern bool s2llMollweide (const SCoord &s, LatLong &ll);
  *
  */
 
+/* info and methods to control scrolling
+ */
+class ScrollState {
 
-extern void drawScrollUp (const SBox &box, uint16_t color, int n, bool draw);
-extern void drawScrollDown (const SBox &box, uint16_t color, int n, bool draw);
-extern bool checkScrollUpTouch (const SCoord &s, const SBox &b);
-extern bool checkScrollDownTouch (const SCoord &s, const SBox &b);
+    public:
+
+        // this allows initializing using {} set
+        ScrollState (int mv, int tv, int nd) {
+            max_vis = mv;
+            top_vis = tv;
+            n_data = nd;
+        };
+
+        void drawScrollUpControl (const SBox &box, uint16_t color) const;
+        void drawScrollDownControl (const SBox &box, uint16_t color) const;
+
+        bool checkScrollUpTouch (const SCoord &s, const SBox &b) const;
+        bool checkScrollDownTouch (const SCoord &s, const SBox &b) const;
+
+        virtual void scrollDown (void);
+        virtual void scrollUp (void);
+        bool okToScrollDown (void) const;
+        bool okToScrollUp (void) const;
+
+        virtual int nMoreAbove (void) const;
+        virtual int nMoreBeneath (void) const;
+        void scrollToNewest (void);
+        bool findDataIndex (int display_row, int &array_index) const;
+        int getVisIndices (int &min_i, int &max_i) const;
+        int getDisplayRow (int array_index) const;
+
+        int max_vis;        // maximum rows in the displayed list
+        int top_vis;        // index into the data array being dislayed at the top of the list
+        int n_data;         // the number of entries in the data array
+
+    private:
+
+        void moveTowardsOlder();
+        void moveTowardsNewer();
+};
+
+
 extern void strtolower (char *str);
 extern void strtoupper (char *str);
 
@@ -1335,6 +1371,8 @@ extern bool weekStartsOnMonday(void);
 extern void formatLat (float lat_d, char s[], int s_len);
 extern void formatLng (float lng_d, char s[], int s_len);
 extern const char *getADIFilename(void);
+extern bool scrollTopToBottom(void);
+extern int nMoreScrollRows(void);
 
 
 
@@ -1730,7 +1768,10 @@ typedef enum {
     NV_I2CFN,                   // I2C device filename
     NV_I2CON,                   // whether to use I2C
     NV_DXMAX_T,                 // time when n dx connections exceeded max
+
     NV_DXWLIST,                 // DX watch list
+    NV_SCROLLDIR,               // 0=bottom 1=top
+    NV_SCROLLLEN,               // n more lines to scroll
 
     NV_N
 

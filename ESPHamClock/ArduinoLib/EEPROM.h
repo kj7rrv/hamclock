@@ -17,10 +17,13 @@ class EEPROM
 	void write (uint32_t address, uint8_t byte);
 	uint8_t read (uint32_t address);
 
+        // non-standard
+        const char *getFilename(void);
+
     private:
 
+	const char *filename;
         FILE *fp;
-	char *filename;
         uint8_t *data_array;
         size_t n_data_array;
 };

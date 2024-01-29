@@ -2391,8 +2391,8 @@ void sendUserAgent (WiFiClient &client)
             NVReadUInt16 (NV_CALL_BG_COLOR, &call_bg);
 
         snprintf (ua, ual,
-            _FX("User-Agent: %s/%s (id %u up %ld) crc %d LV6 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %u %u %d\r\n"),
-            platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), crc,
+            _FX("User-Agent: %s/%s (id %u up %lld) crc %d LV6 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %u %u %d\r\n"),
+            platform, hc_version, ESP.getChipId(), (long long)getUptime(NULL,NULL,NULL,NULL), crc,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb, dx_info_for_sat, rss_code, useMetricUnits(),
             getNBMEConnected(), gpio, io, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
@@ -2406,8 +2406,8 @@ void sendUserAgent (WiFiClient &client)
             path, spots,
             call_fg, call_bg, !clockTimeOk());  // default clock 0 == ok
     } else {
-        snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %ld) crc %d\r\n"),
-            platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
+        snprintf (ua, ual, _FX("User-Agent: %s/%s (id %u up %lld) crc %d\r\n"),
+            platform, hc_version, ESP.getChipId(), (long long)getUptime(NULL,NULL,NULL,NULL), flash_crc_ok);
     }
 
     // send
@@ -2787,7 +2787,7 @@ static bool updateBzBt (const SBox &box)
 
     } else {
 
-        plotMessage (box, BZBT_BZCOLOR, _FX("BzBt connection fail"));
+        plotMessage (box, BZBT_BZCOLOR, _FX("BzBt update error"));
     }
 
     // done

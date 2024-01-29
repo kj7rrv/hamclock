@@ -435,7 +435,7 @@ static void reportPaneChoices (WiFiClient &client, PlotPane pp)
         }
         time_t sleft = nextPaneRotation(pp) - t0;
         if (sleft >= 0)         // count be << 0 if just scheduled
-            snprintf (buf, sizeof(buf), _FX(" rotating in %02ld:%02ld"), sleft/60L, sleft%60L);
+            snprintf (buf, sizeof(buf), _FX(" rotating in %02lld:%02lld"), sleft/60LL, sleft%60LL);
         client.print(buf);
     }
     client.println();
@@ -1417,11 +1417,11 @@ static bool getWiFiSensorData (WiFiClient &client, char line[], size_t line_len)
             // head points to oldest
             for (int j = 0; j < N_BME_READINGS; j++) {
                 uint8_t qj = (dp->q_head+j)%N_BME_READINGS;
-                time_t u = dp->u[qj];
+                long u = dp->u[qj];
                 if (u) {
                     char buf[100];
                     snprintf (buf, sizeof(buf),
-                                _FX("%4d-%02d-%02dT%02d:%02d:%02dZ %lu  %02x %7.2f %7.2f %7.2f %7.2f\n"),
+                                _FX("%4d-%02d-%02dT%02d:%02d:%02dZ %ld  %02x %7.2f %7.2f %7.2f %7.2f\n"),
                                 year(u), month(u), day(u), hour(u), minute(u), second(u), u,
                                 dp->i2c, BMEUNPACK_T(dp->t[qj]), BMEUNPACK_P(dp->p[qj]),
                                 BMEUNPACK_H(dp->h[qj]),
@@ -3703,10 +3703,10 @@ static bool getWiFiLiveSpots (WiFiClient &client, char *line, size_t line_len)
     client.print(buf);
 
     // table
-    time_t t0 = myNow();
+    long long t0 = myNow();
     for (int i = 0; i < n_rep; i++) {
         const PSKReport &r = rp[i];
-        snprintf (buf, sizeof(buf), "%5ld  %-10s %-4s   %-10s %-4s    %-8s %6.2f  %7.2f  %9ld %d\n",
+        snprintf (buf, sizeof(buf), "%5lld  %-10s %-4s   %-10s %-4s    %-8s %6.2f  %7.2f  %9ld %d\n",
             t0-r.posting, r.txcall, r.txgrid,  r.rxcall,  r.rxgrid, r.mode, r.dx_ll.lat_d, r.dx_ll.lng_d, 
             r.Hz, r.snr);
         client.print(buf);
@@ -3951,12 +3951,14 @@ static void serveRemote(WiFiClient &client, bool ro)
             const char indent[] = "  ";
             int ll = 0;
             for (int i = 0; i < PLOT_CH_N; i++) {
-                if (ll == 0)
-                    ll = snprintf (line, line_mem.getSize(), "%s", indent);
-                ll += snprintf (line+ll, line_mem.getSize()-ll, " %s", plot_names[i]);
-                if (ll > max_w) {
-                    client.println (line);
-                    ll = 0;
+                if (plotChoiceIsAvailable ((PlotChoice)i)) {
+                    if (ll == 0)
+                        ll = snprintf (line, line_mem.getSize(), "%s", indent);
+                    ll += snprintf (line+ll, line_mem.getSize()-ll, " %s", plot_names[i]);
+                    if (ll > max_w) {
+                        client.println (line);
+                        ll = 0;
+                    }
                 }
             }
             client.println (line);

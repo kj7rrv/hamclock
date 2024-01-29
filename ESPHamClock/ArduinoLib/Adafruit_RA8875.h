@@ -154,6 +154,7 @@ class Adafruit_RA8875 {
 	void print (int i, int base = 10);
 	void print (float f, int p = 2);
 	void print (long l);
+	void print (long long ll);
 	void println (void);
 	void println (char *s);
 	void println (const char *s);

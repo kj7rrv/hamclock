@@ -71,6 +71,10 @@
 #endif
 
 
+// tcp ports
+#define RESTFUL_PORT    8080    
+#define LIVEWEB_PORT    8081    
+
 
 extern void setX11FullScreen (bool);
 extern void setDemoMode(bool on);

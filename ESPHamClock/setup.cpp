@@ -28,7 +28,7 @@
 // #define _SHOW_ALL                    // RBF
 // #define _MARK_BOUNDS                 // RBF
 #if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
-#warning _SHOW_ALL or _MARK_BOUNDS are set
+#warning _SHOW_ALL and/or _MARK_BOUNDS are set
 #endif
 #ifdef _SHOW_ALL
     #undef _WIFI_NEVER
@@ -39,6 +39,7 @@
     #define _SUPPORT_NATIVE_GPIO
     #define _SUPPORT_ADIFILE
     #define _SUPPORT_SPOTPATH
+    #define _SUPPORT_SCROLLLEN
 #endif // _SHOW_ALL
 
 
@@ -334,11 +335,22 @@ typedef enum {
     SPOTLBLCALL_BPR,
     SPOTPATH_BPR,
     SPOTPATHSZ_BPR,
-    FLIP_BPR,
+    SCROLLDIR_BPR,
+    SCROLLLEN_BPR,
+    SCROLLBIG_BPR,
     X11_FULLSCRN_BPR,
+    FLIP_BPR,
 
-    N_BPR
+    N_BPR,
+    NOMATE                                      // flag for ent_mate
+
 } BPIds;
+
+// values for SCROLLLEN_BPR and SCROLLBIG_BPR
+#define NSCROLL_A       0
+#define NSCROLL_B       10
+#define NSCROLL_C       25
+#define NSCROLL_D       50
 
 // define a boolean prompt
 typedef struct {
@@ -359,68 +371,88 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 1" -- index 0
 
-    {0, { 90, R2Y(2), 180, PR_H}, {270, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes", N_BPR},
-    {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes", N_BPR},
-    {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes", N_BPR},
-    {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL, N_BPR},
+    {0, { 90, R2Y(2), 180, PR_H}, {270, R2Y(2), 40,  PR_H}, false, "or use gpsd?", "No", "Yes", NOMATE},
+    {0, {330, R2Y(2),  80, PR_H}, {410, R2Y(2), 40,  PR_H}, false, "follow?", "No", "Yes", NOMATE},
+    {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes", NOMATE},
+    {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL, NOMATE},
 
     // "page 2" -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes", N_BPR},
-    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes", N_BPR},
+    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes", NOMATE},
+    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes", NOMATE},
 
-    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
-    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
-    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
-    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", N_BPR},
+    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
 
     // "page 3" -- index 2
 
-    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  50, PR_H}, false, "rigctld?", "No", "Yes", N_BPR},
-    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  50, PR_H}, false, "rotctld?", "No", "Yes", N_BPR},
-    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  50, PR_H}, false, "flrig?",   "No", "Yes", N_BPR},
+    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  50, PR_H}, false, "rigctld?", "No", "Yes", NOMATE},
+    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  50, PR_H}, false, "rotctld?", "No", "Yes", NOMATE},
+    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  50, PR_H}, false, "flrig?",   "No", "Yes", NOMATE},
 
     {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers",
-                                                                                                0, N_BPR},
-    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", NULL, N_BPR},
+                                                                                                0, NOMATE},
+    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", NULL, NOMATE},
 
 
     // "page 4" -- index 3
 
-    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active", N_BPR},
-    {3, {250, R2Y(1),  80, PR_H},  {350, R2Y(1), 70,  PR_H}, false, "I2C file?", "No", NULL, N_BPR},
+    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active", NOMATE},
+    {3, {250, R2Y(1),  80, PR_H},  {350, R2Y(1), 70,  PR_H}, false, "I2C file?", "No", NULL, NOMATE},
 
     {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  120, PR_H}, false, "KX3?", "No", NULL, KX3BAUD_BPR},
     {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  120, PR_H}, false, NULL, "4800 bps", "38400 bps",KX3ON_BPR},
-                                                        // entangled: Off: FX   4800: TF   38400: TT
-
+                                                // 3x entangled: Off: FX   4800: TF   38400: TT
 
     // "page 5" -- index 4
 
-    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL, DATEFMT_DMYYMD_BPR},
-    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day", DATEFMT_MDY_BPR},
-                                                        // entangled: MDY: FX   DMY: TF  YMD:  TT
+    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL,
+                                                                                        DATEFMT_DMYYMD_BPR},
+    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day",
+                                                                                        DATEFMT_MDY_BPR},
+                                                // 3x entangled: MDY: FX   DMY: TF  YMD:  TT
 
-    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In", N_BPR},
 
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday", "Monday", N_BPR},
-    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes", N_BPR},
+    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In",NOMATE},
 
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", N_BPR},
-    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N", N_BPR},
 
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", "Dot", SPOTLBLCALL_BPR},
+
+    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday","Monday",NOMATE},
+    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes", NOMATE},
+
+
+    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", NOMATE},
+    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?","True N","Magnetic N",NOMATE},
+
+
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false,"Spot labels?","No","Dot",SPOTLBLCALL_BPR},
     {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
-                                                // entangled: No: FF Dot: TF  Prefix: FT  Call: TT
+                                                // 4x entangled: No: FF Dot: TF  Prefix: FT  Call: TT
 
-    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Spot paths?", "No", NULL, SPOTPATHSZ_BPR},
+
+
+    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Spot paths?", "No", NULL,SPOTPATHSZ_BPR},
     {4, {540, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
-                                                        // entangled: No: FX  Thin: TF  Wide: TT
+                                                // 3x entangled: No: FX  Thin: TF  Wide: TT
 
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes", N_BPR},
 
-    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Full scrn?", "No", "Yes", N_BPR},
-                                                        // N.B. state box must be wide enough for "Won't fit"
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false, "Scroll dir?", "Bottom-Up", "Top-Down",
+                                                                                                NOMATE},
+
+
+    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Scroll length?", "0","10",SCROLLBIG_BPR},
+    {4, {540, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, NULL, "25", "50", SCROLLLEN_BPR},
+                                                // 4x entangled:  0: FF  10: TF   25: FT  50: TT
+                                                // FF -> TF -> FT -> TT -> ...
+                                                // N.B. match NSCROLL_X
+
+
+    {4, {10 , R2Y(5), 140, PR_H},  {150, R2Y(5), 120, PR_H}, false, "Full scrn?", "No", "Yes", NOMATE},
+                                                // N.B. state box must be wide enough for "Won't fit"
+
+    {4, {400, R2Y(5), 140, PR_H},  {540, R2Y(5),  40, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
 
 
 
@@ -662,18 +694,52 @@ static void drawSPValue (StringPrompt *sp);
 
 
 
+/* return the value string of the given entangled pair.
+ * N.B. B must be the forward ent_mate of A
+ * 3x entangled: a: FX  b: TF  c: TT
+ * 4x entangled: a: FF  b: TF  c: FT  d: TT
+ */
+static const char * getEntangledValue (const BoolPrompt *A, const BoolPrompt *B)
+{
+    if (B != &bool_pr[A->ent_mate])
+        fatalError (_FX("bogus entangled pair %s %s\n"), A->p_str, B->f_str);
+
+    const char *s;
+
+    if (A->t_str) {
+        // 4 states
+        if (B->state)
+            s = A->state ? B->t_str : B->f_str;
+        else
+            s = A->state ? A->t_str : A->f_str;
+    } else {
+        // 3 states
+        if (A->state)
+            s = B->state ? B->t_str : B->f_str;
+        else
+            s = A->f_str;
+    }
+
+    return (s);
+}
+
 /* log all string and bool settings
  */
 static void logAllPrompts(void)
 {
+    // strings
     for (StringPrompt *sp = string_pr; sp < &string_pr[N_SPR]; sp++)
         if (sp->p_str)
             Serial.printf (_FX("Setup: %s = %s\n"), sp->p_str, sp->v_str ? sp->v_str : _FX("NULL"));
-    for (BoolPrompt *bp = bool_pr; bp < &bool_pr[N_BPR]; bp++) {
-        if (bp->p_str) {
+
+    // bools
+    for (int i = 0; i < N_BPR; i++) {
+        BoolPrompt *bp = &bool_pr[i];
+        if (bp->ent_mate == i+1)                        // only print the forward-reference pair
+            Serial.printf (_FX("Setup: %s = %s\n"), bp->p_str, getEntangledValue (bp, &bool_pr[i+1]));
+        else if (bp->ent_mate == NOMATE && bp->p_str)
             Serial.printf (_FX("Setup: %s = %s\n"), bp->p_str,
                 bp->state ? (bp->t_str ? bp->t_str : _FX("T-NULL")) : (bp->f_str ? bp->f_str :_FX("F-NULL")));
-        }
     }
 }
 
@@ -828,7 +894,7 @@ static void drawSpiderCommandsHeader()
     // labels
     tft.setTextColor (PR_C);
     tft.setCursor (SPIDER_TX, SPIDER_TY);
-    tft.print ("Spider Commands:");
+    tft.print ("Cluster Commands:");
 }
 
 static void drawPageButton()
@@ -871,8 +937,8 @@ static bool boolIsRelevant (BoolPrompt *bp)
     }
 
     #if !defined(_SUPPORT_SPOTPATH)
-    if (bp == &bool_pr[SPOTPATH_BPR] || bp == &bool_pr[SPOTPATHSZ_BPR])
-        return (false);
+        if (bp == &bool_pr[SPOTPATH_BPR] || bp == &bool_pr[SPOTPATHSZ_BPR])
+            return (false);
     #endif
 
     if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
@@ -931,6 +997,13 @@ static bool boolIsRelevant (BoolPrompt *bp)
     #if !defined(_SUPPORT_ADIFILE)
         // always irrelevant if not supporting ADIF file reading
         if (bp == &bool_pr[ADIFSET_BPR])
+            return (false);
+    #endif
+
+
+    #if !defined(_SUPPORT_SCROLLLEN)
+        // not allowed to change on ESP
+        if (bp == &bool_pr[SCROLLLEN_BPR] || bp == &bool_pr[SCROLLBIG_BPR])
             return (false);
     #endif
 
@@ -1118,10 +1191,10 @@ static void nextTabFocus()
         { NULL, &bool_pr[BEARING_BPR] },
         { NULL, &bool_pr[SPOTLBL_BPR] },
         { NULL, &bool_pr[SPOTPATH_BPR] },
-        { NULL, &bool_pr[FLIP_BPR] },
+        { NULL, &bool_pr[SCROLLDIR_BPR] },
+        { NULL, &bool_pr[SCROLLLEN_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
-
-        // page 3
+        { NULL, &bool_pr[FLIP_BPR] },
     };
     #define N_TAB_FIELDS    NARRAY(tab_fields)
 
@@ -1502,6 +1575,8 @@ static bool s2char (SCoord &s, char &kbchar)
  *   if A->t_str 4 states: FF A->f_str TF A->t_str FT B->f_str TT B->t_str
  *   else        3 state:s FX A->f_str FT B->f_str TT B->t_str
  * N.B. assumes both A and B's state boxes, ie s_box, are in identical locations.
+ * 3x entangled: a: FX  b: TF  c: TT
+ * 4x entangled: a: FF  b: TF  c: FT  d: TT
  */
 static void drawEntangledBools (BoolPrompt *A, BoolPrompt *B)
 {
@@ -1536,7 +1611,7 @@ static void engageBoolTap (BoolPrompt *bp)
     eraseCursor ();
 
     // update state
-    if (bp->ent_mate == N_BPR) {
+    if (bp->ent_mate == NOMATE) {
 
         // just a lone bool
         bp->state = !bp->state;
@@ -1549,6 +1624,8 @@ static void engageBoolTap (BoolPrompt *bp)
     } else {
 
         // this is one of an entangled pair. N.B. primary is always lower in memory.
+        // 3x entangled: a: FX  b: TF  c: TT
+        // 4x entangled: a: FF  b: TF  c: FT  d: TT
         BoolPrompt *mate = &bool_pr[bp->ent_mate];
         BoolPrompt *A = mate < bp ? mate : bp;
         BoolPrompt *B = mate < bp ? bp : mate;
@@ -2024,19 +2101,14 @@ static void drawCurrentPageFields()
     // draw relevant bool prompts on this page
     for (int i = 0; i < N_BPR; i++) {
         BoolPrompt *bp = &bool_pr[i];
-        if (boolIsRelevant(bp))
-            drawBPPromptState (bp);
+        if (boolIsRelevant(bp)) {
+            drawBPPrompt (bp);
+            if (bp->ent_mate == i+1)
+                drawEntangledBools(bp, &bool_pr[i+1]);
+            else if (bp->ent_mate == NOMATE)
+                drawBPState (bp);
+        }
     }
-
-    // draw the entangled pairs
-    if (boolIsRelevant(&bool_pr[DATEFMT_MDY_BPR]))
-        drawEntangledBools(&bool_pr[DATEFMT_MDY_BPR], &bool_pr[DATEFMT_DMYYMD_BPR]);
-    if (boolIsRelevant(&bool_pr[KX3ON_BPR]))
-        drawEntangledBools(&bool_pr[KX3ON_BPR], &bool_pr[KX3BAUD_BPR]);
-    if (boolIsRelevant(&bool_pr[SPOTLBL_BPR]))
-        drawEntangledBools (&bool_pr[SPOTLBL_BPR], &bool_pr[SPOTLBLCALL_BPR]);
-    if (boolIsRelevant(&bool_pr[SPOTPATH_BPR]))
-        drawEntangledBools (&bool_pr[SPOTPATH_BPR], &bool_pr[SPOTPATHSZ_BPR]);
 
     // draw spider header if appropriate
     if (cur_page == SPIDER_PAGE && bool_pr[CLUSTER_BPR].state && !bool_pr[CLISWSJTX_BPR].state)
@@ -2880,6 +2952,45 @@ static void initSetup()
         bright_max = 100;
         NVWriteUInt8 (NV_BR_MAX, bright_max);
     }
+
+    uint8_t scroll_dir;
+    if (!NVReadUInt8 (NV_SCROLLDIR, &scroll_dir)) {
+        scroll_dir = 0;
+        NVWriteUInt8 (NV_SCROLLDIR, scroll_dir);
+    }
+    bool_pr[SCROLLDIR_BPR].state = (scroll_dir != 0);
+
+
+    #if defined(_SUPPORT_SCROLLLEN)
+        uint8_t scroll_len;
+        if (!NVReadUInt8 (NV_SCROLLLEN, &scroll_len)) {
+            scroll_len = NSCROLL_C;
+            NVWriteUInt8 (NV_SCROLLLEN, scroll_len);
+        }
+
+        // entangled: 0: FF  10: TF   25: TT  50: FT
+        if (scroll_len < NSCROLL_B) {
+            // NSCROLL_A
+            bool_pr[SCROLLLEN_BPR].state = false;
+            bool_pr[SCROLLBIG_BPR].state = false;
+        } else if (scroll_len < NSCROLL_C) {
+            // NSCROLL_B
+            bool_pr[SCROLLLEN_BPR].state = true;
+            bool_pr[SCROLLBIG_BPR].state = false;
+        } else if (scroll_len < NSCROLL_D) {
+            // NSCROLL_C
+            bool_pr[SCROLLLEN_BPR].state = false;
+            bool_pr[SCROLLBIG_BPR].state = true;
+        } else {
+            // NSCROLL_D
+            bool_pr[SCROLLLEN_BPR].state = true;
+            bool_pr[SCROLLBIG_BPR].state = true;
+        }
+    #else
+        // always force to zero
+        NVWriteUInt8 (NV_SCROLLLEN, 0);
+        bool_pr[SCROLLLEN_BPR].state = bool_pr[SCROLLBIG_BPR].state = false;
+    #endif
 }
 
 
@@ -3411,6 +3522,8 @@ static void saveParams2NV()
     NVWriteUInt8 (NV_FLRIGUSE, bool_pr[FLRIGUSE_BPR].state);
     NVWriteString (NV_FLRIGHOST, flrig_host);
     NVWriteUInt16 (NV_FLRIGPORT, flrig_port);
+    NVWriteUInt8 (NV_SCROLLDIR, bool_pr[SCROLLDIR_BPR].state);
+    NVWriteUInt8 (NV_SCROLLLEN, nMoreScrollRows());
 
     // save and engage user's X11 settings
     uint16_t x11flags = 0;
@@ -3606,7 +3719,7 @@ bool setCallsign (const char *cs)
     strncpy (dx_login, cs, NV_DXLOGIN_LEN-1);
     NVWriteString (NV_CALLSIGN, call_sign);
     NVWriteString (NV_DXLOGIN, dx_login);
-    return (false);
+    return (true);
 }
 
 /* return pointer to static storage containing the DX cluster host
@@ -4071,4 +4184,18 @@ bool onDXWatchList (const char *call)
 
     // no match
     return (false);
+}
+
+/* return whether scolling panes should show the newest entry on top, else newest on bottom
+ */
+bool scrollTopToBottom(void)
+{
+    return (bool_pr[SCROLLDIR_BPR].state);
+}
+
+/* return number of ADDITIONAL scroll rows
+ */
+int nMoreScrollRows(void)
+{
+    return (atoi (getEntangledValue (&bool_pr[SCROLLLEN_BPR], &bool_pr[SCROLLBIG_BPR])));
 }

@@ -624,7 +624,15 @@ void Adafruit_RA8875::print (float f, int p)
 void Adafruit_RA8875::print (long l)
 {
 	char buf[32];
-	int sl = snprintf (buf, sizeof(buf), "%lu", l);
+	int sl = snprintf (buf, sizeof(buf), "%ld", l);
+	for (int i = 0; i < sl; i++)
+	    plotChar (buf[i]);
+}
+
+void Adafruit_RA8875::print (long long ll)
+{
+	char buf[32];
+	int sl = snprintf (buf, sizeof(buf), "%lld", ll);
 	for (int i = 0; i < sl; i++)
 	    plotChar (buf[i]);
 }

@@ -5,33 +5,26 @@
 
 
 // names for each ONTA program
-#define X(a,b)  b,                              // expands ONTAPrograms to each name plus comma
+#define X(a,b)  b,                                      // expands ONTAPrograms to each name plus comma
 const char *onta_names[ONTA_N] = {
     ONTAPrograms
 };
 #undef X
 
 
-#define POTA_COLOR      RGB565(150,250,255)     // title and spot text color
-#define SOTA_COLOR      RGB565(250,0,0)         // title and spot text color
+#define POTA_COLOR      RGB565(150,250,255)             // title and spot text color
+#define SOTA_COLOR      RGB565(250,0,0)                 // title and spot text color
 
-#define COUNT_DY        32                      // dy of count
-#define START_DY        47                      // dy of first row
-#define ONTA_ROWDY      14                      // dy of each successive row
-#define ONTA_INDENT     1                       // l-r border -- very tight fit
-#define MAX_LINE        27                      // max line length, including EOS
+#define COUNT_DY        32                              // dy of count
+#define START_DY        47                              // dy of first row
+#define ONTA_ROWDY      14                              // dy of each successive row
+#define ONTA_INDENT     1                               // l-r border -- very tight fit
+#define MAX_LINE        27                              // max line length, including EOS
 #define MAX_VIS         ((PLOTBOX_H - START_DY)/ONTA_ROWDY)             // max visible rows
-#define OK2SCDW(o)      ((o)->top_vis < (o)->n_spots - MAX_VIS)         // whether it is ok to scroll down
-#define OK2SCUP(o)      ((o)->top_vis > 0)                              // whether it is ok to scroll up
 
 
 // max spots to keep
-#if defined(_IS_ESP8266)
-#define MAX_SPOTS       MAX_VIS                 // limit ram use on ESP
-#else
-#define MAX_SPOTS       40                      // even with more mem don't want scrolling crazy long
-#endif
-
+#define MAX_SPOTS       (MAX_VIS+nMoreScrollRows())
 
 
 
@@ -102,8 +95,7 @@ typedef struct {
     uint8_t NV_id;                              // non-volatile memory NV_ id
     uint8_t PLOT_CH_id;                         // PLOT_CH_ id
     uint8_t sortby;                             // one of ONTASort
-    int8_t top_vis;                             // spots[] index showing at top of pane
-    int8_t n_spots;                             // n spots[] malloced, newest at n_spots-1, <= MAX_SPOTS
+    ScrollState ss;                             // scroll state info
     DXClusterSpot *spots;                       // malloced collection, smallest sort field first
 } ONTAState;
 
@@ -112,9 +104,9 @@ typedef struct {
 // N.B. must assign in same order as ONTAProgram
 static ONTAState onta_state[ONTA_N] = { 
     { "/POTA/pota-activators.txt", onta_names[ONTA_POTA], POTA_COLOR, ONTA_POTA,
-                NV_ONTASPOTA, PLOT_CH_POTA, ONTAS_AGE, 0, 0, NULL },
+                NV_ONTASPOTA, PLOT_CH_POTA, ONTAS_AGE, {MAX_VIS, 0, 0}, NULL },
     { "/SOTA/sota-activators.txt", onta_names[ONTA_SOTA], SOTA_COLOR, ONTA_SOTA,
-                NV_ONTASSOTA, PLOT_CH_SOTA, ONTAS_AGE, 0, 0, NULL },
+                NV_ONTASSOTA, PLOT_CH_SOTA, ONTAS_AGE, {MAX_VIS, 0, 0}, NULL },
 };
 
 
@@ -154,8 +146,6 @@ static void formatONTASpot (const DXClusterSpot &spot, const ONTAState *osp, cha
     const unsigned AGE_LEN = osp->whoami == ONTA_POTA ? 3 : 1;
     #define FREQ_LEN        6
     #define CALL_LEN        (MAX_LINE - FREQ_LEN - AGE_LEN - ID_LEN - 4) // -EOS and -3 spaces
-
-    // printf ("*********************** ID %d AGE %d FREQ %d CALL %d\n", ID_LEN, AGE_LEN, FREQ_LEN, CALL_LEN);
 
     // pretty freq + trailing space
     int l = snprintf (line, MAX_LINE, _FX("%*.0f "), FREQ_LEN, spot.kHz);
@@ -206,35 +196,39 @@ static void drawONTAVisSpots (const SBox &box, const ONTAState *osp)
     tft.fillRect (box.x+1, box.y + START_DY-1, box.w-2, box.h - START_DY - 1, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     uint16_t x = box.x + ONTA_INDENT;
-    uint16_t y = box.y + START_DY;
+    uint16_t y0 = box.y + START_DY;
 
     // draw otaspots top_vis on top
-    int n_shown = 0;
-    for (int i = osp->top_vis; i < osp->n_spots && n_shown < MAX_VIS; i++) {
-        // get info line
-        const DXClusterSpot &spot = osp->spots[i];
-        char line[MAX_LINE];
-        int flen;
-        formatONTASpot (spot, osp, line, flen);
+    int min_i, max_i;
+    if (osp->ss.getVisIndices (min_i, max_i) > 0) {
 
-        // show freq with proper band map color background
-        uint16_t bg_col = getBandColor ((long)(spot.kHz*1000));           // wants Hz
-        uint16_t txt_col = getGoodTextColor (bg_col);
-        tft.setTextColor(txt_col);
-        tft.setCursor (x, y);
-        tft.fillRect (x, y-1, flen*6, ONTA_ROWDY-3, bg_col);
-        tft.printf (_FX("%*.*s"), flen, flen, line);
+        for (int i = min_i; i <= max_i; i++) {
+            // get info line
+            const DXClusterSpot &spot = osp->spots[i];
+            char line[MAX_LINE];
+            int flen;
+            formatONTASpot (spot, osp, line, flen);
 
-        // show remainder of line in white
-        tft.setTextColor(RA8875_WHITE);
-        tft.printf (line+flen);
-        y += ONTA_ROWDY;
-        n_shown++;
+            // set y location
+            uint16_t y = y0 + osp->ss.getDisplayRow(i) * ONTA_ROWDY;
+
+            // show freq with proper band map color background
+            uint16_t bg_col = getBandColor ((long)(spot.kHz*1000));           // wants Hz
+            uint16_t txt_col = getGoodTextColor (bg_col);
+            tft.setTextColor(txt_col);
+            tft.fillRect (x, y-1, flen*6, ONTA_ROWDY-3, bg_col);
+            tft.setCursor (x, y);
+            tft.printf (_FX("%*.*s"), flen, flen, line);
+
+            // show remainder of line in white
+            tft.setTextColor(RA8875_WHITE);
+            tft.printf (line+flen);
+        }
     }
 
     // draw scroll controls, as needed
-    drawScrollDown (box, osp->color, osp->n_spots - osp->top_vis - MAX_VIS, OK2SCDW(osp));
-    drawScrollUp (box, osp->color, osp->top_vis, OK2SCUP(osp));
+    osp->ss.drawScrollDownControl (box, osp->color);
+    osp->ss.drawScrollUpControl (box, osp->color);
 }
 
 /* draw spots in the given pane box from scratch.
@@ -256,9 +250,9 @@ static void drawONTA (const SBox &box, const ONTAState *osp)
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor(RA8875_WHITE);
     tft.setCursor (box.x + (box.w-10)/2, box.y + COUNT_DY);
-    tft.printf (_FX("%d"), osp->n_spots);
+    tft.printf (_FX("%d"), osp->ss.n_data);
 
-    // show each spot starting with top_vis, up to max
+    // show each spot
     drawONTAVisSpots (box, osp);
 }
 
@@ -266,10 +260,8 @@ static void drawONTA (const SBox &box, const ONTAState *osp)
  */
 static void scrollONTAUp (const SBox &box, ONTAState *osp)
 {
-    if (OK2SCUP(osp)) {
-        osp->top_vis -= (MAX_VIS - 1);               // retain 1 for context
-        if (osp->top_vis < 0)
-            osp->top_vis = 0;
+    if (osp->ss.okToScrollUp ()) {
+        osp->ss.scrollUp ();
         drawONTAVisSpots (box, osp);
     }
 }
@@ -278,10 +270,8 @@ static void scrollONTAUp (const SBox &box, ONTAState *osp)
  */
 static void scrollONTADown (const SBox &box, ONTAState *osp)
 {
-    if (OK2SCDW(osp)) {
-        osp->top_vis += (MAX_VIS - 1);               // retain 1 for context
-        if (osp->top_vis > osp->n_spots - MAX_VIS)
-            osp->top_vis = osp->n_spots - MAX_VIS;
+    if (osp->ss.okToScrollDown()) {
+        osp->ss.scrollDown ();
         drawONTAVisSpots (box, osp);
     }
 }
@@ -379,7 +369,8 @@ static void resetONTAStorage (ONTAState *osp)
 {
     free (osp->spots);
     osp->spots = NULL;
-    osp->n_spots = 0;
+    osp->ss.n_data = 0;
+    osp->ss.top_vis = 0;
 }
 
 /* read fresh ontheair info and draw pane in box.
@@ -450,17 +441,17 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
             }
 
             // append to spots list up to MAX_SPOTS
-            if (osp->n_spots == MAX_SPOTS) {
+            if (osp->ss.n_data == MAX_SPOTS) {
                 // no more so shift out the oldest
                 memmove (osp->spots, &osp->spots[1], (MAX_SPOTS-1) * sizeof(DXClusterSpot));
-                osp->n_spots = MAX_SPOTS - 1;
+                osp->ss.n_data = MAX_SPOTS - 1;
             } else {
                 // add 1 more
-                osp->spots = (DXClusterSpot *) realloc (osp->spots, (osp->n_spots+1)*sizeof(DXClusterSpot));
+                osp->spots = (DXClusterSpot*) realloc (osp->spots, (osp->ss.n_data+1)*sizeof(DXClusterSpot));
                 if (!osp->spots)
-                    fatalError (_FX("No room for %d spots"), osp->n_spots+1);
+                    fatalError (_FX("No room for %d spots"), osp->ss.n_data+1);
             }
-            DXClusterSpot *new_sp = &osp->spots[osp->n_spots++];
+            DXClusterSpot *new_sp = &osp->spots[osp->ss.n_data++];
             memset (new_sp, 0, sizeof(*new_sp));
 
             // repurpose de_call for id, de_grid for list name
@@ -489,14 +480,10 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
 
 out:
 
-    // restart scrolled all the way down
-    osp->top_vis = osp->n_spots - MAX_VIS;
-    if (osp->top_vis < 0)
-        osp->top_vis = 0;
-
     if (ok) {
         Serial.printf (_FX("ONTA: read %d new spots\n"), n_read);
-        qsort (osp->spots, osp->n_spots, sizeof(DXClusterSpot), onta_sorts[osp->sortby].qsf);
+        qsort (osp->spots, osp->ss.n_data, sizeof(DXClusterSpot), onta_sorts[osp->sortby].qsf);
+        osp->ss.scrollToNewest();
         drawONTA (box, osp);
     } else {
         resetONTAStorage (osp);
@@ -519,12 +506,12 @@ bool checkOnTheAirTouch (const SCoord &s, const SBox &box, ONTAProgram whoami)
     // check for title or scroll
     if (s.y < box.y + PANETITLE_H) {
 
-        if (checkScrollUpTouch (s, box)) {
+        if (osp->ss.checkScrollUpTouch (s, box)) {
             scrollONTAUp (box, osp);
             return (true);
         }
 
-        if (checkScrollDownTouch (s, box)) {
+        if (osp->ss.checkScrollDownTouch (s, box)) {
             scrollONTADown (box, osp);
             return (true);
         }
@@ -540,9 +527,9 @@ bool checkOnTheAirTouch (const SCoord &s, const SBox &box, ONTAProgram whoami)
     }
 
     // tapped a row, engage if defined
+    int spot_row;
     int vis_row = (s.y - START_DY)/ONTA_ROWDY;
-    int spot_row = osp->top_vis + vis_row;
-    if (spot_row >= 0 && spot_row < osp->n_spots)
+    if (osp->ss.findDataIndex (vis_row, spot_row))
         engageONTARow (osp->spots[spot_row]);
 
     // ours even if row is empty
@@ -565,7 +552,7 @@ bool getOnTheAirSpots (DXClusterSpot **spp, uint8_t *nspotsp, ONTAProgram whoami
 
     // pass back
     *spp = osp->spots;
-    *nspotsp = osp->n_spots;
+    *nspotsp = osp->ss.n_data;
 
     // ok
     return (true);
@@ -582,7 +569,7 @@ bool overAnyOnTheAirSpots (const SCoord &s)
     for (int i = 0; i < ONTA_N; i++) {
         ONTAState *osp = &onta_state[i];
         if (osp->spots && findPaneForChoice ((PlotChoice)osp->PLOT_CH_id) != PANE_NONE) {
-            for (int j = 0; j < osp->n_spots; j++) {
+            for (int j = 0; j < osp->ss.n_data; j++) {
                 // N.B. inCircle works even though map_c is in Raw coords because on ESP they equal canonical
                 if (labelSpots() ? inBox(s, osp->spots[j].dx_map.map_b)
                                  : (dotSpots() ? inCircle(s, osp->spots[j].dx_map.map_c) : false))
@@ -605,7 +592,7 @@ void drawOnTheAirSpotsOnMap (void)
     for (int i = 0; i < ONTA_N; i++) {
         ONTAState *osp = &onta_state[i];
         if (osp->spots && findPaneForChoice ((PlotChoice)osp->PLOT_CH_id) != PANE_NONE) {
-            for (int j = 0; j < osp->n_spots; j++) {
+            for (int j = 0; j < osp->ss.n_data; j++) {
                 drawDXCLabelOnMap (osp->spots[j]);
             }
         }
@@ -618,7 +605,7 @@ void updateOnTheAirSpotScreenLocations (void)
 {
     for (int i = 0; i < ONTA_N; i++) {
         ONTAState *osp = &onta_state[i];
-        for (int j = 0; j < osp->n_spots; j++) {
+        for (int j = 0; j < osp->ss.n_data; j++) {
             setDXCSpotPosition (osp->spots[j]);
         }
     }
@@ -636,7 +623,7 @@ bool getClosestOnTheAirSpot (const LatLong &ll, DXClusterSpot *dxc_closest, LatL
     for (int i = 0; i < ONTA_N; i++) {
         ONTAState *osp = &onta_state[i];
         if (osp->spots && findPaneForChoice ((PlotChoice)osp->PLOT_CH_id) != PANE_NONE
-                                && getClosestDXC (osp->spots, osp->n_spots, ll, &dxc_cl, &ll_cl)) {
+                                && getClosestDXC (osp->spots, osp->ss.n_data, ll, &dxc_cl, &ll_cl)) {
             if (found_any) {
                 // see if this is even closer than one found so far
                 float new_cl = simpleSphereDist (ll, ll_cl);
