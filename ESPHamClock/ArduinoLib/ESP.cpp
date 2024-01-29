@@ -29,7 +29,7 @@ void ESP::restart(void)
         // go
         execvp (our_argv[0], our_argv);
 
-        printf ("execvp(%s): %s\n", our_argv[0], strerror(errno));
+        printf ("%s has disappeared\n", our_argv[0]);
         exit(1);
 }
 
@@ -42,8 +42,8 @@ uint32_t ESP::getChipId()
         if (sn)
             return (sn);
 
-#if defined(_IS_LINUX)
         // try cpu serial number
+
         FILE *fp = fopen ("/proc/cpuinfo", "r");
         if (fp) {
             static const char serial[] = "Serial";
@@ -53,7 +53,7 @@ uint32_t ESP::getChipId()
                     int l = strlen(buf);                        // includes nl
                     sn = strtoul (&buf[l-9], NULL, 16);         // 8 LSB
                     if (sn) {
-                        // printf ("Found ChipId '%.*s' -> 0x%X = %u\n", l-1, buf, sn, sn);
+                        printf ("Found ChipId '%.*s' -> 0x%X = %u\n", l-1, buf, sn, sn);
                         break;
                     }
                 }
@@ -62,14 +62,14 @@ uint32_t ESP::getChipId()
             if (sn)
                 return (sn);
         }
-#endif
 
         // try MAC address
+
         std::string mac = WiFi.macAddress();
         unsigned int m1, m2, m3, m4, m5, m6;
         if (sscanf (mac.c_str(), "%x:%x:%x:%x:%x:%x", &m1, &m2, &m3, &m4, &m5, &m6) == 6) {
             sn = (m3<<24) + (m4<<16) + (m5<<8) + m6;
-            // printf ("Found ChipId from MAC '%s' -> 0x%x = %u\n", mac.c_str(), sn, sn);
+            printf ("Found ChipId from MAC '%s' -> 0x%x = %u\n", mac.c_str(), sn, sn);
         } else {
             printf ("No ChipId\n");
             sn = 0xFFFFFFFF;

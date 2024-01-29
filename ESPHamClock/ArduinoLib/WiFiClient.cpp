@@ -341,16 +341,15 @@ void WiFiClient::println (uint32_t i)
 	write ((const uint8_t *) buf, n);
 }
 
-IPAddress WiFiClient::remoteIP()
+String WiFiClient::remoteIP()
 {
 	struct sockaddr_in sa;
 	socklen_t len = sizeof(sa);
 
 	getpeername(socket, (struct sockaddr *)&sa, &len);
-	struct in_addr ip_addr = sa.sin_addr;
+	struct in_addr ipAddr = sa.sin_addr;
 
-	char *s = inet_ntoa (ip_addr);
-        int oct0, oct1, oct2, oct3;
-        sscanf (s, "%d.%d.%d.%d", &oct0, &oct1, &oct2, &oct3);
-	return (IPAddress(oct0,oct1,oct2,oct3));
+	char str[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN);
+	return (String(str));
 }

@@ -357,7 +357,7 @@ static uint32_t sendOneString (float correction, const char str[])
     hi_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
     bool hipri_ok = sched_setscheduler (0, SCHED_FIFO, &hi_param) == 0;
     if (!hipri_ok)
-        Serial.printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
+        printf (_FX("Failed to set new prioity %d: %s\n"), hi_param.sched_priority, strerror(errno));
 
     // get starting time
     struct timespec t0, t1;
@@ -409,7 +409,7 @@ static void sendOneMessage (const char cmd[])
         ns1 = sendOneString (correction, cmd);
     }
 
-    Serial.printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
+    printf (_FX("Elecraft: correction= %g cmd= %u ns0= %u ns1= %u ns\n"), correction, cmd_ns, ns0, ns1);
 
 }
 

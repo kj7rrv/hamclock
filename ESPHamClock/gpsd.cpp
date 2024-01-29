@@ -150,7 +150,7 @@ static bool getGPSDSomething(bool (*lookf)(const char *buf, void *arg), void *ar
 
             // read lines, give to lookf, done when it's happy or no more or time out
             for (size_t ll = 0;
-                        !timesUp(&t0,GPSD_TO) && ll < MAXGLL && !look_ok && getTCPChar(gpsd_client,&line[ll]);
+                        !timesUp(&t0,GPSD_TO) && ll < MAXGLL && !look_ok && getChar(gpsd_client,&line[ll]);
                         /* none */ ) {
 
                 // hopeful?

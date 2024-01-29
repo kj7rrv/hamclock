@@ -71,7 +71,7 @@ bool WiFiServer::begin(char ynot[])
 	}
     #endif
         if (::bind(sfd,(struct sockaddr*)&serv_socket,sizeof(serv_socket)) < 0) {
-            snprintf (ynot, 50, "bind(%d): %s", port, strerror(errno));
+            snprintf (ynot, 50, "bind: %s", strerror(errno));
 	    close (sfd);
 	    return (false);
 	}

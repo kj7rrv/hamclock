@@ -48,19 +48,18 @@ static bool getCommand (bool verbose, const char cmd[], char line[], size_t line
                 printf ("** back=%s\n", line);
             return (true);
         }
-        if (verbose) {
+        if (!verbose)
             printf ("** cmd=%s\n", cmd);
-            int signaled = WIFSIGNALED(wstatus);
-            int signal = WTERMSIG(wstatus);
-            if (exited)
-                printf ("** err=%d eof=%d exstatus=%d\n", err, eof, exstatus);
-            else if (signaled)
-                printf ("** err=%d eof=%d signal=%d\n", err, eof, signal);
-            else if (wstatus == -1)
-                printf ("** err=%d eof=%d wait(2) err: %s\n", err, eof, strerror(errno));
-            else
-                printf ("** err=%d eof=%d nknown wait status: %d\n", err, eof, wstatus);
-        }
+        int signaled = WIFSIGNALED(wstatus);
+        int signal = WTERMSIG(wstatus);
+        if (exited)
+            printf ("** err=%d eof=%d exstatus=%d\n", err, eof, exstatus);
+        else if (signaled)
+            printf ("** err=%d eof=%d signal=%d\n", err, eof, signal);
+        else if (wstatus == -1)
+            printf ("** err=%d eof=%d wait(2) err: %s\n", err, eof, strerror(errno));
+        else
+            printf ("** err=%d eof=%d nknown wait status: %d\n", err, eof, wstatus);
 	return (false);
 }
 
@@ -78,6 +77,27 @@ static bool crackIP (const char line[], IPAddress &a)
         a[1] = i[1];
         a[2] = i[2];
         a[3] = i[3];
+        return (true);
+}
+
+/* convert line containing a.b.c.d/m into IPaddress mask.
+ * return whether ok
+ */
+static bool crackCIDR (const char line[], IPAddress &m)
+{
+        int i[5] = {0, 0, 0, 0, 0};
+
+        // printf ("CIDR: %s\n", line);
+        if (sscanf (line, "%d.%d.%d.%d/%d", &i[0], &i[1], &i[2], &i[3], &i[4]) != 5)
+            return (false);
+
+        uint32_t mask = ~((1L << (32-i[4])) - 1);
+        // printf ("mask %d 0x%8X\n", i[4], mask);
+
+        m[0] = (mask >> 24) & 0xFF;
+        m[1] = (mask >> 16) & 0xFF;
+        m[2] = (mask >>  8) & 0xFF;
+        m[3] = (mask >>  0) & 0xFF;
         return (true);
 }
 
@@ -201,36 +221,29 @@ IPAddress WiFi::localIP(void)
 IPAddress WiFi::subnetMask(void)
 {
 	static IPAddress a;                     // retain as cache
+	char cmd[256], back[256];
 
         // try cache first
         if (a[0] != 0)
             return (a);
 
-	// get list of all interfaces
-	struct ifaddrs *ifp0;
-	if (getifaddrs(&ifp0) < 0) {
-	    printf ("getifaddrs(): %s\n", strerror(errno));
-	    return (a);
-	}
+        strcpy (cmd, "[ -x /sbin/ip ] && /sbin/ip address show | awk '/inet / && !/127.0.0.1/{print $2}'");
+	if (getCommand (true, cmd, back, sizeof(back)) && crackCIDR (back, a))
+            return (a);
 
-	// scan for any UP AF_INET with adder other than 127.0.0.1
-	for (struct ifaddrs *ifp = ifp0; ifp != NULL; ifp = ifp->ifa_next) {
-	    if (ifp->ifa_addr && ifp->ifa_addr->sa_family == AF_INET && (ifp->ifa_flags & IFF_UP)) {
-		void *addr_in = &((struct sockaddr_in *)ifp->ifa_addr)->sin_addr;
-		char *addr_a = inet_ntoa(*(struct in_addr*)addr_in);
-		if (strcmp ("127.0.0.1", addr_a) && ifp->ifa_netmask) {
-                    void *netm_in = &((struct sockaddr_in *)ifp->ifa_netmask)->sin_addr;
-                    char *netm_a = inet_ntoa(*(struct in_addr*)netm_in);
-		    // printf ("interface %s: netmask %s\n", ifp->ifa_name, netm_a);
-                    crackIP (netm_a, a);
-		    break;
-		}
-	    }
-	}
+	strcpy (cmd, "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/ netmask / && !/127.0.0.1/{print $4}'");
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
+            return (a);
 
-	// free list
-	freeifaddrs (ifp0);
+	// works on a line of the form inet 192.168.7.11 netmask 0xffffff00 broadcast 192.168.7.255
+	strcpy (cmd, "[ -x /sbin/ifconfig ] && /sbin/ifconfig "
+            "| grep -v '127.0.0.1' "
+            "| awk '/netmask *0x/{printf \"%d.%d.%d.%d\\n\", $4/(2^24), ($4/(2^15))%256, ($4/2^8)%256, $4%256}'"
+            "| head -1");
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
+            return (a);
 
+        // default 0
 	return (a);
 }
 
@@ -244,11 +257,11 @@ IPAddress WiFi::gatewayIP(void)
             return (a);
 
         strcpy (cmd,  "[ -x /sbin/ip ] && /sbin/ip route show default | awk '/default via/{print $3}'");
-	if (getCommand (false, cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         strcpy (cmd,  "netstat -rn | awk '(/^0.0.0.0/ || /^default/) && !/::/{print $2}'");
-	if (getCommand (false, cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         // default 0
@@ -265,7 +278,7 @@ IPAddress WiFi::dnsIP(void)
             return (a);
 
 	strcpy (cmd, "awk '/nameserver/{print $2}' /etc/resolv.conf | head -1");
-	if (getCommand (false, cmd, back, sizeof(back)) && crackIP (back, a))
+	if (getCommand (true, cmd, back, sizeof(back)) && crackIP (back, a))
             return (a);
 
         // default 0
@@ -322,14 +335,14 @@ int WiFi::status(void)
 	    return (WL_OTHER);
 	}
 
-	// scan for any UP AF_INET with adder other than 127.0.0.1
+	// scan for AF_INET and adder other than 127.0.0.1
 	bool ok = false;
 	for (struct ifaddrs *ifp = ifp0; ifp != NULL && !ok; ifp = ifp->ifa_next) {
-	    if (ifp->ifa_addr && ifp->ifa_addr->sa_family == AF_INET && (ifp->ifa_flags & IFF_UP)) {
+	    if (ifp->ifa_addr && ifp->ifa_addr->sa_family == AF_INET) {
 		void *addr_in = &((struct sockaddr_in *)ifp->ifa_addr)->sin_addr;
 		char *addr_a = inet_ntoa(*(struct in_addr*)addr_in);
 		if (strcmp ("127.0.0.1", addr_a)) {
-		    // printf ("interface %s: addr %s\n", ifp->ifa_name, addr_a);
+		    // printf ("interface %s: %s\n", ifp->ifa_name, addr_a);
 		    ok = true;
 		}
 	    }
@@ -358,15 +371,15 @@ std::string WiFi::macAddress(void)
             "[ -x /sbin/ip ] && /sbin/ip addr show dev "
                 "`/sbin/ip route show default 0.0.0.0/0 | perl -n -e '/default.* dev (\\S+) / and print $1'`"
                 "| perl -n -e '/ether ([a-fA-F0-9:]+)/ and print \"$1\\n\"'",
-            "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/ether/{print $2}' | head -1",
-            "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/HWaddr/{print $5}' | head -1",
             "[ -x /sbin/ifconfig -a -x /sbin/route ] && /sbin/ifconfig "
                 "`/sbin/route -n | awk '/UG/{print $8}'` | awk '/ether/{print $2}'",
+            "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/ether/{print $2}' | head -1",
+            "[ -x /sbin/ifconfig ] && /sbin/ifconfig | awk '/HWaddr/{print $5}' | head -1",
         };
         const int n_cmds = sizeof(cmds)/sizeof(cmds[0]);
 
         for (int i = 0; i < n_cmds; i++) {
-            if (getCommand (false, cmds[i], line, sizeof(line))) {
+            if (getCommand (true, cmds[i], line, sizeof(line))) {
                 // insure 5 :
                 unsigned int m1, m2, m3, m4, m5, m6;
                 if (sscanf (line, "%x:%x:%x:%x:%x:%x", &m1, &m2, &m3, &m4, &m5, &m6) == 6)

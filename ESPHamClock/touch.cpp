@@ -56,92 +56,22 @@ static TouchType readRawTouch (uint16_t &x, uint16_t &y)
     return (millis() - t0 >= TOUCH_HOLDT ? TT_HOLD : TT_TAP);
 }
 
+#if defined(_IS_ESP8266)
 
 /* given values return from tft.touchRead(), return screen location.
  * N.B. assumes calibrateTouch() has already been called.
  */
 static void touch2Screen (uint16_t tx, uint16_t ty, SCoord &s)
 {
-#if defined(_IS_ESP8266)
     CAL_POINT p, q;
     p.x = tx;
     p.y = ty;
     getDisplayPoint (&q, &p, &touch_matrix);
     s.x = q.x;
     s.y = q.y;
-#else
-    s.x = tx;
-    s.y = ty;
+}
+
 #endif
-}
-
-/* read keyboard char and check for warp cursor if hjkl or engage cr/lf/space
- * N.B. ignore multiple rapid engages
- */
-TouchType checkKBWarp (SCoord &s)
-{
-    TouchType tt = TT_NONE;
-    s.x = s.y = 0;
-
-#if !defined(_IS_ESP8266) && !defined(_WEB_ONLY) && !defined(_USE_FB0)
-
-    // ignore if don't want warping
-    if (!want_kbcursor)
-        return (TT_NONE);
-
-    bool control, shift;
-    char c = tft.getChar (&control, &shift);
-    if (c) {
-
-        switch (c) {
-
-        case 'h': case 'j': case 'k': case 'l':
-            // warp
-            {
-                unsigned n = 1;
-                if (shift)
-                    n *= 2;
-                if (control)
-                    n *= 4;
-                int x, y;
-                if (tft.warpCursor (c, n, &x, &y)) {
-                    s.x = x;
-                    s.y = y;
-                }
-            }
-            break;
-
-        case '\r': case '\n': case ' ':
-            // engage
-            {
-                static uint32_t prev_engage_ms;
-                static int n_fast_engages;
-                uint32_t engage_ms = millis();
-                bool engage_rate_ok = engage_ms - prev_engage_ms > 1000;
-                bool engage_ok = engage_rate_ok || ++n_fast_engages < 10;
-
-                if (engage_ok && tft.getMouse (&s.x, &s.y))
-                    tt = (shift || control) ? TT_HOLD : TT_TAP;
-                if (engage_rate_ok)
-                    n_fast_engages = 0;
-                else if (!engage_ok)
-                    Serial.printf (F("Keyboard functions are too fast\n"));
-
-                prev_engage_ms = engage_ms;
-            }
-            break;
-
-        default:
-            // ignore all other chars
-            break;
-
-        }
-    }
-#endif // !_IS_ESP8266
-
-    return (tt);
-}
-
 
 /* calibrate the touch screen.
  * use values from NVRAM if available unless force, and give op chance to redo.
@@ -297,8 +227,7 @@ void calibrateTouch (bool force)
 }
 
 
-/* read the touch screen or mouse.
- * pass back calibrated screen coordinate and return a TouchType.
+/* read the touch screen and return calibrated screen coordinate.
  */
 TouchType readCalTouch (SCoord &s)
 {
@@ -310,15 +239,24 @@ TouchType readCalTouch (SCoord &s)
     uint16_t x = 0, y = 0;
     TouchType tt = readRawTouch (x, y);
 
+#if defined(_IS_ESP8266)
+
     // convert to screen coords via calibration matrix
     touch2Screen (x, y, s);
 
-    Serial.printf(_FX("Touch @ %lu s: \t%4d %4d\ttype %d\n"), millis()/1000U, s.x, s.y, (int)tt);
+#else
 
+    // no mapping required
+    s.x = x;
+    s.y = y;
+
+#endif
+
+    Serial.printf(_FX("Touch @ %lu s: \t%4d %4d\ttype %d\n"), millis()/1000U, s.x, s.y, (int)tt);
+    
     // return hold or tap
     return (tt);
 }
-
 
 /* wait for no touch events, need time also since the resistance film seems to be sticky
  */

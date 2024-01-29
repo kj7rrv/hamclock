@@ -49,9 +49,10 @@ const char *brb_names[BRB_N] = {
 
 // configuration values
 #define BPWM_MAX        255                     // PWM for 100% brightness
+#define BPWM_CHG        1.259                   // brightness mult per tap: 1 db = 1 JND
 #define PHOT_PIN        A0                      // Arduino name of analog pin with photo detector
 #define PHOT_MAX        1024                    // 10 bits including known range bug
-#define NO_TOL          20                      // Adc tolerance for no phot attached
+#define NO_TOL          5                       // Adc tolerance for no phot attached
 #define BPWM_BLEND      0.2F                    // fraction of new brightness to keep
 #define PHOT_BLEND      0.5F                    // fraction of new pwm to keep
 #define BPWM_COL        RA8875_WHITE            // brightness scale color
@@ -139,20 +140,16 @@ static void setDisplayBrightness(bool log)
             const char *argv_dpms[] = {         // now try forcing dpms
                 "xset", "dpms", "force", bpwm > BPWM_MAX/2 ? "on" : "off", NULL
             };
-            const char *argv_wlr[] = {          // only works with the Wayland wayfire compositor
-                "wlr-randr", "--output", "HDMI-A-1", bpwm > BPWM_MAX/2 ? "--on" : "--off", NULL
-            };
             const char **argvs[] = {            // collect for easy use
-                argv_vcg, argv_sso, argv_ssvr, argv_dpms, argv_wlr, NULL
+                argv_vcg, argv_sso, argv_ssvr, argv_dpms, NULL
             };
             for (const char ***av = argvs; *av != NULL; av++) {
                 const char **argv = *av;
                 if (log) {
-                    char lm[100];
-                    int lm_l = snprintf (lm, sizeof(lm), "BR: ");
+                    Serial.printf ("BR:");
                     for (const char **ap = argv; *ap != NULL; ap++)
-                        lm_l += snprintf (lm+lm_l, sizeof(lm)-lm_l, " %s", *ap);
-                    Serial.println (lm);
+                        Serial.printf (" %s", *ap);
+                    Serial.printf ("\n");
                 }
                 int child_pid = fork();
                 if (child_pid < 0)
@@ -160,7 +157,7 @@ static void setDisplayBrightness(bool log)
                 if (child_pid == 0) {
                     // new child process
                     execvp (argv[0], (char**)argv);
-                    Serial.printf ("execvp(%s) failed: %s\n", argv[0], strerror(errno));
+                    printf ("execvp(%s) failed: %s\n", argv[0], strerror(errno));
                     exit(1);
                 } else {
                     // parent waits for child
@@ -908,6 +905,18 @@ void followBrightness()
             // engage if either changed
             if (bpwm != prev_bpwm || phot_changed)
                 engageDisplayBrightness(false);
+
+            // #define _DEBUG_BRIGHTNESS
+            #ifdef _DEBUG_BRIGHTNESS
+
+                Serial.print("follow");
+                Serial.print ("\tPHOT:\t");
+                    Serial.print (phot); Serial.print('\t');
+                    Serial.print(fast_phot_dim); Serial.print(" .. "); Serial.print(fast_phot_bright);
+                Serial.print ("\tBPWM:\t");
+                    Serial.print(bpwm); Serial.print('\t');
+                    Serial.print(fast_bpwm_dim); Serial.print(" .. "); Serial.println(fast_bpwm_bright);
+            #endif // _DEBUG_BRIGHTNESS
         }
 
 }

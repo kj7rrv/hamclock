@@ -3,8 +3,6 @@
 
 #include "HamClock.h"
 
-#define SDO_IMG_INTERVAL        1800            // image update interval, seconds
-
 typedef enum {
     SDOT_COMP,
     SDOT_HMIB,
@@ -89,11 +87,25 @@ static void loadSDOChoice (void)
     }
 }
 
-/* download and render sdo_choice.
- * return whether ok.
+/* return whether sdo image is rotating
  */
-static bool drawSDOImage (const SBox &box)
+bool isSDORotating(void)
 {
+    loadSDOChoice();
+    return (sdo_rotating != 0);
+}
+
+
+/* read the current SDO image choice and display in the given box
+ */
+bool updateSDO (const SBox &box)
+{
+    // get choice, and possible rotate
+    if (isSDORotating()) {
+        sdo_choice = (sdo_choice + 1) % SDOT_N;
+        saveSDOChoice();
+    }
+
     // get corresponding file name
 #if defined (_IS_ESP8266)
     // must copy to ram
@@ -104,109 +116,9 @@ static bool drawSDOImage (const SBox &box)
     const char *fn = sdo_names[sdo_choice].file_name;;
 #endif
 
+
     // show file
-    return (drawHTTPBMP (fn, box, SDO_COLOR));
-}
-
-/* return whether sdo image is rotating
- */
-bool isSDORotating(void)
-{
-    loadSDOChoice();
-    return (sdo_rotating != 0);
-}
-
-
-/* update SDO pane info for sure and possibly image also.
- */
-bool updateSDOPane (const SBox &box, bool image_too)
-{
-    resetWatchdog();
-
-    // update and force if rotating
-    if (isSDORotating()) {
-        sdo_choice = (sdo_choice + 1) % SDOT_N;
-        saveSDOChoice();
-        image_too = true;
-    }
-
-    // current user's time
-    static time_t prev_img;
-    time_t t0 = nowWO();
-
-    // keep the strings so we can erase them exactly next time; using rectangles cuts chits from solar disk
-    static char az_str[10];
-    static char el_str[10];
-    static char rs_str[10];
-    static char rt_str[10];
-
-    // start fresh image if requested or old else just erase previous info
-
-    bool ok;
-    if (image_too || labs (t0-prev_img) > SDO_IMG_INTERVAL) {
-
-        // full draw
-        ok = drawSDOImage(box);
-
-        // record time if ok
-        if (ok)
-            prev_img = t0;
-
-    } else {
-
-        // pane image not drawn so erase previous individual stats
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor (RA8875_BLACK);
-        tft.setCursor (box.x+1, box.y+2);
-        tft.print (az_str);
-        tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
-        tft.print (el_str);
-        tft.setCursor (box.x+1, box.y+box.h-10);
-        tft.print (rs_str);
-        tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
-        tft.print (rt_str);
-
-        // always ok
-        ok = true;
-    }
-
-    // draw info if ok, layout similar to moon
-    if (ok) {
-
-        // fresh info at user's effective time
-        getSolarCir (t0, de_ll, solar_cir);
-
-        // draw corners, similar to moon
-
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor (DE_COLOR);
-
-        snprintf (az_str, sizeof(az_str), "Az:%.0f", rad2deg(solar_cir.az));
-        tft.setCursor (box.x+1, box.y+2);
-        tft.print (az_str);
-
-        snprintf (el_str, sizeof(el_str), "El:%.0f", rad2deg(solar_cir.el));
-        tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
-        tft.print (el_str);
-
-        // show which ever rise or set event comes next
-        time_t rise, set;
-        getSolarRS (t0, de_ll, &rise, &set);
-        if (rise > t0 && (set < t0 || rise - t0 < set - t0))
-            snprintf (rs_str, sizeof(rs_str), "R@%02d:%02d", hour(rise+de_tz.tz_secs),
-                                                              minute (rise+de_tz.tz_secs));
-        else if (set > t0 && (rise < t0 || set - t0 < rise - t0))
-            snprintf (rs_str, sizeof(rs_str), "S@%02d:%02d", hour(set+de_tz.tz_secs),
-                                                              minute (set+de_tz.tz_secs));
-        else
-            strcpy (rs_str, "No R/S");
-        tft.setCursor (box.x+1, box.y+box.h-10);
-        tft.print (rs_str);
-
-        snprintf (rt_str, sizeof(rt_str), "%.0fm/s", solar_cir.vel);;
-        tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
-        tft.print (rt_str);
-    }
+    bool ok = drawHTTPBMP (fn, box, SDO_COLOR);
 
     return (ok);
 }
@@ -227,8 +139,8 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
     loadSDOChoice();
 
 #if defined (_IS_UNIX)
-    // check for movie easter egg in lower right corner
-    if (s.y > box.y + 4*box.h/5 && s.x > box.x + box.w/2) {
+    // check for movie easter egg
+    if (s.y > box.y + 4*box.h/5 && s.x > box.x + 4*box.w/5) {
         const char *cmd;
         switch (sdo_choice) {
         case SDOT_COMP:
@@ -263,13 +175,6 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
         return (true);
     }
 #endif // _IS_UNIX
-
-    // check for grayline rise/set in lower left corner
-    if (s.y > box.y + 4*box.h/5 && s.x < box.x + box.w/2) {
-        plotGrayline();
-        initEarthMap();
-        return (true);
-    }
 
     // show menu of SDO images + rotate option
 

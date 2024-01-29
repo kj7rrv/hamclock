@@ -275,14 +275,11 @@ class Adafruit_RA8875 {
 	GC black_gc;
 	XImage *img;
 	Pixmap pixmap;
-        Atom wmDeleteMessage;
 
         // used by X11OptionsEngageNow
         volatile bool options_engage, options_fullscreen;
 
         void encodeKeyEvent (XKeyEvent *event);
-        void captureSelection(void);
-        bool requestSelection (KeySym ks, unsigned kb_state);
 
 
 #endif // _USE_X11

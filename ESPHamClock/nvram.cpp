@@ -77,7 +77,7 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_BR_MAX
     4,                          // NV_DE_TZ
     4,                          // NV_DX_TZ
-    NV_COREMAPSTYLE_LEN,        // NV_COREMAPSTYLE
+    NV_MAPSTYLE_LEN,            // NV_MAPSTYLE
     1,                          // NV_USEDXCLUSTER
     1,                          // NV_USEGPSD
     1,                          // NV_LOGUSAGE
@@ -149,13 +149,9 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_BCMODE
     1,                          // NV_SDO
     1,                          // NV_SDOROT
-    1,                          // NV_ONTASPOTA
-    1,                          // NV_ONTASSOTA
+    1,                          // NV_OTATYPE
+    1,                          // NV_OTASORT
     2,                          // NV_BRB_ROTSET
-    2,                          // NV_ROTCOLOR
-    1,                          // NV_CONTESTS
-    4,                          // NV_BCTOA
-    NV_ADIFFN_LEN,              // NV_ADIFFN
 
 };
 

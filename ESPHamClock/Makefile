@@ -34,7 +34,6 @@ OBJS = \
 	Germano-Regular-16.o \
 	OTAupdate.o \
 	P13.o \
-	adif.o \
 	asknewpos.o \
 	astro.o \
 	brightness.o \
@@ -49,7 +48,6 @@ OBJS = \
 	favicon.o \
 	gimbal.o \
 	gpsd.o \
-	grayline.o \
         kd3tree.o \
 	liveweb.o \
 	liveweb-html.o \
@@ -57,7 +55,6 @@ OBJS = \
 	maidenhead.o \
 	mapmanage.o \
 	menu.o \
-	mollweide.o \
 	moon_imgs.o \
 	moonpane.o \
 	ncdxf.o \

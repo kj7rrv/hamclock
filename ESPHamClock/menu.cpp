@@ -7,11 +7,11 @@
 // allow setting some/all these in Menu?
 #define MENU_TBM        2               // top and bottom margin
 #define MENU_RM         2               // right margin
-#define MENU_RH         10              // row height
+#define MENU_RH         12              // row height
 #define MENU_IS         6               // indicator size
 #define MENU_BB         4               // ok/cancel button horizontal border
 #define MENU_BDX        2               // ok/cancel button text horizontal offset
-#define MENU_BDY        1               // ok/cancel button text vertical offset
+#define MENU_BDY        3               // ok/cancel button text vertical offset
 #define MENU_TIMEOUT    MENU_TO         // timeout, millis
 #define MENU_FGC        RA8875_WHITE    // normal foreground color
 #define MENU_BGC        RA8875_BLACK    // normal background color
@@ -88,8 +88,8 @@ static void menuDrawItem (const MenuItem &mi, const SBox &pb, bool draw_label, b
     // show bounding box for debug
     // drawSBox (pb, RA8875_RED);
 
-    // draw now if just changing indicator over map_b
-    if (!draw_label && boxesOverlap (pb, map_b))
+    // now if just changing indicator
+    if (!draw_label)
         tft.drawPR();
 }
 
@@ -451,8 +451,7 @@ bool runMenu (MenuInfo &menu)
         fatalError (_FX("menu row %d != %d / %d"), vrow_i, n_activerows, menu.n_items);
 
     // immediate draw if menu is over map
-    if (boxesOverlap (menu.menu_b, map_b))
-        tft.drawPR();
+    tft.drawPR();
 
     SCoord tap;
     char kbchar;
@@ -533,10 +532,7 @@ void menuRedrawOk (SBox &ok_b, MenuOkState oks)
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setCursor (ok_b.x+MENU_BDX, ok_b.y+MENU_BDY);
     tft.print (ok_label);
-
-    // immediate draw if over map
-    if (boxesOverlap (ok_b, map_b))
-        tft.drawPR();
+    tft.drawPR();
 }
 
 /* wait until:
@@ -556,9 +552,6 @@ bool waitForUser (UserInput &ui)
     // reset both actions until they happen here
     ui.kbchar = 0;
     ui.tap = {0, 0};
-
-    // insure screen is on
-    setFullBrightness();
 
     for(;;) {
 
@@ -588,7 +581,6 @@ bool waitForUser (UserInput &ui)
         wdDelay (10);
 
         // refresh protected region in case X11 window is moved
-        if (boxesOverlap (ui.inbox, map_b))
-            tft.drawPR();
+        tft.drawPR();
     }
 }

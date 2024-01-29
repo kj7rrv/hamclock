@@ -39,8 +39,14 @@ static void drawMoonImage (const SBox &b)
 /* update moon pane info for sure and possibly image also.
  * image is in moon_image[HC_MOON_W*HC_MOON_H].
  */
-void updateMoonPane (const SBox &box, bool image_too)
+void updateMoonPane (bool force_all)
 {
+        // skip altogether if pane not selected
+        PlotPane moonpp = findPaneChoiceNow (PLOT_CH_MOON);
+        if (moonpp == PANE_NONE)
+            return;
+        const SBox &box = plot_b[moonpp];
+
         resetWatchdog();
 
         // fresh info at user's effective time
@@ -54,9 +60,11 @@ void updateMoonPane (const SBox &box, bool image_too)
         static char rs_str[10];
         static char rt_str[10];
 
-        // start fresh image if requested or old else just erase previous info
+        selectFontStyle (LIGHT_FONT, FAST_FONT);
 
-        if (image_too || labs (t0-prev_full) > 3600) {
+        // start over if requested or old else just erase previous info
+
+        if (force_all || labs (t0-prev_full) > 3600) {
 
             // full draw
             drawMoonImage(box);
@@ -66,8 +74,7 @@ void updateMoonPane (const SBox &box, bool image_too)
 
         } else {
 
-            // pane image not drawn so erase previous individual stats
-            selectFontStyle (LIGHT_FONT, FAST_FONT);
+            // no pane erase so erase previous individual stats
             tft.setTextColor (RA8875_BLACK);
             tft.setCursor (box.x+1, box.y+2);
             tft.print (az_str);
@@ -79,16 +86,15 @@ void updateMoonPane (const SBox &box, bool image_too)
             tft.print (rt_str);
         }
 
-        // always draw info, layout similar to SDO
+        // always draw info
 
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor (DE_COLOR);
 
-        snprintf (az_str, sizeof(az_str), "Az:%.0f", rad2deg(lunar_cir.az));
+        snprintf (az_str, sizeof(az_str), "Az: %.0f", rad2deg(lunar_cir.az));
         tft.setCursor (box.x+1, box.y+2);
         tft.print (az_str);
 
-        snprintf (el_str, sizeof(el_str), "El:%.0f", rad2deg(lunar_cir.el));
+        snprintf (el_str, sizeof(el_str), "El: %.0f", rad2deg(lunar_cir.el));
         tft.setCursor (box.x+box.w-getTextWidth(el_str)-1, box.y+2);
         tft.print (el_str);
 
@@ -101,12 +107,14 @@ void updateMoonPane (const SBox &box, bool image_too)
         else if (set > t0 && (rise < t0 || set - t0 < rise - t0))
             snprintf (rs_str, sizeof(rs_str), "S@%02d:%02d", hour(set+de_tz.tz_secs),
                                                               minute (set+de_tz.tz_secs));
-        else 
+        else {
+            Serial.printf (_FX("No R/S %ld : %ld %ld\n"), t0, rise, set);
             strcpy (rs_str, "No R/S");
+        }
         tft.setCursor (box.x+1, box.y+box.h-10);
         tft.print (rs_str);
 
-        snprintf (rt_str, sizeof(rt_str), "%.0fm/s", lunar_cir.vel);;
+        snprintf (rt_str, sizeof(rt_str), "%.0f m/s", lunar_cir.vel);;
         tft.setCursor (box.x+box.w-getTextWidth(rt_str)-1, box.y+box.h-10);
         tft.print (rt_str);
 }
@@ -543,7 +551,7 @@ void drawMoonElPlot()
                 fillSBox (popup_b, RA8875_BLACK);
                 drawMPSetup (t0);
                 drawMPElPlot (t0, t_start, t_end);
-                popup_is_up = false;
+                popup_is_up = 0;
             }
 
             // show new popup if tap within the plot area
@@ -567,7 +575,7 @@ void drawMoonElPlot()
                 drawMPPopup (MP_X2T(s.x), popup_b);
 
                 // note popup is now up
-                popup_is_up = true;
+                popup_is_up = MP_X2T(popup_b.x);
             }
         }
 
@@ -576,5 +584,6 @@ void drawMoonElPlot()
         drawStringInBox (button_name, resume_b, true, RA8875_GREEN);
         tft.drawPR();
 
+        printFreeHeap(F("drawMoonElPlot"));
 
 }

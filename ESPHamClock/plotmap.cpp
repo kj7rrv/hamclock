@@ -21,6 +21,7 @@
 #define GRIDC   GRAY                    // grid color
 #define LABELC  RA8875_WHITE            // label color
 #define TITLEC  RA8875_WHITE            // title color
+#define DATAC   RA8875_GREEN            // data color
 
 // data
 #define NXTICKS 20                      // nominal number of x tickmarks
@@ -31,14 +32,10 @@
 
 /* read and plot the given server file.
  */
-void plotMap (const char *filename, const char *title, uint16_t color)
+void plotMap (const char *filename, const char *xlabel, const char *ylabel, const char *title)
 {
     // erase
     fillSBox (map_b, RA8875_BLACK);
-
-    // base of filename
-    const char *file_slash = strrchr (filename, '/');
-    const char *file_base = file_slash ? file_slash + 1 : filename;
 
     // read data
     float *x_data = NULL;
@@ -59,7 +56,7 @@ void plotMap (const char *filename, const char *title, uint16_t color)
 
         // skip response header
         if (!httpSkipHeader (map_client)) {
-            mapMsg (true, 2000, _FX("%s: Header is short"), file_base);
+            mapMsg (2000, _FX("Header is short"));
             goto out;
         }
 
@@ -71,7 +68,7 @@ void plotMap (const char *filename, const char *title, uint16_t color)
             float x, y;
             if (sscanf (line, "%f %f", &x, &y) != 2) {
                 Serial.printf (_FX("PMAP: bad line: %s\n"), line);
-                mapMsg (true, 2000, _FX("%s: Data is corrupted"), file_base);
+                mapMsg (2000, _FX("Data is corrupted"));
                 goto out;
             }
 
@@ -79,7 +76,7 @@ void plotMap (const char *filename, const char *title, uint16_t color)
             float *new_x = (float *) realloc (x_data, (n_data+1) * sizeof(float));
             float *new_y = (float *) realloc (y_data, (n_data+1) * sizeof(float));
             if (!new_x || !new_y) {
-                mapMsg (true, 2000, _FX("%s: Insufficient memory"), file_base);
+                mapMsg (1000, _FX("Insufficient memory"));
                 goto out;
             }
 
@@ -101,7 +98,7 @@ void plotMap (const char *filename, const char *title, uint16_t color)
 
         // require at least a few points
         if (n_data < 10) {
-            mapMsg (true, 2000, _FX("%s: File is short"), file_base);
+            mapMsg (2000, _FX("File is short"));
             goto out;
         }
 
@@ -151,7 +148,7 @@ out:
             uint16_t x = DX2GX(x_data[i]);
             uint16_t y = DY2GY(y_data[i]);
             if (i > 0)
-                tft.drawLine (prev_x, prev_y, x, y, color);
+                tft.drawLine (prev_x, prev_y, x, y, DATAC);
             prev_x = x;
             prev_y = y;
         }

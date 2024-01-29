@@ -26,8 +26,8 @@
 
 
 // debugs: force all on just for visual testing, and show bounds
-// #define _SHOW_ALL                    // RBF
-// #define _MARK_BOUNDS                 // RBF
+// #define _SHOW_ALL                    // remove before flight
+// #define _MARK_BOUNDS                 // remove before flight
 #ifdef _SHOW_ALL
     #undef _WIFI_NEVER
     #undef _WIFI_ASK
@@ -36,7 +36,6 @@
     #define _SUPPORT_KX3 
     #define _SUPPORT_ENVSENSOR
     #define _SUPPORT_GPIO
-    #define _SUPPORT_ADIFILE
 #endif // _SHOW_ALL
 
 
@@ -60,7 +59,6 @@ static int16_t center_lng;
 static int16_t alt_center_lng;
 static bool alt_center_lng_set;
 static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
-static char adif_fn[NV_ADIFFN_LEN];
 
 
 // layout constants
@@ -85,11 +83,8 @@ static char adif_fn[NV_ADIFFN_LEN];
 #define PAGE_W          120                     // page button width
 #define PAGE_H          35                      // page button height
 #define CURSOR_DROP     2                       // pixels to drop cursor
-#define NVMS_MKMSK      0x3                     // NV_MAPSPOTS mark mask
-#define NVMS_NONE       0                       // NV_MAPSPOTS & MKMSK value to not mark spots
-#define NVMS_PREFIX     1                       // NV_MAPSPOTS & MKMSK value to mark spots with prefix
-#define NVMS_CALL       2                       // NV_MAPSPOTS & MKMSK value to mark spots with callsign
-#define NVMS_DOT        3                       // NV_MAPSPOTS & MKMSK value to mark spots with dots
+#define NVMS_PREFIX     0x1                     // NV_MAPSPOTS bit to map just prefix
+#define NVMS_CALL       0x2                     // NV_MAPSPOTS bit to map full callsign
 #define NVMS_THIN       0x4                     // NV_MAPSPOTS bit to use THINPATHSZ
 #define NVMS_WIDE       0x8                     // NV_MAPSPOTS bit to use WIDEPATHSZ
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index from 0 return screen y
@@ -201,7 +196,6 @@ typedef enum {
     FLRIGPORT_SPR,
     FLRIGHOST_SPR,
     NTPHOST_SPR,
-    ADIFFN_SPR,
 
     // page "4"
     CENTERLNG_SPR,
@@ -235,11 +229,10 @@ static StringPrompt string_pr[N_SPR] = {
     {1, { 20, R2Y(2), 60, PR_H}, { 80, R2Y(2), 260, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
     {1, { 20, R2Y(3), 60, PR_H}, { 80, R2Y(3), 260, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
 
-    // 1 less that full width to avoid erasing border
-    {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 409, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 409, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 409, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
-    {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 409, PR_H}, NULL, dxcl_cmds[3], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 410, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 410, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 410, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 410, PR_H}, NULL, dxcl_cmds[3], NV_DXCLCMD_LEN, 0},
 
 
     // "page 3" -- index 2
@@ -252,7 +245,6 @@ static StringPrompt string_pr[N_SPR] = {
     {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
 
     {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
-    {2, {100, R2Y(5), 60, PR_H}, {160, R2Y(5), 330, PR_H}, "file:", adif_fn, NV_ADIFFN_LEN, 0},
 
 
     // "page 4" -- index 3
@@ -304,7 +296,6 @@ typedef enum {
     ROTUSE_BPR,
     FLRIGUSE_BPR,
     NTPSET_BPR,
-    ADIFSET_BPR,
 
     // page "4"
     GPIOOK_BPR,
@@ -369,9 +360,7 @@ static BoolPrompt bool_pr[N_BPR] = {
     {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes", N_BPR},
     {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes", N_BPR},
 
-    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers",
-                                                                                                0, N_BPR},
-    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", 0, N_BPR},
+    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers", 0, N_BPR},
 
 
     // "page 4" -- index 3
@@ -381,14 +370,14 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  70, PR_H}, false, "KX3?", "No", NULL, KX3BAUD_BPR},
     {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  70, PR_H}, false, NULL, "4800", "38400", KX3ON_BPR},
-                                                        // entangled: Off: FX   4800: TF   38400: TT
+                                                        // entangled: Off: F X   4800: T F   38400: T T
 
 
     // "page 5" -- index 4
 
     {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL, DATEFMT_DMYYMD_BPR},
     {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day", DATEFMT_MDY_BPR},
-                                                        // entangled: MDY: FX   DMY: TF  YMD:  TT
+                                                        // entangled: MDY: F X   DMY: T F  YMD:  T T
 
     {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In", N_BPR},
 
@@ -398,13 +387,13 @@ static BoolPrompt bool_pr[N_BPR] = {
     {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", N_BPR},
     {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?", "True N", "Magnetic N", N_BPR},
 
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", "Dot", SPOTLBLCALL_BPR},
+    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Spot labels?", "No", NULL, SPOTLBLCALL_BPR},
     {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
-                                                // entangled: No: FF Dot: TF  Prefix: FT  Call: TT
+                                                        // entangled: No: F X  Prefix: T F  Call: T T
 
     {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Spot paths?", "No", NULL, SPOTPATHSZ_BPR},
     {4, {540, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
-                                                        // entangled: No: FX  Thin: TF  Wide: TT
+                                                        // entangled: No: F X  Thin: T F  Wide: T T
 
     {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4),  40, PR_H}, false, "Flip U/D?", "No", "Yes", N_BPR},
 
@@ -474,8 +463,6 @@ typedef struct {
 } ColSelPrompt;
 
 #define DASHOK(p)       (p.a_box.x > 0)         // test whether this color has a dash control option
-#define NODASH(p)       do { p.a_box.x = 0; } while (0) // disable dash with this color
-
 
 /* color selector controls and prompts.
  * N.B. must match ColorSelection order
@@ -511,88 +498,82 @@ static ColSelPrompt csel_pr[N_CSPR] = {
             false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid",
             {0, 0, 0, 0}, false, 0, 0, 0},
 
-#if defined(_IS_UNIX)
+#if defined(_SUPPORT_PSKUNIX)
 
-    // only UNIX supports drawing rotator direction on main map
-    {{CSEL_COL1X+CSEL_PDX, R2Y(5), CSEL_PW, PR_H},
-            {CSEL_COL1X, R2Y(5)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
-            {CSEL_COL1X+CSEL_DDX, R2Y(5)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RA8875_WHITE, NV_ROTCOLOR, "Rotator",
-            {0, 0, 0, 0}, false, 0, 0, 0},
-
-#endif // _IS_UNIX
+    // ESP does not draw paths so doesn't need band colors
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(128,0,0), NV_160M_COLOR, "160 m",
+            false, RGB565(128,0,0), NV_160M_COLOR, "160 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(128,128,0), NV_80M_COLOR, "80 m",
+            false, RGB565(128,128,0), NV_80M_COLOR, "80 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(230,25,75), NV_60M_COLOR, "60 m",
+            false, RGB565(230,25,75), NV_60M_COLOR, "60 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(245,130,48), NV_40M_COLOR, "40 m",
+            false, RGB565(245,130,48), NV_40M_COLOR, "40 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(200,176,20), NV_30M_COLOR, "30 m",
+            false, RGB565(200,176,20), NV_30M_COLOR, "30 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(250,250,0), NV_20M_COLOR, "20 m",
+            false, RGB565(250,250,0), NV_20M_COLOR, "20 m path",
             {CSEL_COL1X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(60,180,75), NV_17M_COLOR, "17 m",
+            false, RGB565(60,180,75), NV_17M_COLOR, "17 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(70,240,240), NV_15M_COLOR, "15 m",
+            false, RGB565(70,240,240), NV_15M_COLOR, "15 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(0,130,200), NV_12M_COLOR, "12 m",
+            false, RGB565(0,130,200), NV_12M_COLOR, "12 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(250,190,212), NV_10M_COLOR, "10 m",
+            false, RGB565(250,190,212), NV_10M_COLOR, "10 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(200,150,100), NV_6M_COLOR, "6 m",
+            false, RGB565(200,150,100), NV_6M_COLOR, "6 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(100,100,100), NV_2M_COLOR, "2 m",
+            false, RGB565(100,100,100), NV_2M_COLOR, "2 m path",
             {CSEL_COL2X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
+#endif
 };
 
 
@@ -835,13 +816,6 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     }
 
-    #if !defined(_SUPPORT_ADIFILE)
-        // always irrelevant if not supporting ADIF file reading
-        if (bp == &bool_pr[ADIFSET_BPR])
-            return (false);
-    #endif
-
-
     return (true);
 }
 
@@ -922,15 +896,6 @@ static bool stringIsRelevant (StringPrompt *sp)
     if (sp == &string_pr[BRMIN_SPR] || sp == &string_pr[BRMAX_SPR])
         return (HAVE_ONOFF());
 
-    if (sp == &string_pr[ADIFFN_SPR]) {
-        // always irrelevant if not supporting ADIF file reading
-        #if defined(_SUPPORT_ADIFILE)
-            if (!bool_pr[ADIFSET_BPR].state)
-        #endif
-                return (false);
-    }
-
-    // no objections
     return (true);
 }
 
@@ -988,8 +953,6 @@ static void nextTabFocus()
         {       &string_pr[FLRIGHOST_SPR], NULL},
         { NULL, &bool_pr[NTPSET_BPR] },
         {       &string_pr[NTPHOST_SPR], NULL},
-        { NULL, &bool_pr[ADIFSET_BPR] },
-        {       &string_pr[ADIFFN_SPR], NULL},
 
         // page 4
 
@@ -1393,33 +1356,15 @@ static bool s2char (SCoord &s, char &kbchar)
     return (false);
 }
 
-/* display an entangled pair of bools states:
- *   if A->t_str 4 states: FF A->f_str TF A->t_str FT B->f_str TT B->t_str
- *   else        3 state:s FX A->f_str FT B->f_str TT B->t_str
- * N.B. assumes both A and B's state boxes, ie s_box, are in identical locations.
+/* display an entangled pair of bools states: show A state if off else B state.
+ * N.B. this works because both A and B's state boxes, ie s_box, are in identical locations.
  */
 static void drawEntangledBools (BoolPrompt *A, BoolPrompt *B)
 {
-    if (A->t_str) {
-        // 4-states
-        if (!B->state)
-            drawBPState (A);
-        else {
-            if (!A->state) {
-                // FT: must temporarily turn off B to show its f_str
-                B->state = false;
-                drawBPState (B);
-                B->state = true;
-            } else
-                drawBPState (B);
-        }
-    } else {
-        // 3 states
-        if (A->state)
-            drawBPState (B);
-        else
-            drawBPState (A);
-    }
+    if (A->state)
+        drawBPState (B);
+    else
+        drawBPState (A);
 }
 
 /* perform action resulting from tapping the given BoolPrompt.
@@ -1445,39 +1390,28 @@ static void engageBoolTap (BoolPrompt *bp)
 
         // this is one of an entangled pair. N.B. primary is always lower in memory.
         BoolPrompt *mate = &bool_pr[bp->ent_mate];
-        BoolPrompt *A = mate < bp ? mate : bp;
-        BoolPrompt *B = mate < bp ? bp : mate;
+        BoolPrompt *pri = mate < bp ? mate : bp;
+        BoolPrompt *sec = mate < bp ? bp : mate;
 
         // roll choice forward, regardless of which was tapped
-        if (A->t_str) {
-            // 4-states: FF -> TF -> FT -> TT -> ...
-            if (A->state) {
-                A->state = false;
-                B->state = !B->state;
+        // F X -> T F -> T T -> F X ...
+        if (pri->state) {
+            if (sec->state) {
+                pri->state = false;
+                sec->state = false;
             } else {
-                A->state = true;
-            };
-                
-        } else {
-            // 3-states: FX -> TF -> TT -> ...
-            if (A->state) {
-                if (B->state) {
-                    A->state = false;
-                    B->state = false;
-                } else {
-                    B->state = true;
-                }
-            } else {
-                A->state = true;
-                B->state = false;
+                sec->state = true;
             }
+        } else {
+            pri->state = true;
+            sec->state = false;
         }
 
         // draw new state
-        drawEntangledBools (A, B);
+        drawEntangledBools (pri, sec);
 
-        // move cursor to Amary field
-        setFocus (NULL, A);
+        // move cursor to primary field
+        setFocus (NULL, pri);
         drawCursor ();
     }
 }
@@ -1550,13 +1484,15 @@ static void drawCSelDemoSwatch (const ColSelPrompt &p)
     uint16_t c = RGB565(p.r, p.g, p.b);
 
     // check for dashed, else solid
-    if (DASHOK(p) && p.a_state) {
+    if (DASHOK(p) > 0 && p.a_state) {
+        // dashed
         for (int i = 0; i < CSEL_NDASH; i++) {
             uint16_t dx = i * p.d_box.w / CSEL_NDASH;
             tft.fillRect (p.d_box.x + dx, p.d_box.y, p.d_box.w/CSEL_NDASH, p.d_box.h,
                         (i&1) ? RA8875_BLACK : c);
         }
     } else {
+        // solid
         fillSBox (p.d_box, c);
     }
 }
@@ -1688,7 +1624,7 @@ static bool handleCSelTouch (SCoord &s)
     if (!ours) {
         for (int i = 0; i < N_CSPR; i++) {
             ColSelPrompt &p = csel_pr[i];
-            if (DASHOK(p) && inBox (s, p.a_box)) {
+            if (inBox (s, p.a_box)) {
                 // toggle and redraw
                 p.a_state = !p.a_state;
                 drawCSelDemoSwatch (p);
@@ -2059,7 +1995,7 @@ static bool validateStringPrompts()
 
         // clean up any extra white space in the commands then check for blank entries that are on
         for (int i = 0; i < N_DXCLCMDS; i++) {
-            trim(dxcl_cmds[i]);
+            memmove (dxcl_cmds[i], trim(dxcl_cmds[i]), NV_DXCLCMD_LEN);
             if (strlen(dxcl_cmds[i]) == 0 && bool_pr[DXCLCMD0_BPR+i].state)
                 badsid[n_badsid++] = (SPIds)(DXCLCMD0_SPR+i);
         }
@@ -2160,13 +2096,6 @@ static bool validateStringPrompts()
     else
         badsid[n_badsid++] = CENTERLNG_SPR;
 
-    // ADIF file name must not be blank if used
-    if (bool_pr[ADIFSET_BPR].state) {
-        trim (adif_fn);
-        if (adif_fn[0] == '\0')
-            badsid[n_badsid++] = ADIFFN_SPR;
-    }
-
     // indicate any values in error, changing pages if necessary
     if (n_badsid > 0) {
 
@@ -2238,7 +2167,7 @@ static bool getWPA()
     static const char wpa_fn[] = "/etc/wpa_supplicant/wpa_supplicant.conf";
     FILE *fp = fopen (wpa_fn, "r");
     if (!fp) {
-        Serial.printf ("%s: %s\n", wpa_fn, strerror(errno));
+        printf ("%s: %s\n", wpa_fn, strerror(errno));
         return (false);
     }
 
@@ -2331,14 +2260,6 @@ static void initSetup()
         NVWriteUInt8 (NV_NTPSET, 0);
     } else
         bool_pr[NTPSET_BPR].state = (nv_ntp != 0);
-
-    // init ADIF
-
-    if (!NVReadString (NV_ADIFFN, adif_fn)) {
-        adif_fn[0] = '\0';
-        NVWriteString (NV_ADIFFN, adif_fn);
-    }
-    bool_pr[ADIFSET_BPR].state = adif_fn[0] != '\0';
 
 
     // init rigctld host, port and option
@@ -2452,11 +2373,10 @@ static void initSetup()
         spotops = NVMS_PREFIX | NVMS_THIN;
         NVWriteUInt8 (NV_MAPSPOTS, spotops);
     }
-    uint8_t spotops_msk = spotops & NVMS_MKMSK;
-    bool_pr[SPOTLBL_BPR].state =     spotops_msk == NVMS_DOT || spotops_msk == NVMS_CALL;
-    bool_pr[SPOTLBLCALL_BPR].state = spotops_msk == NVMS_PREFIX || spotops_msk == NVMS_CALL;
-    bool_pr[SPOTPATH_BPR].state =    (spotops & (NVMS_WIDE|NVMS_THIN)) != 0;
-    bool_pr[SPOTPATHSZ_BPR].state =  (spotops & NVMS_WIDE) != 0;
+    bool_pr[SPOTLBL_BPR].state =     (spotops & (NVMS_PREFIX|NVMS_CALL)) != 0;          // set if either prefix or call
+    bool_pr[SPOTLBLCALL_BPR].state = (spotops & NVMS_CALL) != 0;                        // set if call, else prefix
+    bool_pr[SPOTPATH_BPR].state =    (spotops & (NVMS_WIDE|NVMS_THIN)) != 0;            // set if either thin or wide
+    bool_pr[SPOTPATHSZ_BPR].state =  (spotops & NVMS_WIDE) != 0;                        // set if wide, else thin
 
     uint8_t dx_cmdmask;
     if (!NVReadUInt8 (NV_DXCMDUSED, &dx_cmdmask)) {
@@ -2547,23 +2467,6 @@ static void initSetup()
     }
     for (int i = 0; i < N_CSPR; i++)
         csel_pr[i].a_state = (dashed & (1 << i)) ? true : false;
-
-#if defined (_IS_ESP8266)
-    // ESP does not support paths period, let alone dashed paths
-    NODASH (csel_pr[BAND160_CSPR]);
-    NODASH (csel_pr[BAND80_CSPR]);
-    NODASH (csel_pr[BAND60_CSPR]);
-    NODASH (csel_pr[BAND40_CSPR]);
-    NODASH (csel_pr[BAND30_CSPR]);
-    NODASH (csel_pr[BAND20_CSPR]);
-    NODASH (csel_pr[BAND17_CSPR]);
-    NODASH (csel_pr[BAND15_CSPR]);
-    NODASH (csel_pr[BAND12_CSPR]);
-    NODASH (csel_pr[BAND10_CSPR]);
-    NODASH (csel_pr[BAND6_CSPR]);
-    NODASH (csel_pr[BAND2_CSPR]);
-#endif
-
 
     // X11 flags, engage immediately if defined or sensible thing to do
     uint16_t x11flags;
@@ -2848,7 +2751,7 @@ static void runSetup()
 
     do {
         StringPrompt *sp;
-        BoolPrompt *bp = NULL;
+        BoolPrompt *bp;
 
         // wait for next tap or character input
         (void) waitForUser(ui);
@@ -2943,7 +2846,7 @@ static void runSetup()
                 bp = cur_focus.bp;
 
             // ignore tapping on bools not being shown
-            if (!bp || !boolIsRelevant(bp))
+            if (!boolIsRelevant(bp))
                 continue;
 
             // toggle and redraw with new cursor position
@@ -2999,19 +2902,6 @@ static void runSetup()
                     // show default 
                     eraseSPPromptValue (&string_pr[NTPHOST_SPR]);
                     drawBPState (&bool_pr[NTPSET_BPR]);
-                }
-            }
-
-            else if (bp == &bool_pr[ADIFSET_BPR]) {
-                // show/hide ADIF file name
-                if (bp->state) {
-                    // show file name
-                    eraseBPState (&bool_pr[ADIFSET_BPR]);
-                    drawSPPromptValue (&string_pr[ADIFFN_SPR]);
-                } else {
-                    // show no
-                    eraseSPPromptValue (&string_pr[ADIFFN_SPR]);
-                    drawBPState (&bool_pr[ADIFSET_BPR]);
                 }
             }
 
@@ -3239,12 +3129,10 @@ static void finishSettingUp()
     NVWriteString (NV_DXLOGIN, dxlogin);
     NVWriteUInt8 (NV_LOGUSAGE, bool_pr[LOGUSAGE_BPR].state);
     NVWriteUInt8 (NV_MAPSPOTS,
-              (bool_pr[SPOTLBL_BPR].state ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_DOT)
-                                          : (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_PREFIX : NVMS_NONE))
-            | (bool_pr[SPOTPATH_BPR].state ? (bool_pr[SPOTPATHSZ_BPR].state ? NVMS_WIDE : NVMS_THIN) : 0));
+              (bool_pr[SPOTLBL_BPR].state  ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_PREFIX) : 0)
+            | (bool_pr[SPOTPATH_BPR].state ? (bool_pr[SPOTPATHSZ_BPR].state  ? NVMS_WIDE : NVMS_THIN)   : 0));
     NVWriteUInt8 (NV_NTPSET, bool_pr[NTPSET_BPR].state);
-    NVWriteString (NV_NTPHOST, ntphost);
-    NVWriteString (NV_ADIFFN, adif_fn);
+    NVWriteString(NV_NTPHOST, ntphost);
     NVWriteUInt8 (NV_DATEMDY, bool_pr[DATEFMT_MDY_BPR].state);
     NVWriteUInt8 (NV_DATEDMYYMD, bool_pr[DATEFMT_DMYYMD_BPR].state);
     NVWriteUInt8 (NV_GPIOOK, bool_pr[GPIOOK_BPR].state);
@@ -3543,20 +3431,11 @@ int getSpotPathSize()
 #endif
 }
 
-/* return whether to label spots with either call or prefix.
- *   call plotSpotCallsigns() to determine which.
- *   this does NOT include DOT, call dotSpots() to determine that.
+/* return whether to label spots
  */
 bool labelSpots()
 {
-    return (bool_pr[SPOTLBLCALL_BPR].state);
-}
-
-/* return whether to label spots with dots.
- */
-bool dotSpots()
-{
-    return (bool_pr[SPOTLBL_BPR].state && !bool_pr[SPOTLBLCALL_BPR].state);
+    return (bool_pr[SPOTLBL_BPR].state);
 }
 
 /* return whether to label spots as whole callsigns, else just prefix.
@@ -3564,7 +3443,7 @@ bool dotSpots()
  */
 bool plotSpotCallsigns()
 {
-    return (bool_pr[SPOTLBL_BPR].state);
+    return (bool_pr[SPOTLBLCALL_BPR].state);
 }
 
 /* return whether to use IP geolocation
@@ -3885,11 +3764,4 @@ bool getColorDashed (ColorSelection id)
 bool useWSJTX(void)
 {
     return (bool_pr[CLISWSJTX_BPR].state);
-}
-
-/* return name of ADIF, else NULL if not set
- */
-const char *getADIFilename(void)
-{
-    return (bool_pr[ADIFSET_BPR].state ? adif_fn : NULL);
 }
