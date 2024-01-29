@@ -26,12 +26,12 @@ SBox mapscale_b;
 CoreMaps core_map = CM_NONE;                            // current core map, if any
 
 // current VOACAP prop map setting, if any
-PropMapSetting prop_map;
+PropMapSetting prop_map = PROP_MAP_OFF;
 
 
 // central file name components for the core background maps -- not including voacap.
 #define X(a,b)   b,                                     // expands COREMAPS to each name plus comma
-const char *coremap_names[CM_N] = {
+const char *map_styles[CM_N] = {
     COREMAPS
 };
 #undef X
@@ -378,6 +378,8 @@ static bool installFilePixels (const char *dfile, const char *nfile)
 
         }
 
+        printFreeHeap (F("installFilePixels"));
+
         return (ok);
 }
 
@@ -456,8 +458,8 @@ static void buildMapNames (const char *style, char *dfile, char *nfile, char *dt
             snprintf (nfile, 32, _FX("/map-N-%dx%d-%s.bmp"), HC_MAP_W, HC_MAP_H, style);
         }
 
-        snprintf (dtitle, NV_COREMAPSTYLE_LEN+10, _FX("%s D map"), style);
-        snprintf (ntitle, NV_COREMAPSTYLE_LEN+10, _FX("%s N map"), style);
+        snprintf (dtitle, NV_MAPSTYLE_LEN+10, _FX("%s D map"), style);
+        snprintf (ntitle, NV_MAPSTYLE_LEN+10, _FX("%s N map"), style);
 }
 
 /* qsort-style compare two FS_Info by name
@@ -497,7 +499,7 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
         if (!f) {
             #if defined(_IS_ESP8266)
                 // using fatalError would probably leave user stranded in what is likely a persistent err
-                mapMsg (true, 1000, _FX("%s: create failed"), title);
+                mapMsg (1000, _FX("%s: create failed"), title);
                 return (false);
             #else
                 // use non-standard File members for richer error msg
@@ -508,21 +510,21 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
 
         // read and check remote header
         for (int i = 0; i < BHDRSZ; i++) {
-            if (!getTCPChar (client, &copy_buf[i])) {
+            if (!getChar (client, &copy_buf[i])) {
                 Serial.printf (_FX("short header: %.*s\n"), i, copy_buf); // might be err message
-                mapMsg (true, 1000, _FX("%s: header is short"), title);
+                mapMsg (1000, _FX("%s: header is short"), title);
                 goto out;
             }
         }
         uint32_t filesize;
         if (!bmpHdrOk (copy_buf, HC_MAP_W, HC_MAP_H, &filesize)) {
             Serial.printf (_FX("bad header: %.*s\n"), BHDRSZ, copy_buf); // might be err message
-            mapMsg (true, 1000, _FX("%s: bad header"), title);
+            mapMsg (1000, _FX("%s: bad header"), title);
             goto out;
         }
         if (filesize != npixbytes + BHDRSZ) {
             Serial.printf (_FX("%s: wrong size %u != %u\n"), title, filesize, npixbytes);
-            mapMsg (true, 1000, _FX("%s: wrong size"), title);
+            mapMsg (1000, _FX("%s: wrong size"), title);
             goto out;
         }
 
@@ -532,17 +534,17 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
 
         // copy pixels
         {   // statement block just to avoid complaint about goto bypassing t0
-            mapMsg (false, 100, _FX("%s: downloading"), title);
+            mapMsg (100, _FX("%s: downloading"), title);
             uint32_t t0 = millis();
             for (uint32_t nbytescopy = 0; nbytescopy < npixbytes; nbytescopy++) {
 
                 if (((nbytescopy%(npixbytes/10)) == 0) || nbytescopy == npixbytes-1)
-                    mapMsg (false, 0, _FX("%s: %3d%%"), title, 100*(nbytescopy+1)/npixbytes);
+                    mapMsg (0, _FX("%s: %3d%%"), title, 100*(nbytescopy+1)/npixbytes);
 
                 // read more
-                if (nbufbytes < COPY_BUF_SIZE && !getTCPChar (client, &copy_buf[nbufbytes++])) {
+                if (nbufbytes < COPY_BUF_SIZE && !getChar (client, &copy_buf[nbufbytes++])) {
                     Serial.printf (_FX("%s: file is short: %u %u\n"), title, nbytescopy, npixbytes);
-                    mapMsg (true, 1000, _FX("%s: file is short"), title);
+                    mapMsg (1000, _FX("%s: file is short"), title);
                     goto out;
                 }
 
@@ -551,7 +553,7 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
                     resetWatchdog();
                     updateClocks(false);
                     if (f.write (copy_buf, nbufbytes) != nbufbytes) {
-                        mapMsg (true, 1000, _FX("%s: write failed"), title);
+                        mapMsg (1000, _FX("%s: write failed"), title);
                         goto out;
                     }
                     nbufbytes = 0;
@@ -569,30 +571,10 @@ static bool downloadMapFile (WiFiClient &client, const char *file, const char *t
         if (!ok)
             LittleFS.remove (file);
 
+        printFreeHeap (F("_downloadMapFile"));
         return (ok);
 }
 
-/* crack Last-Modified: Tue, 29 Sep 2020 22:55:02
- * return whether parsing was successful.
- */
-static bool crackLastModified (const char *line, time_t &time_val)
-{
-        char mstr[10];
-        int dy, mo, yr, hr, mn, sc;
-        if (sscanf (line, _FX("%*[^,], %d %3s %d %d:%d:%d"), &dy, mstr, &yr, &hr, &mn, &sc) == 6
-                                                && crackMonth (mstr, &mo)) {
-            tmElements_t tm;
-            tm.Year = yr - 1970;
-            tm.Month = mo;
-            tm.Day = dy;
-            tm.Hour = hr;
-            tm.Minute = mn;
-            tm.Second = sc;
-            time_val = makeTime (tm);
-            return (true);
-        }
-        return (false);
-}
 
 /* open the given file and confirm its size, downloading fresh if not found, no match or newer.
  * if successful return:
@@ -612,8 +594,8 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         File f;
         WiFiClient client;
         uint32_t filesize;
-        time_t local_time = 0;
-        time_t remote_time = 0;
+        uint32_t local_time = 0;
+        uint32_t remote_time = 0;
         char hdr_buf[BHDRSZ];
         int nr = 0;
         bool file_ok = false;
@@ -624,13 +606,11 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
             snprintf (hdr_buf, sizeof(hdr_buf), _FX("/maps/%s"), file);
             httpHCGET (client, backend_host, hdr_buf);
-            char lm_str[50];
-            if (!httpSkipHeader (client, _FX("Last-Modified:"), lm_str, sizeof(lm_str))
-                                                || !crackLastModified (lm_str, remote_time)) {
-                mapMsg (true, 1000, _FX("%s: network err - try local"), title);
+            if (!httpSkipHeader (client, &remote_time) || remote_time == 0) {
+                mapMsg (1000, _FX("%s: err - try local"), title);
                 client.stop();
             }
-            Serial.printf (_FX("%s: %ld remote_time\n"), title, (long)remote_time);
+            Serial.printf (_FX("%s: %d remote_time\n"), title, remote_time);
         }
         
         // even if no net connection, still try using local file if available
@@ -638,32 +618,32 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         // open local file
         f = LittleFS.open (file, "r");
         if (!f) {
-            mapMsg (false, 1000, _FX("%s: not local"), title);
+            mapMsg (1000, _FX("%s: not local"), title);
             goto out;
         }
 
         // file is "bad" if remote is newer than flash
         local_time = f.getCreationTime();
-        Serial.printf (_FX("%s: %ld local_time\n"), title, (long)local_time);
+        Serial.printf (_FX("%s: %d local_time\n"), title, local_time);
         if (client.connected() && remote_time > local_time) {
-            mapMsg (false, 1000, _FX("%s: found newer map"), title);
+            mapMsg (1000, _FX("%s: found newer map"), title);
             goto out;
         }
 
         // read local file header
         nr = f.read ((uint8_t*)hdr_buf, BHDRSZ);
         if (nr != BHDRSZ) {
-            mapMsg (true, 1000, _FX("%s: read err"), title);
+            mapMsg (1000, _FX("%s: read err"), title);
             goto out;
         }
 
         // check flash file type and size
         if (!bmpHdrOk (hdr_buf, HC_MAP_W, HC_MAP_H, &filesize)) {
-            mapMsg (true, 1000, _FX("%s: bad format"), title);
+            mapMsg (1000, _FX("%s: bad format"), title);
             goto out;
         }
         if (filesize != f.size()) {
-            mapMsg (true, 1000, _FX("%s: wrong size"), title);
+            mapMsg (1000, _FX("%s: wrong size"), title);
             goto out;
         }
 
@@ -695,6 +675,7 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         client.stop();
 
         // return result, open if good or closed if not
+        printFreeHeap (F("_openMapFile"));
         return (f);
 }
 
@@ -712,20 +693,21 @@ static bool installQueryMaps (const char *page, const char *style, const float M
         int hr = hour(t);
 
         // prepare query
+        #define DEF_TOA 3.0
         StackMalloc query_mem(300);
         char *query = (char *) query_mem.getMem();
         snprintf (query, query_mem.getSize(),
-            _FX("%s?YEAR=%d&MONTH=%d&UTC=%d&TXLAT=%.3f&TXLNG=%.3f&PATH=%d&WATTS=%d&WIDTH=%d&HEIGHT=%d&MHZ=%.2f&TOA=%.1f&MODE=%d&TOA=%.1f"),
+            _FX("%s?YEAR=%d&MONTH=%d&UTC=%d&TXLAT=%.3f&TXLNG=%.3f&PATH=%d&WATTS=%d&WIDTH=%d&HEIGHT=%d&MHZ=%.2f&TOA=%.1f&MODE=%d"),
             page, yr, mo, hr, de_ll.lat_d, de_ll.lng_d, show_lp, bc_power, HC_MAP_W, HC_MAP_H,
-            MHz, bc_toa, bc_modevalue, bc_toa);
+            MHz, DEF_TOA, bc_modevalue);
 
         Serial.printf (_FX("%s query: %s\n"), style, query);
 
         // assign a style and compose names and titles
         char dfile[32];                 // match LFS_NAME_MAX
         char nfile[32];
-        char dtitle[NV_COREMAPSTYLE_LEN+10];
-        char ntitle[NV_COREMAPSTYLE_LEN+10];
+        char dtitle[NV_MAPSTYLE_LEN+10];
+        char ntitle[NV_MAPSTYLE_LEN+10];
         buildMapNames (style, dfile, nfile, dtitle, ntitle);
 
         // insure fresh start
@@ -770,11 +752,11 @@ static bool installFileMaps()
             fatalError (_FX("style not a file map %d"), core_map);        // does not return
 
         // create names and titles
-        const char *style = coremap_names[core_map];
+        const char *style = map_styles[core_map];
         char dfile[LFS_NAME_MAX];
         char nfile[LFS_NAME_MAX];
-        char dtitle[NV_COREMAPSTYLE_LEN+10];
-        char ntitle[NV_COREMAPSTYLE_LEN+10];
+        char dtitle[NV_MAPSTYLE_LEN+10];
+        char ntitle[NV_MAPSTYLE_LEN+10];
         buildMapNames (style, dfile, nfile, dtitle, ntitle);
 
         // close any previous
@@ -809,25 +791,18 @@ static bool installFileMaps()
  */
 static bool installMUFMaps()
 {
-        mapMsg (true, 0, _FX("Calculating %s..."), muf_style);
+        mapMsg (0, _FX("Calculating %s..."), muf_style);
         return (installQueryMaps (_FX("/fetchVOACAP-MUF.pl"), muf_style, 0));
 }
 
 /* retrieve and install VOACAP maps for the current time and given band.
  * return whether ok
  */
-static bool installPropMaps (void)
+static bool installPropMaps (float MHz)
 {
-        char s[NV_COREMAPSTYLE_LEN];
-        mapMsg (true, 0, _FX("Calculating %s %s..."), getMapStyle(s), prop_style);
-        float MHz = propMap2MHz(prop_map.band);
-        if (prop_map.type == PROPTYPE_REL)
-            return (installQueryMaps (_FX("/fetchVOACAPArea.pl"), prop_style, MHz));
-        else if (prop_map.type == PROPTYPE_TOA)
-            return (installQueryMaps (_FX("/fetchVOACAP-TOA.pl"), prop_style, MHz));
-        else
-            fatalError (_FX("unknow prop map type %d"), prop_map.type);
-        return (false);
+        char s[NV_MAPSTYLE_LEN];
+        mapMsg (0, _FX("Calculating %s %s..."), getMapStyle(s), prop_style);
+        return (installQueryMaps (_FX("/fetchVOACAPArea.pl"), prop_style, MHz));
 }
 
 /* install fresh maps depending on prop_map and core_map.
@@ -835,8 +810,8 @@ static bool installPropMaps (void)
  */
 bool installFreshMaps()
 {
-        if (prop_map.active)
-            return (installPropMaps());
+        if (prop_map != PROP_MAP_OFF)
+            return (installPropMaps(propMap2MHz(prop_map)));
 
         bool core_ok = false;
         if (core_map == CM_MUF)
@@ -844,24 +819,24 @@ bool installFreshMaps()
         else
             core_ok = installFileMaps();
         if (core_ok)
-            NVWriteString (NV_COREMAPSTYLE, coremap_names[core_map]);
+            NVWriteString (NV_MAPSTYLE, map_styles[core_map]);
         return (core_ok);
 }
 
-/* init core_map from NV, or set a default, and always disable prop_map.
+/* init core_map from NV, or set a default, and always reset prop_map.
  * return whether ok
  */
 void initCoreMaps()
 {
         // initially no map is set
         core_map = CM_NONE;
-        prop_map.active = false;
+        prop_map = PROP_MAP_OFF;
 
         // set core from NV if present and valid
-        char s[NV_COREMAPSTYLE_LEN];
-        if (NVReadString (NV_COREMAPSTYLE, s)) {
+        char s[NV_MAPSTYLE_LEN];
+        if (NVReadString (NV_MAPSTYLE, s)) {
             for (int i = 0; i < CM_N; i++) {
-                if (strcmp (coremap_names[i], s) == 0) {
+                if (strcmp (map_styles[i], s) == 0) {
                     core_map = (CoreMaps)i;
                     break;
                 }
@@ -870,11 +845,19 @@ void initCoreMaps()
 
         // pick default if still not set
         if (core_map == CM_NONE) {
-            NVWriteString (NV_COREMAPSTYLE, coremap_names[CM_TERRAIN]);
+            NVWriteString (NV_MAPSTYLE, map_styles[CM_TERRAIN]);
             core_map = CM_TERRAIN;
         }
 }
 
+
+/* return whether the map scale is (or should be) visible now
+ */
+bool mapScaleIsUp(void)
+{
+    return (prop_map == PROP_MAP_OFF &&
+        (core_map == CM_DRAP || core_map == CM_MUF || core_map == CM_AURORA || core_map == CM_WX));
+}
 
 
 /* produce a listing of the map storage directory.
@@ -934,208 +917,143 @@ FS_Info *getConfigDirInfo (int *n_info, char **fs_name, uint64_t *fs_size, uint6
         return (fs_array);
 }
 
-/* return the current map style, meaning core style or short prop map name.
- * N.B. do not use this for setting NV_COREMAPSTYLE
- * N.B. nevertheless s[] is assumed to be at least NV_COREMAPSTYLE_LEN
+/* return the current _effective_ map style, meaning core style unless showing a prop map.
+ * N.B. only for reporting purposes, not strictly for accessing NV_MAPSTYLE.
+ * N.B. s[] assumed to be at least NV_MAPSTYLE_LEN
  */
 const char *getMapStyle (char s[])
 {
-        if (prop_map.active) {
+        if (prop_map == PROP_MAP_OFF)
+            NVReadString (NV_MAPSTYLE, s);
+        else {
             // +1 to suppress warning that s might overflow since we know the %d lengths here
-            snprintf (s, NV_COREMAPSTYLE_LEN+1, "%dm/%s", propMap2Band (prop_map.band),
-                                prop_map.type == PROPTYPE_REL ? "REL" : "TOA");
-        } else {
-            NVReadString (NV_COREMAPSTYLE, s);
+            snprintf (s, NV_MAPSTYLE_LEN+1, "%dm/%dW", propMap2Band(prop_map), bc_power);
         }
 
         return (s);
 }
 
-/* return MHz for the given PropMapSetting.band
- * N.B. match column headings in voacapx.out
+/* return MHz for each PropMapSetting.
+ * match column headings in voacapx.out
  */
-float propMap2MHz (PropMapBand band)
+float propMap2MHz (PropMapSetting pms)
 {
-        switch (band) {
-        case PROPBAND_80M: return ( 3.6);
-        case PROPBAND_40M: return ( 7.1);
-        case PROPBAND_30M: return (10.1);
-        case PROPBAND_20M: return (14.1);
-        case PROPBAND_17M: return (18.1);
-        case PROPBAND_15M: return (21.1);
-        case PROPBAND_12M: return (24.9);
-        case PROPBAND_10M: return (28.2);
-        default: fatalError (_FX("bad MHz PMS %d"), band);
+        switch (pms) {
+        case PROP_MAP_80M: return ( 3.6);
+        case PROP_MAP_40M: return ( 7.1);
+        case PROP_MAP_30M: return (10.1);
+        case PROP_MAP_20M: return (14.1);
+        case PROP_MAP_17M: return (18.1);
+        case PROP_MAP_15M: return (21.1);
+        case PROP_MAP_12M: return (24.9);
+        case PROP_MAP_10M: return (28.2);
+        default: fatalError (_FX("bad MHz PMS %d"), pms); return (0);
         }
-
-        // lint
-        return (0);
 }
 
-/* return band for the given PropMapSetting.band
+/* return band for each PropMapSetting
  */
-int propMap2Band (PropMapBand band)
+int propMap2Band (PropMapSetting pms)
 {
-        switch (band) {
-        case PROPBAND_80M: return (80);
-        case PROPBAND_40M: return (40);
-        case PROPBAND_30M: return (30);
-        case PROPBAND_20M: return (20);
-        case PROPBAND_17M: return (17);
-        case PROPBAND_15M: return (15);
-        case PROPBAND_12M: return (12);
-        case PROPBAND_10M: return (10);
-        default: fatalError (_FX("bad PMS %d"), band);
+        switch (pms) {
+        case PROP_MAP_80M: return (80);
+        case PROP_MAP_40M: return (40);
+        case PROP_MAP_30M: return (30);
+        case PROP_MAP_20M: return (20);
+        case PROP_MAP_17M: return (17);
+        case PROP_MAP_15M: return (15);
+        case PROP_MAP_12M: return (12);
+        case PROP_MAP_10M: return (10);
+        default: fatalError (_FX("bad Band PMS %d"), pms); return (0);
         }
-
-        // lint
-        return (0);
 }
 
 
-/* return whether the map scale is (or should be) visible now
- * N.B. must agree with drawMapScale()
- */
-bool mapScaleIsUp(void)
-{
-    return (prop_map.active
-                || core_map == CM_DRAP || core_map == CM_MUF || core_map == CM_AURORA || core_map == CM_WX);
-}
-
-/* draw the appropriate scale at mapscale_b depending on core_map or prop_map, if any.
+/* draw the appropriate scale at mapscale_b depending on core_map.
  * N.B. we move mapscale_b depending on rss_on
  */
 void drawMapScale()
 {
-    // color scale. values must be monitonivally increasing.
     typedef struct {
-        float value;                                    // world value
-        uint32_t color;                                 // 24 bit RGB scale color
-        bool black_text;                                // black text, else white
+        int value;                              // world value
+        uint32_t color;                         // map color
     } MapScalePoint;
 
     // CM_DRAP and CM_MUF
-    static PROGMEM const MapScalePoint d_scale[] = {    // see fetchDRAP.pl and fetchVOACAP-MUF.pl
-        {0,  0x000000, 0},
-        {4,  0x4E138A, 0},
-        {9,  0x001EF5, 0},
-        {15, 0x78FBD6, 1},
-        {20, 0x78FA4D, 1},
-        {27, 0xFEFD54, 1},
-        {30, 0xEC6F2D, 1},
-        {35, 0xE93323, 1},
+    static const MapScalePoint d_scale[] = {  // see fetchDRAP.pl and fetchVOACAP-MUF.pl
+        {0,  0x000000},
+        {4,  0x4E138A},
+        {9,  0x001EF5},
+        {15, 0x78FBD6},
+        {20, 0x78FA4D},
+        {27, 0xFEFD54},
+        {30, 0xEC6F2D},
+        {35, 0xE93323},
     };
 
     // CM_AURORA
-    static PROGMEM const MapScalePoint a_scale[] = {    // see fetchAurora.pl
-        {0,   0x282828, 0},
-        {25,  0x00FF00, 1},
-        {50,  0xFFFF00, 1},
-        {75,  0xEA6D2D, 1},
-        {100, 0xFF0000, 1},
+    static const MapScalePoint a_scale[] = {  // see fetchAurora.pl
+        {0,   0x282828},
+        {25,  0x00FF00},
+        {50,  0xFFFF00},
+        {75,  0xEA6D2D},
+        {100, 0xFF0000},
     };
 
     // CM_WX
-    static PROGMEM const MapScalePoint w_scale[] = {    // see fetchWordWx.pl
+    static const MapScalePoint w_scale[] = {  // see fetchWordWx.pl
         // values are degs C
-        {-50,  0xD1E7FF, 1},
-        {-40,  0xB5D5FF, 1},
-        {-30,  0x88BFFF, 1},
-        {-20,  0x73AAFF, 1},
-        {-10,  0x4078D9, 0},
-        {0,    0x2060A6, 0},
-        {10,   0x009EDC, 1},
-        {20,   0xBEE5B4, 1},
-        {30,   0xFF8C24, 1},
-        {40,   0xEE0051, 1},
-        {50,   0x5B0023, 1},
+        {-50,  0xD1E7FF},
+        {-40,  0xB5D5FF},
+        {-30,  0x88BFFF},
+        {-20,  0x73AAFF},
+        {-10,  0x4078D9},
+        {0,    0x2060A6},
+        {10,   0x009EDC},
+        {20,   0xBEE5B4},
+        {30,   0xFF8C24},
+        {40,   0xEE0051},
+        {50,   0x5B0023},
     };
 
-    // PROPTYPE_TOA
-    static PROGMEM const MapScalePoint t_scale[] = {    // see fetchVOACAP-TOA.pl
-        {0,    0x0000F0, 0},
-        {6,    0xF0B060, 1},
-        {30,   0xF00000, 1},
-    };
+    const MapScalePoint *msp;
+    unsigned n_scale;
+    unsigned n_labels;
+    const char *title;
 
-    // PROPTYPE_REL
-    static PROGMEM const MapScalePoint r_scale[] = {    // see fetchVOACAPArea.pl
-        {0,    0x666666, 0},
-        {21,   0xEE6766, 0},
-        {40,   0xEEEE44, 1},
-        {60,   0xEEEE44, 1},
-        {83,   0x44CC44, 0},
-        {100,  0x44CC44, 0},
-    };
-
-
-    // set these depending on map
-    const MapScalePoint *msp = NULL;                    // one of above tables
-    unsigned n_scale = 0;                               // n entries in table
-    unsigned n_labels = 0;                              // n labels in scale
-    const char *title = NULL;                           // scale title
-
-    if (prop_map.active) {
-
-        switch (prop_map.type) {
-        case PROPTYPE_TOA:
-            msp = t_scale;
-            n_scale = NARRAY(t_scale);
-            n_labels = 7;
-            title = "DE TOA, degs";
-            break;
-        case PROPTYPE_REL:
-            msp = r_scale;
-            n_scale = NARRAY(r_scale);
-            n_labels = 6;
-            title = "% Reliability";
-            break;
-        }
-
-    } else {
-
-        switch (core_map) {
-        case CM_MUF:        // fallthru
-        case CM_DRAP:
-            msp = d_scale;
-            n_scale = NARRAY(d_scale);
-            n_labels = 8;
-            title = "MHz";
-            break;
-        case CM_AURORA:
-            msp = a_scale;
-            n_scale = NARRAY(a_scale);
-            n_labels = 11;
-            title = "% Chance";
-            break;
-        case CM_WX:
-            msp = w_scale;
-            n_scale = NARRAY(w_scale);
-            n_labels = useMetricUnits() ? 11 : 10;
-            title = "Degs C";
-            break;
-        case CM_COUNTRIES:
-        case CM_TERRAIN:
-        case CM_N:                                      // lint
-            // no scale
-            return;
-        }
-
+    switch (core_map) {
+    case CM_MUF:        // fallthru
+    case CM_DRAP:
+        msp = d_scale;
+        n_scale = NARRAY(d_scale);
+        n_labels = 8;
+        title = "MHz";
+        break;
+    case CM_AURORA:
+        msp = a_scale;
+        n_scale = NARRAY(a_scale);
+        n_labels = 5;
+        title = "% Chance";
+        break;
+    case CM_WX:
+        msp = w_scale;
+        n_scale = NARRAY(w_scale);
+        n_labels = 10;
+        title = "Degs C";
+        break;
+    default:
+        fatalError (_FX("drawMapScale core_map %d"), (int)core_map);
+        return;         // lint
     }
 
     resetWatchdog();
-
-    // handy accessors for ESP
-    #define _MS_PTV(i) pgm_read_float(&msp[i].value)            // handy access to msp[i].value
-    #define _MS_PTC(i) pgm_read_dword(&msp[i].color)            // handy access to msp[i].color
-    #define _MS_PTB(i) pgm_read_byte(&msp[i].black_text)        // handy access to msp[i].black_text
 
     // geometry setup
     #define _MS_X0     mapscale_b.x                             // left x
     #define _MS_X1     (mapscale_b.x + mapscale_b.w)            // right x
     #define _MS_DX     (_MS_X1-_MS_X0)                          // width
-    #define _MS_MINV   _MS_PTV(0)                               // min value
-    #define _MS_MAXV   _MS_PTV(n_scale-1)                       // max value
+    #define _MS_MINV   msp[0].value                             // min value
+    #define _MS_MAXV   msp[n_scale-1].value                     // max value
     #define _MS_DV     (_MS_MAXV-_MS_MINV)                      // value span
     #define _MS_V2X(v) (_MS_X0 + _MS_DX*((v)-_MS_MINV)/_MS_DV)  // convert value to x
     #define _MS_PRY    (mapscale_b.y+1U)                        // text y
@@ -1145,113 +1063,64 @@ void drawMapScale()
 
     // draw smoothly-interpolated color scale
     for (unsigned i = 1; i < n_scale; i++) {
-        uint8_t dm = _MS_PTV(i) - _MS_PTV(i-1);
-        uint8_t r0 = _MS_PTC(i-1) >> 16;
-        uint8_t g0 = (_MS_PTC(i-1) >> 8) & 0xFF;
-        uint8_t b0 = _MS_PTC(i-1) & 0xFF;
-        uint8_t r1 = _MS_PTC(i) >> 16;
-        uint8_t g1 = (_MS_PTC(i) >> 8) & 0xFF;
-        uint8_t b1 = _MS_PTC(i) & 0xFF;
-        for (uint16_t x = _MS_V2X(_MS_PTV(i-1)); x <= _MS_V2X(_MS_PTV(i)); x++) {
-            if (x < mapscale_b.x + mapscale_b.w) {              // the _MS macros can overflow slightlty
+        uint8_t dm = msp[i].value - msp[i-1].value;
+        uint8_t r0 = msp[i-1].color >> 16;
+        uint8_t g0 = (msp[i-1].color >> 8) & 0xFF;
+        uint8_t b0 = msp[i-1].color & 0xFF;
+        uint8_t r1 = msp[i].color >> 16;
+        uint8_t g1 = (msp[i].color >> 8) & 0xFF;
+        uint8_t b1 = msp[i].color & 0xFF;
+        for (uint16_t x = _MS_V2X(msp[i-1].value); x <= _MS_V2X(msp[i].value); x++) {
+            if (x < mapscale_b.x + mapscale_b.w) {
+                // macros can overflow slightlty
                 float value = _MS_MINV + (float)_MS_DV*(x - _MS_X0)/_MS_DX;
-                float frac = CLAMPF ((value - _MS_PTV(i-1))/dm,0,1);
+                float frac = fminf(fmaxf((value - msp[i-1].value)/dm,0),1);
                 uint16_t new_c = RGB565(r0+frac*(r1-r0), g0+frac*(g1-g0), b0+frac*(b1-b0));
                 tft.drawLine (x, mapscale_b.y, x, mapscale_b.y+mapscale_b.h-1, 1, new_c);
             }
         }
     }
 
-    // determine DRAP marker location, if used
-    uint16_t drap_x = 0;
-    if (core_map == CM_DRAP) {
-        SPWxValue ssn, flux, kp, swind, drap, bz, bt;
-        NOAASpaceWx noaaspw;
-        float path[BMTRX_COLS];
-        char xray[10];
-        time_t noaaspw_age, xray_age, path_age;
-        getSpaceWeather (ssn, flux, kp, swind, drap, bz, bt, noaaspw,noaaspw_age,xray,xray_age,path,path_age);
-        if (drap.age < 1800 && drap.value != SPW_ERR) {
-            // find drap marker but beware range overflow and leave room for full width
-            float v = CLAMPF (drap.value, _MS_MINV, _MS_MAXV);
-            drap_x = CLAMPF (_MS_V2X(v), mapscale_b.x+3, mapscale_b.x + mapscale_b.w - 4);
-        }
-    }
-
-    // draw labels inside mapscale_b but may need to build F scale for WX
-
-    // use labels directly unless need to create F weather scale
+    // draw labels inside mapscale_b
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    StackMalloc ticks_v_mem((n_labels+2)*sizeof(float));
-    StackMalloc ticks_x_mem((n_labels+2)*sizeof(uint16_t));
-    float *ticks_v = (float *) ticks_v_mem.getMem();
-    uint16_t *ticks_x = (uint16_t *) ticks_x_mem.getMem();
-    int n_ticks;
-    const char *my_title;
 
-    // prep values and center x locations
     if (core_map == CM_WX && !useMetricUnits()) {
 
-        // switch to F scale
-        my_title = "Degs F";
-        n_ticks = tickmarks (CEN2FAH(_MS_MINV), CEN2FAH(_MS_MAXV), n_labels, ticks_v);
-        for (int i = 0; i < n_ticks; i++) {
-            float value = roundf(ticks_v[i]);                   // value printed is F ...
-            float value_c = FAH2CEN(value);                     // ... but position is based on C
-            ticks_v[i] = value;
-            ticks_x[i] = _MS_V2X(value_c);
+        // create F scale
+        StackMalloc ticks_mem((n_labels+2)*sizeof(float));
+        float *f_ticks = (float *) ticks_mem.getMem();
+        int n_fticks = tickmarks (9.0F*(_MS_MINV)/5+32, 9.0F*(_MS_MAXV)/5+32, n_labels, f_ticks);
+
+        for (int i = 1; i < n_fticks-1; i++) {                  // just use inner set of ticks
+            float t_f = f_ticks[i];
+            float t_c = 5.0F*(t_f - 32)/9;
+            uint16_t x = _MS_X0 + _MS_DX*(t_c - _MS_MINV)/_MS_DV;
+            tft.setCursor (x-15, _MS_PRY);                      // rouch x center
+            tft.setTextColor (i < 3*n_fticks/8 || i > 5*n_fticks/8 ? RA8875_BLACK : RA8875_WHITE );
+            tft.print ((int)t_f);
         }
+
+        // draw scale meaning
+        tft.setTextColor (RA8875_BLACK);
+        tft.setCursor (_MS_X0 + 5, _MS_PRY);
+        tft.print ("Degs F");
 
     } else {
 
-        // generate evenly-spaced labels from min to max, inclusive
-        my_title = title;
-        n_ticks = n_labels;
-        for (unsigned i = 0; i < n_labels; i++) {
-            ticks_v[i] = _MS_MINV + _MS_DV*i/(n_labels-1);
-            ticks_x[i] = _MS_V2X(ticks_v[i]);
+        for (unsigned i = 0; i <= n_labels; i++) {
+            // evenly spaced but keep ends just inside mapscale_b
+            uint16_t x = i == 0 ? _MS_X0+2 : (i == n_labels ? _MS_X1-18 : _MS_X0 + _MS_DX*i/n_labels - 7);
+            tft.setCursor (x, _MS_PRY);
+            tft.setTextColor (i < n_labels/2 ? RA8875_WHITE : RA8875_BLACK);
+            int value = _MS_MINV + _MS_DV*i/n_labels;
+            tft.print (value);
         }
 
+        // draw scale meaning
+        tft.setTextColor (RA8875_WHITE);
+        tft.setCursor (_MS_X0 + _MS_DX/(2*n_labels)-10, _MS_PRY);
+        tft.print (title);
     }
-
-    // print tick marks across mapscale_b but avoid drap marker
-    for (int i = 1; i < n_ticks; i++) {                         // skip first for title
-
-        // skip if off scale or near drap
-        const uint16_t ti_x = ticks_x[i];
-        if (ti_x < _MS_X0 || ti_x > _MS_X1 || (drap_x && ti_x >= drap_x - 15 && ti_x <= drap_x + 15))
-            continue;
-
-        // center but beware edges (we already skipped first so left edge is never a problem)
-        char buf[20];
-        snprintf (buf, sizeof(buf), "%.0f", ticks_v[i]);
-        uint16_t buf_w = getTextWidth(buf);
-        uint16_t buf_lx = ti_x - buf_w/2;
-        uint16_t buf_rx = buf_lx + buf_w;
-        if (buf_rx > _MS_X1 - 2) {
-            buf_rx = _MS_X1 - 2;
-            buf_lx = buf_rx - buf_w;
-        }
-        tft.setCursor (buf_lx, _MS_PRY);
-        tft.setTextColor (_MS_PTB(i*n_scale/n_ticks) ? RA8875_BLACK : RA8875_WHITE);
-        tft.print (buf);
-    }
-
-    // draw scale meaning
-    tft.setTextColor (_MS_PTB(0) ? RA8875_BLACK : RA8875_WHITE);
-    tft.setCursor (_MS_X0 + 4, _MS_PRY);
-    tft.print (my_title);
-
-    // if DRAP mark the max freq
-    if (drap_x) {
-        // use lines for a perfect vetical match to scale
-        tft.drawLine (drap_x-2, mapscale_b.y, drap_x-2, mapscale_b.y+mapscale_b.h-1, 1, RA8875_BLACK);
-        tft.drawLine (drap_x-1, mapscale_b.y, drap_x-1, mapscale_b.y+mapscale_b.h-1, 1, RA8875_RED);
-        tft.drawLine (drap_x,   mapscale_b.y, drap_x,   mapscale_b.y+mapscale_b.h-1, 1, RA8875_RED);
-        tft.drawLine (drap_x+1, mapscale_b.y, drap_x+1, mapscale_b.y+mapscale_b.h-1, 1, RA8875_RED);
-        tft.drawLine (drap_x+2, mapscale_b.y, drap_x+2, mapscale_b.y+mapscale_b.h-1, 1, RA8875_BLACK);
-    }
-
 }
 
 
@@ -1270,7 +1139,7 @@ void eraseMapScale ()
     uint8_t rs = rss_on;
     rss_on = false;
 
-    // only mercator can erase by just redrawing map
+    // erase entire scale if azm mode because redrawing the map will miss some
     if (map_proj != MAPP_MERCATOR)
         fillSBox (db, RA8875_BLACK);
 
@@ -1286,39 +1155,29 @@ void eraseMapScale ()
     rss_on = rs;
 }
 
-/* log and show message over map_b.
- * always show if ESP else only if force.
+/* log and show message over map_b
  */
-void mapMsg (bool force, uint32_t dwell_ms, const char *fmt, ...)
+void mapMsg (uint32_t dwell_ms, const char *fmt, ...)
 {
-#if defined(_IS_ESP8266)
-    (void)force;        // lint
-    bool doit = true;
-#else
-    bool doit = force;
-#endif
+    // format msg
+    va_list ap;
+    va_start(ap, fmt);
+    char msg[200];
+    vsnprintf (msg, sizeof(msg), fmt, ap);
+    va_end(ap);
 
-    if (doit) {
-        // format msg
-        va_list ap;
-        va_start(ap, fmt);
-        char msg[200];
-        vsnprintf (msg, sizeof(msg), fmt, ap);
-        va_end(ap);
+    // log
+    Serial.println (msg);
 
-        // log
-        Serial.println (msg);
+    // show over map
+    selectFontStyle (LIGHT_FONT, SMALL_FONT);
+    tft.setTextColor (RA8875_WHITE);
+    size_t msg_l = getTextWidth(msg);
+    tft.fillRect (map_b.x + map_b.w/5, map_b.y+map_b.h/3, 3*map_b.w/5, 40, RA8875_BLACK);
+    tft.setCursor (map_b.x + (map_b.w-msg_l)/2, map_b.y+map_b.h/3+30);
+    tft.print(msg);
+    tft.drawPR();
 
-        // show over map
-        selectFontStyle (LIGHT_FONT, SMALL_FONT);
-        tft.setTextColor (RA8875_WHITE);
-        size_t msg_l = getTextWidth(msg);
-        tft.fillRect (map_b.x + map_b.w/5, map_b.y+map_b.h/3, 3*map_b.w/5, 40, RA8875_BLACK);
-        tft.setCursor (map_b.x + (map_b.w-msg_l)/2, map_b.y+map_b.h/3+30);
-        tft.print(msg);
-        tft.drawPR();
-
-        // dwell
-        wdDelay(dwell_ms);
-    }
+    // dwell
+    wdDelay(dwell_ms);
 }

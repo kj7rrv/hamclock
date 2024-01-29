@@ -58,11 +58,20 @@ static NCDXFBeacon blist[NBEACONS] = {
 
 /* symbol color for each frequency
  */
+#if defined(_SUPPORT_PSKESP)
+// no getMapColor for band colors
+#define BCOL_14 RA8875_RED              // 14.100 MHz
+#define BCOL_18 RA8875_GREEN            // 18.110 MHz
+#define BCOL_21 RGB565(100,100,255)     // 21.150 MHz
+#define BCOL_24 RA8875_YELLOW           // 24.930 MHz
+#define BCOL_28 RGB565(255,125,0)       // 28.200 MHz
+#else
 #define BCOL_14 getMapColor(BAND20_CSPR)
 #define BCOL_18 getMapColor(BAND17_CSPR)
 #define BCOL_21 getMapColor(BAND15_CSPR)
 #define BCOL_24 getMapColor(BAND12_CSPR)
 #define BCOL_28 getMapColor(BAND10_CSPR)
+#endif
 #define BCOL_S  RA8875_BLACK            // silent, not actually drawn
 #define BCOL_N  6                       // number of color states
 
@@ -109,14 +118,13 @@ static void drawBeacon (NCDXFBeacon &nb)
 }
 
 /* erase beacon
- * ESP only
+ * only needed on ESP
  */
 static void eraseBeacon (NCDXFBeacon &nb)
 {
+    resetWatchdog();
 
 #if defined (_IS_ESP8266)
-
-    resetWatchdog();
 
     // redraw map under symbol
     for (int8_t dy = -BEACONR; dy <= BEACONR/2; dy += 1) {
@@ -131,15 +139,11 @@ static void eraseBeacon (NCDXFBeacon &nb)
             drawMapCoord (x, y);
     }
 
-#endif // _IS_ESP8266
-
+#endif
 }
-
-#if defined (_IS_ESP8266)
 
 
 /* return whether the given point is anywhere inside a beacon symbol or call
- * ESP only
  */
 static bool overBeacon (const SCoord &s, const NCDXFBeacon &nb)
 {
@@ -164,26 +168,6 @@ static bool overBeacon (const SCoord &s, const NCDXFBeacon &nb)
     // yup
     return (true);
 }
-
-/* return whether the given screen coord is over any visible map symbol or call sign box
- * ESP only
- */
-bool overAnyBeacon (const SCoord &s)
-{
-    if (!(brb_rotset & (1 << BRB_SHOW_BEACONS)))
-        return (false);
-
-    for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
-        if (bp->c == BCOL_S)
-            continue;
-        if (overBeacon (s, *bp))
-            return (true);
-    }
-
-    return (false);
-}
-
-#endif // _IS_ESP8266
 
 
 /* update map beacons, typically on each 10 second period unless immediate.
@@ -233,6 +217,23 @@ void updateBeaconScreenLocations()
         ll2s (deg2rad(bp->lat), deg2rad(bp->lng), bp->s, 3*BEACONCW);   // about max
         setMapTagBox (bp->call, bp->s, BEACONR/2+1, bp->call_b);
     }
+}
+
+/* return whether the given screen coord is over any visible map symbol or call sign box
+ */
+bool overAnyBeacon (const SCoord &s)
+{
+    if (!(brb_rotset & (1 << BRB_SHOW_BEACONS)))
+        return (false);
+
+    for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
+        if (bp->c == BCOL_S)
+            continue;
+        if (overBeacon (s, *bp))
+            return (true);
+    }
+
+    return (false);
 }
 
 /* draw the beacon key in NCDXF_b.
@@ -310,7 +311,7 @@ bool drawNCDXFBox()
 
     case BRB_SHOW_SWSTATS:
 
-        (void) checkSpaceStats();
+        (void) checkSpaceStats(now());
         drawSpaceStats(RA8875_BLACK);
         break;
 

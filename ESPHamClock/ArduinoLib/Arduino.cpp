@@ -261,17 +261,16 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", restful_port);
         fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
         fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
-        fprintf (stderr, " -h   : print this help summary then exit\n");
+        fprintf (stderr, " -h   : print this help summary and exit\n");
         fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
-        fprintf (stderr, " -k   : start immediately in normal mode, ie, don't offer Setup or wait for Skips\n");
-        fprintf (stderr, " -l l : set Mercator or Mollweide center longitude to l degrees, +E; requires -k\n");
+        fprintf (stderr, " -k   : don't offer Setup or wait for Skips\n");
+        fprintf (stderr, " -l l : set Mercator center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
         fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
-        fprintf (stderr, " -v   : show version info then exit\n");
+        fprintf (stderr, " -v   : show version info and exit\n");
         fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n", liveweb_port);
-        fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
 
         exit(1);
 }
@@ -324,9 +323,9 @@ static void crackArgs (int ac, char *av[])
                         usage ("missing arg for -f");
                     } else {
                         char *oo = *++av;
-                        if (strcmp (oo, "on") == 0 || strcmp (oo, "yes") == 0)
+                        if (strcmp (oo, "on") == 0)
                             full_screen = true;
-                        else if (strcmp (oo, "off") == 0 || strcmp (oo, "no") == 0)
+                        else if (strcmp (oo, "off") == 0)
                             full_screen = false;
                         else
                             usage ("-f requires on or off");
@@ -391,9 +390,6 @@ static void crackArgs (int ac, char *av[])
                     break;
                 case 'x':
                     usage ("-x is no longer supported -- replaced with direct web \"make\" targets");
-                    break;
-                case 'y':
-                    want_kbcursor = true;
                     break;
                 default:
                     usage ("unknown option: %c", *s);

@@ -18,8 +18,6 @@
 
 class EEPROM EEPROM;
 
-static bool verbose;
-
 EEPROM::EEPROM()
 {
         fp = NULL;
@@ -55,14 +53,12 @@ void EEPROM::begin (int s)
         // open RW, create if new owned by real user
 	fp = fopen (filename, "r+");
         if (fp) {
-            if (verbose)
-                printf ("EEPROM %s: open ok\n", filename);
+            printf ("EEPROM %s: open ok\n", filename);
         } else {
             fp = fopen (filename, "w+");
-            if (fp) {
-                if (verbose)
-                    printf ("EEPROM %s: create ok\n", filename);
-            } else {
+            if (fp)
+                printf ("EEPROM %s: create ok\n", filename);
+            else {
                 fatalError ("EEPROM %s:\ncreate failed:\n%s\n", filename, strerror(errno));
                 // never returns
             }
@@ -82,6 +78,7 @@ void EEPROM::begin (int s)
 	char line[64];
 	unsigned int a, b;
 	while (fp && fgets (line, sizeof(line), fp)) {
+	    // sscanf (line, "%x %x", &a, &b); printf ("R: %08X %02X\n", a, b);
 	    if (sscanf (line, "%x %x", &a, &b) == 2 && a < n_data_array)
                 data_array[a] = b;
         }

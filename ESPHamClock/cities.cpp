@@ -59,7 +59,7 @@ void readCities()
                 // crack
                 char name[101];
                 float lat, lng;
-                if (sscanf (line, _FX("%f, %f, \"%100[^\"]\""), &lat, &lng, name) != 3)
+                if (sscanf (line, "%f, %f, \"%100[^\"]\"", &lat, &lng, name) != 3)
                     continue;
 
                 // grow lists if full
@@ -68,7 +68,7 @@ void readCities()
                     names = (char **) realloc (names, n_malloced * sizeof(char *));
                     lls = (LatLong *) realloc (lls, n_malloced * sizeof(LatLong));
                     if (!names || !lls)
-                        fatalError (_FX("alloc cities: %d"), n_malloced);
+                        fatalError ("alloc cities: %d", n_malloced);
                 }
 
                 // add to lists
@@ -92,7 +92,7 @@ void readCities()
             // build tree -- N.B. can not build as we read because realloc could move left/right pointers
             KD3Node *city_tree = (KD3Node *) calloc (n_cities, sizeof(KD3Node));
             if (!city_tree && n_cities > 0)
-                fatalError (_FX("alloc cities tree: %d"), n_cities);
+                fatalError ("alloc cities tree: %d", n_cities);
             for (int i = 0; i < n_cities; i++) {
                 KD3Node *kp = &city_tree[i];
                 ll2KD3Node (lls[i], kp);

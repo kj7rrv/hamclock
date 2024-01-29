@@ -24,7 +24,6 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
     #define FOOT_ALT0   200             // n dots for 0 deg altitude locus
     #define FOOT_ALT30  100             // n dots for 30 deg altitude locus
     #define FOOT_ALT60  75              // n dots for 60 deg altitude locus
-#define SHSATDTMAP      1               // whether to show satellite time on map
 #endif
 #define N_FOOT      3                   // number of footprint altitude loci
 
@@ -40,7 +39,7 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define SAT_UP_R        2               // dot radius when up
 #define PASS_STEP       10.0F           // pass step size, seconds
 #define TBORDER         50              // top border
-#define FONT_H          (dx_info_b.h/6) // height for SMALL_FONT
+#define FONT_H          (dx_info_b.h/6) // font height
 #define FONT_D          5               // font descent
 #define SAT_COLOR       RA8875_RED      // overall annotation color
 #define SATUP_COLOR     RGB565(0,200,0) // time color when sat is up
@@ -53,7 +52,6 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 #define N_ROWS          ((480-TBORDER)/CELL_H)  // n rows in name table
 #define MAX_NSAT        (N_ROWS*N_COLS) // max names we can display
 #define MAX_PASS_STEPS  30              // max lines to draw for pass map
-#define MAP_DT_W        (6*7)           // map time width assuming X YY:ZZ, pixels
 
 // used so findNextPass() can be used for contexts other than the current sat now
 typedef struct {
@@ -72,8 +70,8 @@ typedef enum {
 } PassState;
 
 // state
-static const char sat_get_all[] PROGMEM = "/esats.pl?getall=";                  // command to get all TLE
-static const char sat_one_page[] = "/esats.pl?tlename=%s";                      // command to get one TLE
+static const char sat_get_all[] PROGMEM = "/esats.pl?getall=";     // command to get all TLE
+static const char sat_one_page[] = "/esats.pl?tlename=%s"; // command to get one TLE
 static Satellite *sat;                  // satellite definition, if any
 static Observer *obs;                   // DE
 static SatRiseSet sat_rs;               // event info for current sat
@@ -419,7 +417,8 @@ static void drawSatSkyDome()
     uint16_t yc = satpass_c.s.y;
 
     // erase sky dome
-    tft.fillRect (dx_info_b.x+1, dx_info_b.y+2*FONT_H+1, dx_info_b.w-2, dx_info_b.h-2*FONT_H-1, RA8875_BLACK);
+    tft.fillRect (dx_info_b.x+1, dx_info_b.y+2*FONT_H+1,
+            dx_info_b.w-2, dx_info_b.h-2*FONT_H+1, RA8875_BLACK);
 
     // skip if no sat or never up
     if (!sat || !obs || !sat_rs.ever_up)
@@ -467,8 +466,8 @@ static void drawSatSkyDome()
     for (float a = 0; a < 2*M_PIF; a += M_PIF/6) {
         uint16_t xr = lroundf(xc + r0*cosf(a));
         uint16_t yr = lroundf(yc - r0*sinf(a));
-        tft.drawLine (xc, yc, xr, yr, HGRIDCOL);
         tft.fillCircle (xr, yr, 1, RA8875_WHITE);
+        tft.drawLine (xc, yc, xr, yr, HGRIDCOL);
     }
 
     // draw elevations
@@ -585,7 +584,7 @@ static void drawSatName()
     strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
 
     // erase
-    tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);  // avoid separator
+    tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);
 
     // shorten until fits in satname_b
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -598,7 +597,7 @@ static void drawSatName()
     tft.print (user_name);
 }
 
-/* set map_name_b with where sat name should go on map
+/* fill map_name_b with where sat name should go on map
  */
 static void setSatMapNameLoc()
 {
@@ -606,21 +605,18 @@ static void setSatMapNameLoc()
     char user_name[NV_SATNAME_LEN];
     strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
 
-    // set size based on longest of sat name or rise/set time
+    // get size
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    map_name_b.w = fmaxf (MAP_DT_W, getTextWidth(user_name));
-#if defined(SHSATDTMAP)
-    map_name_b.h = FONT_H + 10;
-#else
-    map_name_b.h = FONT_H + 1;          // reduce flashing by not including height for time not shown anyway
-#endif
+    uint16_t bw, bh;
+    getTextBounds (user_name, &bw, &bh);
+    map_name_b.w = bw;
+    map_name_b.h = bh;
 
     switch ((MapProjection)map_proj) {
 
-    case MAPP_AZIM1:            // fallthru
-    case MAPP_MOLL:
+    case MAPP_AZIM1:
         // easy: just print in upper right
-        map_name_b.x = map_b.x + map_b.w - map_name_b.w - 10;
+        map_name_b.x = map_b.x + map_b.w - map_name_b.w - 1;
         map_name_b.y = map_b.y + 10;
         break;
 
@@ -631,22 +627,42 @@ static void setSatMapNameLoc()
         break;
 
     case MAPP_MERCATOR: {
-        // try to place somewhere over an ocean and away from sat footprint
-        SCoord sat_xy, name_xy;
-        LatLong sat_ll;
-        sat_xy.x = sat_path[0].x/tft.SCALESZ;
-        sat_xy.y = sat_path[0].y/tft.SCALESZ;
-        s2ll (sat_xy, sat_ll);
-        if (sat_ll.lng_d > -55 && sat_ll.lng_d < 125) {
-            // sat in eastern hemi so put name in s pacific
-            ll2s (deg2rad(-30), deg2rad(-160), name_xy, 0);
-        } else {
-            // sat in western hemi so put symbol in s indian
-            ll2s (deg2rad(-30), deg2rad(50), name_xy, 0);
-        }
-        map_name_b.x = CLAMPF (name_xy.x, map_b.x + 10, map_b.x + map_b.w - map_name_b.w - 10);
-        map_name_b.y = name_xy.y;
+        // locate name away from current sat location and misc symbols
 
+        // start in south pacific
+        #define _SP_LNG (-160)          // South Pacific longitude
+        #define _SP_LAT (-30)           // " latitude above RSS and map scales
+        SCoord name_l_s, name_r_s;      // left and right box candidate location
+        ll2s (deg2rad(_SP_LAT), deg2rad(_SP_LNG), name_l_s, 0);
+        name_r_s.x = name_l_s.x + map_name_b.w;
+        name_r_s.y = name_l_s.y;
+
+        // avoid any symbols
+        #define _EDGE_GUARD 20
+        while (overAnySymbol (name_l_s) || overAnySymbol(name_r_s)) {
+            name_l_s.x += _EDGE_GUARD;
+            name_r_s.x = name_l_s.x + map_name_b.w;
+        }
+
+        // avoid current sat footprint
+        #define _SAT_FOOT_R 75          // typical footprint??
+        uint16_t sat_x = sat_path[0].x/tft.SCALESZ;
+        uint16_t sat_y = sat_path[0].y/tft.SCALESZ;
+        uint16_t dy = sat_y > name_l_s.y ? sat_y - name_l_s.y : name_l_s.y - sat_y;
+        if (dy < _SAT_FOOT_R && name_r_s.x >= sat_x - _SAT_FOOT_R && name_l_s.x < sat_x + _SAT_FOOT_R) {
+            name_l_s.x = sat_x + _SAT_FOOT_R + _EDGE_GUARD;
+            name_r_s.x = name_l_s.x + map_name_b.w;
+        }
+
+        // check for going off the right edge
+        if (name_r_s.x > map_b.x + map_b.w - _EDGE_GUARD) {
+            name_l_s.x = map_b.x + _EDGE_GUARD;
+            name_r_s.x = name_l_s.x + map_name_b.w;
+        }
+
+        // ok
+        map_name_b.x = name_l_s.x;
+        map_name_b.y = name_l_s.y;
         } break;
 
     default:
@@ -665,22 +681,21 @@ static void drawSatPassMarker()
     getSatNow (satnow);
 
     // size and center of screen path
-    uint16_t r0 = satpass_c.r;
-    uint16_t xc = satpass_c.s.x;
-    uint16_t yc = satpass_c.s.y;
+    uint16_t r0 = (dx_info_b.h-2*FONT_H)/2;
+    uint16_t x0 = dx_info_b.x + dx_info_b.w/2;
+    uint16_t y0 = dx_info_b.y + dx_info_b.h - r0;
 
     float r = r0*(90-satnow.el)/90;                            // screen radius, zenith at center 
-    uint16_t x = xc + r*sinf(deg2rad(satnow.az)) + 0.5F;       // want east right
-    uint16_t y = yc - r*cosf(deg2rad(satnow.az)) + 0.5F;       // want north up
+    uint16_t x = x0 + r*sinf(deg2rad(satnow.az)) + 0.5F;       // want east right
+    uint16_t y = y0 - r*cosf(deg2rad(satnow.az)) + 0.5F;       // want north up
 
-    if (y + SAT_UP_R < tft.height() - 1)                       // beware lower edge
-        tft.fillCircle (x, y, SAT_UP_R, SAT_COLOR);
+    tft.fillCircle (x, y, SAT_UP_R, SAT_COLOR);
 }
 
-/* draw event label and time dt in the dx_info box unless dt < 0 then just show title.
- * dt is in days: if > 1 hour show HhM else M:S
+/* draw event label and time t in the dx_info box unless t < 0 then just show title.
+ * t is in days: if > 1 hour show HhM else M:S
  */
-static void drawSatTime (bool force, const char *label, uint16_t color, float dt)
+static void drawSatTime (bool force, const char *label, uint16_t color, float t)
 {
     if (!sat)
         return;
@@ -707,7 +722,7 @@ static void drawSatTime (bool force, const char *label, uint16_t color, float dt
         memcpy (prev_label, label, sizeof(prev_label));
 
     // draw
-    if (dt >= 0) {
+    if (t >= 0) {
 
         // draw label and time
 
@@ -720,15 +735,23 @@ static void drawSatTime (bool force, const char *label, uint16_t color, float dt
         tft.print (label);
 
         // format time as HhM else M:S
-        dt *= 24;                               // dt is now hours
-        int a, b;
-        char sep;
-        formatSexa (dt, a, sep, b);
+        t *= 24;                        // t is now hours
+        uint8_t a, b;
+        char sep = 'h';
+        if (t < 1) {
+            t *= 60;                    // t is now minutes
+            sep = ':';
+            a = (int)t;
+            b = (int)((t-(int)t)*60);
+        } else {
+            a = (int)t;
+            b = (int)((t-(int)t)*60);
+        }
 
         // draw time centered in right half
         if (new_label || a != prev_a || b != prev_b) {
             char t_buf[10];
-            snprintf (t_buf, sizeof(t_buf), _FX("%2d%c%02d"), a, sep, b);
+            snprintf (t_buf, sizeof(t_buf), _FX("%d%c%02d"), a, sep, b);
             uint16_t t_w = getTextWidth(t_buf);
             tft.fillRect (dx_info_b.x + dx_info_b.w/2, erase_y, dx_info_b.w/2-1, erase_h, RA8875_BLACK);
             // tft.drawRect (dx_info_b.x + dx_info_b.w/2, erase_y, dx_info_b.w/2-1, erase_h, RA8875_RED);
@@ -774,56 +797,31 @@ static bool tleHasValidChecksum (const char *line)
     return ((*line - '0') == (sum%10));
 }
 
-/* clear screen, show the given message then restart operation after user ack.
+/* clear screen, show the given message then restart operation without a sat
  */
 static void fatalSatError (const char *fmt, ...)
 {
-    // common prefix
-    char buf[65] = "Sat error: ";               // max on one line
+    char buf[65] = "Sat error: ";       // max on one line
     va_list ap;
 
-    // format message to fit after prefix
-    int prefix_l = strlen (buf);
+    int l = strlen (buf);
+
     va_start (ap, fmt);
-    vsnprintf (buf+prefix_l, sizeof(buf)-prefix_l, fmt, ap);
+    vsnprintf (buf+l, sizeof(buf)-l, fmt, ap);
     va_end (ap);
 
-    // log 
     Serial.println (buf);
 
-    // clear screen and show message centered
-    eraseScreen();
     selectFontStyle (BOLD_FONT, SMALL_FONT);
-    uint16_t mw = getTextWidth (buf);
+    uint16_t bw = getTextWidth (buf);
+
+    eraseScreen();
     tft.setTextColor (RA8875_WHITE);
-    tft.setCursor ((tft.width()-mw)/2, tft.height()/3);
+    tft.setCursor ((tft.width()-bw)/2, tft.height()/2);
     tft.print (buf);
 
-    // ok button
-    SBox ok_b;
-    const char button_msg[] = "Continue";
-    uint16_t bw = getTextWidth(button_msg);
-    ok_b.x = (tft.width() - bw)/2;
-    ok_b.y = tft.height() - 40;
-    ok_b.w = bw + 30;
-    ok_b.h = 35;
-    drawStringInBox (button_msg, ok_b, false, RA8875_WHITE);
+    wdDelay (5000);
 
-    // wait forever for user to tap
-    SCoord s;
-    char c;
-    UserInput ui = {
-        ok_b,                                   // ok box bounds
-        NULL,                                   // user check function, else NULL
-        false,                                  // true if fp returned true
-        0,                                      // timeout, msec, or 0 forever
-        false,                                  // whether to update clocks while waiting
-        s,                                      // tap location or ...
-        c,                                      // keyboard char code
-    };
-    (void) waitForUser (ui);
-
-    // restart without sat
     resetWatchdog();
     unsetSat();
     initScreen();
@@ -876,85 +874,68 @@ static bool satLookup ()
         sat = NULL;
     }
 
-    StackMalloc t1(TLE_LINEL);
-    StackMalloc t2(TLE_LINEL);
-    char buf[sizeof(sat_one_page) + sizeof(sat_name) + 10];
-
     WiFiClient tle_client;
-    const int MAX_TRIES = 3;
-    char err_msg[100];
     bool ok = false;
 
-    for (int try_i = 0; !ok && try_i < MAX_TRIES; try_i++) {
-
+    resetWatchdog();
+    if (wifiOk() && tle_client.connect (backend_host, BACKEND_PORT)) {
         resetWatchdog();
 
-        // wait a bit before retrying
-        if (try_i > 0)
-            wdDelay(2000);
-
-        // connect
-        if (!wifiOk() || !tle_client.connect (backend_host, BACKEND_PORT)) {
-            strcpy (err_msg, _FX("network error"));
-            tle_client.stop();
-            continue;
-        }
+        // memory
+        StackMalloc t1(TLE_LINEL);
+        StackMalloc t2(TLE_LINEL);
+        StackMalloc name_mem(100);
+        char *name = (char *) name_mem.getMem();
 
         // query
-        snprintf (buf, sizeof(buf), sat_one_page, sat_name);
-        httpHCGET (tle_client, backend_host, buf);
+        snprintf (name, name_mem.getSize(), sat_one_page, sat_name);
+        httpHCGET (tle_client, backend_host, name);
         if (!httpSkipHeader (tle_client)) {
-            strcpy (err_msg, _FX("Bad http header"));
-            tle_client.stop();
-            continue;
+            fatalSatError (_FX("Bad http header"));
+            goto out;
         }
 
         // first response line is sat name, should match query
-        if (!getTCPLine (tle_client, buf, sizeof(buf), NULL)) {
-            snprintf (err_msg, sizeof(err_msg), _FX("Satellite %s not found"), sat_name);
-            tle_client.stop();
-            continue;
+        if (!getTCPLine (tle_client, name, name_mem.getSize(), NULL)) {
+            fatalSatError (_FX("Satellite %s not found"), sat_name);
+            goto out;
         }
-        if (strcasecmp (buf, sat_name)) {
-            snprintf (err_msg, sizeof(err_msg), _FX("No match: '%s' '%s'"), sat_name, buf);
-            tle_client.stop();
-            continue;
+        if (strcasecmp (name, sat_name)) {
+            fatalSatError (_FX("No match: '%s' '%s'"), sat_name, name);
+            goto out;
         }
 
         // next two lines are TLE
         if (!getTCPLine (tle_client, (char *) t1.getMem(), TLE_LINEL, NULL)) {
-            strcpy (err_msg, _FX("Error reading TLE line 1"));
-            tle_client.stop();
-            continue;
+            fatalSatError (_FX("Error reading line 1"));
+            goto out;
         }
         if (!tleHasValidChecksum ((char *) t1.getMem())) {
-            snprintf (err_msg, sizeof(err_msg), _FX("Bad checksum for %s in line 1"), sat_name);
-            tle_client.stop();
-            continue;
+            fatalSatError (_FX("Bad checksum for %s in line 1"), sat_name);
+            goto out;
         }
         if (!getTCPLine (tle_client, (char *) t2.getMem(), TLE_LINEL, NULL)) {
-            strcpy (err_msg, _FX("Error reading TLE line 2"));
-            tle_client.stop();
-            continue;
+            fatalSatError (_FX("Error reading line 2"));
+            goto out;
         }
         if (!tleHasValidChecksum ((char *) t2.getMem())) {
-            snprintf (err_msg, sizeof(err_msg), _FX("Bad checksum for %s in line 2"), sat_name);
-            tle_client.stop();
-            continue;
+            fatalSatError (_FX("Bad checksum for %s in line 2"), sat_name);
+            goto out;
         }
 
         // TLE looks good, update name so cases match, define new sat
-        memcpy (sat_name, buf, sizeof(sat_name)-1);    // retain EOS
+        memcpy (sat_name, name, sizeof(sat_name)-1);    // retain EOS
         sat = new Satellite ((char *) t1.getMem(), (char *) t2.getMem());
-
-        // yah!
         ok = true;
+
+    } else {
+
+        fatalSatError (_FX("network error"));
     }
 
-    tle_client.stop();
+out:
 
-    if (!ok)
-        fatalSatError ("%s", err_msg);
+    tle_client.stop();
 
     return (ok);
 }
@@ -1288,7 +1269,7 @@ static PassState findPassState (float *days)
     return (ps);
 }
 
-/* called often to keep sat and sat_rs updated, including creating sat if a name is known.
+/* called often to keep sat and sat_rs updated.
  * return whether ok to use and, if so, whether elements or sat_rs were updated if care.
  */
 static bool checkSatUpToDate (bool *updated)
@@ -1338,34 +1319,38 @@ static bool checkSatUpToDate (bool *updated)
  */
 static void drawSatRSEvents(bool force)
 {
-    float days;
+    if (!sat_rs.ever_up) {
 
-    switch (findPassState(&days)) {
+        drawSatTime (true, _FX("No rise"), SAT_COLOR, -1);
 
-    case PS_NONE:
-        // neither
-        if (!sat_rs.ever_up)
-            drawSatTime (true, _FX("No rise"), SAT_COLOR, -1);
-        else if (!sat_rs.ever_down)
-            drawSatTime (true, _FX("No set"), SAT_COLOR, -1);
-        else
-            fatalError (_FX("Bug! no rise/set from PS_NONE"));
-        break;
+    } else if (!sat_rs.ever_down) {
 
-    case PS_UPSOON:
-        // pass lies ahead
-        drawSatTime (force, "Rise in", SAT_COLOR, days);
-        break;
+        drawSatTime (true, _FX("No set"), SAT_COLOR, -1);
 
-    case PS_UPNOW:
-        // pass in progress
-        drawSatTime (force, "Set in", SAT_COLOR, days);
-        drawSatPassMarker();
-        break;
+    } else {
 
-    case PS_HASSET:
-        // just set
-        break;
+        float days;
+
+        switch (findPassState(&days)) {
+
+        case PS_NONE:
+            break;
+
+        case PS_UPSOON:
+            // pass lies ahead
+            drawSatTime (force, "Rise in", SAT_COLOR, days);
+            break;
+
+        case PS_UPNOW:
+            // pass in progress
+            drawSatTime (force, "Set in", SAT_COLOR, days);
+            drawSatPassMarker();
+            break;
+
+        case PS_HASSET:
+            // just set
+            break;
+        }
     }
 }
 
@@ -1454,12 +1439,11 @@ bool getSatNow (SatNow &satnow)
 /* called by main loop() to update _pass_ info so get out fast if nothing to do.
  * the _path_ is updated much less often in updateSatPath().
  * N.B. beware this is called by loop() while stopwatch is up
- * N.B. update sat_rs if !dx_info_for_sat so drawSatPath can draw rise/set time in map_name_b
  */
 void updateSatPass()
 {
-    // get out fast if nothing for us
-    if (!obs || !SAT_NAME_IS_SET())
+    // get out fast if nothing to do or don't care
+    if (!obs || !dx_info_for_sat || !SAT_NAME_IS_SET())
         return;
 
     // once per second is fine
@@ -1488,7 +1472,7 @@ void updateSatPass()
 /* compute satellite geocentric _path_ into sat_path[] and footprint into sat_foot[].
  * called once at the top of each map sweep.
  * the _pass_ is updated in updateSatPass().
- * we also move map_name_b if necessary to avoid the current sat location.
+ * we also update map_name_b to avoid the current sat location.
  */
 void updateSatPath()
 {
@@ -1518,15 +1502,16 @@ void updateSatPath()
 
     // start sat_path max size, then reduce when know size needed
     sat_path = (SCoord *) malloc (MAX_PATH * sizeof(SCoord));
-    if (!sat_path)
-        fatalError (_FX("No memory for satellite path"));
+    if (!sat_path) {
+        Serial.println (F("Failed to malloc sat_path"));
+        while (1);      // timeout
+    }
 
     // fill sat_path
     float period = sat->period();
     n_path = 0;
     uint16_t max_path = isSatMoon() ? 1 : MAX_PATH;             // N.B. only set the current location if Moon
     int dashed = 0;
-    uint16_t edge = 2*getSpotPathSize();                        // leave room for dot at start of path
     for (uint16_t p = 0; p < max_path; p++) {
 
         // place dashed line points off screen courtesy overMap()
@@ -1534,7 +1519,7 @@ void updateSatPath()
             sat_path[n_path] = {10000, 10000};
         } else {
             // compute next point along path
-            ll2sRaw (satlat, satlng, sat_path[n_path], edge);
+            ll2sRaw (satlat, satlng, sat_path[n_path], tft.SCALESZ*tft.SCALESZ);
         }
 
         // skip duplicate points
@@ -1583,7 +1568,6 @@ void drawSatPathAndFoot()
         SCoord &sp1 = sat_path[i];
         if (segmentSpanOkRaw(sp0,sp1,tft.SCALESZ*tft.SCALESZ)) {
             if (draw_start) {
-                // N.B. set ll2s edge to accommodate this dot
                 tft.fillCircleRaw (sp0.x, sp0.y, 2*lw, path_color);
                 tft.drawCircleRaw (sp0.x, sp0.y, 2*lw, RA8875_BLACK);
                 draw_start = false;
@@ -1649,7 +1633,7 @@ void drawSatPointsOnRow (uint16_t y0)
     }
 }
 
-/* draw sat name and next event time in map_name_b if it contains row y0 unless already showing in dx_info.
+/* draw sat name on map if it includes row y0 unless already showing in dx_info.
  * also draw if y0 == 0 as a way to draw regardless.
  */
 void drawSatNameOnRow(uint16_t y0)
@@ -1666,45 +1650,10 @@ void drawSatNameOnRow(uint16_t y0)
     char user_name[NV_SATNAME_LEN];
     strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
 
-    // draw name
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    uint16_t un_x = map_name_b.x + (map_name_b.w-getTextWidth(user_name))/2;
-    uint16_t un_y = map_name_b.y + FONT_H - FONT_D;
-    shadowString (user_name, true, getMapColor(SATFOOT_CSPR), un_x, un_y);
-
-    // draw time to next event, if any, unless ESP which never erases
-#if defined(SHSATDTMAP)
-    float days;
-    PassState ps = findPassState(&days);
-    switch (ps) {
-    case PS_HASSET:             // fallthru
-    case PS_NONE:
-        // nothing to show
-        break;
-    case PS_UPSOON:             // fallthru
-    case PS_UPNOW: {
-        int a, b;
-        char sep;
-        char buf[50];
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        formatSexa (days*24, a, sep, b);
-        snprintf (buf, sizeof(buf), "%c %d%c%02d", ps == PS_UPSOON ? 'R' : 'S', a, sep, b);
-        uint16_t buf_w = getTextWidth(buf);
-        uint16_t ut_x = map_name_b.x + (map_name_b.w-buf_w)/2;
-        uint16_t ut_y = map_name_b.y + map_name_b.h - 10;
-        //drawSBox (map_name_b, RA8875_RED);
-
-        SBox time_b;
-        time_b.x = ut_x-2;
-        time_b.y = ut_y-2;
-        time_b.w = buf_w+4;
-        time_b.h = 11;
-        drawMapTag (buf, time_b, getMapColor(SATFOOT_CSPR), RA8875_BLACK);
-
-        }
-        break;
-    }
-#endif // SHSATDTMAP
+    tft.setTextColor (getMapColor(SATFOOT_CSPR));
+    tft.setCursor (map_name_b.x, map_name_b.y + map_name_b.h - 1);
+    tft.print (user_name);
 }
 
 /* return whether user has tapped near the head of the satellite path or in the map name
@@ -1758,12 +1707,6 @@ void drawSatPass()
 bool querySatSelection()
 {
     resetWatchdog();
-
-    // not allowed to show sat if too many memory intensive panes are up
-    if (!paneComboOk(plot_rotset)) {
-        fatalSatError (_FX("Too many hi-memory panes to add a satellite also"));
-        return (false);
-    }
 
     // we need the whole screen
     closeDXCluster();       // prevent inbound msgs from clogging network
@@ -1937,8 +1880,6 @@ const char **getAllSatNames()
 
     // close
     sat_client.stop();
-
-    Serial.printf (_FX("SAT: found %d satellites\n"), n_names);
 
     // add NULL then done
     all_names = (const char **) realloc (all_names, (n_names+1)*sizeof(char*));

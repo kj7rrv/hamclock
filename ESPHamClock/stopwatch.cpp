@@ -621,7 +621,18 @@ static void drawSatIndicator(bool force)
         // format time
         int a, b;
         char sep;
-        formatSexa (dt, a, sep, b);
+        if (dt < 1) {
+            // next event is less than 1 hour away, show time in M:S
+            dt *= 60;                           // dt is now minutes
+            sep = ':';
+            a = (int)dt;                        // a is now minutes
+            b = (int)((dt-(int)dt)*60);         // b is now " seconds
+        } else {
+            // next event is at least an hour away, show time in HhM
+            sep = 'h';
+            a = (int)dt;                        // a is now hours
+            b = (int)((dt-(int)dt)*60);         // b is now minutes
+        }
 
         // draw
         char buf[50];
@@ -915,7 +926,7 @@ static bool drawBCDEWxInfo(void)
  */
 static void drawBCSpaceWxInfo (bool all)
 {
-    if (checkSpaceStats() || all)
+    if (checkSpaceStats(now()) || all)
         drawSpaceStats(sw_col);   
 }
 
@@ -1813,9 +1824,9 @@ static void runBCMenu (const SCoord &s)
  */
 static void checkSWPageTouch()
 {
-    // out fast if nothing to do
+    // check for touch at all
     SCoord s;
-    if (screenIsLocked() || (readCalTouchWS(s) == TT_NONE && checkKBWarp(s) == TT_NONE))
+    if (readCalTouchWS(s) == TT_NONE || screenIsLocked())
         return;
 
     // update idle timer, ignore if this tap is restoring full brightness
@@ -2162,12 +2173,12 @@ bool runStopwatch()
     // always check alarm clock regardless of display state
     if (alarm_state == ALMS_ARMED && checkAlarm()) {
         // record time and indicate alarm has just gone off
-        alarm_ringtime = myNow();
+        alarm_ringtime = now();
         alarm_state = ALMS_RINGING;
         showAlarmRinging();
     }
     if (alarm_state == ALMS_RINGING) {
-        if (alarmPinIsSet() || myNow() - alarm_ringtime >= ALM_RINGTO/1000) {
+        if (alarmPinIsSet() || now() - alarm_ringtime >= ALM_RINGTO/1000) {
             // op hit the cancel pin or timed out
             alarm_state = ALMS_ARMED;
             if (sws_display == SWD_NONE)
