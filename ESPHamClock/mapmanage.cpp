@@ -621,7 +621,7 @@ static File openMapFile (bool *downloaded, const char *file, const char *title)
         Serial.printf (_FX("%s: %s\n"), title, file);
 
         // start remote file download, even if only to check whether newer
-        if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
+        if (wifiOk() && client.connect(backend_host, backend_port)) {
             snprintf (hdr_buf, sizeof(hdr_buf), _FX("/maps/%s"), file);
             httpHCGET (client, backend_host, hdr_buf);
             char lm_str[50];
@@ -736,7 +736,7 @@ static bool installQueryMaps (const char *page, const char *style, const float M
         updateClocks(false);
         WiFiClient client;
         bool ok = false;
-        if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
+        if (wifiOk() && client.connect(backend_host, backend_port)) {
             httpHCGET (client, backend_host, query);
             ok = httpSkipHeader (client) && downloadMapFile (client, dfile, dtitle)
                                          && downloadMapFile (client, nfile, ntitle);

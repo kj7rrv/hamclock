@@ -268,7 +268,7 @@ void drawFarthestPSKSpots ()
             memset (&pbs.maxtag_b, 0, sizeof (pbs.maxtag_b));
 
             // show target and call as desired
-            if (markSpots()) {
+            if (markSpots() && overMap(pbs.max_s)) {
 
                 // target for sure
                 drawDistanceTarget (pbs.max_s, getMapColor(bands[i].cid));
@@ -414,7 +414,7 @@ bool updatePSKReporter (const SBox &box)
 
     // fetch and fill reports[]
     resetWatchdog();
-    if (wifiOk() && psk_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && psk_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -639,8 +639,8 @@ bool checkPSKTouch (const SCoord &s, const SBox &box)
     // create a box for the menu
     SBox menu_b;
     menu_b.x = box.x+9;
-    menu_b.y = box.y;   // tight!
-    menu_b.w = 0;       // shrink to fit
+    menu_b.y = box.y + 5;
+    menu_b.w = 0;               // shrink to fit
 
     // run
     SBox ok_b;

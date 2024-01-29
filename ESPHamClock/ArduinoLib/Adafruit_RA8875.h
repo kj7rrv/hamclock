@@ -5,7 +5,7 @@
 #ifndef _Adafruit_RA8875_H
 #define _Adafruit_RA8875_H
 
-#define	PROGMEM
+#include "Arduino.h"
 
 #include <stdint.h>
 #include <pthread.h>
@@ -318,7 +318,7 @@ class Adafruit_RA8875 {
             bool control;
             bool shift;
         } KBState;
-        #define KB_N 20
+        #define KB_N 50                 // allow for longish pastes
         KBState kb_q[KB_N];
         int kb_qhead, kb_qtail;
 	pthread_mutex_t kb_lock;

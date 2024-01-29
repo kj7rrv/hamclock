@@ -169,7 +169,7 @@ bool updateContests (const SBox &box)
     // download and load contests[]
     Serial.println(page);
     resetWatchdog();
-    if (wifiOk() && contest_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && contest_client.connect(backend_host, backend_port)) {
 
         // look alive
         resetWatchdog();

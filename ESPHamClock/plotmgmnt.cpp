@@ -87,10 +87,10 @@ bool plotChoiceIsAvailable (PlotChoice ch)
 
     case PLOT_CH_DXCLUSTER:     return (useDXCluster());
     case PLOT_CH_GIMBAL:        return (haveGimbal());
-    case PLOT_CH_TEMPERATURE:   return (GPIOOk() && getNBMEConnected() > 0);
-    case PLOT_CH_PRESSURE:      return (GPIOOk() && getNBMEConnected() > 0);
-    case PLOT_CH_HUMIDITY:      return (GPIOOk() && getNBMEConnected() > 0);
-    case PLOT_CH_DEWPOINT:      return (GPIOOk() && getNBMEConnected() > 0);
+    case PLOT_CH_TEMPERATURE:   return (getNBMEConnected() > 0);
+    case PLOT_CH_PRESSURE:      return (getNBMEConnected() > 0);
+    case PLOT_CH_HUMIDITY:      return (getNBMEConnected() > 0);
+    case PLOT_CH_DEWPOINT:      return (getNBMEConnected() > 0);
     case PLOT_CH_COUNTDOWN:     return (getSWEngineState(NULL,NULL) == SWE_COUNTDOWN);
     case PLOT_CH_DEWX:          return ((brb_rotset & (1 << BRB_SHOW_DEWX)) == 0);
     case PLOT_CH_DXWX:          return ((brb_rotset & (1 << BRB_SHOW_DXWX)) == 0);
@@ -629,8 +629,6 @@ void savePlotOps()
     NVWriteUInt8 (NV_PLOT_1, plot_ch[PANE_1]);
     NVWriteUInt8 (NV_PLOT_2, plot_ch[PANE_2]);
     NVWriteUInt8 (NV_PLOT_3, plot_ch[PANE_3]);
-
-    logState();
 }
 
 /* flash plot borders nearly ready to change, and include NCDXF_b also.
@@ -668,7 +666,7 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
 
     Serial.println(hc_url);
     resetWatchdog();
-    if (wifiOk() && client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // composite types

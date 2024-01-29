@@ -4,10 +4,10 @@
 #include "HamClock.h"
 
 // config
-#define GL_TB   45                                      // top border
-#define GL_BB   20                                      // bottom border
-#define GL_LB   30                                      // left border
-#define GL_RB   10                                      // right border
+#define GL_TB   55                                      // top plot border
+#define GL_BB   20                                      // bottom plot border
+#define GL_LB   30                                      // left plot border
+#define GL_RB   10                                      // right plot border
 #define GL_TL   5                                       // tick length
 #define GL_PW   (map_b.w - GL_LB - GL_RB)               // plot width
 #define GL_PH   (map_b.h - GL_TB - GL_BB)               // plot height
@@ -16,15 +16,15 @@
 #define GL_Y0   (map_b.y + GL_TB)                       // plot top y coord
 #define GL_Y1   (map_b.y + GL_TB + GL_PH)               // plot bottom y coord
 #define GL_PI   365                                     // total plot interval, days
-#define GL_RC   RA8875_GREEN                            // rise color
-#define GL_SC   RA8875_RED                              // set color
 #define GL_GC   DKGRAY                                  // grid color
 #define GL_LC   BRGRAY                                  // scale color
-#define GL_TC   RA8875_WHITE                            // title color
+#define GL_TC   RA8875_WHITE                            // text color
+#define RISE_R  2                                       // rise line circle radius
 #define SPD     (3600L*24L)                             // seconds per day
 
 // handy conversions
 #define GL_X2D(x)    (((x)-GL_X0)*GL_PI/GL_PW)          // x to doy
+#define GL_D2X(d)    ((d)*GL_PW/GL_PI+GL_X0)            // doy to x
 #define GL_H2Y(h)    (GL_Y0 + (h)*GL_PH/24)             // hours to y
 
 /* perform one-time plot setup, ie, given time_t of Jan 1 this year:
@@ -42,17 +42,27 @@ static void drawGLInit (const time_t yr0, SBox &resume_b)
 
     // title
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setCursor (map_b.x + 70, map_b.y + 35);
+    tft.setCursor (map_b.x + 70, map_b.y + 34);
     tft.setTextColor (GL_TC);
-    tft.print(_FX("Grayline Sun "));
-    tft.setTextColor (GL_RC);
-    tft.print(_FX("Rise "));
+    tft.print(_FX("UTC "));
+    tft.setTextColor (DE_COLOR);
+    tft.print(_FX("DE "));
     tft.setTextColor (GL_TC);
     tft.print(_FX("and "));
-    tft.setTextColor (GL_SC);
-    tft.print(_FX("Set "));
+    tft.setTextColor (DX_COLOR);
+    tft.print(_FX("DX "));
     tft.setTextColor (GL_TC);
-    tft.print(_FX("DE Local Times"));
+
+    // show rise and set key beneath respective word -- x coords are from Touch log
+    tft.print(_FX("Grayline "));
+    uint16_t rise_x = tft.getCursorX();
+    tft.print(_FX("Rise and "));
+    uint16_t set_x = tft.getCursorX();
+    tft.print(_FX("Set Times"));
+    for (uint16_t x = rise_x; x < rise_x + 42; x += 2)
+        tft.fillCircle (x, map_b.y + 42, RISE_R, GL_TC);
+    for (uint16_t x = set_x; x < set_x + 34; x += 2)
+        tft.drawPixel (x, map_b.y + 42, GL_TC);
 
     // define resume button box
     resume_b.w = 100;
@@ -119,6 +129,11 @@ static void drawGLData (const time_t yr0, uint16_t x0, uint16_t x1)
 {
     resetWatchdog();
 
+    // draw today line if within [x0,x1]
+    uint16_t today_x = GL_D2X((myNow() - yr0)/SPD);
+    if (today_x >= x0 && today_x <= x1)
+        tft.drawLine (today_x, GL_Y0, today_x, GL_Y1, DE_COLOR);
+
     int prev_doy = 0;
     for (uint16_t x = x0; x < x1; x++) {
 
@@ -134,26 +149,40 @@ static void drawGLData (const time_t yr0, uint16_t x0, uint16_t x1)
         time_t riset, sett;
         getSolarRS (t, de_ll, &riset, &sett);
         if (riset && sett) {
-            time_t r_local = riset + de_tz.tz_secs;
-            int r_hr = hour(r_local);
-            int r_mn = minute(r_local);
+            int r_hr = hour(riset);
+            int r_mn = minute(riset);
             float r_hrfrac = r_hr + r_mn/60.0F;
             uint16_t r_y = GL_H2Y(r_hrfrac);
-            tft.drawPixel (x, r_y, GL_RC);
+            tft.fillCircle (x, r_y, RISE_R, DE_COLOR);
 
-            time_t s_local = sett + de_tz.tz_secs;
-            int s_hr = hour(s_local);
-            int s_mn = minute(s_local);
+            int s_hr = hour(sett);
+            int s_mn = minute(sett);
             float s_hrfrac = s_hr + s_mn/60.0F;
             uint16_t s_y = GL_H2Y(s_hrfrac);
-            tft.drawPixel (x, s_y, GL_SC);
+            tft.drawPixel (x, s_y, DE_COLOR);
+        }
+
+        getSolarRS (t, dx_ll, &riset, &sett);
+        if (riset && sett) {
+            int r_hr = hour(riset);
+            int r_mn = minute(riset);
+            float r_hrfrac = r_hr + r_mn/60.0F;
+            uint16_t r_y = GL_H2Y(r_hrfrac);
+            tft.fillCircle (x, r_y, RISE_R, DX_COLOR);
+
+            int s_hr = hour(sett);
+            int s_mn = minute(sett);
+            float s_hrfrac = s_hr + s_mn/60.0F;
+            uint16_t s_y = GL_H2Y(s_hrfrac);
+            tft.drawPixel (x, s_y, DX_COLOR);
         }
     }
 
     tft.drawPR();
 }
 
-/* draw a popup in the given box showing DE rise and set time for the given moment
+/* draw a popup in the given box showing rise and set times for the given moment.
+ * N.B. coordinate coords with box size set in plotGrayline().
  */
 static void drawGLPopup (time_t t, SBox &box)
 {
@@ -161,38 +190,50 @@ static void drawGLPopup (time_t t, SBox &box)
     fillSBox (box, RA8875_BLACK);
     drawSBox (box, RA8875_WHITE);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    tft.setCursor (box.x + 30, box.y + 4);
-    tft.setTextColor (DE_COLOR);
+
+    // title
+    tft.setCursor (box.x + 55, box.y + 4);
+    tft.setTextColor (GL_TC);
     tft.printf (_FX("%s %d"), monthShortStr(month(t)), day(t));
 
-    // get rise and set times
+    // draw de rise and set times
     time_t riset, sett;
     getSolarRS (t, de_ll, &riset, &sett);
+    tft.setTextColor (DE_COLOR);
+    tft.setCursor (box.x + 5, box.y + 14);
+    tft.print (_FX("DE  R "));
+    if (riset) {
+        int r_hr = hour(riset);
+        int r_mn = minute(riset);
+        tft.printf (_FX("%02d:%02d"), r_hr, r_mn);
+    } else
+        tft.printf (_FX("--:--"));
+    tft.print (_FX("  S "));
+    if (sett) {
+        int s_hr = hour(sett);
+        int s_mn = minute(sett);
+        tft.printf (_FX("%02d:%02d"), s_hr, s_mn);
+    } else
+        tft.printf (_FX("--:--"));
 
-    // draw info
-    tft.setTextColor (GL_RC);
-    if (!riset) {
-        tft.setTextColor (GL_RC);
-        tft.setCursor (box.x + 25, box.y + 20);
-        tft.print (_FX("No rise"));
-    } else if (!sett) {
-        tft.setTextColor (GL_SC);
-        tft.setCursor (box.x + 30, box.y + 20);
-        tft.print (_FX("No set"));
-    } else {
-        time_t r_local = riset + de_tz.tz_secs;
-        int r_hr = hour(r_local);
-        int r_mn = minute(r_local);
-        tft.setCursor (box.x + 5, box.y + 15);
-        tft.setTextColor (GL_RC);
-        tft.printf (_FX("Rise at %02d:%02d"), r_hr, r_mn);
-        time_t s_local = sett + de_tz.tz_secs;
-        int s_hr = hour(s_local);
-        int s_mn = minute(s_local);
-        tft.setTextColor (GL_SC);
-        tft.setCursor (box.x + 5, box.y + 26);
-        tft.printf (_FX("Set  at %02d:%02d"), s_hr, s_mn);
-    }
+    // draw dx rise and set times
+    getSolarRS (t, dx_ll, &riset, &sett);
+    tft.setTextColor (DX_COLOR);
+    tft.setCursor (box.x + 5, box.y + 24);
+    tft.print (_FX("DX  R "));
+    if (riset) {
+        int r_hr = hour(riset);
+        int r_mn = minute(riset);
+        tft.printf (_FX("%02d:%02d"), r_hr, r_mn);
+    } else
+        tft.printf (_FX("--:--"));
+    tft.print (_FX("  S "));
+    if (sett) {
+        int s_hr = hour(sett);
+        int s_mn = minute(sett);
+        tft.printf (_FX("%02d:%02d"), s_hr, s_mn);
+    } else
+        tft.printf (_FX("--:--"));
 }
 
 /* draw and manage the sun rise/set plot.
@@ -228,7 +269,7 @@ void plotGrayline()
         SBox b;                 // box
     } popup;
     memset (&popup, 0, sizeof(popup));
-    popup.b.w = 90;
+    popup.b.w = 135;                                            // N.B. coordinate size with drawGLPopup()
     popup.b.h = 40;
     // x and y are set from touch location
 
@@ -239,7 +280,7 @@ void plotGrayline()
         map_b,
         NULL,
         false,
-        30000,
+        60000,
         true,
         s,
         c,
@@ -253,10 +294,10 @@ void plotGrayline()
 
         // first erase previous popup, if any
         if (popup.is_up) {
-            fillSBox (popup.b, RA8875_BLACK);                           // erase popup box
+            fillSBox (popup.b, RA8875_BLACK);                   // erase popup box
             uint16_t x1 = popup.b.x + popup.b.w;
-            drawGLGrid (yr0, popup.b.x, x1);                            // redraw exposed grids
-            drawGLData (yr0, popup.b.x, x1);                            // redraw exposed data
+            drawGLGrid (yr0, popup.b.x, x1);                    // redraw exposed grids
+            drawGLData (yr0, popup.b.x, x1);                    // redraw exposed data
             popup.is_up = false;
         }
 

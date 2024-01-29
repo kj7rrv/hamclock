@@ -129,12 +129,13 @@
 static WiFiClient dx_client;                    // persistent TCP connection while displayed ...
 static WiFiUDP wsjtx_server;                    // or persistent UDP "connection" to WSJT-X client program
 static uint32_t last_action;                    // time of most recent spot or user activity, millis()
+#define MAX_CPHR        10                      // max connection attempts per hour
 
 // spots
 #if defined(_IS_ESP8266)
-#define MAX_SPOTS         DXMAX_VIS             // use less precious ESP mem
+#define MAX_SPOTS       DXMAX_VIS               // use less precious ESP mem
 #else
-#define MAX_SPOTS         50                    // some limit anyway
+#define MAX_SPOTS       30                      // some limit anyway
 #endif
 static DXClusterSpot dxspots[MAX_SPOTS];        // oldest first
 static int n_dxspots;                           // n dxspots[] in use, newest at n_dxspots-1
@@ -605,23 +606,12 @@ static void wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 }
 
 /* display the given error message and shut down the connection.
- * draw entire box in case we were not the front pane at time of error.
  */
 static void showDXClusterErr (const SBox &box, const char *msg)
 {
-        // erase box
-        fillSBox (box, RA8875_BLACK);
-
-        // show title and message
-        selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.setTextColor(RA8875_RED);
-        const char *title = _FX("DX Cluster error:");
-        uint16_t tw = getTextWidth (title);
-        tft.setCursor (box.x + (box.w-tw)/2, box.y + box.h/3);
-        tft.print (title);
-        uint16_t mw = getTextWidth (msg);
-        tft.setCursor (box.x + (box.w-mw)/2, box.y + box.h/2);
-        tft.print (msg);
+        char buf[300];
+        snprintf (buf, sizeof(buf), "DX Cluster error: %s", msg);
+        plotMessage (box, RA8875_RED, buf);
 
         // log
         dxcLog (_FX("%s\n"), msg);
@@ -678,12 +668,58 @@ static void prefillDXList(const SBox &box)
 
 #endif // _USE_SHOWDX
 
+/* return whether max connection rate has been reached
+ */
+static bool maxConnRate()
+{
+        // get current state
+        uint32_t t0 = myNow();                  // time now
+        uint32_t t_maxconn;                     // time when the limit was last reached
+        uint8_t n_conn;                         // n connections so far since hr_maxconn
+        if (!NVReadUInt32 (NV_DXMAX_T, &t_maxconn)) {
+            t_maxconn = t0;
+            NVWriteUInt32 (NV_DXMAX_T, t_maxconn);
+        }
+        if (!NVReadUInt8 (NV_DXMAX_N, &n_conn)) {
+            n_conn = 0;
+            NVWriteUInt8 (NV_DXMAX_N, n_conn);
+        }
+        dxcLog (_FX("checking connection %u since %u\n"), n_conn, t_maxconn);
+
+        // check if another connection would hit the max
+        bool hit_max = false;
+        if (++n_conn > MAX_CPHR) {
+            if (t0 < t_maxconn + 3600) {
+                // hit the max
+                hit_max = true;
+                n_conn = MAX_CPHR;
+            } else {
+                // record the time and start a new count
+                NVWriteUInt32 (NV_DXMAX_T, t0);
+                n_conn = 1;
+            }
+        }
+        NVWriteUInt8 (NV_DXMAX_N, n_conn);
+
+        return (hit_max);
+}
+
 /* try to connect to the cluster.
  * if success: dx_client or wsjtx_server is live and return true,
  * else: both are closed, display error msg in box, return false.
+ * N.B. inforce MAX_CPHR via NV_MAXDXCONN_HR
  */
 static bool connectDXCluster (const SBox &box)
 {
+        // check max connection rate
+        if (maxConnRate()) {
+            char buf[100];
+            snprintf (buf, sizeof(buf), _FX("Max %d connections/hr limit"), MAX_CPHR);
+            showDXClusterErr (box, buf);
+            return (false);
+        }
+
+        // get cluster connection info
         const char *dxhost = getHostName();
         int dxport = getDXClusterPort();
 
@@ -737,7 +773,7 @@ static bool connectDXCluster (const SBox &box)
                 }
 
                 if (cl_type == CT_UNKNOWN) {
-                    showDXClusterErr (box, _FX("Type unknown"));
+                    showDXClusterErr (box, _FX("Type unknown or Login rejected"));
                     return (false);
                 }
 
@@ -1277,6 +1313,9 @@ bool getClosestDXCluster (const LatLong &ll, DXClusterSpot *sp, LatLong *llp)
  */
 void drawDXCLabelOnMap (const DXClusterSpot &spot)
 {
+        if (!overMap (spot.dx_map.map_b))
+            return;
+
         uint16_t bg_color = getBandColor ((long)(spot.kHz*1000));          // wants Hz
         uint16_t txt_color = getGoodTextColor (bg_color);
 
@@ -1456,7 +1495,7 @@ void drawDXPathOnMap (const DXClusterSpot &spot)
         }
 
         // mark de end if want
-        if (de_s.x && (dotSpots() || labelSpots())) {
+        if (de_s.x && (dotSpots() || labelSpots()) && overMap(de_s)) {
             // draw square to signify this is the listener end
             tft.fillRectRaw (de_s.x-mkRaw, de_s.y-mkRaw, 2*mkRaw, 2*mkRaw, color);
             tft.drawRectRaw (de_s.x-mkRaw, de_s.y-mkRaw, 2*mkRaw, 2*mkRaw, RA8875_BLACK);
@@ -1476,18 +1515,23 @@ void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row)
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         char line[50];
 
-        // erase row
-        uint16_t x = box.x+4;
-        uint16_t y = box.y + DXLISTING_Y0 + row*DXLISTING_DY;
-        uint16_t bg_col = getBandColor ((long)(1000*spot.kHz)); // wants Hz
-        tft.fillRect (x, y-1, box.w-5, DXLISTING_DY+2, RA8875_BLACK);
+        // overall background color depends on whether spot is on watch list
+        const bool watched = onDXWatchList (spot.dx_call);
+        const uint16_t bg_col = watched ? RA8875_RED : RA8875_BLACK;
+
+        // erase entire row
+        const uint16_t x = box.x+4;
+        const uint16_t y = box.y + DXLISTING_Y0 + row*DXLISTING_DY;
+        const uint16_t h = DXLISTING_DY - 2;
+        tft.fillRect (x, y-2, box.w-6, h, bg_col);
 
         // pretty freq, fixed 8 chars, bg matching band color assignment
         const char *f_fmt = spot.kHz < 1e6F ? _FX("%8.1f") : _FX("%8.0f");
         snprintf (line, sizeof(line), f_fmt, spot.kHz);
-        uint16_t txt_col = getGoodTextColor(bg_col);
-        tft.setTextColor(txt_col);
-        tft.fillRect (x, y-2, 50, DXLISTING_DY-2, bg_col);
+        const uint16_t fbg_col = getBandColor ((long)(1000*spot.kHz)); // wants Hz
+        const uint16_t ffg_col = getGoodTextColor(fbg_col);
+        tft.setTextColor(ffg_col);
+        tft.fillRect (x, y-2, 50, h, fbg_col);
         tft.setCursor (x, y);
         tft.print (line);
 

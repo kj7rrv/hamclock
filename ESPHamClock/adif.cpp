@@ -19,10 +19,13 @@
 #define OK2SCUP    (top_vis > 0)                        // whether ok to scroll up (backward in time)
 
 
+bool from_set_adif;                                     // set when spots are loaded via RESTful set_adif
 static DXClusterSpot *adif_spots;                       // malloced list
 static int n_adif_spots;                                // n entries in adif_spots[]
 static int top_vis;                                     // adif_spots[] index showing at top of pane
-static bool from_set_adif;                              // set when spots loaded from RESTful set_adif
+
+typedef uint8_t crc_t;                                  // CRC data type
+static crc_t prev_crc;                                  // detect crc change from one file to the next
 
 
 /***********************************************************************************************************
@@ -33,6 +36,7 @@ static bool from_set_adif;                              // set when spots loaded
 
 
 typedef enum {
+    ADIFPS_STARTFILE,                                   // initialize all
     ADIFPS_STARTSPOT,                                   // initialize parser and spot candidate
     ADIFPS_STARTSEARCH,                                 // initialize parser, retain spot so far
     ADIFPS_SEARCHING,                                   // looking for opening <
@@ -45,6 +49,8 @@ typedef enum {
 
 typedef struct {
     ADIFParseState ps;                                  // what is happening now
+    int line_n;                                         // line number for diagnostics
+    crc_t crc;                                          // running checksum
     char name[20];                                      // field name so far, always includes EOS
     char value[20];                                     // field value so far, always includes EOS
     unsigned name_seen;                                 // n name chars seen so far (avoids strlen(name))
@@ -323,9 +329,23 @@ static bool spotLooksGood (DXClusterSpot &spot)
     return (false);
 }
 
+/* update crc with the next byte
+ * adapted from pycrc --model=crc-8 --algorithm=bbf --generate c
+ */
+static void updateCRC (crc_t &crc, uint8_t byte)
+{
+    for (int i = 0x80; i > 0; i >>= 1) {
+        crc_t bit = (crc & 0x80) ^ ((byte & i) ? 0x80 : 0);
+        crc <<= 1;
+        if (bit)
+            crc ^= 0x07;
+    }
+}
+
 /* parse the next character of an ADIF file, updating as we go along. spot is gradually filled as fields
- * are recognized. ps is set to ADIFPS_FINISHED when spot is complete. call with ps = ADIFPS_STARTSPOT
- * first time; no need to mess with ps for any subsequent calls even when see ADIFPS_FINISHED.
+ * are recognized. call with ps = ADIFPS_STARTFILE the first time. ps is set to ADIFPS_FINISHED when spot
+ * is complete; no need to mess with ps for any subsequent calls.
+ *
  * return true as long as parsing is going well else false with brief reason in ynot
  * 
  * Required ADIF fields:
@@ -342,20 +362,32 @@ static bool spotLooksGood (DXClusterSpot &spot)
  */
 static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot, int n_ynot)
 {
+    // update running line count and crc
+    if (c == '\n')
+        adif.line_n++;
+    updateCRC (adif.crc, (uint8_t)c);
+
+    // next action depends on current state
+
     switch (adif.ps) {
 
-    case ADIFPS_FINISHED:
-        // this allows caller to not have to change ps to look for the next spot
-        // fallthru
-
-    case ADIFPS_STARTSPOT:
-        // init all
+    case ADIFPS_STARTFILE:
+        // full init
         memset (&adif, 0, sizeof(adif));
         memset (&spot, 0, sizeof(spot));
         // fallthru
 
+    case ADIFPS_FINISHED:
+        // putting FINISHED here allows caller to not have to change ps to look for the next spot
+        // fallthru
+
+    case ADIFPS_STARTSPOT:
+        // init spot
+        memset (&spot, 0, sizeof(spot));
+        // fallthru
+
     case ADIFPS_STARTSEARCH:
-        // init parser to look for a new field but retain inter-field persistence
+        // init parser to look for a new field
         adif.name[0] = '\0';
         adif.value[0] = '\0';
         adif.name_seen = 0;
@@ -364,10 +396,10 @@ static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot
         // fallthru
 
     case ADIFPS_SEARCHING:
-        if (c == '<') {
-            // found opening <, start looking for field name
-            adif.ps = ADIFPS_INNAME;
-        }
+        if (c == '<')
+            adif.ps = ADIFPS_INNAME;                    // found opening <, start looking for field name
+        else
+            adif.ps = ADIFPS_SEARCHING;                 // in case we got here via a fallthru
         break;
 
     case ADIFPS_INNAME:
@@ -386,7 +418,7 @@ static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot
                 else
                     adif.ps = ADIFPS_STARTSPOT;
             } else {
-                snprintf (ynot, n_ynot, _FX("no length with field %s"), adif.name);
+                snprintf (ynot, n_ynot, _FX("line %d: no length with field %s"), adif.line_n+1, adif.name);
                 return (false);
             }
         } else if (adif.name_seen > sizeof(adif.name)-1) {
@@ -412,8 +444,8 @@ static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot
             // fold c as int into value_len
             adif.value_len = 10*adif.value_len + (c - '0');
         } else {
-            snprintf (ynot, n_ynot, _FX("non-digit %c in field %s length\n"),
-                            c, adif.name);
+            snprintf (ynot, n_ynot, _FX("line %d: non-digit %c in field %s length\n"), adif.line_n+1, c,
+                                                                                adif.name);
             return (false);
         }
         break;
@@ -504,13 +536,6 @@ static const char *expandENV (const char *fn)
  *
  ***********************************************************************************************************/
 
-static void resetADIFSpots(void)
-{
-    free (adif_spots);
-    adif_spots = NULL;
-    n_adif_spots = 0;
-}
-
 /* draw all currently visible spot then update scroll markers
  */
 static void drawAllVisADIFSpots (const SBox &box)
@@ -525,6 +550,48 @@ static void drawAllVisADIFSpots (const SBox &box)
     // show scroll controls
     drawScrollUp (box, ADIF_COLOR, top_vis, OK2SCUP);
     drawScrollDown (box, ADIF_COLOR, n_adif_spots - top_vis - DXMAX_VIS, OK2SCDW);
+}
+
+/* shift the visible list to show older spots, if appropriate
+ */
+static void scrollADIFUp (const SBox &box)
+{
+    if (OK2SCUP) {
+        top_vis -= (DXMAX_VIS - 1);           // retain 1 for context
+        if (top_vis < 0)
+            top_vis = 0;
+        drawAllVisADIFSpots (box);
+    }
+}
+
+/* shift the visible list to show newer spots, if appropriate
+ */
+static void scrollADIFDown (const SBox &box)
+{
+    if (OK2SCDW) {
+        top_vis += (DXMAX_VIS - 1);           // retain 1 for context
+        if (top_vis > n_adif_spots - DXMAX_VIS)
+            top_vis = n_adif_spots - DXMAX_VIS;
+        drawAllVisADIFSpots (box);
+    }
+}
+
+/* scroll down to newest
+ */
+static void scrollToBottom(void)
+{
+    top_vis = n_adif_spots - DXMAX_VIS;
+    if (top_vis < 0)
+        top_vis = 0;
+}
+
+static void resetADIFSpots(void)
+{
+    free (adif_spots);
+    adif_spots = NULL;
+    n_adif_spots = 0;
+    scrollToBottom();
+    prev_crc = 0;
 }
 
 /* draw complete ADIF pane in the given box
@@ -555,41 +622,6 @@ static void drawADIFPane (const SBox &box, const char *filename)
 
     // draw spots
     drawAllVisADIFSpots (box);
-}
-
-/* shift the visible list to show older spots, if appropriate
- */
-static void scrollADIFUp (const SBox &box)
-{
-    if (OK2SCUP) {
-        top_vis -= (DXMAX_VIS - 1);           // retain 1 for context
-        if (top_vis < 0)
-            top_vis = 0;
-        drawAllVisADIFSpots (box);
-    }
-}
-
-/* shift the visible list to show newer spots, if appropriate
- */
-static void scrollADIFDown (const SBox &box)
-{
-    if (OK2SCDW) {
-        top_vis += (DXMAX_VIS - 1);           // retain 1 for context
-        if (top_vis > n_adif_spots - DXMAX_VIS)
-            top_vis = n_adif_spots - DXMAX_VIS;
-        drawAllVisADIFSpots (box);
-    }
-}
-
-/* scroll down to newest unless size is the same (meaning it's likely the same file??)
- */
-static void checkScrolling (int prev_n_spots)
-{
-    if (prev_n_spots != n_adif_spots) {
-        top_vis = n_adif_spots - DXMAX_VIS;
-        if (top_vis < 0)
-            top_vis = 0;
-    }
 }
 
 /* add another spot to adif_spots[] unless older than oldest so far.
@@ -643,15 +675,12 @@ static void addADIFSpot (const DXClusterSpot &spot)
 /* replace adif_spots with those found in the given open file.
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we clear from_set_adif.
- * N.B. caller must always close fp
+ * N.B. caller must close fp
  * N.B. silently trucated to newest MAX_SPOTS
  * N.B. errors only reported for broken adif, not missing fields
  */
 static int readADIFile (FILE *fp, char ynot[], int n_ynot)
 {
-    // save current number as a rough guide to whether this file is different.
-    int save_n_spots = n_adif_spots;
-
     // restart list at full capacity
     adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
@@ -664,7 +693,7 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     // crack entire file, but keep only up to MAX_SPOTS newest
     DXClusterSpot spot;
     ADIFParser adif;
-    adif.ps = ADIFPS_STARTSPOT;
+    adif.ps = ADIFPS_STARTFILE;
     for (int c; (c = getc(fp)) != EOF; ) {
         if (!parseADIF((char)c, adif, spot, ynot, n_ynot)) {
             resetADIFSpots();
@@ -681,7 +710,11 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     from_set_adif = false;
 
     // scroll all the way down unless likely the same list
-    checkScrolling (save_n_spots);
+    Serial.printf (_FX("ADIF: crc %d previous %d\n"), adif.crc, prev_crc);
+    if (adif.crc != prev_crc) {
+        scrollToBottom();
+        prev_crc = adif.crc;
+    }
 
     // shrink back to just what we need
     adif_spots = (DXClusterSpot *) realloc (adif_spots, n_adif_spots * sizeof(DXClusterSpot));
@@ -695,15 +728,12 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
 /* replace adif_spots with those found in the given network connection.
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we set from_set_adif.
- * N.B. caller must always close connection.
+ * N.B. caller must close connection.
  * N.B. silently trucated to newest MAX_SPOTS
  * N.B. errors only reported for broken adif, not missing fields
  */
 int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], int n_ynot)
 {
-    // save current number as a rough guide to whether this file is different.
-    int save_n_spots = n_adif_spots;
-
     // restart list at full capacity
     adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
@@ -716,7 +746,7 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     // crack entire stream, but keep only a max of the MAX_SPOTS newest
     DXClusterSpot spot;
     ADIFParser adif;
-    adif.ps = ADIFPS_STARTSPOT;
+    adif.ps = ADIFPS_STARTFILE;
     char c;
     for (long nr = 0; (!content_length || nr < content_length) && getTCPChar (client, &c); nr++) {
         if (!parseADIF(c, adif, spot, ynot, n_ynot)) {
@@ -734,7 +764,11 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     from_set_adif = true;
 
     // scroll all the way down unless likely the same list
-    checkScrolling (save_n_spots);
+    Serial.printf (_FX("ADIF: crc %d previous %d\n"), adif.crc, prev_crc);
+    if (adif.crc != prev_crc) {
+        scrollToBottom();
+        prev_crc = adif.crc;
+    }
 
     // shrink back to just what we need
     adif_spots = (DXClusterSpot *) realloc (adif_spots, n_adif_spots * sizeof(DXClusterSpot));
@@ -776,12 +810,19 @@ void updateADIF (const SBox &box)
             plotMessage (box, RA8875_RED, errmsg);
             showing_errmsg = true;
         } else {
-            int n = readADIFile (fp, errmsg, sizeof(errmsg));
+            // prefill errmsg with basename in case of error
+            const char *fn_basename = strrchr (fn_exp, '/');
+            if (fn_basename)
+                fn_basename += 1;                       // skip past /
+            else
+                fn_basename = fn_exp;                   // use as-is
+            int prefix_l = snprintf (errmsg, sizeof(errmsg), "%s: ", fn_basename);
+            int n = readADIFile (fp, errmsg + prefix_l, sizeof(errmsg) - prefix_l);
             if (n < 0) {
                 plotMessage (box, RA8875_RED, errmsg);
                 showing_errmsg = true;
-            }
-            Serial.printf (_FX("ADIF: found %d spots in %s\n"), n, fn_exp);
+            } else
+                Serial.printf (_FX("ADIF: found %d spots in %s\n"), n, fn_exp);
             fclose (fp);
         }
     }

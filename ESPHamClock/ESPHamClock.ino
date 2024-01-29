@@ -28,8 +28,8 @@ SBox dx_maid_b;                         // dx maindenhead
 SBox de_maid_b;                         // de maindenhead 
 
 // time zone boxes
-TZInfo de_tz = {{85, 158, 50, 17}, DE_COLOR, 0};
-TZInfo dx_tz = {{85, 307, 50, 17}, DX_COLOR, 0};
+TZInfo de_tz = {{75, 158, 50, 17}, DE_COLOR, 0};
+TZInfo dx_tz = {{75, 307, 50, 17}, DX_COLOR, 0};
 
 // NCDFX box, also used for brightness, on/off controls and space wx stats
 SBox NCDXF_b = {740, 0, 60, PLOTBOX_H};
@@ -90,6 +90,7 @@ static bool rssi_ignore;                        // allow op to ignore low wifi p
 static int rssi_avg;                            // running rssi mean
 #define RSSI_ALPHA 0.5F                         // rssi blending coefficient
 #define CSINFO_DROP     3                       // gap below cs_info
+static MCPPoller onair_poller;                  // pin polling control
 
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
 SBox desrss_b, dxsrss_b;
@@ -103,6 +104,10 @@ SCoord wifi_tt_s;
 #define RA8875_RESET    16
 #define RA8875_CS       2
 Adafruit_RA8875_R tft(RA8875_CS, RA8875_RESET);
+
+// MCP23017 driver
+Adafruit_MCP23X17 mcp;
+bool found_mcp;
 
 // manage the great circle path through DE and DX points
 // ESP must use points in order to selectively erase, UNIX never needs to erase
@@ -179,50 +184,107 @@ static void defaultState()
     // try to insure screen is back on -- har!
     setFullBrightness();
 
-    #if defined(_SUPPORT_GPIO) 
-        // return all IO pins to inputs
-        SWresetIO();
-        satResetIO();
-        radioResetIO();
-    #endif
-}
-
-
-/* called on fatal signal. try to clean up a little.
- * N.B. use only write(2)
- */
-void onSig (int signo)
-{
-    char buf[100];
-
-    // ack
-    int npr = snprintf (buf, sizeof(buf), "Goodbye from signal %d\n", signo);
-    (void) !write (1, buf, npr);
-
-    // return to normal
-    defaultState();
-
-    // gone
-    abort();
-}
-
-/* connect onSig to several interesting signals
- */
-static void connectOnSig()
-{
-    struct sigaction sa;
-    memset (&sa, 0, sizeof(sa));
-    sa.sa_handler = onSig;
-    sigaction (SIGILL, &sa, NULL);
-    sigaction (SIGKILL, &sa, NULL);
-    sigaction (SIGSEGV, &sa, NULL);
-    sigaction (SIGBUS, &sa, NULL);
+    // return all IO pins to stable defaults
+    SWresetIO();
+    satResetIO();
+    disableMCPPoller (onair_poller);
+    radioResetIO();
 }
 
 
 #endif // _IS_UNIX
 
 
+/* print setting of several compile-time #defines
+ */
+static void showDefines(void)
+{
+    #define _PR_MAC(m)   Serial.printf (_FX("#define %s\n"), #m)
+
+    #if defined(_IS_ESP8266)
+        _PR_MAC(_IS_ESP8266);
+    #endif
+
+    #if defined(_IS_UNIX)
+        _PR_MAC(_IS_UNIX);
+    #endif
+
+    #if defined(_IS_LINUX)
+        _PR_MAC(_IS_LINUX);
+    #endif
+
+    #if defined(_IS_FREEBSD)
+        _PR_MAC(_IS_FREEBSD);
+    #endif
+
+    #if defined(_IS_LINUX_RPI)
+        _PR_MAC(_IS_LINUX_RPI);
+    #endif
+
+    #if defined(_I2C_ESP)
+        _PR_MAC(_I2C_ESP);
+    #endif
+
+    #if defined(_NATIVE_I2C_FREEBSD)
+        _PR_MAC(_NATIVE_I2C_FREEBSD);
+    #endif
+
+    #if defined(_NATIVE_I2C_LINUX)
+        _PR_MAC(_NATIVE_I2C_LINUX);
+    #endif
+
+    #if defined(_NATIVE_GPIO_ESP)
+        _PR_MAC(_NATIVE_GPIO_ESP);
+    #endif
+
+    #if defined(_NATIVE_GPIO_FREEBSD)
+        _PR_MAC(_NATIVE_GPIO_FREEBSD);
+    #endif
+
+    #if defined(_NATIVE_GPIO_LINUX)
+        _PR_MAC(_NATIVE_GPIO_LINUX);
+    #endif
+
+    #if defined(_NATIVE_GPIOD_LINUX)
+        _PR_MAC(_NATIVE_GPIOD_LINUX);
+    #endif
+
+    #if defined(_NATIVE_GPIOBC_LINUX)
+        _PR_MAC(_NATIVE_GPIOBC_LINUX);
+    #endif
+
+    #if defined(_SUPPORT_NATIVE_GPIO)
+        _PR_MAC(_SUPPORT_NATIVE_GPIO);
+    #endif
+
+    #if defined(_SUPPORT_FLIP)
+        _PR_MAC(_SUPPORT_FLIP);
+    #endif
+
+    #if defined(_SUPPORT_KX3)
+        _PR_MAC(_SUPPORT_KX3);
+    #endif
+
+    #if defined(_SUPPORT_PHOT)
+        _PR_MAC(_SUPPORT_PHOT);
+    #endif
+
+    #if defined(_SUPPORT_SPOTPATH)
+        _PR_MAC(_SUPPORT_SPOTPATH);
+    #endif
+
+    #if defined(_SUPPORT_CITIES)
+        _PR_MAC(_SUPPORT_CITIES);
+    #endif
+
+    #if defined(_SUPPORT_ZONES)
+        _PR_MAC(_SUPPORT_ZONES);
+    #endif
+
+    #if defined(_SUPPORT_ADIFILE)
+        _PR_MAC(_SUPPORT_ADIFILE);
+    #endif
+}
 
 
 // initial stack location
@@ -235,9 +297,11 @@ void setup()
     char stack;
     stack_start = &stack;
 
+    #if defined(_IS_ESP8266)
     // life
     pinMode(LIFE_LED, OUTPUT);
     digitalWrite (LIFE_LED, HIGH);
+    #endif // _IS_ESP8266
 
     // this just reset the soft timeout, the hard timeout is still 6 seconds
     ESP.wdtDisable();
@@ -250,6 +314,9 @@ void setup()
     } while (!Serial);
     Serial.printf("\nHamClock version %s platform %s\n", hc_version, platform);
 
+    // show config
+    showDefines();
+
     // record whether our FLASH CRC is correct -- takes about half a second
     flash_crc_ok = ESP.checkFlashCRC();
 #ifdef _IS_ESP8266
@@ -259,7 +326,7 @@ void setup()
     // random seed, not critical
     randomSeed(micros());
 
-    // Initialise the display
+    // Initialise the display -- not worth continuing if not found
     if (!tft.begin(RA8875_800x480)) {
         Serial.println(_FX("RA8875 Not Found!"));
         while (1);
@@ -285,11 +352,6 @@ void setup()
     tft.GPIOX(true); 
     tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
     initBrightness();
-
-#if defined(_IS_UNIX)
-    // connect signal handler to most nasty signals
-    connectOnSig();
-#endif // _IS_UNIX
 
 
     // now can save rot so if commit fails screen is up for fatalError()
@@ -388,8 +450,20 @@ void setup()
     // set up brb_rotset and brb_mode
     initBRBRotset();
 
-    // run Setup at full brighness, then commence with user's desired brightness
+    // run Setup at full brighness
     clockSetup();
+
+    // initialize MCP23017, fails gracefully so just log whether found
+    found_mcp = mcp.begin_I2C();
+    if (found_mcp)
+        Serial.println(_FX("MCP: GPIO mechanism found"));
+    else
+        Serial.println(_FX("MCP: GPIO mechanism not found"));
+
+    // start onair poller
+    startMCPPoller (onair_poller, ONAIR_PIN, 2);
+
+    // continue with user's desired brightness
     setupBrightness();
 
     // do not display time until all set up
@@ -1448,23 +1522,15 @@ void setOnAir (bool on)
     drawCallsign (true);
 }
 
-/* change call sign to ON AIR as long as GPIO21 is low
+/* change call sign to ON AIR as long as ONAIR_PIN is low
  */
 bool checkOnAir()
 {
-
-#if defined(_SUPPORT_GPIO) && defined(_IS_UNIX)
-
-    // ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return (false);
-
     // only draw when changes
     static bool prev_on;
 
-    GPIO& gpio = GPIO::getGPIO();
-    gpio.setAsInput (ONAIR_GPIO);
-    bool on = gpio.isReady() && !gpio.readPin(ONAIR_GPIO);
+    // switch is grounded when active
+    bool on = !readMCPPoller (onair_poller);
 
     if (on && !prev_on)
         setOnAir(true);
@@ -1474,12 +1540,6 @@ bool checkOnAir()
     prev_on = on;
 
     return (on);
-
-#else
-
-    return (false);
-
-#endif // _SUPPORT_GPIO && _IS_UNIX
 }
 
 // handy
@@ -1895,6 +1955,18 @@ bool overMapScale (const SCoord &s)
 bool overMap (const SCoord &s)
 {
     return (overActiveMap(s) && !overRSS(s) && !inBox(s,view_btn_b) && !overMaidKey(s) && !overMapScale(s));
+}
+
+/* return whether box b is over a usable map location
+ */
+bool overMap (const SBox &b)
+{
+    SCoord s00 = {(uint16_t) b.x,         (uint16_t) b.y};
+    SCoord s01 = {(uint16_t) (b.x + b.w), (uint16_t) b.y};
+    SCoord s10 = {(uint16_t) b.x,         (uint16_t) (b.y + b.h)};
+    SCoord s11 = {(uint16_t) (b.x + b.w), (uint16_t) (b.y + b.h)};
+
+    return (overMap(s00) && overMap(s01) && overMap(s10) && overMap(s11));
 }
 
 
@@ -2422,21 +2494,66 @@ bool timesUp (uint32_t *prev, uint32_t atleast_dt)
     return (false);
 }
 
-/* log our state, if ok with user
- */
-void logState()
-{
-    if (logUsageOk()) {
-        // just use anything to cause a web transaction
 
-        // not crazy fast, and jitter so it doesn't sync with pane rotation
-        static uint32_t last_ver;
-        if (!timesUp (&last_ver, 60000 + random(30000)))
-            return;
-        char ver[50];
-        (void) newVersionIsAvailable (ver, sizeof(ver));
+
+#if defined (_IS_UNIX)
+
+
+/* called to post our diagnostics files to the server for later analysis.
+ * include the ip in the name which identifies us using our public IP address.
+ */
+void postDiags (void)
+{
+    WiFiClient pd;
+
+    // build filename relative to hamclock server root dir and id
+    char fn[300];
+    snprintf (fn, sizeof(fn), "/ham/HamClock/diagnostic-logs/dl-%ld-%s-%u.txt", myNow(),
+                                                remote_addr, ESP.getChipId());
+
+    // get total size for content length
+    int cl = 0;
+    for (int i = 0; i < N_DIAG_FILES; i++) {
+        std::string dp = our_dir + diag_files[i];
+        struct stat s;
+        if (stat (dp.c_str(), &s) == 0)
+            cl += s.st_size;
     }
+
+    Serial.printf ("DP: %d %s\n", cl, fn);
+
+    if (pd.connect (backend_host, backend_port)) {
+
+        char buf[4096];
+        int buf_l = 0;
+
+        // hand-crafted POST header, move to its own func if ever used for something else
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, "POST %s HTTP\r\n", fn);
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, "Content-Length: %d\r\n", cl);
+        pd.print (buf);
+        sendUserAgent (pd);
+        pd.print ("\r\n");
+
+        // just concat each file
+        for (int i = 0; i < N_DIAG_FILES; i++) {
+            std::string dp = our_dir + diag_files[i];
+            FILE *fp = fopen (dp.c_str(), "r");
+            if (fp) {
+                Serial.printf ("DP:   %s\n", dp.c_str());
+                int n_r;
+                while ((n_r = fread (buf, 1, sizeof(buf), fp)) > 0)
+                    pd.write ((uint8_t*)buf, n_r);
+                fclose (fp);
+            }
+        }
+        
+        pd.stop();
+
+    } else
+        Serial.printf ("postDiags() failed to connect to %s:%d\n", backend_host, backend_port);
+
 }
+#endif // _IS_UNIX
 
 
 /* shutdown helper that asks Are You Sure in the given box.
@@ -2520,7 +2637,7 @@ static void shutdown(void)
     const uint16_t x0 = tft.width()/4;
     const uint16_t w = tft.width()/2;
     const uint16_t h = 50;
-    uint16_t y = tft.height()/4;
+    uint16_t y = tft.height()/6;
 
     // define each possibility -- set depends on platform
     typedef struct {
@@ -2532,16 +2649,18 @@ static void shutdown(void)
         _SDC_RESUME,
         _SDC_RESTART,
         _SDC_EXIT,
+        _SDC_POSTDIAGS,
         _SDC_REBOOT,
         _SDC_SHUTDOWN
     };
     ShutDownCtrl sdctl[] = {            // N.B. must be in order of _SDC_* enum
         {"Disregard -- resume",         {x0, y,                 w, h}, RA8875_GREEN},
-        {"Restart HamClock",            {x0, (uint16_t)(y+h),   w, h}, RA8875_YELLOW},
+        {"Restart HamClock",            {x0, (uint16_t)(y+1*h), w, h}, RA8875_YELLOW},
         #if defined(_IS_UNIX)
             {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA},
-            {"Reboot host",             {x0, (uint16_t)(y+3*h), w, h}, RA8875_RED},
-            {"Shutdown host",           {x0, (uint16_t)(y+4*h), w, h}, RGB565(255,125,0)},
+            {"Post diagnostics",        {x0, (uint16_t)(y+3*h), w, h}, RGB565(100,100,255)},
+            {"Reboot host",             {x0, (uint16_t)(y+4*h), w, h}, RA8875_RED},
+            {"Shutdown host",           {x0, (uint16_t)(y+5*h), w, h}, RGB565(255,125,0)},
         #endif // _IS_UNIX
     };
 
@@ -2641,6 +2760,10 @@ static void shutdown(void)
         Serial.print (_FX("Exiting\n"));
         doExit();
         break;                  // ;-)
+    case _SDC_POSTDIAGS:
+        postDiags();
+        initScreen();
+        return;
     case _SDC_REBOOT:
         drawStringInBox ("Rebooting...", sdctl[3].box, true, RA8875_RED);
         tft.drawPR();            // forces immediate effect
@@ -2681,10 +2804,13 @@ void doExit()
         // all we can do
         doReboot();
     #else
-        eraseScreen();
+        Serial.printf ("doExit()\n");
         defaultState();
-        wdDelay(200);
-        exit(0);
+        #if defined(_USE_FB0)
+            // X11 calls doExit on window close, so drawing would be recursive back to that thread
+            eraseScreen();
+        #endif
+        _exit(0);
     #endif
 }
 

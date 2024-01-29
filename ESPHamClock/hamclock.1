@@ -20,7 +20,7 @@ several live space weather indices with time histories
 .IP \(bu
 satellite tracking and pass predictions
 .IP \(bu
-VOACAP propagation modeling point-to-point and global MUF
+VOACAP propagation modeling point-to-point, global MUF and TOA
 .IP \(bu
 short and long path beam headings and distance from DE to DX
 .IP \(bu
@@ -49,6 +49,9 @@ set gimbal trace level
 .TP
 -b h
 set backend host to h; default is clearskyinstitute.com
+.TP
+-c
+disable all touch events from web interface
 .TP
 -d d
 set working directory to d; default is $HOME/.hamclock/
@@ -91,6 +94,9 @@ show version info then exit
 .TP
 -w p
 set live web server port to p; default is 8081
+.TP
+-y
+activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!
 .RE
 
 
@@ -105,7 +111,7 @@ using any browser, with no need for X11.
 All configurations continue to be supported although the ESP is loosing favor.
 
 .SH AUTHOR
-Elwood Downey, ecdowney@clearskyinstitute.com
+Elwood Downey, WB0OEW, ecdowney@clearskyinstitute.com
 
 .SH SEE ALSO
 HamClock has an extensive support page at https://clearskyinstitute.com/ham/HamClock

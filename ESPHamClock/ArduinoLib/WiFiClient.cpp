@@ -134,7 +134,7 @@ bool WiFiClient::connect(const char *host, int port)
 
         /* connect */
         if (connect_to (sockfd, aip->ai_addr, aip->ai_addrlen, 5000) < 0) {
-            printf ("WiFiCl: connect(%s,%d): %s\n", host,port,strerror(errno));
+            printf ("WiFiCl: connect(%s:%d): %s\n", host, port, strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (false);
@@ -286,6 +286,11 @@ void WiFiClient::print (String s)
 	write (sp, n);
 }
 
+void WiFiClient::print (const char *str)
+{
+	write ((const uint8_t *) str, strlen(str));
+}
+
 void WiFiClient::print (float f)
 {
 	char buf[32];
@@ -310,6 +315,12 @@ void WiFiClient::println (String s)
 	const uint8_t *sp = (const uint8_t *) s.c_str();
 	int n = strlen ((char*)sp);
 	write (sp, n);
+	write ((const uint8_t *) "\r\n", 2);
+}
+
+void WiFiClient::println (const char *str)
+{
+	write ((const uint8_t *) str, strlen(str));
 	write ((const uint8_t *) "\r\n", 2);
 }
 

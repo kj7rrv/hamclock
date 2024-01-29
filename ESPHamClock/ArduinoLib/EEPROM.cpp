@@ -63,16 +63,18 @@ void EEPROM::begin (int s)
                 if (verbose)
                     printf ("EEPROM %s: create ok\n", filename);
             } else {
-                fatalError ("EEPROM %s:\ncreate failed:\n%s\n", filename, strerror(errno));
-                // never returns
+                fprintf (stderr, "%s: %s\n", filename, strerror(errno));
+                exit(1);
             }
         }
         (void) !fchown (fileno(fp), getuid(), getgid());
 
         // check lock
-        if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0)
-            fatalError ("Another instance of HamClock has been detected.\n"
+        if (flock (fileno(fp), LOCK_EX|LOCK_NB) < 0) {
+            fprintf (stderr, "Another instance of HamClock has been detected.\n"
                         "Only one at a time is allowed or use -d, -e and -w to make each unique.\n");
+            exit(1);
+        }
 
         // malloc memory, init as zeros
         n_data_array = s;

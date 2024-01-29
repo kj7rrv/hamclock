@@ -32,7 +32,7 @@ void readCities()
 
         Serial.println (cities_fn);
         resetWatchdog();
-        if (wifiOk() && cities_client.connect (backend_host, BACKEND_PORT)) {
+        if (wifiOk() && cities_client.connect (backend_host, backend_port)) {
 
             // stay current
             updateClocks(false);

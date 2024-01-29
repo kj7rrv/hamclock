@@ -403,7 +403,7 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
     bool ok = false;
 
     Serial.println (osp->page);
-    if (wifiOk() && onta_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && onta_client.connect(backend_host, backend_port)) {
 
         // look alive
         resetWatchdog();
@@ -413,7 +413,7 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
         httpHCGET (onta_client, backend_host, osp->page);
         if (!httpSkipHeader (onta_client)) {
             Serial.print (F("OnTheAir download failed\n"));
-            strcpy (line, _FX("header error"));
+            snprintf (line, sizeof(line), _FX("%s header error"), osp->prog);
             goto out;
         }
         // add each spot

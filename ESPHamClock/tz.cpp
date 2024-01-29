@@ -6851,6 +6851,35 @@ int32_t getTZ (const LatLong &ll)
     return (900*((signed char)pgm_read_byte(&tzmap[lat+89][lng])));
 }
 
+/* given a LatLong return the smallest deviation from a whole hour among the
+ * timezones in the containing 3x3 regions, in seconds
+ */
+int getTZStep (const LatLong &ll)
+{
+    // make absolutely certain of range
+    int lat0 = ll.lat_d < -89 ? -89 : (ll.lat_d > 89 ? 89 : ll.lat_d);
+    int lng0 = fmodf((ll.lng_d+180+3600),360);
+
+    // scan 3x3 neighborhood
+    int min_step_15 = 4;                        // look for steps smaller than one hour in units of 15 mins
+    for (int d_lat = -1; d_lat <= 1; d_lat += 1) {
+        int lat = lat0 + d_lat;
+        if (lat < -89 || lat > 89)
+            continue;
+        for (int d_lng = -1; d_lng <= 1; d_lng += 1) {
+            int lng = (lng0 + d_lng + 360) % 360;
+            int tz_15 = (signed char)pgm_read_byte(&tzmap[lat+89][lng]);
+            int step_15 = (tz_15 + (24*60/15)) % 4;
+            if (step_15 == 3)
+                step_15 = 1;                    // +45 mins sames as -15 mins
+            if (step_15 != 0 && step_15 < min_step_15)
+                min_step_15 = step_15;
+        }
+    }
+
+    return (min_step_15 * (15*60));
+}
+
 
 #ifdef _MAIN_TEST
 

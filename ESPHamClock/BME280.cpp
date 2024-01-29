@@ -37,12 +37,6 @@ static bool new_data;                           // whether new data has been rea
  */
 static void connectSensors(bool all)
 {
-#ifdef _SUPPORT_ENVSENSOR
-
-    // skip if don't want external IO
-    if (!GPIOOk())
-        return;
-
     // try to (re)open each sensor
     for (int i = 0; i < MAX_N_BME; i++) {
 
@@ -54,7 +48,7 @@ static void connectSensors(bool all)
         Serial.printf (_FX("BME %strying 0x%x\n"), !bme_data[i] ? "" : "re", addr);
         Adafruit_BME280 &bme = bme_io[i];
         if (!bme.begin(addr)) {
-            Serial.println (F("BME init fail"));
+            Serial.printf (_FX("BME init 0x%02X fail\n"), addr);
             continue;
         }
 
@@ -91,15 +85,13 @@ static void connectSensors(bool all)
         }
 
         if (n_stable == _N_OK)
-            Serial.println (F("BME init success"));
+            Serial.printf (_FX("BME init 0x%02X success\n"), addr);
         else
-            Serial.println (F("BME not stable"));
+            Serial.printf (_FX("BME 0x%02X not stable\n"), addr);
     }
 
     if (getNBMEConnected() == 0)
         Serial.println(F("BME none found"));
-
-#endif // _SUPPORT_ENVSENSOR
 }
 
 /* read the given temperature, pressure and humidity in units determined by useMetricUnits() into
@@ -107,10 +99,6 @@ static void connectSensors(bool all)
  */
 static bool readSensor (int device)
 {
-    // skip if don't want any external IO
-    if (!GPIOOk())
-        return (false);
-
     // get data pointer, skip if not used
     BMEData *dp = bme_data[device];
     if (!dp)
@@ -129,7 +117,7 @@ static bool readSensor (int device)
     float t = bme.readTemperature();                                                    // C
     float p = bme.readPressure();                                                       // Pascals
     float h = bme.readHumidity();                                                       // percent
-    // Serial.printf ("BME Raw T %g P %g H %g\n", t, p, h);
+    // Serial.printf ("BME Raw T %g P %g H %g\n", t, p, h);                             // RBF
     if (isnan(t) || t < -40 || isnan(p) || isnan(h)) {
         // try restarting
         Serial.printf (_FX("BME %x read err\n"), dp->i2c);
@@ -138,12 +126,12 @@ static bool readSensor (int device)
         // all good
         if (useMetricUnits()) {
             // want C and hPa
-            dp->t[dp->q_head] = BMEPACK_T(t + getBMETempCorr(device));                  // already C
-            dp->p[dp->q_head] = BMEPACK_hPa(p/100 + getBMEPresCorr(device));            // Pascals to hPa
+            dp->t[dp->q_head] = BMEPACK_T (t + getBMETempCorr(device));                 // already C
+            dp->p[dp->q_head] = BMEPACK_P (p/100 + getBMEPresCorr(device));             // Pascals to hPa
         } else {
             // want F and inches Hg
-            dp->t[dp->q_head] = BMEPACK_T(1.8*t + 32.0 + getBMETempCorr(device));       // C to F
-            dp->p[dp->q_head] = BMEPACK_inHg(p / 3386.39 + getBMEPresCorr(device));     // Pascals to in Hg
+            dp->t[dp->q_head] = BMEPACK_T (1.8*t + 32.0 + getBMETempCorr(device));      // C to F
+            dp->p[dp->q_head] = BMEPACK_P (p / 3386.39 + getBMEPresCorr(device));       // Pascals to in_Hg
         }
         dp->h[dp->q_head] = BMEPACK_H(h);
         dp->u[dp->q_head] = myNow();
@@ -486,4 +474,56 @@ void doBMETouch (const SCoord &s)
 
     // do it
     doNCDXFStatsTouch (s, pcs);
+}
+
+/* change the temperature correction for the given BME, both any current data and NV persistent.
+ * correction is in current units as determined by useMetricUnits().
+ */
+bool recalBMETemp (BMEIndex device, float new_corr)
+{
+    // access existing data, if any
+    BMEData *dp = bme_data[(int)device];
+
+    if (dp) {
+        // compute net change
+        float del_corr = new_corr - getBMETempCorr(device);
+
+        // apply to all existing data
+        for (int i = 0; i < N_BME_READINGS; i++)
+            if (dp->u[i] > 0)
+                dp->t[i] = BMEPACK_T (BMEUNPACK_T (dp->t[i]) + del_corr);
+
+        // update display, if any applicable
+        drawBME280Panes();
+        drawNCDXFBox();
+    }
+
+    // persist the new correction. not an error if no existing data.
+    return (setBMETempCorr (device, new_corr));
+}
+
+/* change the pressure correction for the given BME, both cpurrent data and NV persistent.
+ * correction is in current units as determined by useMetricUnits().
+ */
+bool recalBMEPres (BMEIndex device, float new_corr)
+{
+    // access existing data, if any
+    BMEData *dp = bme_data[(int)device];
+
+    if (dp) {
+        // compute net change
+        float del_corr = new_corr - getBMEPresCorr(device);
+
+        // apply to all existing data
+        for (int i = 0; i < N_BME_READINGS; i++)
+            if (dp->u[i] > 0)
+                dp->p[i] = BMEPACK_P (BMEUNPACK_P (dp->p[i]) + del_corr);
+
+        // update display, if any applicable
+        drawBME280Panes();
+        drawNCDXFBox();
+    }
+
+    // persist the new correction. not an error if no existing data.
+    return (setBMEPresCorr (device, new_corr));
 }

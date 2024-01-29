@@ -30,6 +30,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <math.h>
 #include <sys/ioctl.h>
@@ -160,6 +161,19 @@ void Adafruit_RA8875::setEarthPix (char *day_pixels, char *night_pixels)
 
 }
 
+#if defined(_USE_X11)
+/* called when our X11 thread gets an error talking to the X server.
+ * this happens when ESP::restart() closes the server connection.
+ * all we do is close down the thread so the default error handler doesn't exit the whole
+ * program before restart() can do the exec().
+ */
+static int myXIOErrorHandler (Display *dpy)
+{
+    (void) dpy;
+    pthread_exit(NULL);
+}
+#endif // _USE_X11
+
 bool Adafruit_RA8875::begin (int not_used)
 {
         (void)not_used;
@@ -244,6 +258,9 @@ bool Adafruit_RA8875::begin (int not_used)
         int screen_num = XScreenNumberOfScreen(screen);
         Window root = RootWindow(display,screen_num);
 	unsigned long black_pixel = BlackPixelOfScreen (screen);
+
+        // exit gracefully if we get server error
+        XSetIOErrorHandler (myXIOErrorHandler);
 
 	// require TrueColor visual so we can use fb_canvas directly in img but try various depths
         XVisualInfo vinfo;
@@ -2087,7 +2104,7 @@ void Adafruit_RA8875::fbThread ()
                 case ClientMessage:
                     if ((Atom)event.xclient.data.l[0] == wmDeleteMessage) {
                         XCloseDisplay(display);
-                        exit(0);
+                        doExit();
                     }
                     break;
 		}
@@ -2522,6 +2539,45 @@ void Adafruit_RA8875::mouseThread (void)
         }
 }
 
+/* move cursor n app pixels in the given hjkl direction then pass back the resulting position if interested.
+ * ignore dir if not one of hjkl. just pass back current position if n is 0.
+ * return whether cursor really is over our window.
+ */
+// _USE_FB0
+bool Adafruit_RA8875::warpCursor (char dir, unsigned n, int *xp, int *yp)
+{
+        int new_x = mouse_x, new_y = mouse_y;
+
+        // move by n app positions
+        switch (dir) {
+        case 'h': new_x = mouse_x-n*SCALESZ; break;       // left
+        case 'j': new_y = mouse_y+n*SCALESZ; break;       // down
+        case 'k': new_y = mouse_y-n*SCALESZ; break;       // up
+        case 'l': new_x = mouse_x+n*SCALESZ; break;       // right
+        default: break;
+        }
+
+        // beware wrap
+        new_x = FB_X0 + ((new_x-FB_X0 + FB_XRES)%FB_XRES);
+        new_y = FB_Y0 + ((new_y-FB_Y0 + FB_YRES)%FB_YRES);
+
+        // printf ("warp from %d %d  to  %d %d\n", mouse_x, mouse_y, new_x, new_y);
+
+        // convert to app coords
+        int new_x_app = (new_x-FB_X0)/SCALESZ;
+        int new_y_app = (new_y-FB_Y0)/SCALESZ;
+
+        // update cursor location; we've already insured the move will be in bounds
+        setMouse (new_x_app, new_y_app);
+
+        // pass back in app coords if interested
+        if (xp) *xp = new_x_app;
+        if (yp) *yp = new_y_app;
+
+        // worked ok
+        return (true);
+}
+
 // _USE_FB0
 void *Adafruit_RA8875::kbThreadHelper(void *me)
 {
@@ -2554,15 +2610,26 @@ void Adafruit_RA8875::kbThread ()
 	    int nr = read (kb_fd, buf, 1);
 	    if (nr == 1) {
 		pthread_mutex_lock (&kb_lock);
+                    printf ("KB: %d %c\n", buf[0], buf[0]);
                     KBState &ks = kb_q[kb_qtail];
-                    ks.c = buf[0];
-                    ks.control = false;
-                    ks.shift = false;
+                    if (isupper(buf[0])) {
+                        ks.c = tolower(buf[0]);
+                        ks.control = false;
+                        ks.shift = true;
+                    } else if (buf[0] == '\10' || buf[0] == '\13' || buf[0] == '\14') {
+                        // one of ^hkl for keyboard cursor control; but not ^j because that's Enter
+                        ks.c = buf[0] + 96;     // convert to lower case printable char...
+                        ks.control = true;      // ... with control set
+                        ks.shift = false;
+                    } else {
+                        ks.c = buf[0];
+                        ks.control = false;
+                        ks.shift = false;
+                    }
                     if (++kb_qtail == KB_N)
                         kb_qtail = 0;
 		    fb_dirty = true;
 		pthread_mutex_unlock (&kb_lock);
-                // printf ("KB: %d %c\n", buf[0], buf[0]);
 	    } else {
                 if (nr < 0)
                     printf ("KB: %s\n", strerror(errno));

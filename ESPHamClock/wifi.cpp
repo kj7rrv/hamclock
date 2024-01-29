@@ -4,8 +4,12 @@
 #include "HamClock.h"
 
 
-// host name of backend server
+// host name and port of backend server
 const char *backend_host = "clearskyinstitute.com";
+int backend_port = 80;
+
+// IP where server thinks we came from
+char remote_addr[16];                           // INET_ADDRSTRLEN
 
 // user's date and time, UNIX only
 time_t usr_datetime;
@@ -71,6 +75,8 @@ static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
 // band conditions and voacap map, models change each hour
 #define BC_INTERVAL     (2400+randIvl(200))     // polling interval, secs
 #define VOACAP_INTERVAL (2500+randIvl(200))     // polling interval, secs
+uint16_t bc_powers[] = {1, 5, 10, 50, 100, 500, 1000};
+const int n_bc_powers = NARRAY(bc_powers);
 static const char bc_page[] = "/fetchBandConditions.pl";
 static BandCdtnMatrix bc_matrix;                // percentage reliability for each band
 static time_t bc_time;                          // nowWO() when bc_matrix was loaded
@@ -154,14 +160,10 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 
 
 // web site retry interval, secs
-#define WIFI_RETRY      (10+randIvl(5))
+#define WIFI_RETRY      (15+randIvl(5))
 
 // pane auto rotation period in seconds
 #define ROTATION_INTERVAL       (40+randIvl(5))                 // default pane rotation interval, s
-#define ROT_SLOW_DELTA          15                              // seconds to defer for high server load
-
-// slow down if hi server load
-static const char sload_page[] PROGMEM = "/loadfactor.pl";      // page to query for server load
 
 /* "reverting" refers to restoring pane1 after it shows DE or DX weather.
  * pane1_reverting tells panes that can do partial updates that a full update is required.
@@ -213,74 +215,11 @@ static int randIvl(int n)
     return (random(2*n+1) - n);
 }
 
-/* retrieve server overload factor, with default if error.
- */
-static int queryServerOverLoad (void)
-{
-    // not crazy fast
-    static uint32_t last_lookup_time;
-    static int overload;
-    if (!timesUp (&last_lookup_time, 600000 + randIvl(30000)))
-        return (overload);
-
-    WiFiClient sl_client;
-    float load;
-    int ncores;
-    bool ok = false;
-
-    resetWatchdog();
-    if (wifiOk() && sl_client.connect(backend_host, BACKEND_PORT)) {
-        updateClocks(false);
-
-        // query web page
-        httpHCPGET (sl_client, backend_host, sload_page);
-
-        // skip response header
-        if (!httpSkipHeader (sl_client)) {
-            Serial.print (F("SL: server load header fail\n"));
-            goto out;
-        }
-
-        // next line is load and ncores
-        char line[50];
-        if (!getTCPLine (sl_client, line, sizeof(line), NULL)) {
-            Serial.print (F("SL: missing server load line\n"));
-            goto out;
-        }
-        // Serial.println (line);
-        if (sscanf (line, "%f %d", &load, &ncores) != 2) {
-            Serial.printf (_FX("SL: bogus server load line: %s"), line);
-            goto out;
-        }
-
-        // ok!
-        overload = (int) fmaxf (0, load - ncores);
-        Serial.printf (_FX("SL: %g %d overload %d\n"), load, ncores, overload);
-        ok = true;
-
-    }
-
-    // clean up
-out:
-
-    sl_client.stop();
-    updateClocks(false);
-    resetWatchdog();
-
-    if (!ok) {
-        overload = 2;
-        Serial.printf (_FX("SL: overload failed, defaulting to %d\n"), overload);
-    }
-
-    return (overload);
-}
-
-/* get pane rotation interval, possibly extended for high server load.
+/* get pane rotation interval
  */
 static int getPaneRotationInterval(void)
 {
-    int server_overload = queryServerOverLoad();
-    return (ROTATION_INTERVAL + server_overload * ROT_SLOW_DELTA);
+    return (ROTATION_INTERVAL);
 }
 
 /* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
@@ -295,13 +234,11 @@ static time_t tdiff (const time_t t1, const time_t t2)
 }
 
 /* return the next retry time_t.
- * retries are spaced out every WIFI_RETRY or more depending on server load to avoid swamping the server
+ * retries are spaced out every WIFI_RETRY
  */
 static time_t nextWiFiRetry (void)
 {
-    // if we are retrying getting the server load probably is not working either but give it a try anyway
-    int server_overload = queryServerOverLoad();
-    int interval = (1 + server_overload) * WIFI_RETRY;
+    int interval = WIFI_RETRY;
 
     // set and save next retry time
     static time_t prev_try;
@@ -380,7 +317,7 @@ static void geolocateIP (const char *ip)
     int nlines = 0;
 
     resetWatchdog();
-    if (wifiOk() && iploc_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && iploc_client.connect(backend_host, backend_port)) {
 
         // create proper query
         size_t l = snprintf (llline, sizeof(llline), "%s", locip_page);
@@ -553,6 +490,9 @@ static void initWiFi (bool verbose)
 
     // retrieve cities
     readCities();
+
+    // log server's idea of our IP
+    Serial.printf (_FX("Remote_Addr: %s\n"), remote_addr);
 }
 
 /* call exactly once to init wifi, maps and maybe time and location.
@@ -876,7 +816,7 @@ static bool retrieveSunSpots (float x[SSPOT_NV], float ssn[SSPOT_NV])
 
     Serial.println(ssn_page);
     resetWatchdog();
-    if (wifiOk() && ss_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && ss_client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // query web page
@@ -935,7 +875,7 @@ static bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
 
     Serial.println (sf_page);
     resetWatchdog();
-    if (wifiOk() && sf_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && sf_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -1036,7 +976,7 @@ static bool retrieveDRAP (float x[DRAPDATA_NPTS], float y[DRAPDATA_NPTS])
 
     Serial.println (drap_page);
     resetWatchdog();
-    if (wifiOk() && drap_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && drap_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -1182,7 +1122,7 @@ static bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
 
     Serial.println(kp_page);
     resetWatchdog();
-    if (wifiOk() && kp_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && kp_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -1274,7 +1214,7 @@ static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XR
 
     Serial.println(xray_page);
     resetWatchdog();
-    if (wifiOk() && xray_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && xray_client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // query web page
@@ -1388,7 +1328,7 @@ static bool retrieveBzBt (float bzbt_hrsold[BZBT_NV], float bz[BZBT_NV], float b
 
     Serial.println(bzbt_page);
     resetWatchdog();
-    if (wifiOk() && bzbt_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && bzbt_client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // query web page
@@ -1546,17 +1486,22 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 
     if (inBox (s, power_b)) {
 
-        // show menu of available power choices
-        MenuItem mitems[] = {
-            {MENU_1OFN, bc_power == 1,    1, 5, "1 watt"},
-            {MENU_1OFN, bc_power == 10,   1, 5, "10 watts"},
-            {MENU_1OFN, bc_power == 100,  1, 5, "100 watts"},
-            {MENU_1OFN, bc_power == 1000, 1, 5, "1000 watts"},
+        // build menu of available power choices
+        MenuItem mitems[n_bc_powers];
+        char labels[n_bc_powers][20];
+        for (int i = 0; i < n_bc_powers; i++) {
+            MenuItem &mi = mitems[i];
+            mi.type = MENU_1OFN;
+            mi.set = bc_power == bc_powers[i];
+            mi.group = 1;
+            mi.indent = 5;
+            mi.label = labels[i];
+            snprintf (labels[i], sizeof(labels[i]), "%d watt%s", bc_powers[i], bc_powers[i] > 1 ? "s" : ""); 
         };
 
         SBox menu_b;
         menu_b.x = power_b.x;
-        menu_b.y = b.y + b.h/2;
+        menu_b.y = b.y + b.h/4;
         menu_b.w = 0;           // shrink to fit
 
         // run menu, find selection
@@ -1564,9 +1509,9 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         MenuInfo menu = {menu_b, ok_b, true, false, 1, NARRAY(mitems), mitems};
         uint16_t new_power = bc_power;
         if (runMenu (menu)) {
-            for (int i = 0; i < NARRAY(mitems); i++) {
+            for (int i = 0; i < n_bc_powers; i++) {
                 if (menu.items[i].set) {
-                    new_power = powf (10, i);
+                    new_power = bc_powers[i];
                     break;
                 }
             }
@@ -1624,7 +1569,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
 
         SBox menu_b;
         menu_b.x = toa_b.x;
-        menu_b.y = b.y + 5*b.h/8;
+        menu_b.y = b.y + b.h/2;
         menu_b.w = 0;           // shrink to fit
 
         // run menu, find selection
@@ -2267,7 +2212,7 @@ bool getTCPChar (WiFiClient &client, char *cp)
         uint32_t t0 = millis();
         while (!client.available()) {
             if (!client.connected()) {
-                Serial.print (F("getTCPChar disconnect\n"));
+                // Serial.print (F("getTCPChar disconnect\n"));
                 return (false);
             }
             if (timesUp(&t0,10000)) {
@@ -2298,7 +2243,7 @@ bool getTCPChar (WiFiClient &client, char *cp)
  */
 void sendUserAgent (WiFiClient &client)
 {
-    StackMalloc ua_mem(200);
+    StackMalloc ua_mem(300);
     char *ua = (char *) ua_mem.getMem();
     size_t ual = ua_mem.getSize();
 
@@ -2370,8 +2315,19 @@ void sendUserAgent (WiFiClient &client)
 
         // kx3 baud else gpio on/off
         int gpio = getKX3Baud();
-        if (gpio == 0)
-            gpio = GPIOOk();
+        if (gpio == 0) {
+            if (GPIOOk())
+                gpio = 1;
+            else if (found_mcp)
+                gpio = 2;
+        }
+
+        // which phot, if any
+        int io = 0;
+        if (found_phot) io |= 1;
+        if (found_ltr) io |= 2;
+        if (found_mcp) io |= 4;
+        if (getI2CFilename()) io |= 8;
 
         // combine rss_on and rss_local
         int rss_code = rss_on + 2*rss_local;
@@ -2439,7 +2395,7 @@ void sendUserAgent (WiFiClient &client)
             platform, hc_version, ESP.getChipId(), getUptime(NULL,NULL,NULL,NULL), crc,
             map_style, main_page, mapgrid_choice, plotops[PANE_1], plotops[PANE_2], plotops[PANE_3],
             de_time_fmt, brb, dx_info_for_sat, rss_code, useMetricUnits(),
-            getNBMEConnected(), gpio, found_phot, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
+            getNBMEConnected(), gpio, io, getBMETempCorr(BME_76), getBMEPresCorr(BME_76),
             desrss, dxsrss, BUILD_W, dpy_mode,
             // new for LV5:
             (int)as, getCenterLng(), (int)auxtime /* getDoy() before 2.80 */, names_on, getDemoMode(),
@@ -2520,11 +2476,12 @@ bool httpSkipHeader (WiFiClient &client, const char *header, char *value, int va
     return (true);
 }
 
-/* same but when we don't care about any header field
+/* same but when we don't care about any header field;
+ * so we pick up Remote_Addr for postDiags()
  */
 bool httpSkipHeader (WiFiClient &client)
 {
-    return (httpSkipHeader (client, NULL, NULL, 0));
+    return (httpSkipHeader (client, _FX("Remote_Addr: "), remote_addr, sizeof(remote_addr)));
 }
 
 /* retrieve and plot latest and predicted DRAP indices, return whether all ok
@@ -2710,7 +2667,7 @@ static bool updateSolarWind(const SBox &box)
 
     Serial.println (swind_page);
     resetWatchdog();
-    if (wifiOk() && swind_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && swind_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -2862,7 +2819,7 @@ static bool updateBandConditions(const SBox &box)
 
     Serial.println (query);
     resetWatchdog();
-    if (wifiOk() && bc_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && bc_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -2978,7 +2935,7 @@ static bool updateNOAASWx(const SBox &box)
     // read scales
     Serial.println(noaaswx_page);
     resetWatchdog();
-    if (wifiOk() && noaaswx_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && noaaswx_client.connect(backend_host, backend_port)) {
 
         resetWatchdog();
         updateClocks(false);
@@ -3061,7 +3018,7 @@ static bool updateRSS ()
         
         Serial.println(rss_page);
         resetWatchdog();
-        if (wifiOk() && rss_client.connect(backend_host, BACKEND_PORT)) {
+        if (wifiOk() && rss_client.connect(backend_host, backend_port)) {
 
             resetWatchdog();
             updateClocks(false);
@@ -3342,13 +3299,14 @@ void scheduleNewBC()
         next_update[bc_pp] = 0;
 }
 
-/* called to schedule an immediate update of the given VOACAP map, unless being turned off.
- * leave core_map as default to use later if VOACAP turned off.
+/* called to schedule an immediate update of the given VOACAP map.
+ * leave core_map unchanged to use later if VOACAP turned off.
  */
 void scheduleNewVOACAPMap(PropMapSetting &pm)
 {
+    bool active_changed = prop_map.active != pm.active;
     prop_map = pm;
-    if (prop_map.active)
+    if (prop_map.active || active_changed)
         next_map = 0;
 }
 

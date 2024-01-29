@@ -28220,7 +28220,7 @@ void drawZone (ZoneID id, uint16_t color, int n_only)
         }
 
         // add label only if drawing all
-        if (all_zones) {
+        if (all_zones && overMap(zp->s_lbl)) {
             SBox label_b;
             char zn[20];
             snprintf (zn, sizeof(zn), "%d", zp->zone_n);

@@ -31,10 +31,8 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
 
 // config
 #define ALARM_DT        (1.0F/1440.0F)  // flash this many days before an event
-#define SATLED_RISING_RATE 1            // flash at this rate when sat about to rise
-#define SATLED_SETTING_RATE 10          // flash at this rate when sat about to set
-#define SATLED_OFF_RATE    (-1)         // risetAlarm() "rate" for LED off
-#define SATLED_ON_RATE     0            // risetAlarm() "rate" for LED on constantly
+#define SATLED_RISING_HZ  1             // flash at this rate when sat about to rise
+#define SATLED_SETTING_HZ 2             // flash at this rate when sat about to set
 #define MAX_TLE_AGE     7.0F            // max age to use a TLE in LEO, scaled by period, days (except moon)
 #define SAT_TOUCH_R     20U             // touch radius, pixels
 #define SAT_UP_R        2               // dot radius when up
@@ -110,98 +108,29 @@ void strncpySubChar (char to_str[], const char from_str[], char to_char, char fr
 
 
 
-#if defined(_SUPPORT_GPIO) and defined(_IS_UNIX)
 
-#include <pthread.h>
-
-static volatile int gpio_rate_hz;       // one of SATLED_*
+/* info to manage the blinker thread
+ */
+static volatile ThreadBlinker sat_blinker;
 
 /* return all IO pins to quiescent state
  */
 void satResetIO()
 {
-    if (!GPIOOk())
-        return;
-    GPIO& gpio = GPIO::getGPIO();
-    if (!gpio.isReady())
-        return;
-    gpio.setAsInput (SATALARM_GPIO);
+    disableBlinker (sat_blinker);
+    mcp.pinMode (SATALARM_PIN, INPUT);
 }
 
-/* thread that repeatedly reads gpio_rate as a desired rate in Hz
- * and controls GPIO pin SATALARM_GPIO
+/* set alarm SATALARM_PIN flashing with the given frequency or one of BLINKER_*.
  */
-static void * gpioThread (void *vp)
+static void risetAlarm (int hz)
 {
-    (void) vp;
+    // tell helper thread what we want done
+    setBlinkerRate (sat_blinker, hz);
 
-    // attach to GPIO, init output
-    GPIO &gpio = GPIO::getGPIO();
-    gpio.setAsOutput (SATALARM_GPIO);
-    gpio.setLo (SATALARM_GPIO);
-
-    // set our internal polling rate and init counter there of.
-    useconds_t delay_us = 100000;               // N.B. sets maximum rate that can be achieved
-    unsigned n_delay = 0;
-
-    // forever check and implement what gpio_rate_hz wants
-    for(;;) {
-        usleep (delay_us);
-        if (gpio_rate_hz == SATLED_OFF_RATE) {
-            gpio.setLo (SATALARM_GPIO);
-            n_delay = 0;
-        } else if (gpio_rate_hz == SATLED_ON_RATE) {
-            gpio.setHi (SATALARM_GPIO);
-            n_delay = 0;
-        } else {
-            unsigned rate_period_us = 1000000U/gpio_rate_hz;
-            if (++n_delay*delay_us >= rate_period_us) {
-                gpio.setHiLo (SATALARM_GPIO, !gpio.readPin(SATALARM_GPIO));
-                n_delay = 0;
-            }
-        }
-    }
+    // insure helper thread is running
+    startBinkerThread (sat_blinker, SATALARM_PIN, false); // on is hi
 }
-
-/* set alarm SATALARM_GPIO according to rate
- * rate < 0  : off
- * rate == 0 : on
- * rate > 0  : flash at this Hz
- */
-static void risetAlarm (int rate)
-{
-    // tell helper thread and big clock what we want done
-    gpio_rate_hz = rate;
-
-    // otherwise ignore if not supposed to use GPIO
-    if (!GPIOOk())
-        return;
-
-    // init helper thread if first time.
-    static bool gpiot_started;
-    if (!gpiot_started) {
-        gpiot_started = true;   // dont repeat even if thread err
-        pthread_t tid;
-        int e = pthread_create (&tid, NULL, gpioThread, NULL);
-        if (e != 0)
-            Serial.printf (_FX("GPIO thread err: %s\n"), strerror(e));
-    }
-}
-
-#else
-
-// dummy
-static void risetAlarm (int rate)
-{
-    // just log changes for a debugging trail
-    static int prev_rate = -100;
-    if (rate != prev_rate) {
-        Serial.printf (_FX("SAT: LED rate now %d\n"), rate);
-        prev_rate = rate;
-    }
-}
-
-#endif // _SUPPORT_GPIO and _IS_UNIX
 
 
 
@@ -230,7 +159,7 @@ static void unsetSat()
     NVWriteString (NV_SATNAME, sat_name);
     dx_info_for_sat = false;
 
-    risetAlarm (SATLED_OFF_RATE);
+    risetAlarm (BLINKER_OFF_HZ);
 }
 
 /* fill sat_foot with loci of points that see the sat at various viewing altitudes.
@@ -894,7 +823,7 @@ static bool satLookup ()
             wdDelay(2000);
 
         // connect
-        if (!wifiOk() || !tle_client.connect (backend_host, BACKEND_PORT)) {
+        if (!wifiOk() || !tle_client.connect (backend_host, backend_port)) {
             strcpy (err_msg, _FX("network error"));
             tle_client.stop();
             continue;
@@ -1046,7 +975,7 @@ static bool askSat()
     // open connection
     WiFiClient sat_client;
     resetWatchdog();
-    if (!wifiOk() || !sat_client.connect (backend_host, BACKEND_PORT))
+    if (!wifiOk() || !sat_client.connect (backend_host, backend_port))
         goto out;
 
     // query page and skip header
@@ -1379,22 +1308,22 @@ static void checkLEDAlarmEvents()
 
     case PS_NONE:
         // no pass: turn off
-        risetAlarm(SATLED_OFF_RATE);
+        risetAlarm(BLINKER_OFF_HZ);
         break;
 
     case PS_UPSOON:
         // pass lies ahead: flash if within ALARM_DT
-        risetAlarm(days < ALARM_DT ? SATLED_RISING_RATE : SATLED_OFF_RATE);
+        risetAlarm(days < ALARM_DT ? SATLED_RISING_HZ : BLINKER_OFF_HZ);
         break;
 
     case PS_UPNOW:
         // pass in progress: check for soon to set
-        risetAlarm(days < ALARM_DT ? SATLED_SETTING_RATE : SATLED_ON_RATE);
+        risetAlarm(days < ALARM_DT ? SATLED_SETTING_HZ : BLINKER_ON_HZ);
         break;
 
     case PS_HASSET:
         // set: turn off
-        risetAlarm(SATLED_OFF_RATE);
+        risetAlarm(BLINKER_OFF_HZ);
         break;
     }
 }
@@ -1462,7 +1391,10 @@ void updateSatPass()
     if (!obs || !SAT_NAME_IS_SET())
         return;
 
-    // once per second is fine
+    // always operate the LED at full rate
+    checkLEDAlarmEvents();
+
+    // other stuff once per second is fine
     static uint32_t last_run;
     if (!timesUp(&last_run, 1000))
         return;
@@ -1471,9 +1403,6 @@ void updateSatPass()
     bool fresh_update;
     if (!checkSatUpToDate(&fresh_update))
         return;
-
-    // always operate the LED
-    checkLEDAlarmEvents();
 
     // do minimal display update if showing
     if (dx_info_for_sat && getSWDisplayState() == SWD_NONE) {
@@ -1872,7 +1801,7 @@ bool setSatFromTLE (const char *name, const char *t1, const char *t2)
  */
 bool initSatSelection()
 {
-    risetAlarm(SATLED_OFF_RATE);
+    risetAlarm(BLINKER_OFF_HZ);
     NVReadString (NV_SATNAME, sat_name);
     if (!SAT_NAME_IS_SET())
         return (false);
@@ -1908,7 +1837,7 @@ const char **getAllSatNames()
     // open connection
     WiFiClient sat_client;
     resetWatchdog();
-    if (!wifiOk() || !sat_client.connect (backend_host, BACKEND_PORT))
+    if (!wifiOk() || !sat_client.connect (backend_host, backend_port))
         return (NULL);
 
     // query page and skip header

@@ -106,7 +106,7 @@ static void eraseSantaBox(const SBox &s)
 }
 
 
-/* draw santa on christmas eve, else move him off the map
+/* draw santa on christmas eve
  */
 void drawSanta()
 {
@@ -125,7 +125,7 @@ void drawSanta()
     float hr_frac = hour(t)/23.0F;
     float mn_frac = minute(t)/59.0F;
 
-    // location now
+    // location now before next iteration
     SBox s0 = santa_b;
 
     // handy
@@ -212,10 +212,14 @@ void drawSanta()
         fatalError (_FX("drawSanta() map_proj %d"), map_proj);
     }
 
-    // erase if moved
-    if (santa_b.x != s0.x || santa_b.y != s0.y)
+
+    // erase if previously drawn and has now moved 
+    if (s0.x && (santa_b.x != s0.x || santa_b.y != s0.y))
         eraseSantaBox (s0);
 
-    // paint
-    drawSantaBox();
+    // draw if over map else mark as not drawn
+    if (overMap (santa_b))
+        drawSantaBox();
+    else
+        santa_b.x = 0;
 }

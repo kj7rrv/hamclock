@@ -50,7 +50,7 @@ void plotMap (const char *filename, const char *title, uint16_t color)
     bool ok = false;
 
     Serial.println (filename);
-    if (wifiOk() && map_client.connect (backend_host, BACKEND_PORT)) {
+    if (wifiOk() && map_client.connect (backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 

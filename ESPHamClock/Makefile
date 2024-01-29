@@ -19,11 +19,17 @@ ifeq ($(shell uname -s), Darwin)
     LDXXFLAGS += -L/opt/X11/lib
 endif
 
-# FreeBSD needs libgpio libexecinfo
+# FreeBSD needs libgpio libexecinfo and local xorg
 ifeq ($(shell uname -s), FreeBSD)
-    LIBS += -lgpio -lexecinfo
+    CXXFLAGS += -I/usr/local/include
+    LDXXFLAGS += -L/usr/local/lib
+    LIBS += -lgpio -lexecinfo -lm
 endif
 
+# Linux needs libgpiod
+ifeq ($(shell find /usr/lib -name libgpiod.a | wc -l), 1)
+    LIBS += -lgpiod
+endif
 
 
 OBJS = \
@@ -37,6 +43,7 @@ OBJS = \
 	adif.o \
 	asknewpos.o \
 	astro.o \
+	blinker.o \
 	brightness.o \
 	calibrate.o \
 	clocks.o \
@@ -104,7 +111,6 @@ help:
 
 # remove old objects before building new ones to be sure the proper flags are used
 $(OBJS): clean
-
 
 # X11 versions
 

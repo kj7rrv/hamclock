@@ -75,7 +75,7 @@ bool newVersionIsAvailable (char *new_ver, uint16_t new_verl)
     bool found_newer = false;
 
     Serial.printf (_FX("%s/%s\n"), backend_host, _FX_helper(v_page));
-    if (wifiOk() && v_client.connect (backend_host, BACKEND_PORT)) {
+    if (wifiOk() && v_client.connect (backend_host, backend_port)) {
         resetWatchdog();
 
         // query page
@@ -154,7 +154,7 @@ bool askOTAupdate(char *new_ver)
     WiFiClient v_client;
     uint16_t liney = INFO_Y+LH;
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    if (wifiOk() && v_client.connect (backend_host, BACKEND_PORT)) {
+    if (wifiOk() && v_client.connect (backend_host, backend_port)) {
         resetWatchdog();
 
         // query page

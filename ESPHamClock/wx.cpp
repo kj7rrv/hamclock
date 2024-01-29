@@ -45,6 +45,17 @@ static void drawNCDXFBoxWx (BRB_MODE m, const WXInfo &wi, bool ok)
  */
 bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
 {
+    // keep one of each de/dx cached
+    #define CACHE_DT (10*60)
+    static WXInfo wi_cached[2];
+    static LatLong ll_cached[2];
+    static time_t time_cached[2];
+    if (memcmp (&ll_cached[is_de], &ll, sizeof(ll)) == 0 && myNow() - time_cached[is_de] < CACHE_DT) {
+        *wip = wi_cached[is_de];
+        Serial.printf (_FX("WX: used cached %s value\n"), is_de ? "DE" : "DX");
+        return (true);
+    }
+
     WiFiClient wx_client;
     char line[100];
 
@@ -53,7 +64,7 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
     resetWatchdog();
 
     // get
-    if (wifiOk() && wx_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && wx_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
@@ -130,6 +141,11 @@ bool getCurrentWX (const LatLong &ll, bool is_de, WXInfo *wip, char ynot[])
 
         // ok!
         ok = true;
+
+        // keep for possible reuse
+        memcpy (&wi_cached[is_de], wip, sizeof(WXInfo));
+        ll_cached[is_de] = ll;
+        time_cached[is_de] = myNow();
 
     } else {
 
@@ -297,7 +313,7 @@ void fetchWorldWx(void)
     n_wwrows = n_wwcols = 0;
 
     // get
-    if (wifiOk() && ww_client.connect(backend_host, BACKEND_PORT)) {
+    if (wifiOk() && ww_client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
         // query web page

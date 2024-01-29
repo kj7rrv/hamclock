@@ -803,7 +803,8 @@ void initTime()
     auxtime = (AuxTimeFormat)at;
     Serial.printf (_FX("time: auxtime format %s\n"), auxtime_names[auxtime]);
 
-    // start using time source
+    // start using time source. twice for good measure
+    startSyncProvider(true);
     startSyncProvider(true);
 }
 
@@ -1251,8 +1252,6 @@ bool checkClockTouch (SCoord &s)
         // restore under menu
         drawOneTimeDE();
         drawDEInfo();
-        // log changes
-        logState();
     }
 
     return (ours);
@@ -1291,7 +1290,7 @@ void changeTime (time_t t)
     scheduleNewBC();
 }
 
-/* show menu of timezone offsets +- 2 from nominal.
+/* show menu of timezone offsets +- a few hours from nominal.
  * if user taps ok update tzi.tz_secs and return true, else false.
  */
 bool TZMenu (TZInfo &tzi, const LatLong &ll)
@@ -1300,13 +1299,14 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
     int32_t tz0_secs = getTZ (ll);
 
     // create menu
+    int step = getTZStep(ll);
     #define N_NEW_TZ 5
     #define MAX_NEW_TZ 20
     #define TZ_MENU_INDENT 5
     MenuItem mitems[N_NEW_TZ];
     char tz_label[N_NEW_TZ][MAX_NEW_TZ];
     for (int i = 0; i < N_NEW_TZ; i++) {
-        int32_t tz = tz0_secs + 3600*(i-N_NEW_TZ/2);
+        int32_t tz = tz0_secs + step*(i-N_NEW_TZ/2);
         snprintf (tz_label[i], MAX_NEW_TZ, _FX("UTC%+g"), tz/3600.0F);
         MenuItem &mi = mitems[i];
         mi.type = MENU_1OFN;
@@ -1337,7 +1337,7 @@ bool TZMenu (TZInfo &tzi, const LatLong &ll)
     // update tzi from set item
     for (int i = 0; i < N_NEW_TZ; i++) {
         if (mitems[i].set) {
-            tzi.tz_secs = tz0_secs + 3600*(i-N_NEW_TZ/2);
+            tzi.tz_secs = tz0_secs + step*(i-N_NEW_TZ/2);
             break;
         }
     }

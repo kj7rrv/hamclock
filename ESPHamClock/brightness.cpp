@@ -1,5 +1,9 @@
-/* Manage display brightness, either automatically via phot sensor or via on/off/idle settings or brightness
- * slider by the user. N.B. pane purpose must coordinate with ncfdx button and key.
+/* Manage display brightness or just on/off if can't dim.
+ *
+ * User may adjust brightness manually using GUI slider or automatically via ESP phot sensor or I2C LTR329.
+ * If can't dim, can still set on/off thresholds for phot/LTR329.
+ *
+ * N.B. pane controls must coordinate with NCDXF.
  *
  * ESP phot circuit:
  *
@@ -19,22 +23,28 @@
  *   FS  = !IS_ESP && getX11FullScreen()
  *   DSI = _IS_RPI and display is DSI
  *
- *                         On/Off          Bightness     PhotoR
- *  _IS_ESP8266              Y                 Y           Y
- *  (FB0 || FS) && DSI       Y                 Y           N
- *  FB0 || FS                Y                 N           N
- *  else                     N                 N           N
+ *                         On/Off      Dimmable     PhotoR     LTR329
+ *  _IS_ESP8266              Y            Y           Y          Y
+ *  (FB0 || FS) && DSI       Y            Y           N          Y
+ *  FB0 || FS                Y            N           N          Y
+ *  else                     N            N           N          N
  *    
+ * In addition to the photosensor on ESP all platforms support the LTR329 I2C light sensor, eg,
+ * Adafruit https://www.adafruit.com/product/5591.
  */
 
 
 #include "HamClock.h"
 
+#include <Adafruit_LTR329_LTR303.h>
+static Adafruit_LTR329 ltr = Adafruit_LTR329();
+
 #if defined(_IS_UNIX)
 #include <sys/wait.h>
 #endif
 
-bool found_phot;                                // set if initial read > 1, else manual clock settings
+bool found_phot;                                // set if either real phot or ltr329 discovered
+bool found_ltr;                                 // set if ltr329 discovered
 
 // NCDXF_b or "BRB" public state
 uint8_t brb_mode;                               // one of BRB_MODE
@@ -52,34 +62,35 @@ const char *brb_names[BRB_N] = {
 #define PHOT_PIN        A0                      // Arduino name of analog pin with photo detector
 #define PHOT_MAX        1024                    // 10 bits including known range bug
 #define NO_TOL          20                      // Adc tolerance for no phot attached
-#define BPWM_BLEND      0.2F                    // fraction of new brightness to keep
+#define BPWM_BLEND      0.3F                    // fraction of new brightness to keep
 #define PHOT_BLEND      0.5F                    // fraction of new pwm to keep
 #define BPWM_COL        RA8875_WHITE            // brightness scale color
 #define PHOT_COL        RA8875_CYAN             // phot scale color
-#define BRIGHT_COL      RA8875_RED              // dim marker color  
-#define DIM_COL         RA8875_BLUE             // dim marker color  
+#define BRIGHT_COL      RA8875_RED              // bright marker color  
+#define DIM_COL         RA8875_RED              // dim marker color  
 #define N_ROWS          11                      // rows of clock info, including gaps
 #define SFONT_H         7                       // small font height
 #define MARKER_H        3                       // scaler marker height
 #define SCALE_W         5                       // scale width
-#define FOLLOW_DT       100                     // read phot this often, ms
+#define FOLLOW_DT       300                     // read phot this often, ms; should be > LTR3XX_MEASRATE_200
 
-static int16_t bpwm;                            // current brightness PWM value 0 .. BPWM_M
-static uint16_t phot;                           // current photorestistor value
+static int16_t bpwm;                            // current brightness PWM value 0 .. BPWM_MAX
+static uint16_t phot;                           // current photoresistor value 0 .. PHOT_MAX
 
-// fast access to what is in NVRAM
-static uint16_t fast_phot_bright, fast_phot_dim;
-static uint16_t fast_bpwm_bright, fast_bpwm_dim;
+// these are fast access shadows of what's is in NVRAM.
+// they capture the user's taps that set the two points for linear brightness interp.
+// N.B. maintain invariant that X_dim < X_bright
+static uint16_t fast_phot_bright, fast_phot_dim;// measured brightness interp points
+static uint16_t fast_bpwm_bright, fast_bpwm_dim;// corresponding commanded brightness interp points
 
 // timers, idle and hw config
 static uint16_t mins_on, mins_off;              // user's local on/off times, stored as hr*60 + min
 static uint16_t idle_mins;                      // user's idle timeout period, minutes; 0 for none
 static uint32_t idle_t0;                        // time of last user action, millis
-static bool clock_off;                          // whether clock is now ostensibly off
-static uint8_t user_on, user_off;               // user's on and off brightness
+static bool clock_off;                          // whether clock is forced off by timers
+static uint8_t user_max, user_min;              // user's on and off brightness PWM value from setup
 static bool support_onoff;                      // whether we support display on/off
 static bool support_dim;                        // whether we support display fine brightness control
-static bool support_phot;                       // whether we support a photoresistor
 
 #if defined(_IS_LINUX_RPI) || defined(_USE_FB0)
 // RPi path to set DSI brightness, write 0 .. 255
@@ -112,6 +123,7 @@ static void setDisplayBrightness(bool log)
     #else
 
         if (support_dim) {
+
             // control DSI backlight
             // could use 'vcgencmd set_backlight x' but still need a way to check whether bl is controllable
             int dsifd = open (dsi_path, O_WRONLY);
@@ -124,49 +136,80 @@ static void setDisplayBrightness(bool log)
                 fprintf (dsifp, "%d\n", bpwm);
                 fclose (dsifp); // also closes dsifd
             }
+
         } else if (support_onoff) {
-            // control HDMI on or off
-            // N.B. can't use system() because we need to retain suid root
-            const char *argv_vcg[] = {          // try vcgencmd
-                "vcgencmd", "display_power", bpwm > BPWM_MAX/2 ? "1" : "0", NULL
-            };
-            const char *argv_sso[] = {          // try turning off system dimming
-                "xset", "dpms", "0", "0", "0", NULL
-            };
-            const char *argv_ssvr[] = {         // and turning off the screen saver
-                "xset", "s", "0", NULL
-            };
-            const char *argv_dpms[] = {         // now try forcing dpms
-                "xset", "dpms", "force", bpwm > BPWM_MAX/2 ? "on" : "off", NULL
-            };
-            const char *argv_wlr[] = {          // only works with the Wayland wayfire compositor
-                "wlr-randr", "--output", "HDMI-A-1", bpwm > BPWM_MAX/2 ? "--on" : "--off", NULL
-            };
-            const char **argvs[] = {            // collect for easy use
-                argv_vcg, argv_sso, argv_ssvr, argv_dpms, argv_wlr, NULL
-            };
-            for (const char ***av = argvs; *av != NULL; av++) {
-                const char **argv = *av;
-                if (log) {
-                    char lm[100];
-                    int lm_l = snprintf (lm, sizeof(lm), "BR: ");
-                    for (const char **ap = argv; *ap != NULL; ap++)
-                        lm_l += snprintf (lm+lm_l, sizeof(lm)-lm_l, " %s", *ap);
-                    Serial.println (lm);
-                }
-                int child_pid = fork();
-                if (child_pid < 0)
-                    fatalError ("fork() failed: %s", strerror(errno));
-                if (child_pid == 0) {
-                    // new child process
-                    execvp (argv[0], (char**)argv);
-                    Serial.printf ("execvp(%s) failed: %s\n", argv[0], strerror(errno));
-                    exit(1);
-                } else {
-                    // parent waits for child
-                    int ws;
-                    (void) wait (&ws);
-                }
+
+            // only hammer on system if changing
+            static bool been_here;
+            static bool was_on;
+            bool want_on = bpwm > fast_bpwm_dim;
+
+            if (!been_here || want_on != was_on) {
+
+                #if defined(__APPLE__)
+
+                    static const char apple_on[] = "caffeinate -u -t 1";
+                    static const char apple_off[] = "pmset displaysleepnow";
+                    const char *apple_cmd = want_on ? apple_on : apple_off;
+                    system (apple_cmd);
+                    if (log)
+                        Serial.printf ("BR: bpwm %d cmd: %s\n", bpwm, apple_cmd);
+
+                #else 
+
+                    if (log)
+                        Serial.printf ("BR: bpwm %d turning %s\n", bpwm, want_on ? "on" : "off");
+
+                    // try lots of ways to control HDMI on or off
+                    // N.B. can't use system() because we need to retain suid root
+                    // N.B. only do the first 3 once
+                    // N.B. only log the potentially verbose outputs the first time for the record
+
+                    typedef const char *argv_t[10];
+                    argv_t argvs[] = {
+                        { "xset", "dpms", "0", "0", "0", NULL},         // no blanking
+                        { "xset", "s", "0", "0", NULL},                 // no screen saver
+                        { "xset", "s", "blank", "0", NULL},             // blank with hardware
+                        { "vcgencmd", "display_power", want_on ? "1" : "0", NULL},
+                        { "xset", "dpms", "force", want_on ? "on" : "off", NULL},
+                        { "wlr-randr", "--output", "HDMI-A-1", want_on ? "--on" : "--off", NULL},
+                        { NULL }
+                    };
+
+                    for (int i = been_here ? 3 : 0; i < NARRAY(argvs); i++) {
+                        const char **argv = argvs[i];
+                        if (!been_here) {
+                            char lm[200];
+                            int lm_l = snprintf (lm, sizeof(lm), "BR: bpwm %d cmd: ", bpwm);
+                            for (const char **ap = argv; *ap != NULL; ap++)
+                                lm_l += snprintf (lm+lm_l, sizeof(lm)-lm_l, " %s", *ap);
+                            Serial.println (lm);
+                        }
+                        int child_pid = fork();
+                        if (child_pid < 0)
+                            fatalError ("fork() failed: %s", strerror(errno));
+                        if (child_pid == 0) {
+                            // new child process, quiet except first time
+                            if (been_here) {
+                                int fd_null = open ("/dev/null", O_WRONLY);
+                                dup2 (fd_null, 1);
+                                dup2 (fd_null, 2);
+                                close (fd_null);
+                            }
+                            execvp (argv[0], (char**)argv);
+                            Serial.printf ("BR: execvp(%s) failed: %s\n", argv[0], strerror(errno));
+                            exit(1);
+                        } else {
+                            // parent waits for child
+                            int ws;
+                            (void) wait (&ws);
+                        }
+                    }
+                #endif
+
+                // persist
+                was_on = want_on;
+                been_here = true;
             }
         }
 
@@ -174,56 +217,99 @@ static void setDisplayBrightness(bool log)
 }
 
 /* return current photo detector value, range [0..PHOT_MAX] increasing with brightness.
+ * also set found_phot or found_ltr on first call.
+ * try I2C else photocell if possible
  */
 static uint16_t readPhot()
 {
-    #if defined(_SUPPORT_PHOT)
+    // set after init attempts
+    static bool tried_ltr;
 
-        resetWatchdog();
+    // value we will return. persistent for when no new data available and/or smoothing
+    static uint16_t new_phot;
 
-        static bool read_before;
-        static uint16_t smooth_adc;
+    resetWatchdog();
 
-        uint16_t raw_adc = analogRead (PHOT_PIN);              // brighter gives smaller ADC value
+    // try LTR on I2C first
 
-        if (!read_before) {
-            // init and spin up smoothing
-            smooth_adc = raw_adc;
-            for (int i = 0; i < 20; i++) {
-                raw_adc = analogRead (PHOT_PIN);
-                smooth_adc = PHOT_BLEND*raw_adc + (1-PHOT_BLEND)*smooth_adc;
-            }
-            read_before = true;
+    if (!tried_ltr) {
+
+        // try to init
+        if (!ltr.begin()) {
+            Serial.println (F("BR: No LTR329"));
+            found_phot = found_ltr = false;
         } else {
-            // blend in another reading
-            smooth_adc = PHOT_BLEND*raw_adc + (1-PHOT_BLEND)*smooth_adc;
+            ltr.setGain(LTR3XX_GAIN_8);
+            ltr.setIntegrationTime(LTR3XX_INTEGTIME_100);
+            ltr.setMeasurementRate(LTR3XX_MEASRATE_200);
+            found_phot = found_ltr = true;
+            Serial.println (F("BR: found LTR329"));
         }
 
-        uint16_t new_phot = PHOT_MAX - smooth_adc;
-        // Serial.printf ("BR: raw_adc %d smooth_adc %d new_phot %d\n", raw_adc, smooth_adc, new_phot);
+        // only one try
+        tried_ltr = true;
 
-        return (new_phot);
+    }
 
-    #else
+    if (found_ltr) {
+        uint16_t ch0, ch1;
+        if (ltr.readBothChannels(ch0, ch1)) {
+            new_phot = ch0;
+            if (new_phot > PHOT_MAX)
+                new_phot = PHOT_MAX;
+        }
+    }
 
-        return (0);
+#if defined(_SUPPORT_PHOT)
 
-    #endif  // _SUPPORT_PHOT
+    else {
+
+        static bool tried_photocell;
+        static bool found_photocell;
+
+        // adc increases when darker, we want increase when brighter
+        uint16_t raw_phot = PHOT_MAX - analogRead (PHOT_PIN);
+
+        if (!tried_photocell) {
+
+            // init and spin up smoothing
+            new_phot = raw_phot;
+            for (int i = 0; i < 20; i++) {
+                new_phot = PHOT_BLEND*raw_phot + (1-PHOT_BLEND)*new_phot;
+                raw_phot = PHOT_MAX - analogRead (PHOT_PIN);
+            }
+            tried_photocell = true;
+
+            // consider found if value at neigher extreme
+            found_phot = found_photocell = new_phot > NO_TOL && new_phot < PHOT_MAX-NO_TOL;
+        }
+
+        if (found_photocell) {
+
+            // blend in another reading
+            new_phot = PHOT_BLEND*raw_phot + (1-PHOT_BLEND)*new_phot;
+        }
+    }
+
+#endif  // _SUPPORT_PHOT
+
+    // Serial.printf (_FX("Phot %d\n"), new_phot);                                         // RBF
+    return (new_phot);
+
 }
-
 
 
 /* get dimensions of the phot slider control
  */
-static void getPhotControl (SBox &p)
+static void getPhotControl (SBox &b)
 {
         // N.B. match getBrControl()
-        p.w = SCALE_W;
-        p.y = NCDXF_b.y + NCDXF_b.h/9;
-        p.h = 6*NCDXF_b.h/10;
+        b.w = SCALE_W;
+        b.y = NCDXF_b.y + NCDXF_b.h/9;
+        b.h = 6*NCDXF_b.h/10;
 
         // right third
-        p.x = NCDXF_b.x + 2*(NCDXF_b.w - SCALE_W)/3;
+        b.x = NCDXF_b.x + 2*(NCDXF_b.w - SCALE_W)/3;
 }
 
 
@@ -236,11 +322,11 @@ static void drawPhotSymbol()
         if (getSWDisplayState() != SWD_NONE)
             return;
 
-        uint8_t n = 2;                                                  // number of \/
-        uint16_t w = 2*n+8;                                             // n steps across
-        uint16_t s = NCDXF_b.w/w;                                  // 1 x step length
-        uint16_t x = NCDXF_b.x + (NCDXF_b.w-w*s)/2 + 2*s;     // initial x to center
-        uint16_t y = NCDXF_b.y + NCDXF_b.h - 3*s;             // y center-line
+        uint8_t n = 2;                                          // number of \/
+        uint16_t w = 2*n+8;                                     // n steps across
+        uint16_t s = NCDXF_b.w/w;                               // 1 x step length
+        uint16_t x = NCDXF_b.x + (NCDXF_b.w-w*s)/2 + 2*s;       // initial x to center
+        uint16_t y = NCDXF_b.y + NCDXF_b.h - 3*s;               // y center-line
 
         // lead in from left then up
         tft.drawLine (x, y, x+s, y, PHOT_COL);
@@ -262,7 +348,7 @@ static void drawPhotSymbol()
         tft.drawLine (x, y, x+s, y, PHOT_COL);
 
         // incoming light arrows
-        uint16_t ax = NCDXF_b.x + 6*s;                     // arrow head location
+        uint16_t ax = NCDXF_b.x + 6*s;                          // arrow head location
 
         tft.drawLine (ax, y-2*s, ax-1*s,   y-3*s,    PHOT_COL); // main shaft
         tft.drawLine (ax, y-2*s, ax-3*s/4, y-19*s/8, PHOT_COL); // lower shaft
@@ -275,6 +361,29 @@ static void drawPhotSymbol()
         tft.drawLine (ax, y-2*s, ax-3*s/8, y-11*s/4, PHOT_COL);
 }
 
+/* draw a scale useful for either brightness or phot in the given box.
+ * show a marker MARKER_H high with top at val_y, and lines at bright/dim_y unless 0
+ */
+static void drawScale (SBox &b, uint16_t val_y, uint16_t bright_y, uint16_t dim_y, uint16_t color)
+{
+
+        // fresh box
+        #if defined(_IS_ESP8266)
+            tft.fillRect (b.x+1, b.y+1, b.w-1, b.h-1, RA8875_BLACK);    // leave border to avoid flicker
+        #else
+            fillSBox (b, RA8875_BLACK);
+        #endif
+        drawSBox (b, color);
+
+        // draw value
+        tft.fillRect (b.x, val_y, b.w-1, MARKER_H, color);
+
+        // overlay markers unless 0
+        if (bright_y && dim_y) {
+            tft.fillRect (b.x, bright_y, b.w, 1, BRIGHT_COL);   // fits rect better at higher res
+            tft.fillRect (b.x, dim_y, b.w, 1, DIM_COL);
+        }
+}
 
 /* draw phot control.
  * skip if stopwatch is up.
@@ -286,20 +395,17 @@ static void drawPhotControl()
         if (getSWDisplayState() != SWD_NONE)
             return;
 
-        SBox p;
-        getPhotControl (p);
+        SBox b;
+        getPhotControl (b);
 
-        // draw phot scale
-        int16_t ph = (p.h-2-MARKER_H)*phot/PHOT_MAX + MARKER_H+1;
-        tft.fillRect (p.x+1, p.y+1, p.w-1, p.h-1, RA8875_BLACK);    // leave border to avoid flicker
-        drawSBox (p, PHOT_COL);
-        tft.fillRect (p.x, p.y+p.h-ph, p.w, MARKER_H, PHOT_COL);
+        // phot marker
+        uint16_t val_y = b.y + b.h - ((b.h-2-MARKER_H)*phot/PHOT_MAX + MARKER_H + 1);
 
-        // overlay phot limits, avoid top and bottom
-        ph = (p.h-2-1)*fast_phot_bright/PHOT_MAX + 2;
-        tft.drawLine (p.x+1, p.y+p.h-ph, p.x+p.w-2, p.y+p.h-ph, BRIGHT_COL);
-        ph = (p.h-2-1)*fast_phot_dim/PHOT_MAX + 2;
-        tft.drawLine (p.x+1, p.y+p.h-ph, p.x+p.w-2, p.y+p.h-ph, DIM_COL);
+        // overlay phot set points, avoid top and bottom
+        uint16_t bright_y = b.y + b.h - ((b.h-2)*fast_phot_bright/PHOT_MAX + 1);
+        uint16_t dim_y = b.y + b.h - ((b.h-2)*fast_phot_dim/PHOT_MAX + 1);
+
+        drawScale (b, val_y, bright_y, dim_y, PHOT_COL);
 }
 
 
@@ -333,18 +439,36 @@ static void drawBrControl()
         SBox b;
         getBrControl (b);
 
-        // draw bpwm scale
-        int16_t bh = (b.h-2-MARKER_H)*(bpwm-user_off)/(user_on - user_off) + MARKER_H+1;
-        tft.fillRect (b.x+1, b.y+1, b.w-2, b.h-2, RA8875_BLACK);    // leave border to avoid flicker
-        drawSBox (b, BPWM_COL);
-        tft.fillRect (b.x, b.y+b.h-bh, b.w, MARKER_H, BPWM_COL);
+        if (support_dim) {
 
-        if (brb_mode == BRB_SHOW_PHOT) {
-            // overlay bpwm limits, avoid top and bottom
-            bh = (b.h-2-1)*fast_bpwm_bright/BPWM_MAX + 2;
-            tft.drawLine (b.x+1, b.y+b.h-bh, b.x+b.w-2, b.y+b.h-bh, BRIGHT_COL);
-            bh = (b.h-2-1)*fast_bpwm_dim/BPWM_MAX + 2;
-            tft.drawLine (b.x+1, b.y+b.h-bh, b.x+b.w-2, b.y+b.h-bh, DIM_COL);
+            int user_range = user_max - user_min;
+
+            // brightness marker
+            // N.B. must be drawn [user_min,user_max] to match changeBrightness()
+            uint16_t val_y = b.y + b.h - ((b.h-2-MARKER_H)*(bpwm-user_min)/user_range + MARKER_H + 1);
+
+            // overlay bpwm set points if showing, avoid top and bottom
+            uint16_t bright_y = 0, dim_y = 0;
+            if (brb_mode == BRB_SHOW_PHOT) {
+                bright_y = b.y + b.h - ((b.h-2)*(fast_bpwm_bright-user_min)/user_range + 1);
+                dim_y = b.y + b.h - ((b.h-2)*(fast_bpwm_dim-user_min)/user_range + 1);
+            }
+
+            drawScale (b, val_y, bright_y, dim_y, BPWM_COL);
+
+        } else {
+
+            // brightness is not adjustable so just show an indication of whether on or off
+            uint16_t val_y;
+            if (bpwm > fast_bpwm_dim) {
+                // top
+                val_y = b.y + 1;
+            } else {
+                // bottom
+                val_y = b.y + b.h - (MARKER_H + 1);
+            }
+
+            drawScale (b, val_y, b.y, b.y+b.h-2, BPWM_COL);
         }
 }
 
@@ -360,7 +484,7 @@ static void drawOnOffControls()
             return;
 
         tft.fillRect (NCDXF_b.x+1, NCDXF_b.y+1, NCDXF_b.w-2, NCDXF_b.h-2, RA8875_BLACK);
-        tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w, NCDXF_b.y, GRAY);
+        tft.drawLine (NCDXF_b.x, NCDXF_b.y, NCDXF_b.x+NCDXF_b.w-1, NCDXF_b.y, GRAY);
         selectFontStyle (LIGHT_FONT, FAST_FONT);
         tft.setTextColor (RA8875_WHITE);
 
@@ -445,7 +569,7 @@ static void persistOnOffTimes (int dow, uint16_t on_mins, uint16_t off_mins)
     NVWriteString (NV_DAILYONOFF, (char*)ootimes);
 }
 
-/* set on/off from presistent storage NV_DAILYONOFF for the given week day 1..7 Sun..Sat
+/* get on/off from presistent storage NV_DAILYONOFF for the given week day 1..7 Sun..Sat
  * N.B. we do not validate dow
  */
 static void getPersistentOnOffTimes (int dow, uint16_t &on, uint16_t &off)
@@ -555,7 +679,8 @@ static void checkOnOffTimers()
             uint16_t ims = (millis() - idle_t0)/60000;   // ms -> mins
             if (ims >= idle_mins && !clock_off) {
                 Serial.println (F("BR: Idle timed out"));
-                bpwm = user_off;
+                bpwm = user_min;
+                clock_off = false;
                 engageDisplayBrightness(true);
                 clock_off = true;
             }
@@ -594,17 +719,18 @@ static void checkOnOffTimers()
 
         // engage when its time
         if (mins_now == mins_on) {
-            if (bpwm != user_on) {
+            if (bpwm != user_max) {
                 Serial.println (F("BR: on"));
-                bpwm = user_on;
-                engageDisplayBrightness(true);
+                bpwm = user_max;
                 clock_off = false;
+                engageDisplayBrightness(true);
                 idle_t0 = millis();             // consider this a user action else will turn off again
             }
         } else if (mins_now == mins_off) {
-            if (bpwm != user_off) {
+            if (bpwm != user_min) {
                 Serial.println (F("BR: off"));
-                bpwm = user_off;
+                bpwm = user_min;
+                clock_off = false;              // just to be sure engage works
                 engageDisplayBrightness(true);
                 clock_off = true;
             }
@@ -615,10 +741,12 @@ static void checkOnOffTimers()
 
 /* set brightness to bpwm and update GUI controls if visible.
  * N.B. beware states that should not be drawn
+ * N.B. we do not change display if clock_off so beware calling order when changing it
  */
 static void engageDisplayBrightness(bool log)
 {
-        setDisplayBrightness(log);
+        if (!clock_off)
+            setDisplayBrightness(log);
 
         // Serial.printf (_FX("BR: engage mode %d\n"), brb_mode);
 
@@ -676,10 +804,21 @@ static bool isRPiDSI()
 #endif
 
 
-/* return whether the display hardware brightness can be controlled.
- * intended for external use, use flags for internal use.
+#if !defined(_WEB_ONLY) && (defined(_IS_UNIX) || defined(_IS_LINUX_RPI))
+/* try to determine whether an X connection is local or remote.
  */
-bool brControlOk()
+static bool localX()
+{
+    const char *display = getenv ("DISPLAY");
+    return (!display || strstr (display, ":0") != NULL);
+}
+#endif
+
+
+/* return whether the display hardware brightness can be controlled.
+ * function is intended for external use, use flags for internal use.
+ */
+bool brDimmableOk()
 {
         #if defined(_WEB_ONLY)
             support_dim = false;                                // never via web
@@ -688,7 +827,7 @@ bool brControlOk()
         #elif defined(_USE_FB0)
             support_dim = isRPiDSI();                           // only if DSI
         #elif defined(_IS_LINUX_RPI)
-            support_dim = getX11FullScreen() && isRPiDSI();     // only if DSI and running full screen
+            support_dim = getX11FullScreen() && localX() && isRPiDSI();     // only local DSI full screen
         #else
             support_dim = false;
         #endif
@@ -696,8 +835,8 @@ bool brControlOk()
         return (support_dim);
 }
 
-/* return whether display hardware support being turned on/off.
- * intended for external use, use flags for internal use.
+/* return whether display hardware supports being turned on/off.
+ * function is intended for external use, use flags for internal use.
  */
 bool brOnOffOk()
 {
@@ -707,27 +846,13 @@ bool brOnOffOk()
             support_onoff = true;                               // always works
         #elif defined(_USE_FB0)
             support_onoff = true;                               // always works
-        #elif defined(_IS_LINUX_RPI)
-            support_onoff = getX11FullScreen();                 // works if full screen
+        #elif defined(_IS_UNIX)
+            support_onoff = getX11FullScreen() && localX();     // works iff full screen on local display
         #else
             support_onoff = false;
         #endif
 
         return (support_onoff);
-}
-
-/* return whether we support having a photoresistor connected
- */
-static bool photOk()
-{
-        // determine photoresistor support, need ADC only on ESP
-        #if defined(_IS_ESP8266)
-            support_phot = true;
-        #else
-            support_phot = false;
-        #endif
-
-        return (support_phot);
 }
 
 /* call this ONCE before Setup to determine hardware and set full brightness for now,
@@ -744,17 +869,11 @@ void initBrightness()
         resetWatchdog();
 
         // determine initial hw capabilities, might change depending on Setup
-        (void) brControlOk();
+        (void) brDimmableOk();
         (void) brOnOffOk();
-        (void) photOk();
 
         // log
-        Serial.printf (_FX("BR: 0 onoff= %d dim= %d phot= %d\n"), support_onoff, support_dim, support_phot);
-
-        // check whether photo resistor is connected, not found if either shorted or open
-        phot = readPhot();
-        found_phot = phot > NO_TOL && phot < PHOT_MAX-NO_TOL;
-        Serial.printf (_FX("BR: phot %d %s\n"), phot, found_phot ? "found" : "not found");
+        Serial.printf (_FX("BR: A onoff= %d dim= %d\n"), support_onoff, support_dim);
 
         // full on for now
         bpwm = BPWM_MAX;
@@ -774,19 +893,23 @@ void setupBrightness()
         resetWatchdog();
 
         // final check of hw capabilities after Setup.
-        (void) brControlOk();
+        (void) brDimmableOk();
         (void) brOnOffOk();
-        (void) photOk();
 
-        // log
-        Serial.printf (_FX("BR: 1 onoff= %d dim= %d phot= %d\n"), support_onoff, support_dim, support_phot);
+        // check whether photo sensor is connected
+        phot = readPhot();
+        Serial.printf (_FX("BR: phot %d %s\n"), phot, found_phot ? "found" : "not found");
 
-        // init to user's full brightness
-        user_on = (getBrMax()*BPWM_MAX+50)/100;         // round
-        user_off = (getBrMin()*BPWM_MAX+50)/100;
-        bpwm = user_on;
+        // init to user's full on and off brightness settings
+        user_max = (getBrMax()*BPWM_MAX+50)/100;         // round
+        user_min = (getBrMin()*BPWM_MAX+50)/100;
+        bpwm = user_max;
         setDisplayBrightness(true);
         clock_off = false;
+
+        // log
+        Serial.printf (_FX("BR: B %d .. %d  onoff= %d dim= %d\n"),
+                        user_min, user_max, support_onoff, support_dim);
 
         // init idle time and period
         idle_t0 = millis();
@@ -797,14 +920,14 @@ void setupBrightness()
 
         // retrieve fast copies, init if first time, honor user settings
 
-        if (!NVReadUInt16 (NV_BPWM_BRIGHT, &fast_bpwm_bright) || fast_bpwm_bright > user_on)
-            fast_bpwm_bright = user_on;
-        if (!NVReadUInt16 (NV_BPWM_DIM, &fast_bpwm_dim) || fast_bpwm_dim < user_off)
-            fast_bpwm_dim = user_off;
+        if (!NVReadUInt16 (NV_BPWM_BRIGHT, &fast_bpwm_bright) || fast_bpwm_bright > user_max)
+            fast_bpwm_bright = user_max;
+        if (!NVReadUInt16 (NV_BPWM_DIM, &fast_bpwm_dim) || fast_bpwm_dim < user_min)
+            fast_bpwm_dim = user_min;
         if (fast_bpwm_bright <= fast_bpwm_dim) {
             // new user range is completely outside 
-            fast_bpwm_bright = user_on;
-            fast_bpwm_dim = user_off;
+            fast_bpwm_bright = user_max;
+            fast_bpwm_dim = user_min;
         }
         NVWriteUInt16 (NV_BPWM_BRIGHT, fast_bpwm_bright);
         NVWriteUInt16 (NV_BPWM_DIM, fast_bpwm_dim);
@@ -824,12 +947,12 @@ void setupBrightness()
             brb_rotset &= ~(1 << BRB_SHOW_ONOFF);
             checkBRBRotset();
         }
-        if ((brb_rotset & (1 << BRB_SHOW_PHOT)) && (!support_phot || !found_phot)) {
+        if ((brb_rotset & (1 << BRB_SHOW_PHOT)) && (!found_phot || (!support_onoff && !support_dim))) {
             Serial.print (F("BR: Removing BRB_SHOW_PHOT from brb_rotset\n"));
             brb_rotset &= ~(1 << BRB_SHOW_PHOT);
             checkBRBRotset();
         }
-        if ((brb_rotset & (1 << BRB_SHOW_BR)) && (!support_dim || (support_phot && found_phot))) {
+        if ((brb_rotset & (1 << BRB_SHOW_BR)) && (!support_dim || found_phot)) {
             Serial.print (F("BR: Removing BRB_SHOW_BR from brb_rotset\n"));
             brb_rotset &= ~(1 << BRB_SHOW_BR);
             checkBRBRotset();
@@ -862,54 +985,49 @@ void drawBrightness()
 }
 
 
-/* set display brightness according to current photo detector and check clock settings
+/* set display brightness according to current photo detector and/or clock settings
  */
 void followBrightness()
 {
         resetWatchdog();
 
+        // not too fast (eg, while not updating map after new DE)
+        static uint32_t follow_ms;
+        if (!timesUp (&follow_ms, FOLLOW_DT))
+            return;
+
+        // always check on/off first
         if (support_onoff)
             checkOnOffTimers();
 
-        if (support_phot && found_phot && !clock_off) {
+        // that's it if there is no light sensor or there is no control ability
+        if (!found_phot || (!support_dim && !support_onoff))
+            return;
 
-            // not too fast (eg, while not updating map after new DE)
-            static uint32_t prev_m;
-            if (!timesUp (&prev_m, FOLLOW_DT))
-                return;
+        // fresh
+        phot = readPhot();
 
-            // save current 
-            uint16_t prev_phot = phot;
-            int16_t prev_bpwm = bpwm;
+        // update brightness from new phot reading using linear interpolation between limits.
+        float del_phot = phot - fast_phot_dim;
+        float bpwm_range = fast_bpwm_bright - fast_bpwm_dim;
+        float phot_range = fast_phot_bright - fast_phot_dim;
+        if (phot_range == 0)
+            phot_range = 1;         // avoid /0
+        float new_bpwm = fast_bpwm_dim + bpwm_range * del_phot / phot_range;
+        if (new_bpwm < 0)
+            new_bpwm = 0;
+        else if (new_bpwm > BPWM_MAX)
+            new_bpwm = BPWM_MAX;
 
-            // update mean with new phot reading if connected
-            // linear interpolate between dim and bright limits to find new brightness
-            phot = readPhot();
-            int32_t del_phot = phot - fast_phot_dim;
-            int32_t bpwm_range = fast_bpwm_bright - fast_bpwm_dim;
-            int32_t phot_range = fast_phot_bright - fast_phot_dim;
-            if (phot_range == 0)
-                phot_range = 1;         // avoid /0
-            int16_t new_bpwm = fast_bpwm_dim + bpwm_range * del_phot / phot_range;
-            if (new_bpwm < 0)
-                new_bpwm = 0;
-            else if (new_bpwm > BPWM_MAX)
-                new_bpwm = BPWM_MAX;
-            // smooth update
-            bpwm = BPWM_BLEND*new_bpwm + (1-BPWM_BLEND)*bpwm + 0.5F;
-            if (bpwm < user_off)
-                bpwm = user_off;
-            if (bpwm > user_on)
-                bpwm = user_on;
+        // smooth update and one final range check
+        bpwm = BPWM_BLEND*new_bpwm + (1-BPWM_BLEND)*bpwm + 0.5F;
+        if (bpwm < user_min)
+            bpwm = user_min;
+        if (bpwm > user_max)
+            bpwm = user_max;
 
-            // draw even if bpwm doesn't change but phot changed some, such as going above fast_phot_bright
-            bool phot_changed = (phot>prev_phot && phot-prev_phot>30) || (phot<prev_phot && prev_phot-phot>30);
-
-            // engage if either changed
-            if (bpwm != prev_bpwm || phot_changed)
-                engageDisplayBrightness(false);
-        }
-
+        // engage
+        engageDisplayBrightness(false);
 }
 
 /* called on any tap anywhere to insure screen is on and reset idle_t0.
@@ -920,10 +1038,10 @@ bool brightnessOn()
         idle_t0 = millis();
 
         if (clock_off) {
-            Serial.println (F("display on"));
-            bpwm = user_on;
-            engageDisplayBrightness(true);
+            Serial.println (F("BR: display commanded on"));
+            bpwm = user_max;
             clock_off = false;
+            engageDisplayBrightness(true);
             return (true);
         } else
             return (false);
@@ -933,13 +1051,16 @@ bool brightnessOn()
  */
 void brightnessOff()
 {
-        Serial.println (F("display off"));
-        bpwm = user_off;
+        Serial.println (F("BR: display commanded off"));
+        bpwm = user_min;
+        clock_off = false;              // just to be sure engage works
         engageDisplayBrightness(true);
         clock_off = true;
 }
 
 /* given a tap within NCDXF_b, change brightness or clock setting
+ * N.B. scale assumed be drawn [user_min,user_max] in drawBrControl()
+ * N.B. maintain invariant that X_dim < X_bright
  */
 static void changeBrightness (const SCoord &s)
 {
@@ -950,37 +1071,48 @@ static void changeBrightness (const SCoord &s)
 
             // set brightness directly from tap location within allowed range
             if (s.y < b.y)
-                bpwm = user_on;
+                bpwm = user_max;
             else if (s.y > b.y + b.h)
-                bpwm = user_off;
+                bpwm = user_min;
             else
-                bpwm = user_on - (user_on-user_off)*(s.y - b.y)/b.h;
+                bpwm = user_max - (user_max-user_min)*(s.y - b.y)/b.h;
 
-            // redefine upper or lower range depending on top or bottom half
             if (s.y < b.y + b.h/2) {
-                // change bright end
+
+                // set new bright end
                 fast_bpwm_bright = bpwm;
-                fast_phot_bright = phot;
+
+                // set bright phot but don't create a reversal
+                if (phot > fast_phot_dim)
+                    fast_phot_bright = phot;
+
+                Serial.printf (_FX("BR: set bright:   bpwm: %4d <= %4d <= %4d   phot: %4d <= %4d <= %4d\n"),
+                                            fast_bpwm_dim, bpwm, fast_bpwm_bright,
+                                            fast_phot_dim, phot, fast_phot_bright);
 
                 // persist
                 NVWriteUInt16 (NV_BPWM_BRIGHT, fast_bpwm_bright);
                 NVWriteUInt16 (NV_PHOT_BRIGHT, fast_phot_bright);
+
              } else {
-                // change dim end
+                // set new dim end
                 fast_bpwm_dim = bpwm;
-                fast_phot_dim = phot;
+
+                // set dim phot but don't create a reversal
+                if (phot < fast_phot_bright)
+                    fast_phot_dim = phot;
+
+                Serial.printf (_FX("BR: set dim:   bpwm: %4d <= %4d <= %4d   phot: %4d <= %4d <= %4d\n"),
+                                            fast_bpwm_dim, bpwm, fast_bpwm_bright,
+                                            fast_phot_dim, phot, fast_phot_bright);
 
                 // persist
                 NVWriteUInt16 (NV_BPWM_DIM, fast_bpwm_dim);
                 NVWriteUInt16 (NV_PHOT_DIM, fast_phot_dim);
             }
 
+            clock_off = false;          // just to insure engage works
             engageDisplayBrightness(true);
-
-            // Serial.printf (_FX("BR: bpwm: %4d < %4d < %4d phot: %4d < %4d < %4d\n"),
-                                    // fast_bpwm_dim, bpwm, fast_bpwm_bright,
-                                    // fast_phot_dim, phot, fast_phot_bright);
-
         }
 
         else if (brb_mode == BRB_SHOW_BR) {
@@ -990,13 +1122,13 @@ static void changeBrightness (const SCoord &s)
 
             // set brightness directly from tap location within allowed range
             if (s.y < b.y)
-                bpwm = user_on;
+                bpwm = user_max;
             else if (s.y > b.y + b.h)
-                bpwm = user_off;
+                bpwm = user_min;
             else
-                bpwm = user_off + (user_on-user_off)*(b.y + b.h - s.y)/b.h;
+                bpwm = user_min + (user_max-user_min)*(b.y + b.h - s.y)/b.h;
 
-            // update scale and engage
+            clock_off = false;          // just to insure engage works
             engageDisplayBrightness(true);
 
         }
@@ -1009,14 +1141,10 @@ static void changeBrightness (const SCoord &s)
 
 }
 
-/* perform proper action given s known to be within NCDXF_b.
+/* run the brb/ncdxf box menu
  */
-void doNCDXFBoxTouch (const SCoord &s)
+static void runNCDXFMenu (const SCoord &s)
 {
-    if (s.y < NCDXF_b.y + NCDXF_b.h/10) {
-
-        // tapped near the top so show menu of options, or toggle if only 2
-
         // this list of each BRB is to avoid knowing their values, nice BUT must be in same order as mitems[]
         static uint8_t mi_brb_order[BRB_N] = {
             BRB_SHOW_BEACONS, BRB_SHOW_SWSTATS, BRB_SHOW_ONOFF, BRB_SHOW_PHOT, BRB_SHOW_BR,
@@ -1036,9 +1164,9 @@ void doNCDXFBoxTouch (const SCoord &s)
                         brb_names[BRB_SHOW_SWSTATS]},
              {support_onoff ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_ONOFF)), 1, _MI_INDENT, brb_names[BRB_SHOW_ONOFF]},
-             {support_phot && found_phot ? MENU_AL1OFN : MENU_IGNORE,
+             {(support_onoff || support_dim) && found_phot ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_PHOT)), 1, _MI_INDENT, brb_names[BRB_SHOW_PHOT]},
-             {support_dim && !(support_phot && found_phot) ? MENU_AL1OFN : MENU_IGNORE,
+             {support_dim && !found_phot ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_BR)), 1, _MI_INDENT, brb_names[BRB_SHOW_BR]},
              {getBMEData(BME_76,false) != NULL ? MENU_AL1OFN : MENU_IGNORE,
                         (bool)(brb_rotset & (1 << BRB_SHOW_BME76)), 1, _MI_INDENT, brb_names[BRB_SHOW_BME76]},
@@ -1094,10 +1222,20 @@ void doNCDXFBoxTouch (const SCoord &s)
 
         // save
         NVWriteUInt16 (NV_BRB_ROTSET, brb_rotset);
+}
+
+/* perform proper action given s known to be within NCDXF_b.
+ */
+void doNCDXFBoxTouch (const SCoord &s)
+{
+    if (s.y < NCDXF_b.y + NCDXF_b.h/10) {
+
+        // tapped near the top so show menu of options
+        runNCDXFMenu (s);
 
     } else {
 
-        // tapped below title so pass to appropriate handler
+        // tapped below title so pass on to appropriate handler
 
         switch ((BRB_MODE)brb_mode) {
 

@@ -26,7 +26,7 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_TOUCH_CAL_E
     4,                          // NV_TOUCH_CAL_F
     4,                          // NV_TOUCH_CAL_DIV
-    1,                          // NV_DE_DST    not used
+    1,                          // NV_DXMAX_N
     1,                          // NV_DE_TIMEFMT
     4,                          // NV_DE_LAT
     4,                          // NV_DE_LNG
@@ -66,12 +66,12 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_DXHOST_LEN,              // NV_DXHOST
     2,                          // NV_DXPORT
     1,                          // NV_SWHUE
-    4,                          // NV_TEMPCORR
+    4,                          // NV_TEMPCORR76
     NV_GPSDHOST_LEN,            // NV_GPSDHOST
     4,                          // NV_KX3BAUD
     2,                          // NV_BCPOWER
     4,                          // NV_CD_PERIOD
-    4,                          // NV_PRESCORR
+    4,                          // NV_PRESCORR76
     2,                          // NV_BR_IDLE
     1,                          // NV_BR_MIN
     1,                          // NV_BR_MAX
@@ -91,8 +91,8 @@ static const uint8_t nv_sizes[NV_N] = {
     2,                          // NV_X11FLAGS
     2,                          // NV_BCFLAGS
     NV_DAILYONOFF_LEN,          // NV_DAILYONOFF
-    4,                          // NV_TEMPCORR2
-    4,                          // NV_PRESCORR2
+    4,                          // NV_TEMPCORR77
+    4,                          // NV_PRESCORR77
     2,                          // NV_SHORTPATHCOLOR
     2,                          // NV_LONGPATHCOLOR
     2,                          // NV_PLOTOPS
@@ -156,6 +156,10 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_CONTESTS
     4,                          // NV_BCTOA
     NV_ADIFFN_LEN,              // NV_ADIFFN
+    NV_I2CFN_LEN,               // NV_I2CFN
+    1,                          // NV_I2CON
+    4,                          // NV_DXMAX_T
+    NV_DXWLIST_LEN,             // NV_DXWLIST
 
 };
 

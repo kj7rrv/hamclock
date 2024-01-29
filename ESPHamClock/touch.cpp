@@ -83,7 +83,7 @@ TouchType checkKBWarp (SCoord &s)
     TouchType tt = TT_NONE;
     s.x = s.y = 0;
 
-#if !defined(_IS_ESP8266) && !defined(_WEB_ONLY) && !defined(_USE_FB0)
+#if !defined(_IS_ESP8266) && !defined(_WEB_ONLY)
 
     // ignore if don't want warping
     if (!want_kbcursor)
@@ -324,7 +324,6 @@ TouchType readCalTouch (SCoord &s)
  */
 void drainTouch()
 {
-#if defined(_IS_ESP8266)
     resetWatchdog();
     uint32_t t0 = millis();
     bool touched = false;
@@ -336,5 +335,4 @@ void drainTouch()
     }
     // Serial.println (F("Drain complete"));
     resetWatchdog();
-#endif // defined(_IS_ESP8266)
 }

@@ -129,10 +129,6 @@ IPAddress WiFi::localIP(void)
         if (a[0] != 0)
             return (a);
 
-        // create socket back to home base then get our IP from that
-        const int port = 80;
-
-
         // lookup host address, retry for several seconds in case network still coming up after host power-on
         // N.B. must call freeaddrinfo(aip) after successful call before returning
         struct addrinfo hints, *aip = NULL;
@@ -140,12 +136,12 @@ IPAddress WiFi::localIP(void)
         memset (&hints, 0, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
-        snprintf (port_str, sizeof(port_str), "%d", port);
+        snprintf (port_str, sizeof(port_str), "%d", backend_port);
         int error = 1;
         for (time_t start_t = time(NULL); error && time(NULL) < start_t + 10; ) {
             error = ::getaddrinfo (backend_host, port_str, &hints, &aip);
             if (error) {
-                printf ("getaddrinfo(%s:%d): %s\n", backend_host, port, gai_strerror(error));
+                printf ("getaddrinfo(%s:%d): %s\n", backend_host, backend_port, gai_strerror(error));
                 usleep (1000000);
                 aip = NULL;
             }
@@ -158,13 +154,13 @@ IPAddress WiFi::localIP(void)
         sockfd = ::socket (aip->ai_family, aip->ai_socktype, aip->ai_protocol);
         if (sockfd < 0) {
             freeaddrinfo (aip);
-            printf ("socket(%s:%d): %s\n", backend_host, port, strerror(errno));
+            printf ("socket(%s:%d): %s\n", backend_host, backend_port, strerror(errno));
             return (a);
         }
 
         // connect
         if (::connect (sockfd, aip->ai_addr, aip->ai_addrlen) < 0) {
-            printf ("connect(%s,%d): %s\n", backend_host, port, strerror(errno));
+            printf ("connect(%s,%d): %s\n", backend_host, backend_port, strerror(errno));
             freeaddrinfo (aip);
             close (sockfd);
             return (a);
@@ -177,7 +173,7 @@ IPAddress WiFi::localIP(void)
         struct sockaddr_in sa;
         socklen_t sl = sizeof(sa);
         if (::getsockname (sockfd, (struct sockaddr *)&sa, &sl) < 0) {
-            printf ("getsockname(%s,%d): %s\n", backend_host, port, strerror(errno));
+            printf ("getsockname(%s,%d): %s\n", backend_host, backend_port, strerror(errno));
             close (sockfd);
             return (a);
         }
@@ -396,7 +392,7 @@ int WiFi::channel(void)
 	int channel = 0;
 
 #ifdef _IS_LINUX
-	FILE *pf = popen ("iw wlan0 info", "r");
+	FILE *pf = popen ("/usr/sbin/iw wlan0 info", "r");
 	if (pf) {
 	    char buf[1024];
 	    while (fgets (buf, sizeof(buf), pf))

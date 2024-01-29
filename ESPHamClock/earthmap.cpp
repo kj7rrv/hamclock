@@ -1298,9 +1298,6 @@ void drawMapMenu()
         // restart map if enough has changed
         if (full_redraw)
             initEarthMap();
-
-        // update state
-        logState();
     }
 
     if (!menu_ok || !full_redraw) {
@@ -1387,8 +1384,10 @@ void drawMoreEarth()
 {
     resetWatchdog();
 
+    #if defined (_IS_ESP8266)
     // handy health indicator and update timer
     digitalWrite(LIFE_LED, !digitalRead(LIFE_LED));
+    #endif // _IS_ESP8266
 
     // refresh circumstances at start of each map scan but not very first call after initEarthMap()
     if (moremap_s.y == map_b.y && moremap_s.x != 0) {

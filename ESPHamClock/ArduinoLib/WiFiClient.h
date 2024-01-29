@@ -47,10 +47,12 @@ class WiFiClient {
 	int write (const uint8_t *buf, int n);
 	void print (void);
 	void print (String s);
+	void print (const char *str);
 	void print (float f);
 	void print (float f, int s);
 	void println (void);
 	void println (String s);
+	void println (const char *str);
 	void println (uint32_t ui);
 	void println (int i);
 	void println (float f);

@@ -7,58 +7,27 @@
 #define _HAMCLOCK_H
 
 
-// handy build categories
+// POSIX modules
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
+#include <ctype.h>
+#include <math.h>
 
-#if defined(ESP8266)
-  #define _IS_ESP8266
-#else
-  #define _IS_UNIX
-#endif
 
-#if defined(__linux__)
-  #define _IS_LINUX
-#endif
+#include "ArduinoLib.h"
 
-#if defined(__FreeBSD__)
-  #define _IS_FREEBSD
-#endif
 
-#if (defined(__arm__) || defined(__aarch64__)) && defined(_IS_LINUX)
-  #if defined(__has_include)
-      #if __has_include(<bcm_host.h>) || __has_include(<pigpio.h>) || __has_include(<wiringPi.h>) 
-        #define _IS_LINUX_RPI
-      #endif
-  #endif
-#endif
+// N.B. keep showDefines() up to date
 
-#if defined(_IS_ESP8266)
-  #define _IIC_ESP
-#elif defined(__has_include)
-  #if defined(_IS_FREEBSD) && __has_include(<dev/iicbus/iic.h>) && __has_include("/dev/iic0")
-    #define _IIC_FREEBSD
-  #elif defined(_IS_LINUX) && (__has_include(<linux/i2c-dev.h>) || __has_include("linux/i2c-dev.h"))
-    #define _IIC_LINUX
-  #endif
-#endif
 
-#if defined(_IS_ESP8266)
-  #define _GPIO_ESP
-#elif defined(__has_include)
-  #if defined(_IS_FREEBSD) && __has_include(<libgpio.h>) && __has_include("/dev/gpioc0")
-    #define _GPIO_FREEBSD
-  #elif defined(_IS_LINUX) && (__has_include(<bcm_host.h>) || __has_include(<pigpio.h>) || __has_include(<wiringPi.h>) )
-    #define _GPIO_LINUX
-  #endif
-#endif
-
-// whether we seem to support discreet IO
-#if defined(_GPIO_ESP) || defined(_GPIO_FREEBSD) || defined(_GPIO_LINUX)
-  #define _SUPPORT_GPIO
-#endif
-
-// whether we can support a temp sensor
-#if defined(_IIC_ESP) || defined(_IIC_FREEBSD) || defined(_IIC_LINUX)
-  #define _SUPPORT_ENVSENSOR
+// whether we have native IO
+#if defined(_NATIVE_GPIO_ESP) || defined(_NATIVE_GPIO_FREEBSD) || defined(_NATIVE_GPIO_LINUX)
+  #define _SUPPORT_NATIVE_GPIO
 #endif
 
 // Flip screen only on ESP
@@ -66,8 +35,8 @@
   #define _SUPPORT_FLIP
 #endif
 
-// kx3 on any system with GPIO
-#if defined(_SUPPORT_GPIO)
+// kx3 on any system with NATIVE_GPIO
+#if defined(_SUPPORT_NATIVE_GPIO)
   #define _SUPPORT_KX3
 #endif
 
@@ -147,24 +116,16 @@
 #define EARTH_H   330
 #define EARTH_W   660
 
-
-// UNIX-like modules
-#include <stdio.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <math.h>
 #if defined(_IS_UNIX)
 #include <signal.h>
+#include <sys/file.h>
 #endif // _IS_UNIX
 
 // see Adafruit_RA8875.h
 #define USE_ADAFRUIT_GFX_FONTS
 
 // community modules
+#include <Arduino.h>
 #include <TimeLib.h>
 #include <ESP8266WiFi.h>
 #include <IPAddress.h>
@@ -178,43 +139,13 @@ typedef struct {
     uint16_t x, y;
 } SCoord;
 #include "Adafruit_RA8875_R.h"
+#include "Adafruit_MCP23X17.h"
 
 // HamClock modules
 #include "calibrate.h"
 #include "version.h"
 #include "P13.h"
 
-
-// GPIO pins for unix systems
-#if defined(_SUPPORT_GPIO) && defined(_IS_UNIX)
-
-#include "GPIO.h"
-
-// Raspberry Pi GPIO definitions, not header pins
-
-#define SW_RED_GPIO             13      // header 33
-#define SW_GRN_GPIO             19      // header 35
-#define SW_COUNTDOWN_GPIO       26      // header 37
-#define SW_ALARMOUT_GPIO        06      // header 31
-#define SW_ALARMOFF_GPIO        05      // header 29
-#define Elecraft_GPIO           14      // header 8
-#define SATALARM_GPIO           20      // header 38
-#define ONAIR_GPIO              21      // header 40
-
-
-extern void SWresetIO(void);
-extern void satResetIO(void);
-extern void radioResetIO(void);
-
-#endif
-
-
-// GPIO pins for ESP Huzzah
-#if defined (_GPIO_ESP)
-
-#define Elecraft_GPIO           15
-
-#endif
 
 
 
@@ -243,7 +174,6 @@ extern void radioResetIO(void);
 #define PATH_SEGLEN     2
 
 // tcp ports
-#define BACKEND_PORT    80
 #define RESTFUL_PORT    8080
 #define LIVEWEB_PORT    8081
 
@@ -429,6 +359,8 @@ typedef struct {
 
 
 extern Adafruit_RA8875_R tft;           // compat layer
+extern Adafruit_MCP23X17 mcp;           // I2C digital IO device
+extern bool found_mcp;                  // whether found
 extern TZInfo de_tz, dx_tz;             // time zone info
 extern SBox NCDXF_b;                    // NCDXF box, and more
 
@@ -528,10 +460,7 @@ extern SBox de_maid_b;                  // de maidenhead pick
 extern SBox lkscrn_b;                   // screen lock icon button
 
 extern SBox skip_b;                     // common "Skip" button
-extern bool skip_skip;                  // whether to skip skipping
-extern bool want_kbcursor;              // whether to support keyboard operation
-extern bool init_iploc;                 // init DE using our IP location
-extern const char *init_locip;          // init DE from given IP
+
 
 // size and location of maidenhead labels
 #define MH_TR_H  9                      // top row background height
@@ -608,7 +537,6 @@ extern bool inBox (const SCoord &s, const SBox &b);
 extern bool inCircle (const SCoord &s, const SCircle &c);
 extern bool boxesOverlap (const SBox &b1, const SBox &b2);
 extern void doReboot(void);
-extern void doExit(void);
 extern void printFreeHeap (const __FlashStringHelper *label);
 extern void getWorstMem (int *heap, int *stack);
 extern void resetWatchdog(void);
@@ -617,6 +545,7 @@ extern bool timesUp (uint32_t *prev, uint32_t dt);
 extern void setDXPathInvalid(void);
 extern const SCoord raw2appSCoord (const SCoord &s_raw);
 extern bool overMap (const SCoord &s);
+extern bool overMap (const SBox &b);
 extern bool overRSS (const SCoord &s);
 extern bool overRSS (const SBox &b);
 extern void setScreenLock (bool on);
@@ -641,7 +570,6 @@ extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
 extern void getDefaultCallsign(void);
 extern void drawCallsign (bool all);
-extern void logState (void);
 extern const char *hc_version;
 extern void fillSBox (const SBox &box, uint16_t color);
 extern void drawSBox (const SBox &box, uint16_t color);
@@ -690,6 +618,7 @@ extern void doOTAupdate(const char *ver);
  */
 
 
+// DXClusterSpot used in several places
 #define MAX_SPOTCALL_LEN                12      // including \0
 #define MAX_SPOTGRID_LEN                MAID_CHARLEN
 #define MAX_SPOTMODE_LEN                8
@@ -710,6 +639,7 @@ typedef struct {
 } DXClusterSpot;
 
 
+extern bool from_set_adif;
 extern void updateADIF (const SBox &box);
 extern bool checkADIFTouch (const SCoord &s, const SBox &box);
 extern void drawADIFSpotsOnMap (void);
@@ -768,15 +698,36 @@ extern void getLunarRS (const time_t t0, const LatLong &ll, time_t *riset, time_
 
 /*********************************************************************************************
  *
- * contests.cpp
+ * blinker.cpp
  *
  */
 
-extern bool updateContests (const SBox &box);
-extern bool checkContestsTouch (const SCoord &s, const SBox &box);
-extern int getContests (char **credp, char ***conppp);
+#define BLINKER_OFF_HZ  (-1)    // special hz to mean constant off
+#define BLINKER_ON_HZ   0       // speacial hz to mean constant on
 
+typedef struct {
+    int pin;                    // pin number
+    int hz;                     // blink rate or one of BLINKER_*
+    bool on_is_low;             // whether "on" means drive LOW
+    bool started;               // set when an attempt was made to start the service
+    bool disable;               // set to stop the thread
+} ThreadBlinker;
 
+extern void startBinkerThread (volatile ThreadBlinker &tb, int pin, bool on_is_low);
+extern void setBlinkerRate (volatile ThreadBlinker &tb, int hz);
+extern void disableBlinker (volatile ThreadBlinker &tb);
+
+typedef struct {
+    int pin;                    // pin number
+    int hz;                     // blink rate or one of BLINKER_*
+    bool started;               // set when an attempt was made to start the service
+    bool disable;               // set to stop the thread
+    bool value;                 // latest value
+} MCPPoller;
+
+extern void startMCPPoller (volatile MCPPoller &mp, int pin, int hz);
+extern void disableMCPPoller (volatile MCPPoller &mp);
+extern bool readMCPPoller (volatile const MCPPoller &mp);
 
 
 
@@ -797,9 +748,9 @@ extern bool setDisplayOnOffTimes (int dow, uint16_t on, uint16_t off, int &idle)
 extern bool getDisplayOnOffTimes (int dow, uint16_t &on, uint16_t &off);
 extern bool getDisplayInfo (uint16_t &percent, uint16_t &idle_min, uint16_t &idle_left_sec);
 extern void setFullBrightness(void);
-extern bool brControlOk(void);
+extern bool brDimmableOk(void);
 extern bool brOnOffOk(void);
-extern bool found_phot;
+extern bool found_phot, found_ltr;
 
 
 
@@ -897,6 +848,21 @@ extern uint16_t HSV565 (uint8_t h, uint8_t s, uint8_t v);
 
 /*********************************************************************************************
  *
+ * contests.cpp
+ *
+ */
+
+extern bool updateContests (const SBox &box);
+extern bool checkContestsTouch (const SCoord &s, const SBox &box);
+extern int getContests (char **credp, char ***conppp);
+
+
+
+
+
+
+/*********************************************************************************************
+ *
  * dxcluster.cpp
  *
  */
@@ -926,6 +892,8 @@ extern void setDXCSpotPosition (DXClusterSpot &s);
 extern void getRawSpotSizes (uint16_t &lwRaw, uint16_t &mkRaw);
 extern void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row);
 extern void drawDXPathOnMap (const DXClusterSpot &spot);
+extern bool onDXWatchList (const char *call);
+
 
 
 #if defined(_IS_ESP8266)
@@ -1041,14 +1009,14 @@ extern bool desiredBearing (const LatLong &ll, float &bear);
  *
  */
 
-// pack ESP into words to save almost 2 kB
+// pack into int16_t to save almost 2 kB on ESP
 
 #define BMEPACK_T(t)            (round((t)*50))
-#define BMEPACK_hPa(p)          (round((p)*10))
-#define BMEPACK_inHg(p)         (round((p)*100))
+#define BMEPACK_P(p)            (useMetricUnits() ? round((p)*10) : round((p)*100))
 #define BMEPACK_H(h)            (round((h)*100))
+
 #define BMEUNPACK_T(t)          ((t)/50.0F)
-#define BMEUNPACK_P(p)          (useMetricUnits() ? ((p)/10.0F) : ((p)/100.0F))
+#define BMEUNPACK_P(p)          (useMetricUnits() ? ((p)*0.1F) : ((p)*0.01F))
 #define BMEUNPACK_H(h)          ((h)/100.0F)
 
 // measurement queues
@@ -1082,6 +1050,8 @@ extern const BMEData *getBMEData (BMEIndex i, bool fresh_read);
 extern int getNBMEConnected (void);
 extern float dewPoint (float T, float RH);
 extern void doBMETouch (const SCoord &s);
+extern bool recalBMETemp (BMEIndex device, float new_corr);
+extern bool recalBMEPres (BMEIndex device, float new_corr);
 
 
 
@@ -1130,6 +1100,7 @@ extern int nextSatRSEvents (time_t **rises, float **raz, time_t **sets, float **
 extern bool isSatDefined(void);
 extern void drawDXSatMenu(const SCoord &s);
 extern bool dx_info_for_sat;
+extern void satResetIO(void);
 
 
 
@@ -1231,8 +1202,6 @@ extern char live_html[];
 
 extern void initLiveWeb(bool verbose);
 extern time_t last_live;
-extern bool no_web_touch;
-extern int liveweb_port;
 
 
 
@@ -1310,12 +1279,15 @@ typedef enum {
     N_CSPR
 } ColorSelection;
 
+#define NV_ROTHOST_LEN          18
+#define NV_RIGHOST_LEN          18
+#define NV_FLRIGHOST_LEN        18
 
 extern void clockSetup(void);
 extern const char *getWiFiSSID(void);
 extern const char *getWiFiPW(void);
 extern const char *getCallsign(void);
-extern void setCallsign (const char *cs);
+extern bool setCallsign (const char *cs);
 extern const char *getDXClusterHost(void);
 extern int getDXClusterPort(void);
 extern bool setDXCluster (char *host, const char *port_str, char ynot[]);
@@ -1334,7 +1306,6 @@ extern bool setBMETempCorr(BMEIndex i, float delta);
 extern bool setBMEPresCorr(BMEIndex i, float delta);
 extern const char *getGPSDHost(void);
 extern bool useLocalNTPHost(void);
-extern bool GPIOOk(void);
 extern const char *getLocalNTPHost(void);
 extern bool useDXCluster(void);
 extern uint32_t getKX3Baud(void);
@@ -1348,13 +1319,11 @@ extern bool getX11FullScreen(void);
 extern bool latSpecIsValid (const char *lng_spec, float &lng);
 extern bool lngSpecIsValid (const char *lng_spec, float &lng);
 extern bool getDemoMode(void);
-extern void setDemoMode(bool on);
 extern int16_t getCenterLng(void);
-extern void setCenterLng(int16_t);
 extern DateFormat getDateFormat(void);
-extern bool getRigctld (char host[], int *portp);
-extern bool getRotctld (char host[], int *portp);
-extern bool getFlrig (char host[], int *portp);
+extern bool getRigctld (char host[NV_RIGHOST_LEN], int *portp);
+extern bool getRotctld (char host[NV_ROTHOST_LEN], int *portp);
+extern bool getFlrig (char host[NV_FLRIGHOST_LEN], int *portp);
 extern const char *getDXClusterLogin(void);
 extern int getSpotPathSize(void);
 extern bool setMapColor (const char *name, uint16_t rgb565);
@@ -1602,7 +1571,7 @@ typedef enum {
 
     NV_TOUCH_CAL_F,             // touch calibration coefficient
     NV_TOUCH_CAL_DIV,           // touch calibration normalization
-    NV_DE_DST,                  // deprecated
+    NV_DXMAX_N,                 // n dx connections since NV_DXMAX_T
     NV_DE_TIMEFMT,              // DE: 0=info; 1=analog; 2=cal; 3=analog+day; 4=dig 12hr; 5=dig 24hr
     NV_DE_LAT,                  // DE latitude, degrees N
 
@@ -1650,13 +1619,13 @@ typedef enum {
 
     NV_DXPORT,                  // DX cluster port number
     NV_SWHUE,                   // stopwatch color RGB 565
-    NV_TEMPCORR,                // BME280 76 temperature correction, NV_METRIC_ON units
+    NV_TEMPCORR76,              // BME280 76 temperature correction, NV_METRIC_ON units
     NV_GPSDHOST,                // gpsd daemon host name
     NV_KX3BAUD,                 // KX3 baud rate or 0
 
     NV_BCPOWER,                 // VOACAP power, watts
     NV_CD_PERIOD,               // stopwatch count down period, seconds
-    NV_PRESCORR,                // BME280 76 pressure correction, NV_METRIC_ON units
+    NV_PRESCORR76,              // BME280 76 pressure correction, NV_METRIC_ON units
     NV_BR_IDLE,                 // idle period, minutes
     NV_BR_MIN,                  // minimum brightness, percent of display range
 
@@ -1680,8 +1649,8 @@ typedef enum {
 
     NV_BCFLAGS,                 // Big Clock bitmask: 1=date;2=wx;4=dig;8=12hr;16=nosec;32=UTC;64=an+dig;128=hrs;256=SpWx;512=hands;1024=sat
     NV_DAILYONOFF,              // 7 2-byte on times then 7 off times, each mins from midnight
-    NV_TEMPCORR2,               // BME280 77 temperature correction, NV_METRIC_ON units
-    NV_PRESCORR2,               // BME280 77 pressure correction, NV_METRIC_ON units
+    NV_TEMPCORR77,              // BME280 77 temperature correction, NV_METRIC_ON units
+    NV_PRESCORR77,              // BME280 77 pressure correction, NV_METRIC_ON units
     NV_SHORTPATHCOLOR,          // prop short path color as RGB 565
 
     NV_LONGPATHCOLOR,           // prop long path color as RGB 565
@@ -1758,6 +1727,10 @@ typedef enum {
 
     NV_BCTOA,                   // VOACAP take off angle, degs
     NV_ADIFFN,                  // ADIF file name, if any
+    NV_I2CFN,                   // I2C device filename
+    NV_I2CON,                   // whether to use I2C
+    NV_DXMAX_T,                 // time when n dx connections exceeded max
+    NV_DXWLIST,                 // DX watch list
 
     NV_N
 
@@ -1776,12 +1749,14 @@ typedef enum {
 #define NV_DAILYONOFF_LEN       28      // (2*DAYSPERWEEK*sizeof(uint16_t))
 #define NV_DE_GRID_LEN          MAID_CHARLEN
 #define NV_DX_GRID_LEN          MAID_CHARLEN
-#define NV_ROTHOST_LEN          18
-#define NV_RIGHOST_LEN          18
-#define NV_FLRIGHOST_LEN        18
+// NV_ROTHOST_LEN needed above for setup.cpp
+// NV_RIGHOST_LEN needed above for setup.cpp
+// NV_FLRIGHOST_LEneeded above for setup.cpp
 #define NV_DXLOGIN_LEN          12
+#define NV_DXWLIST_LEN          26
 #define NV_DXCLCMD_LEN          35
 #define NV_ADIFFN_LEN           30
+#define NV_I2CFN_LEN            30
 
 
 
@@ -2046,7 +2021,8 @@ extern void getPSKSpots (const PSKReport* &rp, int &n_rep);
  *
  */
 
-void setRadioSpot (float kHz);
+extern void setRadioSpot (float kHz);
+extern void radioResetIO(void);
 
 
 
@@ -2212,6 +2188,8 @@ extern SWDisplayState getSWDisplayState (void);
 extern void getAlarmState (AlarmState &as, uint16_t &hr, uint16_t &mn);
 extern void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn);
 extern SWBCBits getBigClockBits(void);
+extern void SWresetIO(void);
+
 
 
 
@@ -2224,6 +2202,8 @@ extern SWBCBits getBigClockBits(void);
  *
  */
 extern int32_t getTZ (const LatLong &ll);
+extern int getTZStep (const LatLong &ll);
+
 
 
 
@@ -2313,10 +2293,11 @@ extern void drawSpaceStats(uint16_t color);
 extern bool getBCMatrix (BandCdtnMatrix &bm);
 extern time_t nextPaneRotation (PlotPane pp);
 
+extern char remote_addr[16];
+
+
 
 extern uint8_t rss_interval;
-extern int restful_port;
-extern const char *backend_host;
 
 #define N_BCMODES       6               // n voacap modes
 typedef struct {
@@ -2330,6 +2311,8 @@ extern uint8_t bc_modevalue;
 extern uint16_t bc_power;
 extern float bc_toa;
 extern uint8_t bc_utc_tl;
+extern const int n_bc_powers;
+extern uint16_t bc_powers[];
 
 extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, 
     SPWxValue &drap, SPWxValue &bz, SPWxValue &bt,

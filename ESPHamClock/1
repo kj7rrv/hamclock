@@ -1,0 +1,270 @@
+In file included from ArduinoLib/Arduino.h:12,
+                 from ArduinoLib/Adafruit_Sensor.h:24,
+                 from BME280.cpp:4:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from ArduinoLib/WiFiClient.h:30,
+                 from ArduinoLib/ESP8266httpUpdate.h:4,
+                 from OTAupdate.cpp:4:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from UNIXHamClock.cpp:6:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from Germano-Bold-16.cpp:1:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from Germano-Regular-16.cpp:1:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from Germano-Bold-30.cpp:1:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from adif.cpp:7:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from asknewpos.cpp:16:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+OTAupdate.cpp: In function 'bool newVersionIsAvailable(char*, uint16_t)':
+OTAupdate.cpp:91:25: error: 'getTCPLine' cannot be used as a function
+   91 |         if (!getTCPLine (v_client, line, sizeof(line), NULL)) {
+      |              ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+OTAupdate.cpp: In function 'bool askOTAupdate(char*)':
+OTAupdate.cpp:170:25: error: 'getTCPLine' cannot be used as a function
+  170 |         if (!getTCPLine (v_client, line, sizeof(line), NULL)) {
+      |              ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+OTAupdate.cpp:176:27: error: 'getTCPLine' cannot be used as a function
+  176 |         while (getTCPLine (v_client, line, sizeof(line), NULL)) {
+      |                ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+In file included from ArduinoLib/Arduino.h:12,
+                 from HamClock.h:31,
+                 from astro.cpp:36:
+ArduinoLib/../ArduinoLib.h:96:13: warning: 'getTCPLine' initialized and declared 'extern'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |             ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:25: error: 'WiFiClient' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                         ^~~~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:37: error: 'client' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                     ^~~~~~
+ArduinoLib/../ArduinoLib.h:96:45: error: expected primary-expression before 'char'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                             ^~~~
+ArduinoLib/../ArduinoLib.h:96:67: error: expected primary-expression before 'line_len'
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                   ^~~~~~~~
+ArduinoLib/../ArduinoLib.h:96:86: error: expected primary-expression before '*' token
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                      ^
+ArduinoLib/../ArduinoLib.h:96:87: error: 'll' was not declared in this scope
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                       ^~
+ArduinoLib/../ArduinoLib.h:96:89: error: expression list treated as compound expression in initializer [-fpermissive]
+   96 | extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
+      |                                                                                         ^
+adif.cpp: In function 'int readADIFWiFiClient(WiFiClient&, long int, char*, int)':
+adif.cpp:751:67: error: 'getTCPChar' was not declared in this scope; did you mean 'getwchar'?
+  751 |     for (long nr = 0; (!content_length || nr < content_length) && getTCPChar (client, &c); nr++) {
+      |                                                                   ^~~~~~~~~~
+      |                                                                   getwchar
+make: *** [BME280.o] Error 1
+make: *** Waiting for unfinished jobs....
+make: *** [Germano-Bold-16.o] Error 1
+make: *** [OTAupdate.o] Error 1
+make: *** [Germano-Regular-16.o] Error 1
+make: *** [Germano-Bold-30.o] Error 1
+make: *** [UNIXHamClock.o] Error 1
+make: *** [adif.o] Error 1
+make: *** [asknewpos.o] Error 1
+make: *** [astro.o] Error 1

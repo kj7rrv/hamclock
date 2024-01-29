@@ -9,7 +9,6 @@
  */
 #define DEF_SSID        "FiOS-9QRT4-Guest"
 #define DEF_PASS        "Veritium2017"
-#define DEF_CALL        "WB0OEW"
 
 // feature tests.
 
@@ -28,39 +27,44 @@
 // debugs: force all on just for visual testing, and show bounds
 // #define _SHOW_ALL                    // RBF
 // #define _MARK_BOUNDS                 // RBF
+#if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
+#warning _SHOW_ALL or _MARK_BOUNDS are set
+#endif
 #ifdef _SHOW_ALL
     #undef _WIFI_NEVER
     #undef _WIFI_ASK
     #define _WIFI_ALWAYS
     #define _SUPPORT_FLIP
     #define _SUPPORT_KX3 
-    #define _SUPPORT_ENVSENSOR
-    #define _SUPPORT_GPIO
+    #define _SUPPORT_NATIVE_GPIO
     #define _SUPPORT_ADIFILE
+    #define _SUPPORT_SPOTPATH
 #endif // _SHOW_ALL
 
 
 // static storage for published setup items
-static char wifissid[NV_WIFI_SSID_LEN];
-static char wifipw[NV_WIFI_PW_LEN];
-static char callsign[NV_CALLSIGN_LEN];
-static char dxlogin[NV_DXLOGIN_LEN];
-static char dxhost[NV_DXHOST_LEN];
-static char rothost[NV_ROTHOST_LEN];
-static char righost[NV_RIGHOST_LEN];
-static char flrighost[NV_FLRIGHOST_LEN];
-static char gpsdhost[NV_GPSDHOST_LEN];
-static char ntphost[NV_NTPHOST_LEN];
+static char wifi_ssid[NV_WIFI_SSID_LEN];
+static char wifi_pw[NV_WIFI_PW_LEN];
+static char call_sign[NV_CALLSIGN_LEN];
+static char dx_login[NV_DXLOGIN_LEN];
+static char dx_host[NV_DXHOST_LEN];
+static char rot_host[NV_ROTHOST_LEN];
+static char rig_host[NV_RIGHOST_LEN];
+static char flrig_host[NV_FLRIGHOST_LEN];
+static char gpsd_host[NV_GPSDHOST_LEN];
+static char ntp_host[NV_NTPHOST_LEN];
 static uint8_t bright_min, bright_max;
-static uint16_t dxport;
-static uint16_t rigport, rotport, flrigport;
+static uint16_t dx_port;
+static uint16_t rig_port, rot_port, flrig_port;
 static float temp_corr[MAX_N_BME];
 static float pres_corr[MAX_N_BME];
 static int16_t center_lng;
 static int16_t alt_center_lng;
 static bool alt_center_lng_set;
 static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
+static char dx_wlist[NV_DXWLIST_LEN];
 static char adif_fn[NV_ADIFFN_LEN];
+static char i2c_fn[NV_I2CFN_LEN];
 
 
 // layout constants
@@ -83,12 +87,12 @@ static char adif_fn[NV_ADIFFN_LEN];
 #define PR_H            (PR_A+PR_D)             // prompt height
 #define ASK_TO          10                      // user option timeout, seconds
 #define PAGE_W          120                     // page button width
-#define PAGE_H          35                      // page button height
+#define PAGE_H          33                      // page button height
 #define CURSOR_DROP     2                       // pixels to drop cursor
 #define NVMS_MKMSK      0x3                     // NV_MAPSPOTS mark mask
 #define NVMS_NONE       0                       // NV_MAPSPOTS & MKMSK value to not mark spots
 #define NVMS_PREFIX     1                       // NV_MAPSPOTS & MKMSK value to mark spots with prefix
-#define NVMS_CALL       2                       // NV_MAPSPOTS & MKMSK value to mark spots with callsign
+#define NVMS_CALL       2                       // NV_MAPSPOTS & MKMSK value to mark spots with call_sign
 #define NVMS_DOT        3                       // NV_MAPSPOTS & MKMSK value to mark spots with dots
 #define NVMS_THIN       0x4                     // NV_MAPSPOTS bit to use THINPATHSZ
 #define NVMS_WIDE       0x8                     // NV_MAPSPOTS bit to use WIDEPATHSZ
@@ -185,6 +189,7 @@ typedef enum {
     WIFIPASS_SPR,
 
     // page "2"
+    DXWLIST_SPR,
     DXPORT_SPR,
     DXHOST_SPR,
     DXLOGIN_SPR,
@@ -205,10 +210,11 @@ typedef enum {
 
     // page "4"
     CENTERLNG_SPR,
-    TEMPCORR_SPR,
-    PRESCORR_SPR,
-    TEMPCORR2_SPR,
-    PRESCORR2_SPR,
+    I2CFN_SPR,
+    BME76_DT,
+    BME76_DP,
+    BME77_DT,
+    BME77_DP,
     BRMIN_SPR,
     BRMAX_SPR,
 
@@ -221,19 +227,20 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 1" -- index 0
 
-    {0, { 10, R2Y(0), 70, PR_H}, { 90, R2Y(0), 270, PR_H}, "Call:",   callsign, NV_CALLSIGN_LEN, 0}, 
+    {0, { 10, R2Y(0), 70, PR_H}, { 90, R2Y(0), 270, PR_H}, "Call:",   call_sign, NV_CALLSIGN_LEN, 0}, 
     {0, { 90, R2Y(1),180, PR_H}, {270, R2Y(1), 110, PR_H}, "Enter DE Lat:", NULL, 0, 0},       // shadowed
     {0, {380, R2Y(1), 50, PR_H}, {430, R2Y(1), 120, PR_H}, "Lng:", NULL, 0, 0},                // shadowed
     {0, {560, R2Y(1), 60, PR_H}, {620, R2Y(1), 130, PR_H}, "Grid:", NULL, 0, 0},               // shadowed
-    {0, {460, R2Y(2), 60, PR_H}, {520, R2Y(2), 290, PR_H}, "host:", gpsdhost, NV_GPSDHOST_LEN, 0},
-    {0, { 90, R2Y(4), 60, PR_H}, {160, R2Y(4), 500, PR_H}, "SSID:", wifissid, NV_WIFI_SSID_LEN, 0},
-    {0, {670, R2Y(4),110, PR_H}, { 10, R2Y(5), 789, PR_H}, "Password:", wifipw, NV_WIFI_PW_LEN, 0},
+    {0, {460, R2Y(2), 60, PR_H}, {520, R2Y(2), 280, PR_H}, "host:", gpsd_host, NV_GPSDHOST_LEN, 0},
+    {0, { 90, R2Y(4), 60, PR_H}, {160, R2Y(4), 500, PR_H}, "SSID:", wifi_ssid, NV_WIFI_SSID_LEN, 0},
+    {0, {670, R2Y(4),110, PR_H}, { 10, R2Y(5), 789, PR_H}, "Password:", wifi_pw, NV_WIFI_PW_LEN, 0},
 
     // "page 2" -- index 1
 
-    {1, { 20, R2Y(1), 60, PR_H}, { 80, R2Y(1),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {1, { 20, R2Y(2), 60, PR_H}, { 80, R2Y(2), 260, PR_H}, "host:", dxhost, NV_DXHOST_LEN, 0},
-    {1, { 20, R2Y(3), 60, PR_H}, { 80, R2Y(3), 260, PR_H}, "login:", dxlogin, NV_DXLOGIN_LEN, 0},
+    {1, { 20, R2Y(1), 65, PR_H}, { 85, R2Y(1), 260, PR_H}, "watch:", dx_wlist, NV_DXWLIST_LEN, 0},
+    {1, { 20, R2Y(2), 65, PR_H}, { 85, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, { 20, R2Y(3), 65, PR_H}, { 85, R2Y(3), 260, PR_H}, "host:", dx_host, NV_DXHOST_LEN, 0},
+    {1, { 20, R2Y(4), 65, PR_H}, { 85, R2Y(4), 260, PR_H}, "login:", dx_login, NV_DXLOGIN_LEN, 0},
 
     // 1 less that full width to avoid erasing border
     {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 409, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
@@ -244,27 +251,30 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 3" -- index 2
 
-    {2, {160, R2Y(0), 60, PR_H}, {220, R2Y(0),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(0), 60, PR_H}, {380, R2Y(0), 400, PR_H}, "host:", righost, NV_RIGHOST_LEN, 0},
-    {2, {160, R2Y(1), 60, PR_H}, {220, R2Y(1),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(1), 60, PR_H}, {380, R2Y(1), 400, PR_H}, "host:", rothost, NV_ROTHOST_LEN, 0},
-    {2, {160, R2Y(2), 60, PR_H}, {220, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {320, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrighost, NV_FLRIGHOST_LEN, 0},
+    {2, {150, R2Y(0), 60, PR_H}, {210, R2Y(0),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {290, R2Y(0), 60, PR_H}, {380, R2Y(0), 280, PR_H}, "host:", rig_host, NV_RIGHOST_LEN, 0},
+    {2, {150, R2Y(1), 60, PR_H}, {210, R2Y(1),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {290, R2Y(1), 60, PR_H}, {380, R2Y(1), 400, PR_H}, "host:", rot_host, NV_ROTHOST_LEN, 0},
+    {2, {150, R2Y(2), 60, PR_H}, {210, R2Y(2),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {290, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrig_host, NV_FLRIGHOST_LEN, 0},
 
-    {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntphost, NV_NTPHOST_LEN, 0},
+    {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntp_host, NV_NTPHOST_LEN, 0},
     {2, {100, R2Y(5), 60, PR_H}, {160, R2Y(5), 330, PR_H}, "file:", adif_fn, NV_ADIFFN_LEN, 0},
 
 
     // "page 4" -- index 3
 
     {3, {10,  R2Y(0), 200, PR_H}, {250, R2Y(0),  70, PR_H}, "Map center lng:", NULL, 0, 0},     // shadowed
-    {3, {100, R2Y(2), 120, PR_H}, {250, R2Y(2),  70, PR_H}, "dTemp@76:", NULL, 0, 0},           // shadowed
-    {3, {350, R2Y(2), 120, PR_H}, {500, R2Y(2),  70, PR_H}, "dPres@76:", NULL, 0, 0},           // shadowed
-    {3, {100, R2Y(3), 120, PR_H}, {250, R2Y(3),  70, PR_H}, "dTemp@77:", NULL, 0, 0},           // shadowed
-    {3, {350, R2Y(3), 120, PR_H}, {500, R2Y(3),  70, PR_H}, "dPres@77:", NULL, 0, 0},           // shadowed
 
-    {3, {10,  R2Y(5), 200, PR_H}, {250, R2Y(5),  70, PR_H}, "Brightness Min%:", NULL, 0, 0},    // shadowed
-    {3, {350, R2Y(5), 120, PR_H}, {500, R2Y(5),  70, PR_H}, "Max%:", NULL, 0, 0},               // shadowed
+    {3, {350, R2Y(1),  70, PR_H}, {440, R2Y(1),  360,PR_H}, "name:", i2c_fn, NV_I2CFN_LEN, 0},
+
+    {3, {100, R2Y(2), 240, PR_H}, {350, R2Y(2),  80, PR_H}, "BME280@76    dTemp:", NULL, 0, 0}, // shadowed
+    {3, {440, R2Y(2), 80,  PR_H}, {530, R2Y(2),  80, PR_H}, "dPres:", NULL, 0, 0},              // shadowed
+    {3, {100, R2Y(3), 240, PR_H}, {350, R2Y(3),  80, PR_H}, "BME280@77    dTemp:", NULL, 0, 0}, // shadowed
+    {3, {440, R2Y(3), 80,  PR_H}, {530, R2Y(3),  80, PR_H}, "dPres:", NULL, 0, 0},              // shadowed
+
+    {3, {10,  R2Y(5), 200, PR_H}, {250, R2Y(5),  80, PR_H}, "Brightness Min%:", NULL, 0, 0},    // shadowed
+    {3, {350, R2Y(5),  90, PR_H}, {450, R2Y(5),  80, PR_H}, "Max%:", NULL, 0, 0},               // shadowed
 
 
 
@@ -308,6 +318,7 @@ typedef enum {
 
     // page "4"
     GPIOOK_BPR,
+    I2CON_BPR,
     KX3ON_BPR,
     KX3BAUD_BPR,
 
@@ -365,22 +376,22 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 3" -- index 2
 
-    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes", N_BPR},
-    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes", N_BPR},
-    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes", N_BPR},
+    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  50, PR_H}, false, "rigctld?", "No", "Yes", N_BPR},
+    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  50, PR_H}, false, "rotctld?", "No", "Yes", N_BPR},
+    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  50, PR_H}, false, "flrig?",   "No", "Yes", N_BPR},
 
     {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers",
                                                                                                 0, N_BPR},
-    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", 0, N_BPR},
+    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", NULL, N_BPR},
 
 
     // "page 4" -- index 3
 
-    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, NULL, "Off", "Active", N_BPR},
-                                                                                // dynamic prompt
+    {3, {10,  R2Y(1),  80, PR_H},  {100, R2Y(1), 110, PR_H}, false, "GPIO?", "Off", "Active", N_BPR},
+    {3, {250, R2Y(1),  80, PR_H},  {350, R2Y(1), 70,  PR_H}, false, "I2C file?", "No", NULL, N_BPR},
 
-    {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  70, PR_H}, false, "KX3?", "No", NULL, KX3BAUD_BPR},
-    {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  70, PR_H}, false, NULL, "4800", "38400", KX3ON_BPR},
+    {3, {100, R2Y(4), 120, PR_H},  {250, R2Y(4),  120, PR_H}, false, "KX3?", "No", NULL, KX3BAUD_BPR},
+    {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  120, PR_H}, false, NULL, "4800 bps", "38400 bps",KX3ON_BPR},
                                                         // entangled: Off: FX   4800: TF   38400: TT
 
 
@@ -436,7 +447,7 @@ typedef struct {
 #if defined(_SHOW_ALL)
     #define HAVE_ONOFF()      1
 #else
-    #define HAVE_ONOFF()      (brControlOk() || brOnOffOk())
+    #define HAVE_ONOFF()      (brDimmableOk() || brOnOffOk())
 #endif
 
 // current focus and page names
@@ -445,10 +456,10 @@ typedef struct {
 #define COLOR_PAGE      5                       // 0-based counting
 #define ONOFF_PAGE      6                       // 0-based counting
 #define N_PAGES         (HAVE_ONOFF() ? 7 : 6)  // last page is on/off
-#define SPIDER_PX       480                     // prompt x
-#define SPIDER_PY       (R2Y(2) - PR_D)         // prompt y
-#define SPIDER_BX       340                     // border x
-#define SPIDER_BY       (SPIDER_PY - PR_A)      // border y
+#define SPIDER_TX       480                     // title x
+#define SPIDER_TY       (R2Y(2) - PR_D)         // title y
+#define SPIDER_BX       345                     // border x
+#define SPIDER_BY       (SPIDER_TY - PR_A)      // border y
 #define SPIDER_BRX      799                     // border right x
 #define SPIDER_BBY      (R2Y(6))                // border bottom y
 static Focus cur_focus;
@@ -639,7 +650,7 @@ static const uint8_t qroff[NQR] = {
 static const SBox delete_b  = {KB_INDENT, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
 static const SBox space_b   = {SBAR_X, KB_SPC_Y, SBAR_W, KB_SPC_H};
 static const SBox done_b    = {SBAR_X+SBAR_W, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
-static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 2, PAGE_W, PAGE_H};
+static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 1, PAGE_W, PAGE_H};
 
 // note whether ll edited
 static bool ll_edited;
@@ -650,6 +661,82 @@ static void eraseSPValue (const StringPrompt *sp);
 static void drawSPValue (StringPrompt *sp);
 
 
+
+/* log all string and bool settings
+ */
+static void logAllPrompts(void)
+{
+    for (StringPrompt *sp = string_pr; sp < &string_pr[N_SPR]; sp++)
+        if (sp->p_str)
+            Serial.printf (_FX("Setup: %s = %s\n"), sp->p_str, sp->v_str ? sp->v_str : _FX("NULL"));
+    for (BoolPrompt *bp = bool_pr; bp < &bool_pr[N_BPR]; bp++) {
+        if (bp->p_str) {
+            Serial.printf (_FX("Setup: %s = %s\n"), bp->p_str,
+                bp->state ? (bp->t_str ? bp->t_str : _FX("T-NULL")) : (bp->f_str ? bp->f_str :_FX("F-NULL")));
+        }
+    }
+}
+
+/* prepare the shadowed prompts
+ * N.B. if call this, then always call freeShadowedParams() eventually
+ */
+static void initShadowedParams()
+{
+
+    string_pr[LAT_SPR].v_str = (char*)malloc(string_pr[LAT_SPR].v_len = 9);
+                                formatLat (de_ll.lat_d, string_pr[LAT_SPR].v_str, string_pr[LAT_SPR].v_len);
+    string_pr[LNG_SPR].v_str = (char*)malloc(string_pr[LNG_SPR].v_len = 9);
+                                formatLng (de_ll.lng_d, string_pr[LNG_SPR].v_str, string_pr[LNG_SPR].v_len);
+    string_pr[GRID_SPR].v_str = (char*)malloc(string_pr[GRID_SPR].v_len = MAID_CHARLEN);
+                                getNVMaidenhead (NV_DE_GRID, string_pr[GRID_SPR].v_str);
+    snprintf (string_pr[DXPORT_SPR].v_str = (char*)malloc(8), string_pr[DXPORT_SPR].v_len = 8,
+                                "%u", dx_port);
+    snprintf (string_pr[RIGPORT_SPR].v_str = (char*)malloc(8), string_pr[RIGPORT_SPR].v_len = 8,
+                                "%u", rig_port);
+
+    snprintf (string_pr[ROTPORT_SPR].v_str = (char*)malloc(8), string_pr[ROTPORT_SPR].v_len = 8,
+                                "%u", rot_port);
+    snprintf (string_pr[FLRIGPORT_SPR].v_str = (char*)malloc(8), string_pr[FLRIGPORT_SPR].v_len = 8,
+                                "%u", flrig_port);
+    snprintf (string_pr[BME76_DT].v_str = (char*)malloc(8), string_pr[BME76_DT].v_len = 8,
+                                "%.2f", temp_corr[BME_76]);
+    snprintf (string_pr[BME76_DP].v_str = (char*)malloc(8), string_pr[BME76_DP].v_len = 8,
+                                "%.3f", pres_corr[BME_76]);
+    snprintf (string_pr[BME77_DT].v_str = (char*)malloc(8), string_pr[BME77_DT].v_len = 8,
+                                "%.2f", temp_corr[BME_77]);
+
+    snprintf (string_pr[BME77_DP].v_str = (char*)malloc(8), string_pr[BME77_DP].v_len = 8,
+                                "%.3f", pres_corr[BME_77]);
+    snprintf (string_pr[BRMIN_SPR].v_str = (char*)malloc(8), string_pr[BRMIN_SPR].v_len = 8,
+                                "%u", bright_min);
+    snprintf (string_pr[BRMAX_SPR].v_str = (char*)malloc(8), string_pr[BRMAX_SPR].v_len = 8,
+                                "%u", bright_max);
+    snprintf (string_pr[CENTERLNG_SPR].v_str = (char*)malloc(5), string_pr[CENTERLNG_SPR].v_len = 5,
+                                "%.0f%c", fabsf((float)center_lng), center_lng < 0 ? 'W' : 'E');
+                                // conversion to float just to avoid g++ snprintf size warning
+}
+
+/* free the shadowed parameters
+ */
+static void freeShadowedParams()
+{
+    free (string_pr[LAT_SPR].v_str);
+    free (string_pr[LNG_SPR].v_str);
+    free (string_pr[GRID_SPR].v_str);
+    free (string_pr[DXPORT_SPR].v_str);
+    free (string_pr[RIGPORT_SPR].v_str);
+
+    free (string_pr[ROTPORT_SPR].v_str);
+    free (string_pr[FLRIGPORT_SPR].v_str);
+    free (string_pr[BME76_DT].v_str);
+    free (string_pr[BME76_DP].v_str);
+    free (string_pr[BME77_DT].v_str);
+
+    free (string_pr[BME77_DP].v_str);
+    free (string_pr[BRMIN_SPR].v_str);
+    free (string_pr[BRMAX_SPR].v_str);
+    free (string_pr[CENTERLNG_SPR].v_str);
+}
 
 /* set the given StringPrompt to a brief error message
  */
@@ -740,7 +827,7 @@ static void drawSpiderCommandsHeader()
 
     // labels
     tft.setTextColor (PR_C);
-    tft.setCursor (SPIDER_PX, SPIDER_PY);
+    tft.setCursor (SPIDER_TX, SPIDER_TY);
     tft.print ("Spider Commands:");
 }
 
@@ -824,8 +911,14 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     }
 
+    if (bp == &bool_pr[I2CON_BPR]) {
+        #if defined(_I2C_ESP)
+            return (false);
+        #endif
+    }
+
     if (bp == &bool_pr[GPIOOK_BPR]) {
-        #if !defined(_SUPPORT_GPIO) && !defined(_SUPPORT_ENVSENSOR)
+        #if !defined(_SUPPORT_NATIVE_GPIO)
             return (false);
         #endif
     }
@@ -841,7 +934,7 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     #endif
 
-
+    // use by default
     return (true);
 }
 
@@ -875,8 +968,13 @@ static bool stringIsRelevant (StringPrompt *sp)
     if (sp == &string_pr[DXCLCMD0_SPR] || sp == &string_pr[DXCLCMD1_SPR]
                     || sp == &string_pr[DXCLCMD2_SPR] || sp == &string_pr[DXCLCMD3_SPR]
                     || sp == &string_pr[DXLOGIN_SPR]) {
-        // only show if enabled and host is not WSJT
+        // only show if enabled and not using WSJT
         if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
+            return (false);
+    }
+
+    if (sp == &string_pr[DXWLIST_SPR]) {
+        if (!bool_pr[CLUSTER_BPR].state)
             return (false);
     }
 
@@ -910,13 +1008,17 @@ static bool stringIsRelevant (StringPrompt *sp)
             return (false);
     }
 
-    if (sp == &string_pr[TEMPCORR_SPR] || sp == &string_pr[TEMPCORR2_SPR]
-                    || sp == &string_pr[PRESCORR_SPR] || sp == &string_pr[PRESCORR2_SPR]) {
-        #if defined(_SUPPORT_ENVSENSOR)
-            return (bool_pr[GPIOOK_BPR].state);
-        #else
+    if (sp == &string_pr[I2CFN_SPR]) {
+        #if defined(_I2C_ESP)
             return (false);
+        #else
+            return (bool_pr[I2CON_BPR].state);
         #endif
+    }
+
+    if (sp == &string_pr[BME76_DT] || sp == &string_pr[BME77_DT]
+                    || sp == &string_pr[BME76_DP] || sp == &string_pr[BME77_DP]) {
+        return (bool_pr[GPIOOK_BPR].state || bool_pr[I2CON_BPR].state);
     }
 
     if (sp == &string_pr[BRMIN_SPR] || sp == &string_pr[BRMAX_SPR])
@@ -963,6 +1065,7 @@ static void nextTabFocus()
 
         { NULL, &bool_pr[CLUSTER_BPR] },
         { NULL, &bool_pr[CLISWSJTX_BPR] },
+        {       &string_pr[DXWLIST_SPR], NULL},
         {       &string_pr[DXPORT_SPR], NULL},
         {       &string_pr[DXHOST_SPR], NULL},
         {       &string_pr[DXLOGIN_SPR], NULL},
@@ -995,10 +1098,12 @@ static void nextTabFocus()
 
         {       &string_pr[CENTERLNG_SPR], NULL},
         { NULL, &bool_pr[GPIOOK_BPR] },
-        {       &string_pr[TEMPCORR_SPR], NULL},
-        {       &string_pr[PRESCORR_SPR], NULL},
-        {       &string_pr[TEMPCORR2_SPR], NULL},
-        {       &string_pr[PRESCORR2_SPR], NULL},
+        { NULL, &bool_pr[I2CON_BPR] },
+        {       &string_pr[I2CFN_SPR], NULL},
+        {       &string_pr[BME76_DT], NULL},
+        {       &string_pr[BME76_DP], NULL},
+        {       &string_pr[BME77_DT], NULL},
+        {       &string_pr[BME77_DP], NULL},
         { NULL, &bool_pr[KX3ON_BPR] },
         {       &string_pr[BRMIN_SPR], NULL},
         {       &string_pr[BRMAX_SPR], NULL},
@@ -1771,7 +1876,9 @@ static void drawOnOffTimeCell (int dow, uint16_t y, uint16_t thm)
 static void drawOnOffControls()
 {
     // title
-    const char *title = brControlOk() ? _FX("Daily Display On/Dim Times") : _FX("Daily Display On/Off Times");
+    const char *title = brDimmableOk()
+                        ? _FX("DE Daily Display On/Dim Times")
+                        : _FX("DE Daily Display On/Off Times");
     tft.setCursor (OO_X0+(OO_TW-getTextWidth(title))/2, OO_Y0-OO_RH-OO_TO);
     tft.setTextColor (PR_C);
     tft.print (title);
@@ -1792,7 +1899,7 @@ static void drawOnOffControls()
     tft.setCursor (OO_X0+2, OO_ONY);
     tft.print (F("On"));
     tft.setCursor (OO_X0+2, OO_OFFY);
-    if (brControlOk())
+    if (brDimmableOk())
         tft.print (F("Dim"));
     else
         tft.print (F("Off"));
@@ -2026,6 +2133,39 @@ static bool hostOK (char *host_str, int max_len)
     return (lh || dots_ok);
 }
 
+/* return whether the i2c_fn looks legit
+ */
+static bool I2CFnOk(void)
+{
+    bool ok = strncmp (i2c_fn, _FX("/dev/"), 5) == 0 && strlen (i2c_fn) > 5;
+
+    #if defined(_IS_UNIX)
+        // on linux actually try to open and lock the same as Wire will do
+        if (ok) {
+            int fd = open (i2c_fn, O_RDWR);
+            if (fd < 0) {
+                Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, strerror(errno));
+                ok = false;
+            } else {
+                ok = ::flock (fd, LOCK_EX|LOCK_NB) == 0;
+                Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, ok ? "ok" : strerror(errno));
+                close (fd);
+            }
+        }
+    #endif
+
+    return (ok);
+}
+
+/* return whether dx_login looks ok
+ */
+static bool clusterLoginOk()
+{
+    // must be blank or contain DE call
+    noBlanks(dx_login);
+    return (dx_login[0] == '\0' || strstr (dx_login, call_sign) != NULL);
+}
+
 /* validate all string fields, temporarily indicate ones in error if on current page.
  * return whether all ok.
  */
@@ -2034,6 +2174,11 @@ static bool validateStringPrompts()
     // collect bad ids to flag
     SPIds badsid[N_SPR];
     uint8_t n_badsid = 0;
+
+    // call must not be blank
+    noBlanks(call_sign);
+    if (call_sign[0] == '0')
+        badsid[n_badsid++] = CALL_SPR;
 
     // check lat/long unless using something else
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state) {
@@ -2054,8 +2199,10 @@ static bool validateStringPrompts()
         char *clhost = string_pr[DXHOST_SPR].v_str;
         if (!hostOK(clhost,NV_DXHOST_LEN) && !bool_pr[CLISWSJTX_BPR].state)
             badsid[n_badsid++] = DXHOST_SPR;
-        if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dxport))         // 23 is telnet
+        if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dx_port))         // 23 is telnet
             badsid[n_badsid++] = DXPORT_SPR;
+        if (!clusterLoginOk())
+            badsid[n_badsid++] = DXLOGIN_SPR;
 
         // clean up any extra white space in the commands then check for blank entries that are on
         for (int i = 0; i < N_DXCLCMDS; i++) {
@@ -2065,19 +2212,19 @@ static bool validateStringPrompts()
         }
     }
 
-    // check righost and port if used
+    // check rig_host and port if used
     if (bool_pr[RIGUSE_BPR].state) {
         if (!hostOK(string_pr[RIGHOST_SPR].v_str,NV_RIGHOST_LEN))
             badsid[n_badsid++] = RIGHOST_SPR;
-        if (!portOK (string_pr[RIGPORT_SPR].v_str, 1000, &rigport))
+        if (!portOK (string_pr[RIGPORT_SPR].v_str, 1000, &rig_port))
             badsid[n_badsid++] = RIGPORT_SPR;
     }
 
-    // check rothost and port if used
+    // check rot_host and port if used
     if (bool_pr[ROTUSE_BPR].state) {
         if (!hostOK(string_pr[ROTHOST_SPR].v_str,NV_ROTHOST_LEN))
             badsid[n_badsid++] = ROTHOST_SPR;
-        if (!portOK (string_pr[ROTPORT_SPR].v_str, 1000, &rotport))
+        if (!portOK (string_pr[ROTPORT_SPR].v_str, 1000, &rot_port))
             badsid[n_badsid++] = ROTPORT_SPR;
     }
 
@@ -2085,29 +2232,29 @@ static bool validateStringPrompts()
     if (bool_pr[FLRIGUSE_BPR].state) {
         if (!hostOK(string_pr[FLRIGHOST_SPR].v_str,NV_FLRIGHOST_LEN))
             badsid[n_badsid++] = FLRIGHOST_SPR;
-        if (!portOK (string_pr[FLRIGPORT_SPR].v_str, 1000, &flrigport))
+        if (!portOK (string_pr[FLRIGPORT_SPR].v_str, 1000, &flrig_port))
             badsid[n_badsid++] = FLRIGPORT_SPR;
     }
 
-    // check for plausible temperature and pressure corrections if used
-    if (bool_pr[GPIOOK_BPR].state) {
-        char *tc_str = string_pr[TEMPCORR_SPR].v_str;
+    // check for plausible temperature and pressure corrections and file name if used
+    if (bool_pr[GPIOOK_BPR].state || bool_pr[I2CON_BPR].state) {
+        char *tc_str = string_pr[BME76_DT].v_str;
         temp_corr[BME_76] = atof (tc_str);
         if (fabsf(temp_corr[BME_76]) > MAX_BME_DTEMP)
-            badsid[n_badsid++] = TEMPCORR_SPR;
-        char *tc2_str = string_pr[TEMPCORR2_SPR].v_str;
+            badsid[n_badsid++] = BME76_DT;
+        char *tc2_str = string_pr[BME77_DT].v_str;
         temp_corr[BME_77] = atof (tc2_str);
         if (fabsf(temp_corr[BME_77]) > MAX_BME_DTEMP)
-            badsid[n_badsid++] = TEMPCORR2_SPR;
+            badsid[n_badsid++] = BME77_DT;
 
-        char *pc_str = string_pr[PRESCORR_SPR].v_str;
+        char *pc_str = string_pr[BME76_DP].v_str;
         pres_corr[BME_76] = atof (pc_str);
         if (fabsf(pres_corr[BME_76]) > MAX_BME_DPRES)
-            badsid[n_badsid++] = PRESCORR_SPR;
-        char *pc2_str = string_pr[PRESCORR2_SPR].v_str;
+            badsid[n_badsid++] = BME76_DP;
+        char *pc2_str = string_pr[BME77_DP].v_str;
         pres_corr[BME_77] = atof (pc2_str);
         if (fabsf(pres_corr[BME_77]) > MAX_BME_DPRES)
-            badsid[n_badsid++] = PRESCORR2_SPR;
+            badsid[n_badsid++] = BME77_DP;
     }
 
     // require ssid and pw if wifi
@@ -2136,7 +2283,7 @@ static bool validateStringPrompts()
     }
 
     // require both brightness 0..100 and min < max.
-    if (brControlOk()) {
+    if (brDimmableOk()) {
         // Must use ints to check for < 0
         int brmn = atoi (string_pr[BRMIN_SPR].v_str);
         int brmx = atoi (string_pr[BRMAX_SPR].v_str);
@@ -2165,6 +2312,13 @@ static bool validateStringPrompts()
         trim (adif_fn);
         if (adif_fn[0] == '\0')
             badsid[n_badsid++] = ADIFFN_SPR;
+    }
+
+    // check I2C file name
+    if (bool_pr[I2CON_BPR].state) {
+        trim (i2c_fn);
+        if (!I2CFnOk())
+            badsid[n_badsid++] = I2CFN_SPR;
     }
 
     // indicate any values in error, changing pages if necessary
@@ -2258,11 +2412,11 @@ static bool getWPA()
     // save if found both
     if (found_ssid && found_psk) {
         wpa_ssid[NV_WIFI_SSID_LEN-1] = '\0';
-        strcpy (wifissid, wpa_ssid);
-        NVWriteString(NV_WIFI_SSID, wifissid);
+        strcpy (wifi_ssid, wpa_ssid);
+        NVWriteString(NV_WIFI_SSID, wifi_ssid);
         wpa_psk[NV_WIFI_PW_LEN-1] = '\0';
-        strcpy (wifipw, wpa_psk);
-        NVWriteString(NV_WIFI_PASSWD, wifipw);
+        strcpy (wifi_pw, wpa_psk);
+        NVWriteString(NV_WIFI_PASSWD, wifi_pw);
         return (true);
     }
 
@@ -2283,29 +2437,27 @@ static void initSetup()
 {
     // init wifi, accept OLD PW if valid
 
-    if (!getWPA() && !NVReadString(NV_WIFI_SSID, wifissid)) {
-        strncpy (wifissid, DEF_SSID, NV_WIFI_SSID_LEN-1);
-        NVWriteString(NV_WIFI_SSID, wifissid);
+    if (!getWPA() && !NVReadString(NV_WIFI_SSID, wifi_ssid)) {
+        strncpy (wifi_ssid, DEF_SSID, NV_WIFI_SSID_LEN-1);
+        NVWriteString(NV_WIFI_SSID, wifi_ssid);
     }
-    if (!NVReadString(NV_WIFI_PASSWD, wifipw) && !NVReadString(NV_WIFI_PASSWD_OLD, wifipw)) {
-        strncpy (wifipw, DEF_PASS, NV_WIFI_PW_LEN-1);
-        NVWriteString(NV_WIFI_PASSWD, wifipw);
+    if (!NVReadString(NV_WIFI_PASSWD, wifi_pw) && !NVReadString(NV_WIFI_PASSWD_OLD, wifi_pw)) {
+        strncpy (wifi_pw, DEF_PASS, NV_WIFI_PW_LEN-1);
+        NVWriteString(NV_WIFI_PASSWD, wifi_pw);
     }
 
 
 
-    // init call sign
+    // init call sign, no default
 
-    if (!NVReadString(NV_CALLSIGN, callsign))
-        setCallsign (DEF_CALL);
-
+    NVReadString(NV_CALLSIGN, call_sign);
 
 
     // init gpsd host and option
 
-    if (!NVReadString (NV_GPSDHOST, gpsdhost)) {
-        strcpy (gpsdhost, "localhost");
-        NVWriteString (NV_GPSDHOST, gpsdhost);
+    if (!NVReadString (NV_GPSDHOST, gpsd_host)) {
+        strcpy (gpsd_host, "localhost");
+        NVWriteString (NV_GPSDHOST, gpsd_host);
     }
     uint8_t nv_gpsd;
     if (!NVReadUInt8 (NV_USEGPSD, &nv_gpsd)) {
@@ -2321,9 +2473,9 @@ static void initSetup()
 
     // init ntp host and option
 
-    if (!NVReadString (NV_NTPHOST, ntphost)) {
-        ntphost[0] = '\0';
-        NVWriteString (NV_NTPHOST, ntphost);
+    if (!NVReadString (NV_NTPHOST, ntp_host)) {
+        ntp_host[0] = '\0';
+        NVWriteString (NV_NTPHOST, ntp_host);
     }
     uint8_t nv_ntp;
     if (!NVReadUInt8 (NV_NTPSET, &nv_ntp)) {
@@ -2340,16 +2492,36 @@ static void initSetup()
     }
     bool_pr[ADIFSET_BPR].state = adif_fn[0] != '\0';
 
+    // init I2C
+
+    if (!NVReadString (NV_I2CFN, i2c_fn)) {
+        // supply a reasonable system-dependent default
+        #if defined (_I2C_FREEBSD)
+            strcpy (i2c_fn, _FX("/dev/iic0"));
+        #elif defined (_I2C_LINUX)
+            strcpy (i2c_fn, _FX("/dev/i2c-1"));
+        #else
+            i2c_fn[0] = '\0';
+        #endif
+        NVWriteString (NV_I2CFN, i2c_fn);
+    }
+    uint8_t i2c_on;
+    if (!NVReadUInt8 (NV_I2CON, &i2c_on)) {
+        i2c_on = 0;
+        NVWriteUInt8 (NV_I2CON, i2c_on);
+    }
+    bool_pr[I2CON_BPR].state = (i2c_on != 0);
+
 
     // init rigctld host, port and option
 
-    if (!NVReadString (NV_RIGHOST, righost)) {
-        strcpy (righost, "localhost");
-        NVWriteString (NV_RIGHOST, righost);
+    if (!NVReadString (NV_RIGHOST, rig_host)) {
+        strcpy (rig_host, "localhost");
+        NVWriteString (NV_RIGHOST, rig_host);
     }
-    if (!NVReadUInt16(NV_RIGPORT, &rigport)) {
-        rigport = 4532;
-        NVWriteUInt16(NV_RIGPORT, rigport);
+    if (!NVReadUInt16(NV_RIGPORT, &rig_port)) {
+        rig_port = 4532;
+        NVWriteUInt16(NV_RIGPORT, rig_port);
     }
     uint8_t nv_rig;
     if (!NVReadUInt8 (NV_RIGUSE, &nv_rig)) {
@@ -2361,13 +2533,13 @@ static void initSetup()
 
     // init rotctld host, port and option
 
-    if (!NVReadString (NV_ROTHOST, rothost)) {
-        strcpy (rothost, "localhost");
-        NVWriteString (NV_ROTHOST, rothost);
+    if (!NVReadString (NV_ROTHOST, rot_host)) {
+        strcpy (rot_host, "localhost");
+        NVWriteString (NV_ROTHOST, rot_host);
     }
-    if (!NVReadUInt16(NV_ROTPORT, &rotport)) {
-        rotport = 4533;
-        NVWriteUInt16(NV_ROTPORT, rotport);
+    if (!NVReadUInt16(NV_ROTPORT, &rot_port)) {
+        rot_port = 4533;
+        NVWriteUInt16(NV_ROTPORT, rot_port);
     }
     uint8_t nv_rot;
     if (!NVReadUInt8 (NV_ROTUSE, &nv_rot)) {
@@ -2379,13 +2551,13 @@ static void initSetup()
 
     // init flrig host, port and option
 
-    if (!NVReadString (NV_FLRIGHOST, flrighost)) {
-        strcpy (flrighost, "localhost");
-        NVWriteString (NV_FLRIGHOST, flrighost);
+    if (!NVReadString (NV_FLRIGHOST, flrig_host)) {
+        strcpy (flrig_host, "localhost");
+        NVWriteString (NV_FLRIGHOST, flrig_host);
     }
-    if (!NVReadUInt16(NV_FLRIGPORT, &flrigport)) {
-        flrigport = 12345;
-        NVWriteUInt16(NV_FLRIGPORT, flrigport);
+    if (!NVReadUInt16(NV_FLRIGPORT, &flrig_port)) {
+        flrig_port = 12345;
+        NVWriteUInt16(NV_FLRIGPORT, flrig_port);
     }
     uint8_t nv_flrig;
     if (!NVReadUInt8 (NV_FLRIGUSE, &nv_flrig)) {
@@ -2398,17 +2570,17 @@ static void initSetup()
 
     // init dx cluster info
 
-    if (!NVReadString(NV_DXHOST, dxhost)) {
-        memset (dxhost, 0, sizeof(dxhost));
-        NVWriteString(NV_DXHOST, dxhost);
+    if (!NVReadString(NV_DXHOST, dx_host)) {
+        memset (dx_host, 0, sizeof(dx_host));
+        NVWriteString(NV_DXHOST, dx_host);
     }
-    if (!NVReadString(NV_DXLOGIN, dxlogin)) {
-        strcpy (dxlogin, callsign);      // default to call
-        NVWriteString(NV_DXLOGIN, dxlogin);
+    if (!NVReadString(NV_DXLOGIN, dx_login) || !clusterLoginOk()) {
+        strcpy (dx_login, call_sign);      // default to call
+        NVWriteString(NV_DXLOGIN, dx_login);
     }
-    if (!NVReadUInt16(NV_DXPORT, &dxport)) {
-        dxport = 0;
-        NVWriteUInt16(NV_DXPORT, dxport);
+    if (!NVReadUInt16(NV_DXPORT, &dx_port)) {
+        dx_port = 0;
+        NVWriteUInt16(NV_DXPORT, dx_port);
     }
     if (!NVReadString(NV_DXCMD0, dxcl_cmds[0])) {
         memset (dxcl_cmds[0], 0, sizeof(dxcl_cmds[0]));
@@ -2426,14 +2598,18 @@ static void initSetup()
         memset (dxcl_cmds[3], 0, sizeof(dxcl_cmds[3]));
         NVWriteString(NV_DXCMD3, dxcl_cmds[3]);
     }
+    if (!NVReadString(NV_DXWLIST, dx_wlist)) {
+        memset (dx_wlist, 0, sizeof(dx_wlist));
+        NVWriteString(NV_DXWLIST, dx_wlist);
+    }
 
     uint8_t nv_wsjt;
     if (!NVReadUInt8 (NV_WSJT_DX, &nv_wsjt)) {
         // check host for possible backwards compat
-        if (strcasecmp(dxhost,"WSJT-X") == 0 || strcasecmp(dxhost,"JTDX") == 0) {
+        if (strcasecmp(dx_host,"WSJT-X") == 0 || strcasecmp(dx_host,"JTDX") == 0) {
             nv_wsjt = 1;
-            memset (dxhost, 0, sizeof(dxhost));
-            NVWriteString(NV_DXHOST, dxhost);
+            memset (dx_host, 0, sizeof(dx_host));
+            NVWriteString(NV_DXHOST, dx_host);
         } else
             nv_wsjt = 0;
         NVWriteUInt8 (NV_WSJT_DX, nv_wsjt);
@@ -2677,21 +2853,21 @@ static void initSetup()
         NVWriteUInt8 (NV_NAMES_ON, names_on);
     }
 
-    if (!NVReadFloat (NV_TEMPCORR, &temp_corr[BME_76])) {
+    if (!NVReadFloat (NV_TEMPCORR76, &temp_corr[BME_76])) {
         temp_corr[BME_76] = 0;
-        NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
+        NVWriteFloat (NV_TEMPCORR76, temp_corr[BME_76]);
     }
-    if (!NVReadFloat (NV_PRESCORR, &pres_corr[BME_76])) {
+    if (!NVReadFloat (NV_PRESCORR76, &pres_corr[BME_76])) {
         pres_corr[BME_76] = 0;
-        NVWriteFloat (NV_PRESCORR, pres_corr[BME_76]);
+        NVWriteFloat (NV_PRESCORR76, pres_corr[BME_76]);
     }
-    if (!NVReadFloat (NV_TEMPCORR2, &temp_corr[BME_77])) {
+    if (!NVReadFloat (NV_TEMPCORR77, &temp_corr[BME_77])) {
         temp_corr[BME_77] = 0;
-        NVWriteFloat (NV_TEMPCORR2, temp_corr[BME_77]);
+        NVWriteFloat (NV_TEMPCORR77, temp_corr[BME_77]);
     }
-    if (!NVReadFloat (NV_PRESCORR2, &pres_corr[BME_77])) {
+    if (!NVReadFloat (NV_PRESCORR77, &pres_corr[BME_77])) {
         pres_corr[BME_77] = 0;
-        NVWriteFloat (NV_PRESCORR2, pres_corr[BME_77]);
+        NVWriteFloat (NV_PRESCORR77, pres_corr[BME_77]);
     }
 
     bool_pr[GEOIP_BPR].state = false;
@@ -2760,7 +2936,6 @@ static bool askRun()
 
 
 /* init display and supporting StringPrompt and BoolPrompt data structs
- * N.B. must call finishSettingUp() when done
  */
 static void initDisplay()
 {
@@ -2770,56 +2945,31 @@ static void initDisplay()
     // set invalid page
     cur_page = -1;
 
-    // init shadow strings. N.B. free() before leaving
-
-    string_pr[LAT_SPR].v_str = (char*)malloc(string_pr[LAT_SPR].v_len = 9);
-                                formatLat (de_ll.lat_d, string_pr[LAT_SPR].v_str, string_pr[LAT_SPR].v_len);
-    string_pr[LNG_SPR].v_str = (char*)malloc(string_pr[LNG_SPR].v_len = 9);
-                                formatLng (de_ll.lng_d, string_pr[LNG_SPR].v_str, string_pr[LNG_SPR].v_len);
-    string_pr[GRID_SPR].v_str = (char*)malloc(string_pr[GRID_SPR].v_len = MAID_CHARLEN);
-                                getNVMaidenhead (NV_DE_GRID, string_pr[GRID_SPR].v_str);
-    snprintf (string_pr[DXPORT_SPR].v_str = (char*)malloc(8), string_pr[DXPORT_SPR].v_len = 8,
-                                "%u", dxport);
-    snprintf (string_pr[RIGPORT_SPR].v_str = (char*)malloc(8), string_pr[RIGPORT_SPR].v_len = 8,
-                                "%u", rigport);
-    snprintf (string_pr[ROTPORT_SPR].v_str = (char*)malloc(8), string_pr[ROTPORT_SPR].v_len = 8,
-                                "%u", rotport);
-    snprintf (string_pr[FLRIGPORT_SPR].v_str = (char*)malloc(8), string_pr[FLRIGPORT_SPR].v_len = 8,
-                                "%u", flrigport);
-    snprintf (string_pr[TEMPCORR_SPR].v_str = (char*)malloc(8), string_pr[TEMPCORR_SPR].v_len = 8,
-                                "%.2f", temp_corr[BME_76]);
-    snprintf (string_pr[PRESCORR_SPR].v_str = (char*)malloc(8), string_pr[PRESCORR_SPR].v_len = 8,
-                                "%.3f", pres_corr[BME_76]);
-    snprintf (string_pr[TEMPCORR2_SPR].v_str = (char*)malloc(8), string_pr[TEMPCORR2_SPR].v_len = 8,
-                                "%.2f", temp_corr[BME_77]);
-    snprintf (string_pr[PRESCORR2_SPR].v_str = (char*)malloc(8), string_pr[PRESCORR2_SPR].v_len = 8,
-                                "%.3f", pres_corr[BME_77]);
-    snprintf (string_pr[BRMIN_SPR].v_str = (char*)malloc(8), string_pr[BRMIN_SPR].v_len = 8,
-                                "%u", bright_min);
-    snprintf (string_pr[BRMAX_SPR].v_str = (char*)malloc(8), string_pr[BRMAX_SPR].v_len = 8,
-                                "%u", bright_max);
-    snprintf (string_pr[CENTERLNG_SPR].v_str = (char*)malloc(5), string_pr[CENTERLNG_SPR].v_len = 5,
-                                "%.0f%c", fabsf((float)center_lng), center_lng < 0 ? 'W' : 'E');
-                                // conversion to float just to avoid g++ snprintf size warning
 
 #if defined(_SHOW_ALL) || defined(_MARK_BOUNDS)
     // don't show my creds when testing
-    strcpy (wifissid, _FX("mywifissid"));
-    strcpy (wifipw, _FX("mywifipassword"));
-#endif
-
-    // set appropriate io prompt
-#if defined (_SUPPORT_GPIO)
-    bool_pr[GPIOOK_BPR].p_str = "GPIO?";
-#elif defined (_SUPPORT_ENVSENSOR)
-    bool_pr[GPIOOK_BPR].p_str = "IIC?";
-#else
-    bool_pr[GPIOOK_BPR].p_str = "BUG!";
+    strcpy (wifi_ssid, _FX("mywifissid"));
+    strcpy (wifi_pw, _FX("mywifipassword"));
 #endif
 
     // force drawing first page
     cur_page = -1;
     changePage(0);
+}
+
+static void drawBMEPrompts (bool on)
+{
+    if (on) {
+        drawSPPromptValue (&string_pr[BME76_DT]);
+        drawSPPromptValue (&string_pr[BME76_DP]);
+        drawSPPromptValue (&string_pr[BME77_DT]);
+        drawSPPromptValue (&string_pr[BME77_DP]);
+    } else {
+        eraseSPPromptValue (&string_pr[BME76_DT]);
+        eraseSPPromptValue (&string_pr[BME76_DP]);
+        eraseSPPromptValue (&string_pr[BME77_DT]);
+        eraseSPPromptValue (&string_pr[BME77_DP]);
+    }
 }
 
 /* run the setup screen until all fields check ok and user wants to exit
@@ -3105,30 +3255,30 @@ static void runSetup()
                 }
             }
 
-          #if defined(_SUPPORT_GPIO) || defined(_SUPPORT_ENVSENSOR)
             else if (bp == &bool_pr[GPIOOK_BPR]) {
                 if (bp->state) {
-                  #if defined(_SUPPORT_GPIO)
                     drawBPPrompt (&bool_pr[KX3ON_BPR]);
                     drawEntangledBools(&bool_pr[KX3ON_BPR], &bool_pr[KX3BAUD_BPR]);
-                  #endif
-                    drawSPPromptValue (&string_pr[TEMPCORR_SPR]);
-                    drawSPPromptValue (&string_pr[PRESCORR_SPR]);
-                    drawSPPromptValue (&string_pr[TEMPCORR2_SPR]);
-                    drawSPPromptValue (&string_pr[PRESCORR2_SPR]);
                 } else {
-                  #if defined(_SUPPORT_GPIO)
                     bool_pr[KX3ON_BPR].state = false;
                     eraseBPPromptState (&bool_pr[KX3ON_BPR]);
                     eraseBPPromptState (&bool_pr[KX3BAUD_BPR]);
-                  #endif
-                    eraseSPPromptValue (&string_pr[TEMPCORR_SPR]);
-                    eraseSPPromptValue (&string_pr[PRESCORR_SPR]);
-                    eraseSPPromptValue (&string_pr[TEMPCORR2_SPR]);
-                    eraseSPPromptValue (&string_pr[PRESCORR2_SPR]);
                 }
+                drawBMEPrompts (bool_pr[GPIOOK_BPR].state || bool_pr[I2CON_BPR].state);
             }
-          #endif // _SUPPORT_GPIO || _SUPPORT_ENVSENSOR
+
+            else if (bp == &bool_pr[I2CON_BPR]) {
+                if (bp->state) {
+                    // show file name
+                    eraseBPState (&bool_pr[I2CON_BPR]);
+                    drawSPPromptValue (&string_pr[I2CFN_SPR]);
+                } else {
+                    // show no
+                    eraseSPPromptValue (&string_pr[I2CFN_SPR]);
+                    drawBPState (&bool_pr[I2CON_BPR]);
+                }
+                drawBMEPrompts (bool_pr[GPIOOK_BPR].state || bool_pr[I2CON_BPR].state);
+            }
 
           #if defined(_WIFI_ASK)
             else if (bp == &bool_pr[WIFI_BPR]) {
@@ -3189,40 +3339,41 @@ static char *scrubGrid (char *g)
     return (g);
 }
 
-/* all done
+/* save all parameters to NVRAM
  */
-static void finishSettingUp()
+static void saveParams2NV()
 {
     // persist results 
 
 #if !defined(_SHOW_ALL) && !defined(_MARK_BOUNDS)
     // only persist creds when not testing
-    NVWriteString(NV_WIFI_SSID, wifissid);
-    NVWriteString(NV_WIFI_PASSWD, wifipw);
+    NVWriteString(NV_WIFI_SSID, wifi_ssid);
+    NVWriteString(NV_WIFI_PASSWD, wifi_pw);
 #endif
 
-    NVWriteString(NV_CALLSIGN, callsign);
+    NVWriteString(NV_CALLSIGN, call_sign);
     NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
     NVWriteUInt8 (NV_WEEKMON, bool_pr[WEEKDAY1MON_BPR].state);
     NVWriteUInt8 (NV_BEAR_MAG, bool_pr[BEARING_BPR].state);
     NVWriteUInt32 (NV_KX3BAUD, bool_pr[KX3ON_BPR].state ? (bool_pr[KX3BAUD_BPR].state ? 38400 : 4800) : 0);
-    NVWriteFloat (NV_TEMPCORR, temp_corr[BME_76]);
-    NVWriteFloat (NV_PRESCORR, pres_corr[BME_76]);
-    NVWriteFloat (NV_TEMPCORR2, temp_corr[BME_77]);
-    NVWriteFloat (NV_PRESCORR2, pres_corr[BME_77]);
+    NVWriteFloat (NV_TEMPCORR76, temp_corr[BME_76]);
+    NVWriteFloat (NV_PRESCORR76, pres_corr[BME_76]);
+    NVWriteFloat (NV_TEMPCORR77, temp_corr[BME_77]);
+    NVWriteFloat (NV_PRESCORR77, pres_corr[BME_77]);
     NVWriteUInt8 (NV_BR_MIN, bright_min);
     NVWriteUInt8 (NV_BR_MAX, bright_max);
     NVWriteUInt8 (NV_USEGPSD, (bool_pr[GPSDON_BPR].state ? USEGPSD_FORTIME_BIT : 0)
                 | (bool_pr[GPSDON_BPR].state && bool_pr[GPSDFOLLOW_BPR].state ? USEGPSD_FORLOC_BIT : 0));
-    NVWriteString (NV_GPSDHOST, gpsdhost);
+    NVWriteString (NV_GPSDHOST, gpsd_host);
     NVWriteUInt8 (NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
     NVWriteUInt8 (NV_WSJT_DX, bool_pr[CLISWSJTX_BPR].state);
-    NVWriteString (NV_DXHOST, dxhost);
+    NVWriteString (NV_DXHOST, dx_host);
     NVWriteString (NV_DXCMD0, dxcl_cmds[0]);
     NVWriteString (NV_DXCMD1, dxcl_cmds[1]);
     NVWriteString (NV_DXCMD2, dxcl_cmds[2]);
     NVWriteString (NV_DXCMD3, dxcl_cmds[3]);
+    NVWriteString (NV_DXWLIST, dx_wlist);
 
     uint8_t dx_cmdmask = 0;
     if (bool_pr[DXCLCMD0_BPR].state)
@@ -3235,29 +3386,31 @@ static void finishSettingUp()
         dx_cmdmask |= 8;
     NVWriteUInt8 (NV_DXCMDUSED, dx_cmdmask);
 
-    NVWriteUInt16 (NV_DXPORT, dxport);
-    NVWriteString (NV_DXLOGIN, dxlogin);
+    NVWriteUInt16 (NV_DXPORT, dx_port);
+    NVWriteString (NV_DXLOGIN, dx_login);
     NVWriteUInt8 (NV_LOGUSAGE, bool_pr[LOGUSAGE_BPR].state);
     NVWriteUInt8 (NV_MAPSPOTS,
               (bool_pr[SPOTLBL_BPR].state ? (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_CALL : NVMS_DOT)
                                           : (bool_pr[SPOTLBLCALL_BPR].state ? NVMS_PREFIX : NVMS_NONE))
             | (bool_pr[SPOTPATH_BPR].state ? (bool_pr[SPOTPATHSZ_BPR].state ? NVMS_WIDE : NVMS_THIN) : 0));
     NVWriteUInt8 (NV_NTPSET, bool_pr[NTPSET_BPR].state);
-    NVWriteString (NV_NTPHOST, ntphost);
+    NVWriteString (NV_NTPHOST, ntp_host);
     NVWriteString (NV_ADIFFN, adif_fn);
+    NVWriteUInt8 (NV_I2CON, bool_pr[I2CON_BPR].state);
+    NVWriteString (NV_I2CFN, i2c_fn);
     NVWriteUInt8 (NV_DATEMDY, bool_pr[DATEFMT_MDY_BPR].state);
     NVWriteUInt8 (NV_DATEDMYYMD, bool_pr[DATEFMT_DMYYMD_BPR].state);
     NVWriteUInt8 (NV_GPIOOK, bool_pr[GPIOOK_BPR].state);
     NVWriteInt16 (NV_CENTERLNG, center_lng);
     NVWriteUInt8 (NV_RIGUSE, bool_pr[RIGUSE_BPR].state);
-    NVWriteString (NV_RIGHOST, righost);
-    NVWriteUInt16 (NV_RIGPORT, rigport);
+    NVWriteString (NV_RIGHOST, rig_host);
+    NVWriteUInt16 (NV_RIGPORT, rig_port);
     NVWriteUInt8 (NV_ROTUSE, bool_pr[ROTUSE_BPR].state);
-    NVWriteString (NV_ROTHOST, rothost);
-    NVWriteUInt16 (NV_ROTPORT, rotport);
+    NVWriteString (NV_ROTHOST, rot_host);
+    NVWriteUInt16 (NV_ROTPORT, rot_port);
     NVWriteUInt8 (NV_FLRIGUSE, bool_pr[FLRIGUSE_BPR].state);
-    NVWriteString (NV_FLRIGHOST, flrighost);
-    NVWriteUInt16 (NV_FLRIGPORT, flrigport);
+    NVWriteString (NV_FLRIGHOST, flrig_host);
+    NVWriteUInt16 (NV_FLRIGPORT, flrig_port);
 
     // save and engage user's X11 settings
     uint16_t x11flags = 0;
@@ -3289,23 +3442,6 @@ static void finishSettingUp()
         de_tz.tz_secs = getTZ (de_ll);
         NVWriteInt32(NV_DE_TZ, de_tz.tz_secs);
     }
-
-    // clean up shadow strings
-    free (string_pr[LAT_SPR].v_str);
-    free (string_pr[LNG_SPR].v_str);
-    free (string_pr[GRID_SPR].v_str);
-    free (string_pr[DXPORT_SPR].v_str);
-    free (string_pr[RIGPORT_SPR].v_str);
-    free (string_pr[ROTPORT_SPR].v_str);
-    free (string_pr[FLRIGPORT_SPR].v_str);
-    free (string_pr[TEMPCORR_SPR].v_str);
-    free (string_pr[PRESCORR_SPR].v_str);
-    free (string_pr[TEMPCORR2_SPR].v_str);
-    free (string_pr[PRESCORR2_SPR].v_str);
-    free (string_pr[BRMIN_SPR].v_str);
-    free (string_pr[BRMAX_SPR].v_str);
-    free (string_pr[CENTERLNG_SPR].v_str);
-
 }
 
 /* draw the given string with border centered inside the given box using the current font.
@@ -3339,30 +3475,34 @@ void clockSetup()
     // load values from nvram, else set defaults
     initSetup();
 
+    // prep shadowed params, if nothing else for logging them
+    initShadowedParams();
+
     // ask user whether they want to run setup
-    if (!askRun())
-        return;
+    if (askRun()) {
 
-    // ok, user wants to run setup
+        // init display prompts and options
+        initDisplay();
 
-    // init display prompts and options
-    initDisplay();
+        // get current rotation state so we can tell whether it changes
+        bool rotated = rotateScreen();
 
-    // get current rotation state so we can tell whether it changes
-    bool rotated = rotateScreen();
+        // main interaction loop
+        runSetup();
 
-    // main interaction loop
-    runSetup();
+        // save
+        saveParams2NV();
 
-    // finish up
-    finishSettingUp();
-
-    // must recalibrate if rotating screen
-    if (rotated != rotateScreen()) {
-        tft.setRotation(rotateScreen() ? 2 : 0);
-        calibrateTouch(true);
+        // must recalibrate if rotating screen
+        if (rotated != rotateScreen()) {
+            tft.setRotation(rotateScreen() ? 2 : 0);
+            calibrateTouch(true);
+        }
     }
 
+    // log and clean up shadowed params
+    logAllPrompts();
+    freeShadowedParams();
 }
 
 /* return whether the given string is a valid latitude specification, if so set lat in degrees
@@ -3425,7 +3565,7 @@ const char *getWiFiSSID()
     // don't try to set linux wifi while testing
     #ifndef _SHOW_ALL
         if (bool_pr[WIFI_BPR].state)
-            return (wifissid);
+            return (wifi_ssid);
         else
     #endif // !_SHOW_ALL
             return (NULL);
@@ -3439,7 +3579,7 @@ const char *getWiFiPW()
     // don't try to set linux wifi while testing
     #ifndef _SHOW_ALL
         if (bool_pr[WIFI_BPR].state)
-            return (wifipw);
+            return (wifi_pw);
         else
     #endif // !_SHOW_ALL
             return (NULL);
@@ -3450,16 +3590,23 @@ const char *getWiFiPW()
  */
 const char *getCallsign()
 {
-    return (callsign);
+    return (call_sign);
 }
 
 /* set a new default/persistent DE call sign.
+ * also sets dx_login to match.
  * intended for use by set_newde API
  */
-void setCallsign (const char *cs)
+bool setCallsign (const char *cs)
 {
-    strncpy (callsign, cs, NV_CALLSIGN_LEN-1);
-    NVWriteString(NV_CALLSIGN, callsign);
+    int csl = strlen (cs);
+    if (cs[0] == '\0' || cs[0] == ' ' || csl >= NV_CALLSIGN_LEN || csl >= NV_DXLOGIN_LEN)
+        return (false);
+    strncpy (call_sign, cs, NV_CALLSIGN_LEN-1);
+    strncpy (dx_login, cs, NV_DXLOGIN_LEN-1);
+    NVWriteString (NV_CALLSIGN, call_sign);
+    NVWriteString (NV_DXLOGIN, dx_login);
+    return (false);
 }
 
 /* return pointer to static storage containing the DX cluster host
@@ -3467,7 +3614,7 @@ void setCallsign (const char *cs)
  */
 const char *getDXClusterHost()
 {
-    return (dxhost);
+    return (dx_host);
 }
 
 /* return pointer to static storage containing the GPSD host
@@ -3475,7 +3622,7 @@ const char *getDXClusterHost()
  */
 const char *getGPSDHost()
 {
-    return (gpsdhost);
+    return (gpsd_host);
 }
 
 /* return pointer to static storage containing the NTP host defined herein
@@ -3483,7 +3630,7 @@ const char *getGPSDHost()
  */
 const char *getLocalNTPHost()
 {
-    return (ntphost);
+    return (ntp_host);
 }
 
 /* return dx cluster node port
@@ -3491,7 +3638,7 @@ const char *getLocalNTPHost()
  */
 int getDXClusterPort()
 {
-    return (dxport);
+    return (dx_port);
 }
 
 /* return whether we should be allowing DX cluster
@@ -3635,7 +3782,7 @@ bool setBMETempCorr(BMEIndex i, float delta)
     temp_corr[(int)i] = delta;
 
     // persist
-    NVWriteFloat (i == BME_76 ? NV_TEMPCORR : NV_TEMPCORR2, temp_corr[i]);
+    NVWriteFloat (i == BME_76 ? NV_TEMPCORR76 : NV_TEMPCORR77, temp_corr[i]);
 
     return (true);
 }
@@ -3662,7 +3809,7 @@ bool setBMEPresCorr(BMEIndex i, float delta)
     pres_corr[(int)i] = delta;
 
     // persist
-    NVWriteFloat (i == BME_76 ? NV_PRESCORR : NV_PRESCORR2, pres_corr[i]);
+    NVWriteFloat (i == BME_76 ? NV_PRESCORR76 : NV_PRESCORR77, pres_corr[i]);
 
     return (true);
 }
@@ -3689,14 +3836,14 @@ uint32_t getKX3Baud()
  */
 uint8_t getBrMax()
 {
-    return (bright_max);
+    return (brDimmableOk() ? bright_max : 100);
 }
 
 /* return desired minimum brightness, percentage
  */
 uint8_t getBrMin()
 {
-    return (bright_min);
+    return (brDimmableOk() ? bright_min : 0);
 }
 
 /* whether to engage full screen.
@@ -3745,9 +3892,9 @@ bool getRigctld (char host[NV_RIGHOST_LEN], int *portp)
 {
     if (bool_pr[RIGUSE_BPR].state) {
         if (host != NULL)
-            strcpy (host, righost);
+            strcpy (host, rig_host);
         if (portp != NULL)
-            *portp = rigport;
+            *portp = rig_port;
         return (true);
     }
     return (false);
@@ -3760,9 +3907,9 @@ bool getRotctld (char host[NV_ROTHOST_LEN], int *portp)
 {
     if (bool_pr[ROTUSE_BPR].state) {
         if (host != NULL)
-            strcpy (host, rothost);
+            strcpy (host, rot_host);
         if (portp != NULL)
-            *portp = rotport;
+            *portp = rot_port;
         return (true);
     }
     return (false);
@@ -3775,9 +3922,9 @@ bool getFlrig (char host[NV_FLRIGHOST_LEN], int *portp)
 {
     if (bool_pr[FLRIGUSE_BPR].state) {
         if (host != NULL)
-            strcpy (host, flrighost);
+            strcpy (host, flrig_host);
         if (portp != NULL)
-            *portp = flrigport;
+            *portp = flrig_port;
         return (true);
     }
     return (false);
@@ -3787,7 +3934,7 @@ bool getFlrig (char host[NV_FLRIGHOST_LEN], int *portp)
  */
 const char *getDXClusterLogin()
 {
-    return (dxlogin[0] != '\0' ? dxlogin : callsign);
+    return (dx_login[0] != '\0' ? dx_login : call_sign);
 }
 
 /* return cluster commands and whether each is on or off.
@@ -3814,13 +3961,13 @@ bool setDXCluster (char *host, const char *port_str, char ynot[])
         strcpy (ynot, _FX("Bad host"));
         return (false);
     }
-    if (!portOK (port_str, 1000, &dxport)) {
+    if (!portOK (port_str, 1000, &dx_port)) {
         strcpy (ynot, _FX("Bad port"));
         return (false);
     }
-    strncpy (dxhost, host, NV_DXHOST_LEN-1);
-    NVWriteString (NV_DXHOST, dxhost);
-    NVWriteUInt16 (NV_DXPORT, dxport);
+    strncpy (dx_host, host, NV_DXHOST_LEN-1);
+    NVWriteString (NV_DXHOST, dx_host);
+    NVWriteUInt16 (NV_DXPORT, dx_port);
     return(true);
 }
 
@@ -3892,4 +4039,36 @@ bool useWSJTX(void)
 const char *getADIFilename(void)
 {
     return (bool_pr[ADIFSET_BPR].state ? adif_fn : NULL);
+}
+
+/* return name of I2C device to use, else NULL
+ */
+const char *getI2CFilename(void)
+{
+    // N.B. do not call I2CFnOk here, just rely on it having been used by setup to determine I2CON_BPR
+    return (bool_pr[I2CON_BPR].state ? i2c_fn : NULL);
+}
+
+/* return whether the given call is on the dx cluster watch list
+ */
+bool onDXWatchList (const char *call)
+{
+    // dx_wlist is a list of calls or prefixes separated by spaces or commas.
+    // call is considered to be in the list if its first chars match any of the calls or prefixes.
+
+    // copy for strtok
+    StackMalloc watched(sizeof(dx_wlist));
+    char *wl = (char *) watched.getMem();
+    strcpy (wl, dx_wlist);
+
+    // separators
+    const char *sep = ", ";
+    
+    // scan for match
+    for (char *prefix = strtok (wl, sep); prefix; prefix = strtok (NULL, sep))
+        if (strncasecmp (call, prefix, strlen(prefix)) == 0)
+            return (true);
+
+    // no match
+    return (false);
 }
