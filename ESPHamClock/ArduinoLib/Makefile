@@ -26,7 +26,8 @@ OBJS = \
 	WiFiServer.o \
 	WiFiUdp.o \
         Wire.o \
-	i2cdriver.o
+	i2cdriver.o \
+	passwords.o
 
 default:
 	@echo "This Makefile is not intended for stand-alone use -- use only from HamClock's main Makefile"

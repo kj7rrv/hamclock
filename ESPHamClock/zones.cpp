@@ -27817,7 +27817,7 @@ static ZonePoly ituzones[] = {
     {48,      700,   4000,  ituz48, 140},
     {49,     1700,  10000,  ituz49, 231},
     {50,     1200,  12000,  ituz50, 77},
-    {51,     -200,  15000,  ituz51, 106},
+    {51,     -600,  15000,  ituz51, 106},
     {52,     -500,   1700,  ituz52, 283},
     {53,    -1000,   4500,  ituz53, 251},
     {54,        0,  11500,  ituz54, 135},
@@ -27944,8 +27944,8 @@ void updateZoneSCoords (ZoneID id)
     const uint16_t map_xleft = tft.SCALESZ*map_b.x;                     // handy raw map x left edge
     const uint16_t map_xcenter = tft.SCALESZ*(map_b.x + map_b.w/2);     // handy raw map x center
     const uint16_t map_xright = tft.SCALESZ*(map_b.x + map_b.w - 1);    // handy raw map x right edge
-    const uint16_t map_ho2 = tft.SCALESZ*map_b.h/2;                     // handy raw map height
-    const uint16_t map_wo2 = tft.SCALESZ*map_b.w/2;                     // handy raw map width-over-2
+    const uint16_t map_hh = tft.SCALESZ*map_b.h/2;                      // handy raw map half-height
+    const uint16_t map_hw = tft.SCALESZ*map_b.w/2;                      // handy raw map half-width
 
     // for each polygon
     const ZonePoly *end_zp = &zpoly[n_z];                         // zp loop sentinel
@@ -27988,8 +27988,8 @@ void updateZoneSCoords (ZoneID id)
             case MAPP_AZIMUTHAL: {
 
                 // find half-width at this y
-                float y_frac = ((float)sp0.y - (float)map_ycenter)/map_ho2;
-                int hw = map_ho2 * sqrtf (1 - y_frac*y_frac);
+                float y_frac = ((float)sp0.y - (float)map_ycenter)/map_hh;
+                int hw = map_hh * sqrtf (1 - y_frac*y_frac);
 
                 // break into two polygons if wraps around edges
                 if (abs ((int)sp0.x - (int)sc0.x) > hw) {
@@ -28004,11 +28004,10 @@ void updateZoneSCoords (ZoneID id)
                 }
                 break;
 
-            case MAPP_MOLL: {
+            case MAPP_ROB: {
 
                 // find half-width at this y
-                float y_frac = ((float)sp0.y - (float)map_ycenter)/map_ho2;
-                int hw = map_wo2 * sqrtf (1 - y_frac*y_frac);   // Moll is 2:1 ellipse
+                int hw = map_hw * RobLat2G (90*(map_ycenter - sp0.y)/map_hh);
 
                 // break into two polygons if wraps around edges
                 if (abs ((int)sp0.x - (int)sc0.x) > hw) {
@@ -28028,7 +28027,7 @@ void updateZoneSCoords (ZoneID id)
                 // discard zones near the antipodal horizon
                 float dx = (int)sc0.x - (int)map_xcenter;
                 float dy = (int)sc0.y - (int)map_ycenter;
-                float max_rr = 0.95F*map_ho2*map_ho2;
+                float max_rr = 0.95F*map_hh*map_hh;
                 if (dx*dx + dy*dy > max_rr) {
                     // reset all vertices then abandon remainder of this zone
                     for (int ve = 0; ve <= zp->n_verts; ve++) {
@@ -28044,7 +28043,7 @@ void updateZoneSCoords (ZoneID id)
             case MAPP_MERCATOR:
 
                 // break into two polygons if wraps around edges
-                if (abs ((int)sp0.x - (int)sc0.x) > map_wo2) {
+                if (abs ((int)sp0.x - (int)sc0.x) > map_hw) {
                     uint16_t p_edge = sp0.x < map_xcenter ? map_xleft : map_xright;     // prev edge
                     uint16_t c_edge = sc0.x < map_xcenter ? map_xleft : map_xright;     // current edge
                     sp0.x = p_edge;                             // extend previous vertex to prev edge

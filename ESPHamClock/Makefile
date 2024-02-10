@@ -42,6 +42,7 @@ OBJS = \
 	P13.o \
 	adif.o \
 	asknewpos.o \
+	askpasswd.o \
 	astro.o \
 	blinker.o \
 	brightness.o \
@@ -64,7 +65,6 @@ OBJS = \
 	maidenhead.o \
 	mapmanage.o \
 	menu.o \
-	mollweide.o \
 	moon_imgs.o \
 	moonpane.o \
 	ncdxf.o \
@@ -76,6 +76,7 @@ OBJS = \
 	prefixes.o \
 	pskreporter.o \
 	radio.o \
+	robinson.o \
 	runner.o \
 	santa.o \
 	scroll.o \

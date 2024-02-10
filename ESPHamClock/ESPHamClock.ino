@@ -539,8 +539,11 @@ void setup()
     // ask to update if new version available -- never returns if update succeeds
     if (!skip_skip) {
         char nv[50];
-        if (newVersionIsAvailable (nv, sizeof(nv)) && askOTAupdate (nv))
-            doOTAupdate(nv);
+        if (newVersionIsAvailable (nv, sizeof(nv)) && askOTAupdate (nv)) {
+            if (askPasswd (_FX("upgrade"), false))
+                doOTAupdate(nv);
+            eraseScreen();
+        }
     }
 
     // init sensors
@@ -684,6 +687,12 @@ void setup()
     // check for saved satellite
     dx_info_for_sat = initSatSelection();
 
+    // show locked if web-only and -c
+#if defined(_WEB_ONLY)
+    if (no_web_touch)
+        setScreenLock (true);
+#endif
+
     // perform inital screen layout
     initScreen();
 
@@ -785,7 +794,7 @@ void initScreen()
     // erase entire screen
     eraseScreen();
 
-    // set protected region
+    // set protected region, which requires explicit call to tft.drawPR() to update
     tft.setPR (map_b.x, map_b.y, map_b.w, map_b.h);
 
     // us
@@ -875,7 +884,7 @@ static void checkTouch()
     if (inBox (s, lkscrn_b)) {
         if (screenIsLocked()) {
             // if locked all you can do is unlock with a tap
-            if (tt == TT_TAP)
+            if (tt == TT_TAP && askPasswd(_FX("unlock"), true))
                 toggleLockScreen();
         } else {
             // if unlocked HOLD always means shutdown else toggle
@@ -1007,7 +1016,7 @@ static void checkTouch()
     } else if (inBox (s, version_b)) {
         char nv[50];
         if (newVersionIsAvailable(nv, sizeof(nv))) {
-            if (askOTAupdate (nv))
+            if (askOTAupdate (nv) && askPasswd (_FX("upgrade"), false))
                 doOTAupdate(nv);
         } else {
             eraseScreen();
@@ -1046,6 +1055,10 @@ void normalizeLL (LatLong &ll)
 void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
 {
     resetWatchdog();
+
+    // require password if set
+    if (!askPasswd(_FX("newdx"), true))
+        return;
 
     // disable the sat info 
     if (dx_info_for_sat) {
@@ -1105,6 +1118,10 @@ void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
 void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
 {
     resetWatchdog();
+
+    // require password if set
+    if (!askPasswd(_FX("newde"), true))
+        return;
 
     // set grid and TZ
     normalizeLL (ll);
@@ -1916,36 +1933,41 @@ static bool overMaidKey (const SCoord &s)
  */
 static bool overActiveMap (const SCoord &s)
 {
-    if (map_proj == MAPP_AZIMUTHAL) {
-        int map_r = map_b.w/4;
-        int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
-        if (s.x < map_b.x + map_b.w/2) {
-            // left globe
-            int dx = (int)s.x - (int)(map_b.x + map_b.w/4);
-            return (dx*dx + dy*dy <= map_r*map_r);
-        } else {
-            // right globe
-            int dx = (int)s.x - (int)(map_b.x + 3*map_b.w/4);
+    switch ((MapProjection)map_proj) {
+
+    case MAPP_AZIMUTHAL: {
+            // two adjacent hemispheres
+            int map_r = map_b.w/4;
+            int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
+            if (s.x < map_b.x + map_b.w/2) {
+                // left globe
+                int dx = (int)s.x - (int)(map_b.x + map_b.w/4);
+                return (dx*dx + dy*dy <= map_r*map_r);
+            } else {
+                // right globe
+                int dx = (int)s.x - (int)(map_b.x + 3*map_b.w/4);
+                return (dx*dx + dy*dy <= map_r*map_r);
+            }
+        }
+
+    case MAPP_AZIM1: {
+            // one centered globe
+            int map_r = map_b.w/4;
+            int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
+            int dx = (int)s.x - (int)(map_b.x + map_b.w/2);
             return (dx*dx + dy*dy <= map_r*map_r);
         }
 
-    } else if (map_proj == MAPP_AZIM1) {
-        // centered globe
-        int map_r = map_b.w/4;
-        int dy = (int)s.y - (int)(map_b.y + map_b.h/2);
-        int dx = (int)s.x - (int)(map_b.x + map_b.w/2);
-        return (dx*dx + dy*dy <= map_r*map_r);
-
-    } else if (map_proj == MAPP_MERCATOR) {
+    case MAPP_MERCATOR:
+        // full map_b
         return (inBox(s,map_b));
 
-    } else if (map_proj == MAPP_MOLL) {
-        // normalize ellipse boundry to unit circle
-        float dx = (float)(s.x - (map_b.x + map_b.w/2))/(map_b.w/2);
-        float dy = (float)(s.y - (map_b.y + map_b.h/2))/(map_b.h/2);
-        return (dx*dx + dy*dy < 1);
+    case MAPP_ROB: {
+            LatLong ll;
+            return (s2llRobinson (s, ll));
+        }
 
-    } else {
+    default:
         fatalError (_FX("overActiveMap bogus projection %d"), map_proj);
         return (false);         // lint 
     }
@@ -2442,7 +2464,7 @@ void eraseSCircle (const SCircle &c)
     }
 }
 
-/* erase entire screen
+/* erase entire screen engage immediate graphical updates
  */
 void eraseScreen()
 {
@@ -2761,33 +2783,57 @@ static void shutdown(void)
     switch (selection) {
     case _SDC_RESUME:
         initScreen();
-        return;
+        break;
     case _SDC_RESTART:
-        Serial.print (_FX("Restarting\n"));
-        eraseScreen();  // fast touch feedback
-        doReboot();
+        if (askPasswd (_FX("restart"), true)) {
+            Serial.print (_FX("Restarting\n"));
+            eraseScreen();  // fast touch feedback
+            doReboot();
+        }
+        // resume normal ops
         break;
  #if defined(_IS_UNIX)
     case _SDC_EXIT:
-        Serial.print (_FX("Exiting\n"));
-        doExit();
+        if (askPasswd ("exit", true)) {
+            Serial.print (_FX("Exiting\n"));
+            doExit();
+        }
+        // resume normal ops
         break;                  // ;-)
     case _SDC_POSTDIAGS:
         postDiags();
         initScreen();
-        return;
+        break;
     case _SDC_REBOOT:
-        drawStringInBox ("Rebooting...", sdctl[3].box, true, RA8875_RED);
-        tft.drawPR();            // forces immediate effect
-        Serial.print (_FX("Rebooting\n"));
-        (void) !system ("sudo reboot");
-        for(;;);
+        if (askPasswd ("reboot", true)) {
+            eraseScreen();
+            selectFontStyle (BOLD_FONT, SMALL_FONT);
+            drawStringInBox ("Rebooting...", sdctl[3].box, true, sdctl[3].color);
+            tft.drawPR();            // forces immediate effect
+            Serial.print ("Rebooting\n");
+            int x = system ("sudo reboot");
+            if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
+                doExit();
+            else
+                Serial.printf ("system(reboot) returns %d\n", x);
+        }
+        // resume normal ops
+        break;
     case _SDC_SHUTDOWN:
-        drawStringInBox ("Shutting down...", sdctl[4].box, true, RA8875_RED);
-        tft.drawPR();            // forces immediate effect
-        Serial.print (_FX("Shutting down\n"));
-        (void) !system ("sudo poweroff || sudo halt");
-        for(;;);
+        if (askPasswd ("shutdown", true)) {
+            eraseScreen();
+            selectFontStyle (BOLD_FONT, SMALL_FONT);
+            drawStringInBox ("Shutting down...", sdctl[4].box, true, sdctl[4].color);
+            tft.drawPR();            // forces immediate effect
+            Serial.print ("Shutting down\n");
+            int x = system ("sudo poweroff || sudo halt");
+            if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
+                doExit();
+            else
+                Serial.printf ("system(poweroff) returns %d\n", x);
+        }
+        // resume normal ops
+        break;
  #endif // _IS_UNIX
     default:
         fatalError (_FX("Shutdown choice: %d"), selection);

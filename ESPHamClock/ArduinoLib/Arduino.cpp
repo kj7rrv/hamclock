@@ -65,6 +65,7 @@ const char *diag_files[N_DIAG_FILES] = {
   #error Unknown build configuration
 #endif
  
+static const char *pw_file;
 
 /* return milliseconds since first call
  */
@@ -294,6 +295,8 @@ static void usage (const char *errfmt, ...)
         fprintf (stderr, " -l l : set Mercator or Mollweide center longitude to l degrees, +E; requires -k\n");
         fprintf (stderr, " -m   : enable demo mode\n");
         fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
+        fprintf (stderr, " -p f : require passwords in file f formatted as lines of \"category password\"\n");
+        fprintf (stderr, "        categories: changeUTC exit newde newdx reboot restart setup shutdown unlock upgrade\n");
         fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
         fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
         fprintf (stderr, " -v   : show version info then exit\n");
@@ -399,6 +402,12 @@ static void crackArgs (int ac, char *av[])
                     diag_to_file = false;
                     break;
                     break;
+                case 'p':
+                    if (ac < 2)
+                        usage ("missing file name for -p");
+                    pw_file = *++av;
+                    ac--;
+                    break;
                 case 's':
                     if (ac < 2)
                         usage ("missing date/time for -s");
@@ -483,11 +492,13 @@ int main (int ac, char *av[])
         for (int i = 0; i < ac; i++)
             printf ("  argv[%d] = %s\n", i, av[i]);
 
-        // log our key info: make, working dir and uid
+        // log our some info
         printf ("process id %d\n", getpid());
         printf ("built as %s\n", our_make);
         printf ("working directory is %s\n", our_dir.c_str());
         printf ("ruid %d euid %d\n", getuid(), geteuid());
+        if (pw_file)
+            capturePasswords (pw_file);
 
         // log os release, if available
         logOS();

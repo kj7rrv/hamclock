@@ -480,13 +480,14 @@ static bool parseADIF (char c, ADIFParser &adif, DXClusterSpot &spot, char *ynot
  */
 static const char *expandENV (const char *fn)
 {
-    // build fn with any env expanded
+    // build fn with any embedded info expanded
     char *fn_exp = NULL;
     int exp_len = 0;
     for (const char *fn_walk = fn; *fn_walk; fn_walk++) {
 
-        // check for embedded ENV
-        char *env_value = NULL;
+        // check for embedded terms
+
+        char *embed_value = NULL;
         if (*fn_walk == '$') {
             // expect ENV all caps, digits or _
             const char *dollar = fn_walk;
@@ -498,19 +499,24 @@ static const char *expandENV (const char *fn)
             char *env_tmp = (char *) env_mem.getMem();
             memcpy (env_tmp, dollar+1, env_len);
             env_tmp[env_len] = '\0';
-            env_value = getenv(env_tmp);
+            embed_value = getenv(env_tmp);
             fn_walk += env_len;
+
+        } else if (*fn_walk == '~') {
+            // expand ~ as $HOME
+            embed_value = getenv("HOME");
+            // fn_walk++ in for loop is sufficient
         }
 
         // append to fn_exp
-        if (env_value) {
-            // add env value to fn_exp
-            int val_len = strlen (env_value);
+        if (embed_value) {
+            // add embedded value to fn_exp
+            int val_len = strlen (embed_value);
             fn_exp = (char *) realloc (fn_exp, exp_len + val_len);
-            memcpy (fn_exp + exp_len, env_value, val_len);
+            memcpy (fn_exp + exp_len, embed_value, val_len);
             exp_len += val_len;
         } else {
-            // env not found, just add fn_walk to fn_exp
+            // no embedded found, just add fn_walk to fn_exp
             fn_exp = (char *) realloc (fn_exp, exp_len + 1);
             fn_exp[exp_len++] = *fn_walk;
         }

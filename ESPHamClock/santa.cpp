@@ -147,21 +147,20 @@ void drawSanta()
         }
         break;
     
-    case MAPP_MOLL: {
-        // fit within 2:1 ellipse
+    case MAPP_ROB: {
         uint16_t tb_border = SANTA_HPIX/2;                              // top/bot border
         uint16_t y_t = map_b.y + tb_border;                             // santa_b.y at hr 0
         uint16_t y_b = map_b.y + map_b.h - tb_border - SANTA_HPIX;      // santa_b.y at hr 23
         santa_b.y = y_t + hr_frac*(y_b-y_t);                            // santa_b.y now
-        float y_frac;
-        if (santa_b.y < yc-SANTA_HPIX/2)                                // test using top or bottom
-            y_frac = (yc - santa_b.y)/(float)hh;                        // overall y fraction on santa top
-        else
-            y_frac = (santa_b.y + SANTA_HPIX - yc)/(float)hh;           // overall y fraction on santa bottom
-        uint16_t ew = hw * sqrtf(1 - y_frac*y_frac);                    // half-width to each edge
-        uint16_t x_l = xc - ew;                                         // left edge
-        uint16_t x_r = xc + ew - SANTA_WPIX;                            // right edge
-        santa_b.x = x_l + mn_frac*(x_r-x_l);                            // spread x along [x_l,x_r] by minutes
+        uint16_t y_hw;                                                  // globe half-width 
+        if (santa_b.y < yc-SANTA_HPIX/2) {                              // test using top or bottom of box
+            y_hw = hw * RobLat2G (90*(yc - santa_b.y)/hh);              // globe half-width at santa top
+        } else {
+            y_hw = hw * RobLat2G (90*(yc - santa_b.y - SANTA_HPIX)/hh); // globe half-width at santa bottom
+        }
+        uint16_t x_l = xc - y_hw;
+        uint16_t x_r = xc + y_hw - SANTA_WPIX;
+        santa_b.x = x_l + mn_frac*(x_r-x_l);                            // spread x along [x_l,x_r]
         }
         break;
     

@@ -428,12 +428,12 @@ static void runAuxTimeMenu()
     }
 }
 
-/* use NTP or GPSD to update time, but not crazy fast
+/* use NTP or GPSD to update time unless using host
  */
 static void startSyncProvider(bool force)
 {
     static uint32_t prev_start;
-    if (timesUp(&prev_start, TIME_RETRY) || force) {
+    if (!useOSTime() && (timesUp(&prev_start, TIME_RETRY) || force)) {
         Serial.print (_FX("time: perform fresh sync\n"));
         setSyncInterval (TIME_INTERVAL);
         setSyncProvider (getTime);
@@ -843,23 +843,30 @@ time_t nowWO()
 
 /* there is circumstantial evidence that now() can return 0 or values less than previous.
  * that raises havoc so this wrapper hides that and makes note.
+ * then in 3.05 we added OS time which this made trivial.
  */
 time_t myNow()
 {
-    static time_t prev_t;
-    time_t t = now();
+    if (useOSTime()) {
+        return (time(NULL));
 
-    if (t < prev_t) {
-        if (!time_running_bw)
-            Serial.printf (_FX("time: running backwards: %ld -> %ld\n"), (long)prev_t, (long)t);
-        time_running_bw = true;
-        return (prev_t);
     } else {
-        if (time_running_bw)
-            Serial.printf (_FX("time: running forwards now: %ld -> %ld\n"), (long)prev_t, (long)t);
-        time_running_bw = false;
-        prev_t = t;
-        return (t);
+
+        static time_t prev_t;
+        time_t t = now();
+
+        if (t < prev_t) {
+            if (!time_running_bw)
+                Serial.printf (_FX("time: running backwards: %ld -> %ld\n"), (long)prev_t, (long)t);
+            time_running_bw = true;
+            return (prev_t);
+        } else {
+            if (time_running_bw)
+                Serial.printf (_FX("time: running forwards now: %ld -> %ld\n"), (long)prev_t, (long)t);
+            time_running_bw = false;
+            prev_t = t;
+            return (t);
+        }
     }
 }
 
@@ -869,7 +876,7 @@ time_t myNow()
  */
 bool clockTimeOk()
 {
-    bool time_ok = timeStatus() == timeSet && !time_running_bw;    // N.B. timeStatus() calls myNow()
+    bool time_ok = useOSTime() || (timeStatus() == timeSet && !time_running_bw);
     if (!time_ok)
         startSyncProvider(false);
     return (time_ok);
@@ -1172,7 +1179,7 @@ bool checkClockTouch (SCoord &s)
             menu_b.x += 20;
             SBox ok_b;
             MenuInfo menu = {menu_b, ok_b, false, false, 1, _CT_N, mitems};
-            if (runMenu(menu)) {
+            if (runMenu(menu) && askPasswd ("changeUTC", true)) {
 
                 // find change direction
                 int sign = mitems[_CT_DIR_FRW].set ? 1 : -1;

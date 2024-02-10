@@ -27,7 +27,7 @@
     
 #if (defined(__arm__) || defined(__aarch64__)) && defined(_IS_LINUX)
   #if defined(__has_include)
-      #if __has_include(<gpiod.h>)
+      #if __has_include(<gpiod.h>) || __has_include(<bcm_host.h>) || __has_include(<pigpio.h>)
         #define _IS_LINUX_RPI
       #endif
   #endif
@@ -94,6 +94,7 @@ extern const char *getI2CFilename(void);
 extern bool GPIOOk(void);
 extern const char *hc_version;
 extern void doExit(void);
+extern bool testPassword (const char *category, const char *candidate_pw);
 
 #define N_DIAG_FILES 4
 extern const char *diag_files[N_DIAG_FILES];

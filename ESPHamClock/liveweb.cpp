@@ -1,6 +1,6 @@
 /* implement a live web server connection so browsers can see and control HamClock.
  *
- * we listen to liveweb_port for normal GET requests such as live.html or web socket upgrades.
+ * we listen to liveweb_port for live.html or web socket upgrades.
  *
  * Browser displays entire HamClock frame buffer. Complete frame is sent initially then only the
  * pixels that change.
@@ -18,7 +18,7 @@
 // public
 time_t last_live;                                       // last live update; public for wifi.cpp
 bool no_web_touch;                                      // disable web touch events
-
+bool liveweb_fs_ready;                                  // set when ok to send fullscreen command
 
 #if defined(_IS_UNIX)
 
@@ -35,7 +35,7 @@ bool no_web_touch;                                      // disable web touch eve
 static int live_verbose = 0;                            // more chatter if > 0
 
 // our public endpoint port
-int liveweb_port = LIVEWEB_PORT;                        // server port -- can be changed with -e
+int liveweb_port = LIVEWEB_PORT;                        // server port -- can be changed with -w
 
 
 // png format is 3 bytes per pixel
@@ -332,6 +332,14 @@ static void sendClientPNG (ws_cli_conn_t *client)
         Serial.printf ("LIVE: client %s: sent full PNG\n", ws_getaddress(client));
 }
 
+/* send message as to whether or not display in full screen
+ */
+static void sendFullScreen(ws_cli_conn_t *client)
+{
+    char fs[3] = {99, 91, getX11FullScreen()};          // see liveweb-html
+    ws_sendframe_bin (client, fs, 3);
+}
+
 /* client running liveweb-html.cpp is asking for a complete screen capture as png file.
  */
 static void getLivePNG (ws_cli_conn_t *client, char args[], size_t args_len)
@@ -343,11 +351,16 @@ static void getLivePNG (ws_cli_conn_t *client, char args[], size_t args_len)
 }
 
 /* client running liveweb-html.cpp is asking for incremental screen update.
+ * we also send fullscreen if ready from setup.cpp. must send continuously because it only
+ *   works a short while after a GUI interaction and we don't know when those will occur.
  */
 static void getLiveUpdate (ws_cli_conn_t *client, char args[], size_t args_len)
 {
     (void)args;
     (void)args_len;
+
+    if (liveweb_fs_ready && getX11FullScreen())
+        sendFullScreen (client);
 
     updateExistingClient (client);
 }

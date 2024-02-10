@@ -741,6 +741,23 @@ static void logAllPrompts(void)
             Serial.printf (_FX("Setup: %s = %s\n"), bp->p_str,
                 bp->state ? (bp->t_str ? bp->t_str : _FX("T-NULL")) : (bp->f_str ? bp->f_str :_FX("F-NULL")));
     }
+
+    // on/off times
+    uint16_t onoff[NV_DAILYONOFF_LEN];
+    NVReadString (NV_DAILYONOFF, (char*)onoff);
+    char oostr[40+6*DAYSPERWEEK];
+    size_t sl = snprintf (oostr, sizeof(oostr), _FX("Setup: DAILYONOFF =  On"));
+    for (int i = 0; i < DAYSPERWEEK; i++) {
+        uint16_t on = onoff[i];
+        sl += snprintf (oostr+sl, sizeof(oostr)-sl, _FX(" %02u:%02u"), on/60, on%60);
+    }
+    Serial.println (oostr);
+    sl = snprintf (oostr, sizeof(oostr), _FX("Setup: DAILYONOFF = Off"));
+    for (int i = 0; i < DAYSPERWEEK; i++) {
+        uint16_t off = onoff[i+DAYSPERWEEK];
+        sl += snprintf (oostr+sl, sizeof(oostr)-sl, _FX(" %02u:%02u"), off/60, off%60);
+    }
+    Serial.println (oostr);
 }
 
 /* prepare the shadowed prompts
@@ -917,7 +934,7 @@ static bool boolIsRelevant (BoolPrompt *bp)
     if (bp->page != cur_page)
         return (false);
 
-#if !defined(_USE_X11)
+#if !defined(_USE_X11) && !defined(_WEB_ONLY)
     if (bp == &bool_pr[X11_FULLSCRN_BPR])
         return (false);
 #endif
@@ -1029,7 +1046,7 @@ static bool stringIsRelevant (StringPrompt *sp)
     }
 
     if (sp == &string_pr[DXHOST_SPR]) {
-        if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
+        if (!bool_pr[CLUSTER_BPR].state)
             return (false);
     }
 
@@ -2196,13 +2213,34 @@ static bool portOK (const char *port_str, int min_port, uint16_t *portp)
 static bool hostOK (char *host_str, int max_len)
 {
     noBlanks(host_str);
+
+    // not too long or too short
     int hl = strlen (host_str);
-    if (hl > max_len-1)
+    if (hl > max_len-1 || hl == 0)
         return (false);
-    bool lh = !strcmp (host_str, "localhost");  // special case
-    char *dot = strchr (host_str, '.');
-    bool dots_ok = dot != NULL && host_str[0] != '.' && host_str[hl-1] != '.';
-    return (lh || dots_ok);
+
+    // localhost?
+    if (!strcmp (host_str, "localhost"))
+        return (true);
+
+    // need at least one dot for TLD or exactly 3 if looks like dotted ip notation
+    int n_dots = 0;
+    int n_digits = 0;
+    int n_other = 0;
+    for (int i = 0; i < hl; i++) {
+        if (host_str[i] == '.')
+            n_dots++;
+        else if (isdigit(host_str[i]))
+            n_digits++;
+        else
+            n_other++;
+    }
+    if (n_dots < 1 || host_str[0] == '.' || host_str[hl-1] == '.')
+        return (false);
+    if (n_other == 0 && (n_dots != 3 || n_digits != hl-3))
+        return (false);
+
+    return (true);
 }
 
 /* return whether the i2c_fn looks legit
@@ -2238,10 +2276,10 @@ static bool clusterLoginOk()
     return (dx_login[0] == '\0' || strstr (dx_login, call_sign) != NULL);
 }
 
-/* validate all string fields, temporarily indicate ones in error if on current page.
- * return whether all ok.
+/* return whether string fields are all valid.
+ * if show_errors then temporarily indicate ones in error.
  */
-static bool validateStringPrompts()
+static bool validateStringPrompts (bool show_errors)
 {
     // collect bad ids to flag
     SPIds badsid[N_SPR];
@@ -2249,7 +2287,7 @@ static bool validateStringPrompts()
 
     // call must not be blank
     noBlanks(call_sign);
-    if (call_sign[0] == '0')
+    if (call_sign[0] == '\0')
         badsid[n_badsid++] = CALL_SPR;
 
     // check lat/long unless using something else
@@ -2269,11 +2307,11 @@ static bool validateStringPrompts()
     // check cluster info if used
     if (bool_pr[CLUSTER_BPR].state) {
         char *clhost = string_pr[DXHOST_SPR].v_str;
-        if (!hostOK(clhost,NV_DXHOST_LEN) && !bool_pr[CLISWSJTX_BPR].state)
+        if (!hostOK(clhost,NV_DXHOST_LEN))
             badsid[n_badsid++] = DXHOST_SPR;
-        if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dx_port))         // 23 is telnet
+        if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dx_port))        // 23 is telnet
             badsid[n_badsid++] = DXPORT_SPR;
-        if (!clusterLoginOk())
+        if (!bool_pr[CLISWSJTX_BPR].state && !clusterLoginOk())         // no used with wsjt
             badsid[n_badsid++] = DXLOGIN_SPR;
 
         // clean up any extra white space in the commands then check for blank entries that are on
@@ -2348,9 +2386,9 @@ static bool validateStringPrompts()
             badsid[n_badsid++] = GPSDHOST_SPR;
     }
 
-    // require plausible ntp host name if used
+    // require plausible ntp host name or a few special cases if used
     if (bool_pr[NTPSET_BPR].state) {
-        if (!hostOK(string_pr[NTPHOST_SPR].v_str,NV_NTPHOST_LEN))
+        if (!hostOK(string_pr[NTPHOST_SPR].v_str,NV_NTPHOST_LEN) && !useOSTime())
             badsid[n_badsid++] = NTPHOST_SPR;
     }
 
@@ -2393,9 +2431,12 @@ static bool validateStringPrompts()
             badsid[n_badsid++] = I2CFN_SPR;
     }
 
-    // indicate any values in error, changing pages if necessary
-    if (n_badsid > 0) {
+    // if not showing, just return whether all ok
+    if (!show_errors)
+        return (n_badsid == 0);
 
+    // if any bad indicate values in error, changing pages if necessary
+    if (n_badsid > 0) {
 
         // starting with the current page, search for first page with any bad fields
 
@@ -3429,7 +3470,7 @@ static void runSetup()
             }
         }
 
-    } while (!(inBox (s, done_b) || c == '\r' || c == '\n') || !validateStringPrompts());
+    } while (!(inBox (s, done_b) || c == '\r' || c == '\n') || !validateStringPrompts(true));
 
     drawDoneButton(true);
 
@@ -3591,11 +3632,16 @@ void clockSetup()
     // prep shadowed params, if nothing else for logging them
     initShadowedParams();
 
-    // ask user whether they want to run setup
-    if (askRun()) {
+    // ask user whether they want to run setup, display anyway if any strings are invalid
+    bool str_ok = validateStringPrompts (false);
+    if ((!str_ok || askRun()) && askPasswd (_FX("setup"), false)) {
 
         // init display prompts and options
         initDisplay();
+
+        // start by indicating any errors
+        if (!str_ok)
+            validateStringPrompts (true);
 
         // get current rotation state so we can tell whether it changes
         bool rotated = rotateScreen();
@@ -3616,6 +3662,9 @@ void clockSetup()
     // log and clean up shadowed params
     logAllPrompts();
     freeShadowedParams();
+
+    // ok to send liveweb full screen setting
+    liveweb_fs_ready = true;
 }
 
 /* return whether the given string is a valid latitude specification, if so set lat in degrees
@@ -3853,6 +3902,18 @@ bool useGPSDLoc()
 bool useLocalNTPHost()
 {
     return (bool_pr[NTPSET_BPR].state);
+}
+
+/* return whether to use OS for time, not NTP
+ */
+bool useOSTime()
+{
+#if defined(_IS_ESP8266)
+    // there is no OS
+    return (false);
+#else
+    return (bool_pr[NTPSET_BPR].state && strcmp (ntp_host, "OS") == 0);
+#endif
 }
 
 /* return desired date format

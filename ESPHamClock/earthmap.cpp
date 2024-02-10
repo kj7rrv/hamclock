@@ -57,17 +57,7 @@ static void getGridColorCache()
 {
     // get base color
     GRIDC = getMapColor(GRID_CSPR);
-
-    // find different color for 0/0 and zone lines
-    uint8_t r = RGB565_R(GRIDC);
-    uint8_t g = RGB565_G(GRIDC);
-    uint8_t b = RGB565_B(GRIDC);
-    uint8_t h, s, v;
-    rgbtohsv (&h, &s, &v, r, g, b);
-
-    // highlight with contrasting brightness
-    v += 64;                                   // relies on 8 bit to roll over
-    GRIDC00 = HSV565 (h, s, v);
+    GRIDC00 = getGoodTextColor (GRIDC);
 }
 
 /* erase the DE symbol by restoring map contents.
@@ -953,8 +943,7 @@ static void drawAzmStars()
             int32_t dy = y - map_b.h/2;
             if (dx*dx + dy*dy > map_b.w*map_b.w/16) {
                 uint16_t c = random(256);
-                c = RGB565(c,c,c);
-                tft.drawPixel (map_b.x+x, map_b.y+y, c);
+                tft.drawPixel (map_b.x+x, map_b.y+y, RGB565(c,c,c));
                 n_stars++;
             }
         }
@@ -968,24 +957,21 @@ static void drawAzmStars()
             int32_t dy = y - map_b.h/2;
             if (dx*dx + dy*dy > map_b.h*map_b.h/4) {
                 uint16_t c = random(256);
-                c = RGB565(c,c,c);
-                tft.drawPixel (map_b.x+x, map_b.y+y, c);
+                tft.drawPixel (map_b.x+x, map_b.y+y, RGB565(c,c,c));
                 n_stars++;
             }
         }
         break;
 
-    case MAPP_MOLL:
+    case MAPP_ROB:
         while (n_stars < N_AZMSTARS) {
-            // Mollweide edge is a 2x1 ellipse
-            float dx_frac = (500.0F - random(1000))/501.0F;      // (-1 .. 1)
-            float dy_frac = (500.0F - random(1000))/501.0F;      // (-1 .. 1)
-            if (dx_frac*dx_frac + dy_frac*dy_frac > 1) {
-                uint16_t star_x = roundf (map_b.x + (1+dx_frac)*map_b.w/2);
-                uint16_t star_y = roundf (map_b.y + (1+dy_frac)*map_b.h/2);
+            LatLong ll;
+            SCoord star;
+            star.x = map_b.x + random(map_b.w);
+            star.y = map_b.y + random(map_b.h);
+            if (!s2llRobinson(star,ll)) {
                 uint16_t c = random(256);
-                c = RGB565(c,c,c);
-                tft.drawPixel (star_x, star_y, c);
+                tft.drawPixel (star.x, star.y, RGB565(c,c,c));
                 n_stars++;
             }
         }
@@ -1128,7 +1114,7 @@ void drawMapMenu()
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_MERCATOR]},
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_AZIMUTHAL]},
             {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_AZIM1]},
-            {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_MOLL]},
+            {MENU_1OFN, false, 3, SEC_INDENT, map_projnames[MAPP_ROB]},
         {MENU_TOGGLE, false, 4, PRI_INDENT, "RSS"},
         {MENU_TOGGLE, false, 5, PRI_INDENT, "Night"},
     #if defined(_SUPPORT_CITIES)
@@ -1169,7 +1155,7 @@ void drawMapMenu()
     mitems[MI_PRJ_MER].set = map_proj == MAPP_MERCATOR;
     mitems[MI_PRJ_AZM].set = map_proj == MAPP_AZIMUTHAL;
     mitems[MI_PRJ_AZ1].set = map_proj == MAPP_AZIM1;
-    mitems[MI_PRJ_MOL].set = map_proj == MAPP_MOLL;
+    mitems[MI_PRJ_MOL].set = map_proj == MAPP_ROB;
 
     mitems[MI_RSS_YES].set = rss_on;
     mitems[MI_NON_YES].set = night_on;
@@ -1257,8 +1243,8 @@ void drawMapMenu()
             map_proj = MAPP_AZIM1;
             NVWriteUInt8 (NV_MAPPROJ, map_proj);
             full_redraw = true;
-        } else if (mitems[MI_PRJ_MOL].set && map_proj != MAPP_MOLL) {
-            map_proj = MAPP_MOLL;
+        } else if (mitems[MI_PRJ_MOL].set && map_proj != MAPP_ROB) {
+            map_proj = MAPP_ROB;
             NVWriteUInt8 (NV_MAPPROJ, map_proj);
             full_redraw = true;
         }
@@ -1570,8 +1556,8 @@ void ll2s (const LatLong &ll, SCoord &s, uint8_t edge)
             s.y = e;
         } break;
 
-    case MAPP_MOLL:
-        ll2sMollweide (ll, s, edge, 1);
+    case MAPP_ROB:
+        ll2sRobinson (ll, s, edge, 1);
         break;
 
     default:
@@ -1660,8 +1646,8 @@ void ll2sRaw (const LatLong &ll, SCoord &s, uint8_t edge)
             s.y = e;
         } break;
 
-    case MAPP_MOLL:
-        ll2sMollweide (ll, s, edge, tft.SCALESZ);
+    case MAPP_ROB:
+        ll2sRobinson (ll, s, edge, tft.SCALESZ);
         break;
 
     default:
@@ -1746,9 +1732,9 @@ bool s2ll (const SCoord &s, LatLong &ll)
 
         } break;
 
-    case MAPP_MOLL:
+    case MAPP_ROB:
 
-        return (s2llMollweide (s, ll));
+        return (s2llRobinson (s, ll));
         break;
 
     default:
@@ -1894,7 +1880,7 @@ void drawMapCoord (const SCoord &s)
                 if (radius < RADIAL_GRID || radius > 180 - RADIAL_GRID)
                     th_cutoff += 2;                                 // insure thicker at DE and antipode
                 break;
-            case MAPP_MOLL:                                         // fallthru
+            case MAPP_ROB:                                          // fallthru
             case MAPP_AZIMUTHAL:
                 th_cutoff = 1+ca*ca;                                // fat @ 0 .. thin at 90 .. fat @ 180
                 break;

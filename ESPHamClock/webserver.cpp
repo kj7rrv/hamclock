@@ -1,5 +1,5 @@
-/* service the external web server or internal demo.
- *
+/* RESTful interface and automatic demo mode.
+ * (the live webserver has been broken out to liveweb.cpp.)
  */
 
 #include "HamClock.h"
@@ -2515,7 +2515,7 @@ static bool setWiFiMapCenter (WiFiClient &client, char line[], size_t line_len)
 
     // set and restart map if showing map that uses this
     setCenterLng (new_lng);
-    if (map_proj == MAPP_MERCATOR || map_proj == MAPP_MOLL)
+    if (map_proj == MAPP_MERCATOR || map_proj == MAPP_ROB)
         initEarthMap();
 
     // ack
@@ -3966,14 +3966,17 @@ static void serveRemote(WiFiClient &client, bool ro)
     }
 }
 
-/* check if someone is trying to tell/ask us something
+/* check if someone is trying to tell/ask us something.
+ * N.B, all such commands bypass the password system.
  */
 void checkWebServer(bool ro)
 {
     if (restful_server) {
         WiFiClient client = restful_server->available();
         if (client) {
+            bypass_pw = true;
             serveRemote(client, ro);
+            bypass_pw = false;
             client.stop();
         }
     }
@@ -4030,6 +4033,7 @@ TouchType readCalTouchWS (SCoord &s)
 
 
 /* called from main loop() to run another demo command if time.
+ * N.B. demo commands bypass the password system,
  */
 void runNextDemoCommand()
 {
@@ -4112,9 +4116,11 @@ void runNextDemoCommand()
         } while (choice == prev_choice);
         prev_choice = choice;
 
-        // run choice
+        // run choice, bypassing any passwords
         char msg[200];
+        bypass_pw = true;
         ok = runDemoChoice (choice, prev_slow, msg, sizeof(msg));
+        bypass_pw = false;
         Serial.println (msg);
 
     } while (!ok);

@@ -425,7 +425,7 @@ extern uint8_t map_proj;
     X(MAPP_MERCATOR,  "Mercator")  \
     X(MAPP_AZIMUTHAL, "Azimuthal") \
     X(MAPP_AZIM1,     "Azim One")  \
-    X(MAPP_MOLL,      "Mollweide")
+    X(MAPP_ROB,       "Robinson")
 
 #define X(a,b)  a,                      // expands MAPPROJS to enum plus comma
 typedef enum {
@@ -662,12 +662,22 @@ extern bool overAnyADIFSpots(const SCoord &s);
 
 /*********************************************************************************************
  *
- * askNewPos.cpp
+ * asknewpos.cpp
  *
  */
 
 extern bool askNewPos (const SBox &b, LatLong &ll, char grid[MAID_CHARLEN]);
 
+
+
+
+/*********************************************************************************************
+ *
+ * askpasswd.cpp
+ *
+ */
+
+extern bool askPasswd (const char *category, bool restore);
 
 
 
@@ -1184,7 +1194,7 @@ extern float nearestKD3Dist2Miles(float d);
 
 /*********************************************************************************************
  *
- * live-help.cpp
+ * liveweb-html.cpp
  *
  */
 
@@ -1194,24 +1204,27 @@ extern char live_html[];
 
 /*********************************************************************************************
  *
- * live.cpp
+ * liveweb.cpp
  *
  */
 
 
 extern void initLiveWeb(bool verbose);
+extern bool liveweb_fs_ready;
 extern time_t last_live;
 
 
 
 /*********************************************************************************************
  *
- * mollweide.cpp
+ * robinson.cpp
  *
  */
 
-extern void ll2sMollweide (const LatLong &ll, SCoord &s, int edge, int scalesz);
-extern bool s2llMollweide (const SCoord &s, LatLong &ll);
+extern void ll2sRobinson (const LatLong &ll, SCoord &s, int edge, int scalesz);
+extern bool s2llRobinson (const SCoord &s, LatLong &ll);
+extern float RobLat2G (const float lat_d);
+
 
 
 
@@ -1373,6 +1386,8 @@ extern void formatLng (float lng_d, char s[], int s_len);
 extern const char *getADIFilename(void);
 extern bool scrollTopToBottom(void);
 extern int nMoreScrollRows(void);
+extern bool useOSTime (void);
+
 
 
 
@@ -2272,6 +2287,7 @@ extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
 extern void runNextDemoCommand(void);
+extern bool bypass_pw;
 
 #if defined(__GNUC__)
 extern void sendHTTPError (WiFiClient &client, const char *fmt, ...) __attribute__ ((format(__printf__,2,3)));
@@ -2333,6 +2349,7 @@ extern void doSpaceStatsTouch (const SCoord &s);
 extern void drawSpaceStats(uint16_t color);
 extern bool getBCMatrix (BandCdtnMatrix &bm);
 extern time_t nextPaneRotation (PlotPane pp);
+
 
 extern char remote_addr[16];
 

@@ -51,6 +51,7 @@ char live_html[] =  R"_raw_html_(
         var pointerdown_x = 0;          // location of pointerdown event
         var pointerdown_y = 0;          // location of pointerdown event
         var pointermove_ms = 0;         // Date.now when pointermove event
+        var fs_success = 0;             // whether setting full screen has ever succeeded
         var cvs, ctx;                   // handy
 
         // define functions, onLoad follows near the bottom
@@ -350,8 +351,19 @@ char live_html[] =  R"_raw_html_(
                         }
                         // ask for updates regardless
                         runSoon (getUpdate);
+                    } else if (data8[0] == 99 && data8[1] == 91) {      // see liveweb.cpp
+                        // this is a message whether to be in full screen mode.
+                        // only succeed once in case user wants to cancel
+                        if (data8[2]) {
+                            if (!fs_success) {
+                                if (document.fullscreenElement)
+                                    fs_success = 1;
+                                else
+                                    document.documentElement.requestFullscreen();
+                            }
+                        }
                     } else {
-                        // save image update header
+                        // this is an update patch collection
                         ws_abdata = e.data;
                     }
                 }

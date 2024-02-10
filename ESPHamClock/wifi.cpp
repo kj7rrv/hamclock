@@ -215,13 +215,6 @@ static int randIvl(int n)
     return (random(2*n+1) - n);
 }
 
-/* get pane rotation interval
- */
-static int getPaneRotationInterval(void)
-{
-    return (ROTATION_INTERVAL);
-}
-
 /* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
  */
 static time_t tdiff (const time_t t1, const time_t t2)
@@ -275,7 +268,7 @@ static time_t nextWiFiRetry (PlotChoice ch)
 static time_t nextPaneRotationTime (PlotPane pp)
 {
     // start with standard rotation interval
-    int interval = getPaneRotationInterval();
+    int interval = ROTATION_INTERVAL;
     time_t rot_time = myNow() + interval;
 
     // then find soonest rot_time that is at least interval away from all other active panes
@@ -550,6 +543,9 @@ void initSys()
             initTime();
         } else
             tftMsg (true, 1000, _FX("GPSD: no time"));
+
+    } else if (useOSTime()) {
+        tftMsg (true, 0, _FX("Time from OS"));
 
     } else if (WiFi.status() == WL_CONNECTED) {
 
@@ -1681,7 +1677,7 @@ static void checkBRB (time_t t)
             if (next_rotT)
                 brb_updateT = next_rotT;
             else
-                brb_updateT = t + getPaneRotationInterval();
+                brb_updateT = t + ROTATION_INTERVAL;
         }
 
         int dt = brb_updateT - myNow();
@@ -2274,11 +2270,12 @@ void sendUserAgent (WiFiClient &client)
         case SWD_NONE:
             // < V2.81: main_page = azm_on ? 1: 0;
             // >= 2.96: add MAPP_MOLL
+            // >= 3.05: change MAP_MOLL to MAPP_ROB
             switch ((MapProjection)map_proj) {
             case MAPP_MERCATOR:  main_page = 0; break;
             case MAPP_AZIMUTHAL: main_page = 1; break;
             case MAPP_AZIM1:     main_page = 5; break;
-            case MAPP_MOLL:      main_page = 6; break;
+            case MAPP_ROB:       main_page = 6; break;
             default: fatalError(_FX("sendUserAgent() map_proj %d"), map_proj);
             }
             break;
@@ -2390,6 +2387,13 @@ void sendUserAgent (WiFiClient &client)
         else
             NVReadUInt16 (NV_CALL_BG_COLOR, &call_bg);
 
+        // ntp source
+        int ntp = 0;
+        if (useLocalNTPHost())
+            ntp = 1;
+        else if (useOSTime())
+            ntp = 2;                                    // added in 3.05
+
         snprintf (ua, ual,
             _FX("User-Agent: %s/%s (id %u up %lld) crc %d LV6 %s %d %d %d %d %d %d %d %d %d %d %d %d %d %.2f %.2f %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %u %u %d\r\n"),
             platform, hc_version, ESP.getChipId(), (long long)getUptime(NULL,NULL,NULL,NULL), crc,
@@ -2402,7 +2406,7 @@ void sendUserAgent (WiFiClient &client)
             (int)getSWEngineState(NULL,NULL), (int)getBigClockBits(), utcOffset(), gpsd,
             rss_interval, dayf, rr_score,
             // new for LV6:
-            useMagBearing(), n_dashed, useLocalNTPHost(), 
+            useMagBearing(), n_dashed, ntp,
             path, spots,
             call_fg, call_bg, !clockTimeOk());  // default clock 0 == ok
     } else {
@@ -2598,8 +2602,10 @@ static bool updateSunSpots (const SBox &box)
         updateClocks(false);
         resetWatchdog();
 
-        // plot
-        plotXY (box, x, ssn, SSPOT_NV, _FX("Days"), _FX("Sunspot Number"), SSPOT_COLOR, 0,0,ssn[SSPOT_NV-1]);
+        // plot, showing value as traditional whole number
+        char label[20];
+        snprintf (label, sizeof(label), "%.0f", ssn[SSPOT_NV-1]);
+        plotXYstr (box, x, ssn, SSPOT_NV, _FX("Days"), _FX("Sunspot Number"), SSPOT_COLOR, 0,0, label);
 
         // update NCDXF box if up for this
         if (brb_mode == BRB_SHOW_SWSTATS)

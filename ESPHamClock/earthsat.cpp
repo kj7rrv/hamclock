@@ -547,7 +547,6 @@ static void setSatMapNameLoc()
     switch ((MapProjection)map_proj) {
 
     case MAPP_AZIM1:            // fallthru
-    case MAPP_MOLL:
         // easy: just print in upper right
         map_name_b.x = map_b.x + map_b.w - map_name_b.w - 10;
         map_name_b.y = map_b.y + 10;
@@ -559,6 +558,7 @@ static void setSatMapNameLoc()
         map_name_b.y = map_b.y + 10;
         break;
 
+    case MAPP_ROB:              // fallthru
     case MAPP_MERCATOR: {
         // try to place somewhere over an ocean and away from sat footprint
         SCoord sat_xy, name_xy;

@@ -52,17 +52,6 @@ static void dxcLog (const char *fmt, ...)
 #endif
 
 
-/* return the current host name
- */
-static const char *getHostName()
-{
-        if (useWSJTX())
-            return ("WSJT-X");
-        else
-            return (getDXClusterHost());
-}
-
-
 /* draw, else erase, the clear spots control
  */
 static void drawClearListBtn (const SBox &box, bool draw)
@@ -623,7 +612,7 @@ static bool maxConnRate()
 static bool connectDXCluster (const SBox &box)
 {
         // check max connection rate
-        if (0 && maxConnRate()) {               // TODO
+        if (maxConnRate()) {
             char buf[100];
             snprintf (buf, sizeof(buf), _FX("Max %d connections/hr limit"), MAX_CPHR);
             showDXClusterErr (box, buf);
@@ -631,7 +620,7 @@ static bool connectDXCluster (const SBox &box)
         }
 
         // get cluster connection info
-        const char *dxhost = getHostName();
+        const char *dxhost = getDXClusterHost();
         int dxport = getDXClusterPort();
 
         dxcLog (_FX("Connecting to %s:%d\n"), dxhost, dxport);
@@ -641,7 +630,35 @@ static bool connectDXCluster (const SBox &box)
 
             // create fresh UDP for WSJT-X
             wsjtx_server.stop();
-            if (wsjtx_server.begin(dxport)) {
+
+            // open normal or multicast depending on first octet
+            bool ok;
+            int first_octet = atoi (dxhost);
+            if (first_octet >= 224 && first_octet <= 239) {
+
+                // reformat as IPAddress
+                unsigned o1, o2, o3, o4;
+                if (sscanf (dxhost, "%u.%u.%u.%u", &o1, &o2, &o3, &o4) != 4) {
+                    char emsg[100];
+                    snprintf (emsg, sizeof(emsg), _FX("Multicast address must be formatted as a.b.c.d: %s"),
+                                                    dxhost);
+                    showDXClusterErr (box, emsg);
+                    return (false);
+                }
+                IPAddress ifIP(0,0,0,0);                        // ignored
+                IPAddress mcIP(o1,o2,o3,o4);
+
+                ok = wsjtx_server.beginMulticast (ifIP, mcIP, dxport);
+                if (ok)
+                    dxcLog ("multicast %s:%d ok\n", dxhost, dxport);
+
+            } else {
+
+                ok = wsjtx_server.begin(dxport);
+
+            }
+
+            if (ok) {
 
                 // record and claim ok so far
                 cl_type = CT_WSJTX;
@@ -752,7 +769,7 @@ static bool connectDXCluster (const SBox &box)
  */
 static void showHostPort (const SBox &box, uint16_t c)
 {
-        const char *dxhost = getHostName();
+        const char *dxhost = getDXClusterHost();
         int dxport = getDXClusterPort();
 
         StackMalloc name_mem((box.w-2)/FONT_W);
