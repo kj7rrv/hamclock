@@ -54,13 +54,13 @@ static const float CNS = cosf(INS) ;
 static const float SNS = sinf(INS) ;
 
 
-float
+static float
 RADIANS(float deg)
 {
     return deg * M_PI / 180. ;
 }
 
-float
+static float
 DEGREES(float rad)
 {
     return rad * 180. / M_PI ;

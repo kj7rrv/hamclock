@@ -40,7 +40,7 @@ class Adafruit_MCP23X17 {
 
         // be prepared to use gpiod if new enough
 
-        gpiod_chip *chip;
+        gpiod_chip *gpiochip;
 
         // lines cache large enough to accommodate the largest RPi GPIO line number
         #define N_RPI_LINES 50

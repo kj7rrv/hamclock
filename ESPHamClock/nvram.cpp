@@ -144,7 +144,7 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_DXCLCMD_LEN,             // NV_DXCMD2
 
     NV_DXCLCMD_LEN,             // NV_DXCMD3
-    1,                          // NV_DXCMDUSED
+    1,                          // NV_DXCMDUSED not used as of V3.06
     1,                          // NV_PSK_MODEBITS
     4,                          // NV_PSK_BANDS
     2,                          // NV_160M_COLOR
@@ -188,6 +188,20 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_DXWLIST_LEN,             // NV_DXWLIST
     1,                          // NV_SCROLLDIR
     1,                          // NV_SCROLLLEN
+    NV_DXCLCMD_LEN,             // NV_DXCMD4
+    NV_DXCLCMD_LEN,             // NV_DXCMD5
+
+    NV_DXCLCMD_LEN,             // NV_DXCMD6
+    NV_DXCLCMD_LEN,             // NV_DXCMD7
+    NV_DXCLCMD_LEN,             // NV_DXCMD8
+    NV_DXCLCMD_LEN,             // NV_DXCMD9
+    NV_DXCLCMD_LEN,             // NV_DXCMD10
+
+    NV_DXCLCMD_LEN,             // NV_DXCMD11
+    2,                          // NV_DXCMDMASK
+    1,                          // NV_DXWLISTMASK
+    1,                          // NV_AUTOSW
+    1,                          // NV_NEWDXDEWX
 
 };
 

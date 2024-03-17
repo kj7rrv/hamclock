@@ -45,10 +45,6 @@
 typedef float Vec3[3] ;
 
 
-extern float RADIANS(float deg);
-extern float DEGREES(float rad);
-
-
 //----------------------------------------------------------------------
 
 class DateTime {

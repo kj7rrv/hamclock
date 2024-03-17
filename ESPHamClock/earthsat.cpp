@@ -568,10 +568,10 @@ static void setSatMapNameLoc()
         s2ll (sat_xy, sat_ll);
         if (sat_ll.lng_d > -55 && sat_ll.lng_d < 125) {
             // sat in eastern hemi so put name in s pacific
-            ll2s (deg2rad(-30), deg2rad(-160), name_xy, 0);
+            ll2s (deg2rad(-20), deg2rad(-160), name_xy, 0);
         } else {
             // sat in western hemi so put symbol in s indian
-            ll2s (deg2rad(-30), deg2rad(50), name_xy, 0);
+            ll2s (deg2rad(-20), deg2rad(50), name_xy, 0);
         }
         map_name_b.x = CLAMPF (name_xy.x, map_b.x + 10, map_b.x + map_b.w - map_name_b.w - 10);
         map_name_b.y = name_xy.y;

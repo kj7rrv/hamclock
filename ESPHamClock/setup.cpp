@@ -12,16 +12,17 @@
 
 // feature tests.
 
-// ESP always needs wifi setup, linux is up to user, others never
+// ESP always needs wifi setup, linux with known wpa format is up to user, others never
 #if defined(_IS_ESP8266)
-#define _WIFI_ALWAYS
+    #define _WIFI_ALWAYS
 #elif defined(_IS_LINUX)
-#include <string.h>
-#include <errno.h>
-#define _WIFI_ASK
+    #include <string.h>
+    #include <errno.h>
+    #define _WIFI_ASK
 #else
-#define _WIFI_NEVER
+    #define _WIFI_NEVER
 #endif
+static bool good_wpa;
 
 
 // debugs: force all on just for visual testing, and show bounds
@@ -194,10 +195,18 @@ typedef enum {
     DXPORT_SPR,
     DXHOST_SPR,
     DXLOGIN_SPR,
-    DXCLCMD0_SPR,
+    DXCLCMD0_SPR,                               // must be N_DXCLCMDS
     DXCLCMD1_SPR,
     DXCLCMD2_SPR,
     DXCLCMD3_SPR,
+    DXCLCMD4_SPR,
+    DXCLCMD5_SPR,
+    DXCLCMD6_SPR,
+    DXCLCMD7_SPR,
+    DXCLCMD8_SPR,
+    DXCLCMD9_SPR,
+    DXCLCMD10_SPR,
+    DXCLCMD11_SPR,
 
     // page "3"
     RIGPORT_SPR,
@@ -238,26 +247,37 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 2" -- index 1
 
-    {1, { 20, R2Y(1), 65, PR_H}, { 85, R2Y(1), 260, PR_H}, "watch:", dx_wlist, NV_DXWLIST_LEN, 0},
-    {1, { 20, R2Y(2), 65, PR_H}, { 85, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {1, { 20, R2Y(3), 65, PR_H}, { 85, R2Y(3), 260, PR_H}, "host:", dx_host, NV_DXHOST_LEN, 0},
-    {1, { 20, R2Y(4), 65, PR_H}, { 85, R2Y(4), 260, PR_H}, "login:", dx_login, NV_DXLOGIN_LEN, 0},
+    {1, {135, R2Y(1), 0, PR_H},  {135, R2Y(1), 210, PR_H}, NULL, dx_wlist, NV_DXWLIST_LEN, 0},
+    {1, { 15, R2Y(2), 70, PR_H}, { 85, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {1, { 15, R2Y(3), 70, PR_H}, { 85, R2Y(3), 260, PR_H}, "host:", dx_host, NV_DXHOST_LEN, 0},
+    {1, { 15, R2Y(4), 70, PR_H}, { 85, R2Y(4), 260, PR_H}, "login:", dx_login, NV_DXLOGIN_LEN, 0},
 
-    // 1 less that full width to avoid erasing border
+    // three overlapping sets, visibility depends on DXCLCMDPGA/B_BPR
+
     {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 409, PR_H}, NULL, dxcl_cmds[0], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 409, PR_H}, NULL, dxcl_cmds[1], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 409, PR_H}, NULL, dxcl_cmds[2], NV_DXCLCMD_LEN, 0},
     {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 409, PR_H}, NULL, dxcl_cmds[3], NV_DXCLCMD_LEN, 0},
 
+    {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 409, PR_H}, NULL, dxcl_cmds[4], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 409, PR_H}, NULL, dxcl_cmds[5], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 409, PR_H}, NULL, dxcl_cmds[6], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 409, PR_H}, NULL, dxcl_cmds[7], NV_DXCLCMD_LEN, 0},
+
+    {1, {350, R2Y(2), 40, PR_H}, {390, R2Y(2), 409, PR_H}, NULL, dxcl_cmds[8], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(3), 40, PR_H}, {390, R2Y(3), 409, PR_H}, NULL, dxcl_cmds[9], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(4), 40, PR_H}, {390, R2Y(4), 409, PR_H}, NULL, dxcl_cmds[10], NV_DXCLCMD_LEN, 0},
+    {1, {350, R2Y(5), 40, PR_H}, {390, R2Y(5), 409, PR_H}, NULL, dxcl_cmds[11], NV_DXCLCMD_LEN, 0},
+
 
     // "page 3" -- index 2
 
     {2, {150, R2Y(0), 60, PR_H}, {210, R2Y(0),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(0), 60, PR_H}, {380, R2Y(0), 280, PR_H}, "host:", rig_host, NV_RIGHOST_LEN, 0},
+    {2, {290, R2Y(0), 60, PR_H}, {350, R2Y(0), 310, PR_H}, "host:", rig_host, NV_RIGHOST_LEN, 0},
     {2, {150, R2Y(1), 60, PR_H}, {210, R2Y(1),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(1), 60, PR_H}, {380, R2Y(1), 400, PR_H}, "host:", rot_host, NV_ROTHOST_LEN, 0},
+    {2, {290, R2Y(1), 60, PR_H}, {350, R2Y(1), 440, PR_H}, "host:", rot_host, NV_ROTHOST_LEN, 0},
     {2, {150, R2Y(2), 60, PR_H}, {210, R2Y(2),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(2), 60, PR_H}, {380, R2Y(2), 400, PR_H}, "host:", flrig_host, NV_FLRIGHOST_LEN, 0},
+    {2, {290, R2Y(2), 60, PR_H}, {350, R2Y(2), 440, PR_H}, "host:", flrig_host, NV_FLRIGHOST_LEN, 0},
 
     {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntp_host, NV_NTPHOST_LEN, 0},
     {2, {100, R2Y(5), 60, PR_H}, {160, R2Y(5), 330, PR_H}, "file:", adif_fn, NV_ADIFFN_LEN, 0},
@@ -305,10 +325,22 @@ typedef enum {
     // page "2"
     CLUSTER_BPR,
     CLISWSJTX_BPR,
-    DXCLCMD0_BPR,
+    DXWLISTA_BPR,
+    DXWLISTB_BPR,
+    DXCLCMDPGA_BPR,
+    DXCLCMDPGB_BPR,
+    DXCLCMD0_BPR,                               // must be N_DXCLCMDS
     DXCLCMD1_BPR,
     DXCLCMD2_BPR,
     DXCLCMD3_BPR,
+    DXCLCMD4_BPR,
+    DXCLCMD5_BPR,
+    DXCLCMD6_BPR,
+    DXCLCMD7_BPR,
+    DXCLCMD8_BPR,
+    DXCLCMD9_BPR,
+    DXCLCMD10_BPR,
+    DXCLCMD11_BPR,
 
     // page "3"
     RIGUSE_BPR,
@@ -331,6 +363,8 @@ typedef enum {
     DEMO_BPR,
     UNITS_BPR,
     BEARING_BPR,
+    AUTOSW_BPR,
+    NEWDXDEWX_BPR,
     SPOTLBL_BPR,
     SPOTLBLCALL_BPR,
     SPOTPATH_BPR,
@@ -361,7 +395,7 @@ typedef struct {
     const char *p_str;                          // prompt string, or NULL to use just f/t_str
     const char *f_str;                          // "false" string, or NULL
     const char *t_str;                          // "true" string, or NULL
-    BPIds ent_mate;                             // entanglement partner, else N_BPR
+    BPIds ent_mate;                             // entanglement partner, else NOMATE
 } BoolPrompt;
 
 /* bool prompts. N.B. must match BPIds order
@@ -376,15 +410,38 @@ static BoolPrompt bool_pr[N_BPR] = {
     {0, { 90, R2Y(3), 180, PR_H}, {270, R2Y(3), 40,  PR_H}, false, "or IP Geolocate?", "No", "Yes", NOMATE},
     {0, {10,  R2Y(4),  70, PR_H}, {100, R2Y(4), 30,  PR_H}, false, "WiFi?", "No", NULL, NOMATE},
 
+
     // "page 2" -- index 1
 
-    {1, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes", NOMATE},
-    {1, {200, R2Y(0),  90, PR_H},  {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes", NOMATE},
+    {1, {10,  R2Y(0),  90, PR_H}, {100, R2Y(0), 50,  PR_H}, false, "Cluster?", "No", "Yes", NOMATE},
+    {1, {200, R2Y(0),  90, PR_H}, {290, R2Y(0), 50,  PR_H}, false, "WSJT-X?", "No", "Yes", NOMATE},
+
+
+    {1, {15, R2Y(1),  70, PR_H},  {85, R2Y(1), 50, PR_H}, false, "watch:", "Off", NULL, DXWLISTB_BPR},
+    {1, {15, R2Y(1),  70, PR_H},  {85, R2Y(1), 50, PR_H}, false, NULL, "On", "Only", DXWLISTA_BPR},
+                                                // 3x entangled: Off: FX  On: TF  Only: TT
+
+    // three overlapping sets, visibility depends on DXCLCMDPGA/B_BPR
+
+    {1, {350, R2Y(1),   35, PR_H}, {385, R2Y(1), 20, PR_H},  false, "Pg", "1", NULL, DXCLCMDPGB_BPR},
+    {1, {350, R2Y(1),   35, PR_H}, {385, R2Y(1), 20, PR_H},  false, "Pg", "2", "3", DXCLCMDPGA_BPR},
+                                             // 3x entangled: page 1: FX  2: TF  3: TT
 
     {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
     {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
     {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
     {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+
+    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+
+    {1, {350, R2Y(2),   0, PR_H},  {350, R2Y(2), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(3),   0, PR_H},  {350, R2Y(3), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(4),   0, PR_H},  {350, R2Y(4), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+    {1, {350, R2Y(5),   0, PR_H},  {350, R2Y(5), 40, PR_H},  false, NULL, "Off:", "On:", NOMATE},
+
 
     // "page 3" -- index 2
 
@@ -420,39 +477,42 @@ static BoolPrompt bool_pr[N_BPR] = {
 
 
     {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday","Monday",NOMATE},
-    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1),  40, PR_H}, false, "Demo mode?", "No", "Yes", NOMATE},
+    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1), 120, PR_H}, false, "Demo mode?", "No", "Yes", NOMATE},
 
 
     {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", NOMATE},
     {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?","True N","Magnetic N",NOMATE},
 
 
-    {4, {10,  R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false,"Spot labels?","No","Dot",SPOTLBLCALL_BPR},
-    {4, {150, R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
+    {4, {10 , R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Auto SpcWx?", "No", "Yes", NOMATE},
+    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "New DX Wx?",  "No", "Yes", NOMATE},
+
+
+    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false,"Spot labels?","No","Dot",SPOTLBLCALL_BPR},
+    {4, {150, R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
                                                 // 4x entangled: No: FF Dot: TF  Prefix: FT  Call: TT
 
 
-
-    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "Spot paths?", "No", NULL,SPOTPATHSZ_BPR},
-    {4, {540, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
+    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Spot paths?", "No", NULL,SPOTPATHSZ_BPR},
+    {4, {540, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
                                                 // 3x entangled: No: FX  Thin: TF  Wide: TT
 
 
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false, "Scroll dir?", "Bottom-Up", "Top-Down",
+    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5), 120, PR_H}, false, "Scroll dir?", "Bottom-Up", "Top-Down",
                                                                                                 NOMATE},
 
 
-    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Scroll length?", "0","10",SCROLLBIG_BPR},
-    {4, {540, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, NULL, "25", "50", SCROLLLEN_BPR},
+    {4, {400, R2Y(5), 140, PR_H},  {540, R2Y(5), 120, PR_H}, false, "Scroll length?", "0","10",SCROLLBIG_BPR},
+    {4, {540, R2Y(5), 140, PR_H},  {540, R2Y(5), 120, PR_H}, false, NULL, "25", "50", SCROLLLEN_BPR},
                                                 // 4x entangled:  0: FF  10: TF   25: FT  50: TT
                                                 // FF -> TF -> FT -> TT -> ...
                                                 // N.B. match NSCROLL_X
 
 
-    {4, {10 , R2Y(5), 140, PR_H},  {150, R2Y(5), 120, PR_H}, false, "Full scrn?", "No", "Yes", NOMATE},
+    {4, {10,  R2Y(6), 140, PR_H}, {150, R2Y(6), 120, PR_H}, false, "Full scrn?", "No", "Yes", NOMATE},
                                                 // N.B. state box must be wide enough for "Won't fit"
 
-    {4, {400, R2Y(5), 140, PR_H},  {540, R2Y(5),  40, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
+    {4, {400, R2Y(6), 140, PR_H}, {540, R2Y(6), 120, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
 
 
 
@@ -491,13 +551,11 @@ typedef struct {
 #define SPIDER_TX       480                     // title x
 #define SPIDER_TY       (R2Y(2) - PR_D)         // title y
 #define SPIDER_BX       345                     // border x
-#define SPIDER_BY       (SPIDER_TY - PR_A)      // border y
+#define SPIDER_BY       (SPIDER_TY - PR_A - 1)  // border y
 #define SPIDER_BRX      799                     // border right x
 #define SPIDER_BBY      (R2Y(6))                // border bottom y
 static Focus cur_focus;
 static int cur_page;
-
-
 
 /* color selector information.
  * since mouse is required it does not participate in tabbing or Focus.
@@ -692,8 +750,6 @@ static bool ll_edited;
 static void eraseSPValue (const StringPrompt *sp);
 static void drawSPValue (StringPrompt *sp);
 
-
-
 /* return the value string of the given entangled pair.
  * N.B. B must be the forward ent_mate of A
  * 3x entangled: a: FX  b: TF  c: TT
@@ -701,10 +757,10 @@ static void drawSPValue (StringPrompt *sp);
  */
 static const char * getEntangledValue (const BoolPrompt *A, const BoolPrompt *B)
 {
-    if (B != &bool_pr[A->ent_mate])
-        fatalError (_FX("bogus entangled pair %s %s\n"), A->p_str, B->f_str);
+    if (B != &bool_pr[A->ent_mate] || A != &bool_pr[B->ent_mate])
+        fatalError (_FX("getting bogus entangled pair %s %s\n"), A->p_str, B->p_str);
 
-    const char *s;
+    const char *s; 
 
     if (A->t_str) {
         // 4 states
@@ -721,6 +777,58 @@ static const char * getEntangledValue (const BoolPrompt *A, const BoolPrompt *B)
     }
 
     return (s);
+}
+
+
+/* set the state of the entangled pair to represent the given value.
+ + N.B. fatal if value is not one of the t/f_str
+ * 3x entangled: a: FX  b: TF  c: TT
+ * 4x entangled: a: FF  b: TF  c: FT  d: TT
+ */
+static void setEntangledValue (BoolPrompt *A, BoolPrompt *B, const char *value)
+{
+    if (B != &bool_pr[A->ent_mate] || A != &bool_pr[B->ent_mate])
+        fatalError (_FX("setting bogus entangled pair %s %s to %s\n"), A->p_str, B->p_str, value);
+
+    if (A->t_str) {
+        // 4 states
+        if (strcmp (A->f_str, value) == 0) {
+            A->state = false;
+            B->state = false;
+        } else if (strcmp (A->t_str, value) == 0) {
+            A->state = true;
+            B->state = false;
+        } else if (strcmp (B->f_str, value) == 0) {
+            A->state = false;
+            B->state = true;
+        } else if (strcmp (B->t_str, value) == 0) {
+            A->state = true;
+            B->state = true;
+        } else
+            fatalError (_FX("unknown 4x entangle value %s"), value);
+    } else {
+        // 3 states
+        if (strcmp (A->f_str, value) == 0) {
+            A->state = false;
+            B->state = false;
+        } else if (strcmp (B->f_str, value) == 0) {
+            A->state = true;
+            B->state = false;
+        } else if (strcmp (B->t_str, value) == 0) {
+            A->state = true;
+            B->state = true;
+        } else
+            fatalError (_FX("unknown 3x entangle value %s"), value);
+    }
+}
+
+/* same as above but allows integeter value
+ */
+static void setEntangledValue (BoolPrompt *A, BoolPrompt *B, int value)
+{
+    char buf[20];
+    snprintf (buf, sizeof(buf), "%d", value);
+    setEntangledValue (A, B, buf);
 }
 
 /* log all string and bool settings
@@ -758,6 +866,15 @@ static void logAllPrompts(void)
         sl += snprintf (oostr+sl, sizeof(oostr)-sl, _FX(" %02u:%02u"), off/60, off%60);
     }
     Serial.println (oostr);
+
+    // cluster commands
+    char clcmdstr[40+NV_DXCLCMD_LEN];
+    for (int i = 0; i < N_DXCLCMDS; i++) {
+        snprintf (clcmdstr, sizeof(clcmdstr), "Setup: DXCLCMD%d %s: %s", i,
+                bool_pr[DXCLCMD0_BPR+i].state ? " on" : "off", string_pr[DXCLCMD0_SPR+i].v_str);
+        Serial.println (clcmdstr);
+    }
+    Serial.printf (_FX("Setup: watch_list: %s\n"), dx_wlist);
 }
 
 /* prepare the shadowed prompts
@@ -898,7 +1015,7 @@ static void noBlanks (char *s)
     *s_to = '\0';
 }
 
-/* draw the Spider commands table header
+/* draw the Spider commands table
  */
 static void drawSpiderCommandsHeader()
 {
@@ -944,7 +1061,7 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
         #endif
         #if defined(_WIFI_ASK)
-            return (true);
+            return (good_wpa);
         #endif
     }
 
@@ -958,10 +1075,20 @@ static bool boolIsRelevant (BoolPrompt *bp)
             return (false);
     #endif
 
-    if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
-                    || bp == &bool_pr[DXCLCMD2_BPR] || bp == &bool_pr[DXCLCMD3_BPR]) {
-        // only show if enabled and host is not WSJT
+    if (bp == &bool_pr[DXCLCMDPGA_BPR] || bp == &bool_pr[DXCLCMDPGB_BPR]) {
         if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
+            return (false);
+    }
+
+    if (bp == &bool_pr[DXWLISTA_BPR] || bp == &bool_pr[DXWLISTB_BPR]) {
+        if (!bool_pr[CLUSTER_BPR].state)
+            return (false);
+    }
+
+    if (bp >= &bool_pr[DXCLCMD0_BPR] && bp < &bool_pr[DXCLCMD0_BPR + N_DXCLCMDS]) {
+        int pr_page = (bp - &bool_pr[DXCLCMD0_BPR])/4 + 1;
+        int cmd_page = atoi (getEntangledValue (&bool_pr[DXCLCMDPGA_BPR], &bool_pr[DXCLCMDPGB_BPR]));
+        if (cmd_page != pr_page || !bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
             return (false);
     }
 
@@ -1055,11 +1182,15 @@ static bool stringIsRelevant (StringPrompt *sp)
             return (false);
     }
 
-    if (sp == &string_pr[DXCLCMD0_SPR] || sp == &string_pr[DXCLCMD1_SPR]
-                    || sp == &string_pr[DXCLCMD2_SPR] || sp == &string_pr[DXCLCMD3_SPR]
-                    || sp == &string_pr[DXLOGIN_SPR]) {
-        // only show if enabled and not using WSJT
+    if (sp == &string_pr[DXLOGIN_SPR]) {
         if (!bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
+            return (false);
+    }
+
+    if (sp >= &string_pr[DXCLCMD0_SPR] && sp < &string_pr[DXCLCMD0_SPR + N_DXCLCMDS]) {
+        int pr_page = (sp - &string_pr[DXCLCMD0_SPR])/4 + 1;
+        int cmd_page = atoi (getEntangledValue (&bool_pr[DXCLCMDPGA_BPR], &bool_pr[DXCLCMDPGB_BPR]));
+        if (cmd_page != pr_page || !bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
             return (false);
     }
 
@@ -1155,10 +1286,12 @@ static void nextTabFocus()
 
         { NULL, &bool_pr[CLUSTER_BPR] },
         { NULL, &bool_pr[CLISWSJTX_BPR] },
+        { NULL, &bool_pr[DXWLISTA_BPR] },
         {       &string_pr[DXWLIST_SPR], NULL},
         {       &string_pr[DXPORT_SPR], NULL},
         {       &string_pr[DXHOST_SPR], NULL},
         {       &string_pr[DXLOGIN_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMDPGA_BPR] },
         { NULL, &bool_pr[DXCLCMD0_BPR] },
         {       &string_pr[DXCLCMD0_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD1_BPR] },
@@ -1167,6 +1300,22 @@ static void nextTabFocus()
         {       &string_pr[DXCLCMD2_SPR], NULL},
         { NULL, &bool_pr[DXCLCMD3_BPR] },
         {       &string_pr[DXCLCMD3_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD4_BPR] },
+        {       &string_pr[DXCLCMD4_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD5_BPR] },
+        {       &string_pr[DXCLCMD5_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD6_BPR] },
+        {       &string_pr[DXCLCMD6_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD7_BPR] },
+        {       &string_pr[DXCLCMD7_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD8_BPR] },
+        {       &string_pr[DXCLCMD8_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD9_BPR] },
+        {       &string_pr[DXCLCMD9_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD10_BPR] },
+        {       &string_pr[DXCLCMD10_SPR], NULL},
+        { NULL, &bool_pr[DXCLCMD11_BPR] },
+        {       &string_pr[DXCLCMD11_SPR], NULL},
 
         // page 3
 
@@ -1206,6 +1355,8 @@ static void nextTabFocus()
         { NULL, &bool_pr[DEMO_BPR] },
         { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[BEARING_BPR] },
+        { NULL, &bool_pr[AUTOSW_BPR] },
+        { NULL, &bool_pr[NEWDXDEWX_BPR] },
         { NULL, &bool_pr[SPOTLBL_BPR] },
         { NULL, &bool_pr[SPOTPATH_BPR] },
         { NULL, &bool_pr[SCROLLDIR_BPR] },
@@ -1258,10 +1409,6 @@ static void setFocus (StringPrompt *sp, BoolPrompt *bp)
  */
 static void setInitialFocus()
 {
-    // just stay if still on current page
-    if ((cur_focus.sp && cur_focus.sp->page == cur_page) || (cur_focus.bp && cur_focus.bp->page == cur_page))
-        return;
-
     StringPrompt *sp0 = NULL;
     BoolPrompt *bp0 = NULL;
 
@@ -1460,8 +1607,7 @@ static void drawBPState (BoolPrompt *bp)
     if (show_t || show_f) {
 
         // dx commands are unusual as they are colored like buttons to appear as active
-        if (bp == &bool_pr[DXCLCMD0_BPR] || bp == &bool_pr[DXCLCMD1_BPR]
-                    || bp == &bool_pr[DXCLCMD2_BPR] || bp == &bool_pr[DXCLCMD3_BPR])
+        if (bp >= &bool_pr[DXCLCMD0_BPR] && bp < &bool_pr[DXCLCMD0_BPR + N_DXCLCMDS])
             tft.setTextColor (BUTTON_C);
         else
             tft.setTextColor (TX_C);
@@ -2196,9 +2342,10 @@ static void changePage (int new_page)
 /* check whether the given string is a number between min_port and 65535.
  * if so, set port and return true, else return false.
  */
-static bool portOK (const char *port_str, int min_port, uint16_t *portp)
+static bool portOK (char *port_str, int min_port, uint16_t *portp)
 {
     char *first_bad;
+    trim (port_str);
     int portn = strtol (port_str, &first_bad, 10);
     if (*first_bad != '\0' || portn < min_port || portn > 65535)
         return (false);
@@ -2282,68 +2429,76 @@ static bool clusterLoginOk()
 static bool validateStringPrompts (bool show_errors)
 {
     // collect bad ids to flag
-    SPIds badsid[N_SPR];
-    uint8_t n_badsid = 0;
+    SPIds badsids[N_SPR];
+    uint8_t n_badsids = 0;
 
     // call must not be blank
     noBlanks(call_sign);
     if (call_sign[0] == '\0')
-        badsid[n_badsid++] = CALL_SPR;
+        badsids[n_badsids++] = CALL_SPR;
 
     // check lat/long unless using something else
     if (!bool_pr[GEOIP_BPR].state && !bool_pr[GPSDON_BPR].state) {
 
         if (!latSpecIsValid (string_pr[LAT_SPR].v_str, de_ll.lat_d))
-            badsid[n_badsid++] = LAT_SPR;
+            badsids[n_badsids++] = LAT_SPR;
 
         if (!lngSpecIsValid (string_pr[LNG_SPR].v_str, de_ll.lng_d))
-            badsid[n_badsid++] = LNG_SPR;
+            badsids[n_badsids++] = LNG_SPR;
 
         LatLong ll;
         if (!maidenhead2ll (ll, string_pr[GRID_SPR].v_str))
-            badsid[n_badsid++] = GRID_SPR;
+            badsids[n_badsids++] = GRID_SPR;
     }
 
     // check cluster info if used
     if (bool_pr[CLUSTER_BPR].state) {
         char *clhost = string_pr[DXHOST_SPR].v_str;
         if (!hostOK(clhost,NV_DXHOST_LEN))
-            badsid[n_badsid++] = DXHOST_SPR;
+            badsids[n_badsids++] = DXHOST_SPR;
         if (!portOK (string_pr[DXPORT_SPR].v_str, 23, &dx_port))        // 23 is telnet
-            badsid[n_badsid++] = DXPORT_SPR;
+            badsids[n_badsids++] = DXPORT_SPR;
         if (!bool_pr[CLISWSJTX_BPR].state && !clusterLoginOk())         // no used with wsjt
-            badsid[n_badsid++] = DXLOGIN_SPR;
+            badsids[n_badsids++] = DXLOGIN_SPR;
 
         // clean up any extra white space in the commands then check for blank entries that are on
         for (int i = 0; i < N_DXCLCMDS; i++) {
             trim(dxcl_cmds[i]);
             if (strlen(dxcl_cmds[i]) == 0 && bool_pr[DXCLCMD0_BPR+i].state)
-                badsid[n_badsid++] = (SPIds)(DXCLCMD0_SPR+i);
+                badsids[n_badsids++] = (SPIds)(DXCLCMD0_SPR+i);
+        }
+
+        // watch list must not be blank if being used
+        const char *v = getEntangledValue (&bool_pr[DXWLISTA_BPR], &bool_pr[DXWLISTB_BPR]);
+        if (strcmp (v, bool_pr[DXWLISTA_BPR].f_str)) {  // not Off
+            trim(string_pr[DXWLIST_SPR].v_str);
+            if (strlen(string_pr[DXWLIST_SPR].v_str) == 0)
+                badsids[n_badsids++] = DXWLIST_SPR;
         }
     }
 
     // check rig_host and port if used
     if (bool_pr[RIGUSE_BPR].state) {
         if (!hostOK(string_pr[RIGHOST_SPR].v_str,NV_RIGHOST_LEN))
-            badsid[n_badsid++] = RIGHOST_SPR;
+            badsids[n_badsids++] = RIGHOST_SPR;
         if (!portOK (string_pr[RIGPORT_SPR].v_str, 1000, &rig_port))
-            badsid[n_badsid++] = RIGPORT_SPR;
+            badsids[n_badsids++] = RIGPORT_SPR;
     }
 
     // check rot_host and port if used
     if (bool_pr[ROTUSE_BPR].state) {
         if (!hostOK(string_pr[ROTHOST_SPR].v_str,NV_ROTHOST_LEN))
-            badsid[n_badsid++] = ROTHOST_SPR;
+            badsids[n_badsids++] = ROTHOST_SPR;
         if (!portOK (string_pr[ROTPORT_SPR].v_str, 1000, &rot_port))
-            badsid[n_badsid++] = ROTPORT_SPR;
+            badsids[n_badsids++] = ROTPORT_SPR;
     }
 
     // check flrig host and port if used
     if (bool_pr[FLRIGUSE_BPR].state) {
         if (!hostOK(string_pr[FLRIGHOST_SPR].v_str,NV_FLRIGHOST_LEN))
-            badsid[n_badsid++] = FLRIGHOST_SPR;
+            badsids[n_badsids++] = FLRIGHOST_SPR;
         if (!portOK (string_pr[FLRIGPORT_SPR].v_str, 1000, &flrig_port))
-            badsid[n_badsid++] = FLRIGPORT_SPR;
+            badsids[n_badsids++] = FLRIGPORT_SPR;
     }
 
     // check for plausible temperature and pressure corrections and file name if used
@@ -2351,45 +2506,40 @@ static bool validateStringPrompts (bool show_errors)
         char *tc_str = string_pr[BME76_DT].v_str;
         temp_corr[BME_76] = atof (tc_str);
         if (fabsf(temp_corr[BME_76]) > MAX_BME_DTEMP)
-            badsid[n_badsid++] = BME76_DT;
+            badsids[n_badsids++] = BME76_DT;
         char *tc2_str = string_pr[BME77_DT].v_str;
         temp_corr[BME_77] = atof (tc2_str);
         if (fabsf(temp_corr[BME_77]) > MAX_BME_DTEMP)
-            badsid[n_badsid++] = BME77_DT;
+            badsids[n_badsids++] = BME77_DT;
 
         char *pc_str = string_pr[BME76_DP].v_str;
         pres_corr[BME_76] = atof (pc_str);
         if (fabsf(pres_corr[BME_76]) > MAX_BME_DPRES)
-            badsid[n_badsid++] = BME76_DP;
+            badsids[n_badsids++] = BME76_DP;
         char *pc2_str = string_pr[BME77_DP].v_str;
         pres_corr[BME_77] = atof (pc2_str);
         if (fabsf(pres_corr[BME_77]) > MAX_BME_DPRES)
-            badsid[n_badsid++] = BME77_DP;
+            badsids[n_badsids++] = BME77_DP;
     }
 
     // require ssid and pw if wifi
     if (bool_pr[WIFI_BPR].state) {
         if (strlen (string_pr[WIFISSID_SPR].v_str) == 0)
-            badsid[n_badsid++] = WIFISSID_SPR;
+            badsids[n_badsids++] = WIFISSID_SPR;
         if (strlen (string_pr[WIFIPASS_SPR].v_str) == 0)
-            badsid[n_badsid++] = WIFIPASS_SPR;
-    }
-
-    // allow no spaces in call sign
-    if (strchr (string_pr[CALL_SPR].v_str, ' ')) {
-        badsid[n_badsid++] = CALL_SPR;
+            badsids[n_badsids++] = WIFIPASS_SPR;
     }
 
     // require plausible gpsd host name if used
     if (bool_pr[GPSDON_BPR].state) {
         if (!hostOK(string_pr[GPSDHOST_SPR].v_str,NV_GPSDHOST_LEN))
-            badsid[n_badsid++] = GPSDHOST_SPR;
+            badsids[n_badsids++] = GPSDHOST_SPR;
     }
 
     // require plausible ntp host name or a few special cases if used
     if (bool_pr[NTPSET_BPR].state) {
         if (!hostOK(string_pr[NTPHOST_SPR].v_str,NV_NTPHOST_LEN) && !useOSTime())
-            badsid[n_badsid++] = NTPHOST_SPR;
+            badsids[n_badsids++] = NTPHOST_SPR;
     }
 
     // require both brightness 0..100 and min < max.
@@ -2401,9 +2551,9 @@ static bool validateStringPrompts (bool show_errors)
         bool brmx_ok = brmx >= 0 && brmx <= 100;
         bool order_ok = brmn < brmx;
         if (!brmn_ok || (!order_ok && brmx_ok))
-            badsid[n_badsid++] = BRMIN_SPR;
+            badsids[n_badsids++] = BRMIN_SPR;
         if (!brmx_ok || (!order_ok && brmn_ok))
-            badsid[n_badsid++] = BRMAX_SPR;
+            badsids[n_badsids++] = BRMAX_SPR;
         if (brmn_ok && brmx_ok && order_ok) {
             bright_min = brmn;
             bright_max = brmx;
@@ -2415,76 +2565,72 @@ static bool validateStringPrompts (bool show_errors)
     if (lngSpecIsValid (string_pr[CENTERLNG_SPR].v_str, clng))
         center_lng = clng;
     else
-        badsid[n_badsid++] = CENTERLNG_SPR;
+        badsids[n_badsids++] = CENTERLNG_SPR;
 
     // ADIF file name must not be blank if used
     if (bool_pr[ADIFSET_BPR].state) {
         trim (adif_fn);
         if (adif_fn[0] == '\0')
-            badsid[n_badsid++] = ADIFFN_SPR;
+            badsids[n_badsids++] = ADIFFN_SPR;
     }
 
     // check I2C file name
     if (bool_pr[I2CON_BPR].state) {
         trim (i2c_fn);
         if (!I2CFnOk())
-            badsid[n_badsid++] = I2CFN_SPR;
+            badsids[n_badsids++] = I2CFN_SPR;
     }
 
     // if not showing, just return whether all ok
     if (!show_errors)
-        return (n_badsid == 0);
+        return (n_badsids == 0);
 
-    // if any bad indicate values in error, changing pages if necessary
-    if (n_badsid > 0) {
+    // indicate one bad field, if any
+    if (n_badsids > 0) {
 
-        // starting with the current page, search for first page with any bad fields
-
-        int bad_page = -1;
-        for (int p = 0; bad_page < 0 && p < N_PAGES; p++) {
-
-            // check this page for any bad values
-            int tmp_page = (cur_page + p) % N_PAGES;
-            for (int i = 0; i < n_badsid; i++) {
-                StringPrompt *sp = &string_pr[badsid[i]];
+        // show first bad sid, starting with current page
+        bool show_bad = false;
+        for (int pg_offset = 0; !show_bad && pg_offset < N_PAGES; pg_offset++) {
+            int tmp_page = (cur_page + pg_offset) % N_PAGES;
+            for (int badsid = 0; !show_bad && badsid < n_badsids; badsid++) {
+                StringPrompt *sp = &string_pr[badsids[badsid]];
                 if (sp->page == tmp_page) {
-                    bad_page = tmp_page;
-                    break;
-                }
-            }
-        }
 
-        // if found, change to bad page if not already up and flag all its bad values
+                    // set DXCLCMDPGA/B_BPR] if this is one of the cluster commands
+                    bool chg_pg1 = false;
+                    if (sp >= &string_pr[DXCLCMD0_SPR] && sp < &string_pr[DXCLCMD0_SPR + N_DXCLCMDS]) {
+                        int pr_page = (sp - &string_pr[DXCLCMD0_SPR])/4 + 1;
+                        int cmd_page = atoi (getEntangledValue (&bool_pr[DXCLCMDPGA_BPR], &bool_pr[DXCLCMDPGB_BPR]));
+                        if (pr_page != cmd_page) {
+                            setEntangledValue (&bool_pr[DXCLCMDPGA_BPR], &bool_pr[DXCLCMDPGB_BPR], pr_page);
+                            chg_pg1 = true;
+                        }
+                    }
 
-        if (bad_page >= 0) {
+                    // change page, if not already showing
+                    if (tmp_page != cur_page || chg_pg1)
+                        changePage(tmp_page);
 
-            // change page, if not already showing
-            if (bad_page != cur_page)
-                changePage(bad_page);
-
-            // flag each erroneous value on this page
-            for (int i = 0; i < n_badsid; i++) {
-                StringPrompt *sp = &string_pr[badsid[i]];
-                if (sp->page == cur_page) 
+                    // flag erroneous field
                     flagErrField (sp);
-            }
 
-            // dwell error flag(s)
-            wdDelay(3000);
+                    // dwell error flag(s)
+                    wdDelay(3000);
 
-            // restore values
-            for (int i = 0; i < n_badsid; i++) {
-                StringPrompt *sp = &string_pr[badsid[i]];
-                if (sp->page == cur_page) {
+                    // restore value with handy cursor placed to edit
+                    eraseCursor();
                     eraseSPValue (sp);
                     drawSPValue (sp);
+                    setFocus (sp, NULL);
+                    drawCursor();
+
+                    // flagged one
+                    show_bad = true;
                 }
             }
-
-            // redraw cursor in case it's value was flagged
-            drawCursor();
-
         }
+        if (!show_bad)
+            fatalError (_FX("%d bad fields but none found"), n_badsids);
 
         // at least one bad field
         return (false);
@@ -2495,24 +2641,26 @@ static bool validateStringPrompts (bool show_errors)
 }
 
 
-/* if linux try to set NV_WIFI_SSID and NV_WIFI_PASSWD from wpa_supplicant.conf 
+/* try to set NV_WIFI_SSID and NV_WIFI_PASSWD from a valid wpa_supplicant.conf
  */
-static bool getWPA()
+static bool getWPACreds()
 {
 #if defined(_IS_LINUX)
 
+    // first look in the wpa conf file
+
     // open
     static const char wpa_fn[] = "/etc/wpa_supplicant/wpa_supplicant.conf";
-    FILE *fp = fopen (wpa_fn, "r");
-    if (!fp) {
+    FILE *wpa_fp = fopen (wpa_fn, "r");
+    if (!wpa_fp) {
         Serial.printf ("%s: %s\n", wpa_fn, strerror(errno));
         return (false);
     }
 
-    // read, looking for ssid and psk
+    // look for ssid and psk
     char buf[100], wpa_ssid[100], wpa_psk[100];
     bool found_ssid = false, found_psk = false;
-    while (fgets (buf, sizeof(buf), fp)) {
+    while (fgets (buf, sizeof(buf), wpa_fp)) {
         if (sscanf (buf, " ssid=\"%100[^\"]\"", wpa_ssid) == 1)
             found_ssid = true;
         if (sscanf (buf, " psk=\"%100[^\"]\"", wpa_psk) == 1)
@@ -2520,21 +2668,55 @@ static bool getWPA()
     }
 
     // finished with file
-    fclose (fp);
+    fclose (wpa_fp);
 
-    // save if found both
-    if (found_ssid && found_psk) {
-        wpa_ssid[NV_WIFI_SSID_LEN-1] = '\0';
-        strcpy (wifi_ssid, wpa_ssid);
-        NVWriteString(NV_WIFI_SSID, wifi_ssid);
-        wpa_psk[NV_WIFI_PW_LEN-1] = '\0';
-        strcpy (wifi_pw, wpa_psk);
-        NVWriteString(NV_WIFI_PASSWD, wifi_pw);
-        return (true);
+    // false unless find both
+    if (!found_ssid || !found_psk)
+        return (false);
+
+    // but unless this is debain < bookworm these are old/bogus
+
+    static const char osr_fn[] = "/etc/os-release";
+    FILE *osr_fp = fopen (osr_fn, "r");
+    if (!osr_fp) {
+        Serial.printf ("%s: %s\n", osr_fn, strerror(errno));
+        return (false);
     }
+    bool is_debian = false;
+    bool found_version = false;
+    int version = 0;
+    while (fgets (buf, sizeof(buf), osr_fp)) {
+        // see https://www.freedesktop.org/software/systemd/man/latest/os-release.html
+        char *eq = strchr (buf, '=');
+        if (!eq)
+            continue;
+        *eq = '\0';
+        const char *name = buf;
+        const char *value = eq+1;
+        if (*value == '"')
+            value++;
+        if ((!strcmp (name, "ID") || !strcmp (name, "ID_LIKE")) && strstr (value, "debian"))
+            is_debian = true;
+        else if (!strcmp (name, "VERSION_ID")) {
+            version = atoi(value);
+            found_version = true;
+        }
+    }
+    fclose (osr_fp);
 
-    // nope
-    return (false);
+    // wpa file is encrypted starting with debian 12 (bookworm)
+    if (!(is_debian && found_version && version < 12))
+        return (false);
+
+    // ok!
+    wpa_ssid[NV_WIFI_SSID_LEN-1] = '\0';
+    strcpy (wifi_ssid, wpa_ssid);
+    NVWriteString(NV_WIFI_SSID, wifi_ssid);
+    wpa_psk[NV_WIFI_PW_LEN-1] = '\0';
+    strcpy (wifi_pw, wpa_psk);
+    NVWriteString(NV_WIFI_PASSWD, wifi_pw);
+
+    return (true);
 
 #else
 
@@ -2543,14 +2725,17 @@ static bool getWPA()
 #endif // _IS_LINUX
 }
 
-
 /* load all setup values from nvram or set default values:
  */
 static void initSetup()
 {
     // init wifi, accept OLD PW if valid
 
-    if (!getWPA() && !NVReadString(NV_WIFI_SSID, wifi_ssid)) {
+    // see if we have a known WPA format
+    good_wpa = getWPACreds();
+
+    if (!good_wpa && !NVReadString(NV_WIFI_SSID, wifi_ssid)) {
+        good_wpa = true;        // for Veritium
         strncpy (wifi_ssid, DEF_SSID, NV_WIFI_SSID_LEN-1);
         NVWriteString(NV_WIFI_SSID, wifi_ssid);
     }
@@ -2695,6 +2880,18 @@ static void initSetup()
         dx_port = 0;
         NVWriteUInt16(NV_DXPORT, dx_port);
     }
+    if (!NVReadString(NV_DXWLIST, dx_wlist)) {
+        memset (dx_wlist, 0, sizeof(dx_wlist));
+        NVWriteString(NV_DXWLIST, dx_wlist);
+    }
+    uint8_t dxwlist_mask;
+    if (!NVReadUInt8(NV_DXWLISTMASK, &dxwlist_mask)) {
+        dxwlist_mask = 0;
+        NVWriteUInt8(NV_DXWLISTMASK, dxwlist_mask);
+    }
+    bool_pr[DXWLISTA_BPR].state = (dxwlist_mask & 1) == 1;
+    bool_pr[DXWLISTB_BPR].state = (dxwlist_mask & 2) == 2;
+
     if (!NVReadString(NV_DXCMD0, dxcl_cmds[0])) {
         memset (dxcl_cmds[0], 0, sizeof(dxcl_cmds[0]));
         NVWriteString(NV_DXCMD0, dxcl_cmds[0]);
@@ -2711,9 +2908,37 @@ static void initSetup()
         memset (dxcl_cmds[3], 0, sizeof(dxcl_cmds[3]));
         NVWriteString(NV_DXCMD3, dxcl_cmds[3]);
     }
-    if (!NVReadString(NV_DXWLIST, dx_wlist)) {
-        memset (dx_wlist, 0, sizeof(dx_wlist));
-        NVWriteString(NV_DXWLIST, dx_wlist);
+    if (!NVReadString(NV_DXCMD4, dxcl_cmds[4])) {
+        memset (dxcl_cmds[4], 0, sizeof(dxcl_cmds[4]));
+        NVWriteString(NV_DXCMD4, dxcl_cmds[4]);
+    }
+    if (!NVReadString(NV_DXCMD5, dxcl_cmds[5])) {
+        memset (dxcl_cmds[5], 0, sizeof(dxcl_cmds[5]));
+        NVWriteString(NV_DXCMD5, dxcl_cmds[5]);
+    }
+    if (!NVReadString(NV_DXCMD6, dxcl_cmds[6])) {
+        memset (dxcl_cmds[6], 0, sizeof(dxcl_cmds[6]));
+        NVWriteString(NV_DXCMD6, dxcl_cmds[6]);
+    }
+    if (!NVReadString(NV_DXCMD7, dxcl_cmds[7])) {
+        memset (dxcl_cmds[7], 0, sizeof(dxcl_cmds[7]));
+        NVWriteString(NV_DXCMD7, dxcl_cmds[7]);
+    }
+    if (!NVReadString(NV_DXCMD8, dxcl_cmds[8])) {
+        memset (dxcl_cmds[8], 0, sizeof(dxcl_cmds[8]));
+        NVWriteString(NV_DXCMD8, dxcl_cmds[8]);
+    }
+    if (!NVReadString(NV_DXCMD9, dxcl_cmds[9])) {
+        memset (dxcl_cmds[9], 0, sizeof(dxcl_cmds[9]));
+        NVWriteString(NV_DXCMD9, dxcl_cmds[9]);
+    }
+    if (!NVReadString(NV_DXCMD10, dxcl_cmds[10])) {
+        memset (dxcl_cmds[10], 0, sizeof(dxcl_cmds[10]));
+        NVWriteString(NV_DXCMD10, dxcl_cmds[10]);
+    }
+    if (!NVReadString(NV_DXCMD11, dxcl_cmds[11])) {
+        memset (dxcl_cmds[11], 0, sizeof(dxcl_cmds[11]));
+        NVWriteString(NV_DXCMD11, dxcl_cmds[11]);
     }
 
     uint8_t nv_wsjt;
@@ -2747,16 +2972,13 @@ static void initSetup()
     bool_pr[SPOTPATH_BPR].state =    (spotops & (NVMS_WIDE|NVMS_THIN)) != 0;
     bool_pr[SPOTPATHSZ_BPR].state =  (spotops & NVMS_WIDE) != 0;
 
-    uint8_t dx_cmdmask;
-    if (!NVReadUInt8 (NV_DXCMDUSED, &dx_cmdmask)) {
+    uint16_t dx_cmdmask;
+    if (!NVReadUInt16 (NV_DXCMDMASK, &dx_cmdmask)) {
         dx_cmdmask = 0;
-        NVWriteUInt8 (NV_DXCMDUSED, dx_cmdmask);
+        NVWriteUInt16 (NV_DXCMDMASK, dx_cmdmask);
     }
-    bool_pr[DXCLCMD0_BPR].state = (dx_cmdmask & 1) != 0;
-    bool_pr[DXCLCMD1_BPR].state = (dx_cmdmask & 2) != 0;
-    bool_pr[DXCLCMD2_BPR].state = (dx_cmdmask & 4) != 0;
-    bool_pr[DXCLCMD3_BPR].state = (dx_cmdmask & 8) != 0;
-
+    for (int i = 0; i < N_DXCLCMDS; i++)
+        bool_pr[DXCLCMD0_BPR+i].state = (dx_cmdmask & (1<<i)) != 0;
 
 
     // init de lat/lng
@@ -3000,6 +3222,20 @@ static void initSetup()
         NVWriteUInt8 (NV_SCROLLDIR, scroll_dir);
     }
     bool_pr[SCROLLDIR_BPR].state = (scroll_dir != 0);
+
+    uint8_t auto_sw;
+    if (!NVReadUInt8 (NV_AUTOSW, &auto_sw)) {
+        auto_sw = 0;
+        NVWriteUInt8 (NV_AUTOSW, auto_sw);
+    }
+    bool_pr[AUTOSW_BPR].state = (auto_sw != 0);
+
+    uint8_t newdxdewx;
+    if (!NVReadUInt8 (NV_NEWDXDEWX, &newdxdewx)) {
+        newdxdewx = 1;                                  // default yes
+        NVWriteUInt8 (NV_NEWDXDEWX, newdxdewx);
+    }
+    bool_pr[NEWDXDEWX_BPR].state = (newdxdewx != 0);
 
 
     #if defined(_SUPPORT_SCROLLLEN)
@@ -3460,6 +3696,11 @@ static void runSetup()
             }
           #endif // _SUPPORT_KX3
 
+            else if (bp == &bool_pr[DXCLCMDPGA_BPR] || bp == &bool_pr[DXCLCMDPGB_BPR]) {
+                // redraw showing next command page
+                changePage (cur_page);
+            }
+
         } else if (tappedStringPrompt (s, &sp) && stringIsRelevant (sp)) {
 
             // move focus here unless already there
@@ -3521,22 +3762,28 @@ static void saveParams2NV()
     NVWriteUInt8 (NV_USEDXCLUSTER, bool_pr[CLUSTER_BPR].state);
     NVWriteUInt8 (NV_WSJT_DX, bool_pr[CLISWSJTX_BPR].state);
     NVWriteString (NV_DXHOST, dx_host);
+    NVWriteString (NV_DXWLIST, dx_wlist);
+    NVWriteUInt8 (NV_DXWLISTMASK, bool_pr[DXWLISTA_BPR].state | (bool_pr[DXWLISTB_BPR].state << 1));
+
+    // N.B. these are NOT contiguous so can not look through N_DXCLCMDS
     NVWriteString (NV_DXCMD0, dxcl_cmds[0]);
     NVWriteString (NV_DXCMD1, dxcl_cmds[1]);
     NVWriteString (NV_DXCMD2, dxcl_cmds[2]);
     NVWriteString (NV_DXCMD3, dxcl_cmds[3]);
-    NVWriteString (NV_DXWLIST, dx_wlist);
+    NVWriteString (NV_DXCMD4, dxcl_cmds[4]);
+    NVWriteString (NV_DXCMD5, dxcl_cmds[5]);
+    NVWriteString (NV_DXCMD6, dxcl_cmds[6]);
+    NVWriteString (NV_DXCMD7, dxcl_cmds[7]);
+    NVWriteString (NV_DXCMD8, dxcl_cmds[8]);
+    NVWriteString (NV_DXCMD9, dxcl_cmds[9]);
+    NVWriteString (NV_DXCMD10, dxcl_cmds[10]);
+    NVWriteString (NV_DXCMD11, dxcl_cmds[11]);
 
-    uint8_t dx_cmdmask = 0;
-    if (bool_pr[DXCLCMD0_BPR].state)
-        dx_cmdmask |= 1;
-    if (bool_pr[DXCLCMD1_BPR].state)
-        dx_cmdmask |= 2;
-    if (bool_pr[DXCLCMD2_BPR].state)
-        dx_cmdmask |= 4;
-    if (bool_pr[DXCLCMD3_BPR].state)
-        dx_cmdmask |= 8;
-    NVWriteUInt8 (NV_DXCMDUSED, dx_cmdmask);
+    uint16_t dx_cmdmask = 0;
+    for (int i = 0; i < N_DXCLCMDS; i++)
+        if (bool_pr[DXCLCMD0_BPR+1].state)
+            dx_cmdmask |= (1<<i);
+    NVWriteUInt16 (NV_DXCMDMASK, dx_cmdmask);
 
     NVWriteUInt16 (NV_DXPORT, dx_port);
     NVWriteString (NV_DXLOGIN, dx_login);
@@ -3565,6 +3812,8 @@ static void saveParams2NV()
     NVWriteUInt16 (NV_FLRIGPORT, flrig_port);
     NVWriteUInt8 (NV_SCROLLDIR, bool_pr[SCROLLDIR_BPR].state);
     NVWriteUInt8 (NV_SCROLLLEN, nMoreScrollRows());
+    NVWriteUInt8 (NV_AUTOSW, bool_pr[AUTOSW_BPR].state);
+    NVWriteUInt8 (NV_NEWDXDEWX, bool_pr[NEWDXDEWX_BPR].state);
 
     // save and engage user's X11 settings
     uint16_t x11flags = 0;
@@ -3671,18 +3920,15 @@ void clockSetup()
  */
 bool latSpecIsValid (const char *lat_spec, float &lat)
 {
-    float v;
-    char ns = ' ', x = ' ';
-
-    int n_lats = sscanf (lat_spec, "%f%c%c", &v, &ns, &x);
-    ns = toupper(ns);
-    if (n_lats == 1 && v >= -90 && v <= 90)
-        lat = v;
-    else if ((n_lats == 2 || (n_lats == 3 && isspace(x))) && v >= 0 && v <= 90 && (ns == 'N' || ns == 'S'))
-        lat = ns == 'S' ? -v : v;
-    else
+    char *endp;
+    lat = strtod (lat_spec, &endp);
+    char ns = *endp;
+    if (ns == 'S' || ns == 's')
+        lat = -lat;
+    else if (ns != 'N' && ns != 'n' && ns != ' ' && ns != '\0')
         return (false);
-
+    if (lat < -90 || lat > 90)
+        return (false);
     return (true);
 }
 
@@ -3691,18 +3937,15 @@ bool latSpecIsValid (const char *lat_spec, float &lat)
  */
 bool lngSpecIsValid (const char *lng_spec, float &lng)
 {
-    float v;
-    char ew = ' ', x = ' ';
-
-    int n_lngs = sscanf (lng_spec, "%f%c%c", &v, &ew, &x);
-    ew = toupper(ew);
-    if (n_lngs == 1 && v >= -180 && v <= 180)
-        lng = v;
-    else if ((n_lngs == 2 || (n_lngs == 3 && isspace(x))) && v >= 0 && v <= 180 && (ew == 'E' || ew == 'W'))
-        lng = ew == 'W' ? -v : v;
-    else
+    char *endp;
+    lng = strtod (lng_spec, &endp);
+    char ew = *endp;
+    if (ew == 'W' || ew == 'w')
+        lng = -lng;
+    else if (ew != 'E' && ew != 'e' && ew != ' ' && ew != '\0')
         return (false);
-
+    if (lng < -180 || lng > 180)
+        return (false);
     if (lng == 180)
         lng = -180;
 
@@ -4115,21 +4358,16 @@ const char *getDXClusterLogin()
  */
 void getDXClCommands(const char *cmds[N_DXCLCMDS], bool on[N_DXCLCMDS])
 {
-    cmds[0] = dxcl_cmds[0];
-    cmds[1] = dxcl_cmds[1];
-    cmds[2] = dxcl_cmds[2];
-    cmds[3] = dxcl_cmds[3];
-
-    on[0] = bool_pr[DXCLCMD0_BPR].state;
-    on[1] = bool_pr[DXCLCMD1_BPR].state;
-    on[2] = bool_pr[DXCLCMD2_BPR].state;
-    on[3] = bool_pr[DXCLCMD3_BPR].state;
+    for (int i = 0; i < N_DXCLCMDS; i++) {
+        cmds[i] = dxcl_cmds[i];
+        on[i] = bool_pr[DXCLCMD0_BPR+i].state;
+    }
 }
 
 /* set a new host and port, return reason if false.
  * N.B. host is trimmed IN PLACE
  */
-bool setDXCluster (char *host, const char *port_str, char ynot[])
+bool setDXCluster (char *host, char *port_str, char ynot[])
 {
     if (!hostOK(host,NV_DXHOST_LEN)) {
         strcpy (ynot, _FX("Bad host"));
@@ -4229,6 +4467,7 @@ bool onDXWatchList (const char *call)
 {
     // dx_wlist is a list of calls or prefixes separated by spaces or commas.
     // call is considered to be in the list if its first chars match any of the calls or prefixes.
+    // TODO: use the dx prefix of portable calls
 
     // copy for strtok
     StackMalloc watched(sizeof(dx_wlist));
@@ -4247,6 +4486,14 @@ bool onDXWatchList (const char *call)
     return (false);
 }
 
+/* return whether to display only calls in the watch list
+ */
+bool showOnlyOnDXWatchList()
+{
+    const char *v = getEntangledValue (&bool_pr[DXWLISTA_BPR], &bool_pr[DXWLISTB_BPR]);
+    return (strcmp (v, bool_pr[DXWLISTB_BPR].t_str) == 0);
+}
+
 /* return whether scolling panes should show the newest entry on top, else newest on bottom
  */
 bool scrollTopToBottom(void)
@@ -4259,4 +4506,18 @@ bool scrollTopToBottom(void)
 int nMoreScrollRows(void)
 {
     return (atoi (getEntangledValue (&bool_pr[SCROLLLEN_BPR], &bool_pr[SCROLLBIG_BPR])));
+}
+
+/* return whether to sort spx wx
+ */
+bool autoSortSpaceWx(void)
+{
+    return (bool_pr[AUTOSW_BPR].state);
+}
+
+/* return whether to automatically show new DX or DE weather in pane 1
+ */
+bool showNewDXDEWx(void)
+{
+    return (bool_pr[NEWDXDEWX_BPR].state);
 }

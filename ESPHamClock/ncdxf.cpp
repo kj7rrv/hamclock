@@ -237,7 +237,7 @@ void updateBeaconScreenLocations()
 
 /* draw the beacon key in NCDXF_b.
  */
-void drawBeaconKey()
+static void drawBeaconKey()
 {
     // tiny font
     selectFontStyle (BOLD_FONT, FAST_FONT);
@@ -310,7 +310,7 @@ bool drawNCDXFBox()
 
     case BRB_SHOW_SWSTATS:
 
-        (void) checkSpaceStats();
+        (void) checkSpaceWx();
         drawSpaceStats(RA8875_BLACK);
         break;
 
@@ -383,7 +383,7 @@ void drawNCDXFStats (uint16_t color,
     }
 }
 
-/* common template to respond to a touch in NCDXF_b showing a table of stats.
+/* common function to install pane corresponding to touch in NCDXF_b
  */
 void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS])
 {

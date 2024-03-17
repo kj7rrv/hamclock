@@ -44,6 +44,8 @@ void hsvtorgb(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t h, uint8_t s, uint8_t 
     return;
 }
 
+#if 0           // unused but here if ever need it
+
 /* RGB to HSV conversion function with only integer math.
  */
 void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t b)
@@ -75,6 +77,8 @@ void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t 
     else
         *h = 171 + 43 * (r - g) / (rgbMax - rgbMin);
 }
+
+#endif
 
 /* handy function to get RGB565 pixel from h, s, v
  */

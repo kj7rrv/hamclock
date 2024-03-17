@@ -315,7 +315,7 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
     }
 
     // always show image, even if cancelled just to erase the menu
-    scheduleNewSDO();
+    scheduleNewPlot(PLOT_CH_SDO);
 
     // ours
     return (true);

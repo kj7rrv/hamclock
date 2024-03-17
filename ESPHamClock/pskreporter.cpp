@@ -286,7 +286,7 @@ void drawFarthestPSKSpots ()
 
 /* draw the PSK pane in the given box
  */
-void drawPSKPane (const SBox &box)
+static void drawPSKPane (const SBox &box)
 {
     // clear
     prepPlotBox (box);
@@ -505,7 +505,7 @@ bool updatePSKReporter (const SBox &box)
                         if (plotSpotCallsigns())
                             strcpy (pbs.maxcall, dx_call);
                         else
-                            call2Prefix (dx_call, pbs.maxcall);
+                            findCallPrefix (dx_call, pbs.maxcall);
                     }
                     // N.B. do not set max_s or maxtag_b here, rely on drawFarthestPSKSpots() as needed
 

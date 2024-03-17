@@ -47,8 +47,10 @@ static DXClusterType cl_type;
 
 #if defined(__GNUC__)
 static void dxcLog (const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)));
+static void showDXClusterErr (const SBox &box, const char *fmt, ...) __attribute__ ((format (__printf__, 2, 3)));
 #else
-static void dxcLog (const char *fmt, ...)
+static void dxcLog (const char *fmt, ...);
+static void showDXClusterErr (const SBox &box, const char *fmt, ...);
 #endif
 
 
@@ -184,149 +186,6 @@ static bool lookForDXClusterString (char *buf, uint16_t bufl, const char *needle
 }
 
 
-/* given a call sign find its lat/long by querying the cty table.
- * return whether successful.
- */
-static bool getDXClusterSpotLL (const char *call, LatLong &ll)
-{
-        static char cty_page[] PROGMEM = "/cty/cty_wt_mod-ll.txt";
-        typedef struct {
-            char call[MAX_SPOTCALL_LEN];                // mostly prefixes, a few calls; sorted ala strcmp
-            float lat_d, lng_d;                         // +N +E degrees
-            int call_len;                               // handy strlen(call)
-        } CtyLoc;
-        static CtyLoc *cty_list;                        // malloced list
-        static int n_cty;                               // n entries
-        #define _N_RADIX ('Z' - '0' + 1)                // radix range, 
-        #define _LOOKUP_DT (3600*24*1000L)              // refresh period, millis
-        static int radix[_N_RADIX];                     // table of cty_list index from first character
-        static uint32_t last_lookup;                    // update occasionally
-
-        // retrieve the file first time or once per _LOOKUP_DT
-        if (!cty_list || timesUp (&last_lookup, _LOOKUP_DT)) {
-
-            WiFiClient cty_client;
-            bool ok = false;
-
-            Serial.println (cty_page);
-
-            if (wifiOk() && cty_client.connect(backend_host, backend_port)) {
-
-                // look alive
-                updateClocks(false);
-
-                // request page and skip response header
-                httpHCPGET (cty_client, backend_host, cty_page);
-                if (!httpSkipHeader (cty_client)) { 
-                    dxcLog (_FX("%s header short\n"), cty_page);
-                    goto out;
-                }
-
-                // fresh start
-                free (cty_list);
-                cty_list = NULL;
-                n_cty = 0;
-                int n_malloc = 0;
-                const int n_more = 1000;
-
-                // read lines and build tables
-                char line[50];
-                char prev_radix = 0;
-                uint16_t line_len;
-                CtyLoc cl;
-                while (getTCPLine (cty_client, line, sizeof(line), &line_len)) {
-
-                    // skip blank and comment lines
-                    if (line_len == 0 || line[0] == '#')
-                        continue;
-
-                    // crack
-                    if (sscanf (line, "%10s %f %f", cl.call, &cl.lat_d, &cl.lng_d) != 3) {
-                        dxcLog (_FX("%s bad format: %s\n"), cty_page, line);
-                        goto out;
-                    }
-
-                    // add to list, expanding as needed
-                    if (n_cty + 1 > n_malloc) {
-                        cty_list = (CtyLoc *) realloc (cty_list, (n_malloc += n_more) * sizeof(CtyLoc));
-                        if (!cty_list)
-                            fatalError (_FX("No memory for cluster location list %d\n"), n_malloc);
-                    }
-                    cl.call_len = strlen(cl.call);
-                    cty_list[n_cty++] = cl;
-
-                    // update radix index when first char changes
-                    if (cl.call[0] != prev_radix) {
-                        int radix_index = cl.call[0] - '0';
-                        if (radix_index < 0 || radix_index >= _N_RADIX)
-                            fatalError (_FX("cluster radix out of range %d %d"), radix_index, _N_RADIX);
-                        radix[radix_index] = n_cty - 1;
-                        prev_radix = cl.call[0];
-                        // printf ("********* radix %c %5d %5d\n",cl.call[0],radix_index,radix[radix_index]);
-                    }
-                }
-
-                // sanity check
-                if (n_cty > 20000)
-                    ok = true;
-            }
-
-          out:
-
-            // close connection regardless
-            cty_client.stop();
-
-            if (ok) {
-                // note success
-                last_lookup = millis();
-                Serial.printf (_FX("Found %d locations, next refresh in %ld s at %ld\n"), n_cty,
-                                        _LOOKUP_DT/1000L, (last_lookup+_LOOKUP_DT)/1000L);
-            } else {
-                // note failure and reset
-                Serial.printf (_FX("%s download failed after %d\n"), cty_page, n_cty);
-                free (cty_list);
-                cty_list = NULL;
-                n_cty = 0;
-                return (false);
-            }
-        }
-
-        // start at radix then find longest cty_list call entry that starts with call.
-        const CtyLoc *candidate = NULL;
-        int radix_index = call[0] - '0';
-        if (radix_index >= 0 && radix_index < _N_RADIX) {
-            int start = radix[radix_index];
-            int len_match = 0;
-            // printf ("********* %c start %d .. ", call[0], start);
-            for (int i = start; i < n_cty; i++) {
-                const CtyLoc *cp = &cty_list[i];
-                if (cp->call[0] != call[0]) {
-                    // printf ("%d\n", i);
-                    break;
-                }
-                if (strncmp (cp->call, call, cp->call_len) == 0) {
-                    int cc_len = strlen(cp->call);
-                    if (cc_len > len_match) {
-                        len_match = cc_len;
-                        candidate = cp;
-                    }
-                }
-            }
-        } else
-            fatalError (_FX("cluster radix out of range %d %d"), radix_index, _N_RADIX);
-
-        if (candidate) {
-            ll.lat_d = candidate->lat_d;
-            ll.lng_d = candidate->lng_d;
-            normalizeLL (ll);
-            return (true);
-        }
-
-        // darn
-        dxcLog (_FX("No location for %s\n"), call);
-        return (false);
-}
-
 /* set radio and DX from given row, known to be defined
  */
 static void engageDXCRow (DXClusterSpot &s)
@@ -358,7 +217,7 @@ static void addDXClusterSpot (const SBox &box, DXClusterSpot &new_spot)
             }
         }
 
-        // insure calls are upper case for getDXClusterSpotLL()
+        // nice to insure calls are upper case
         strtoupper (new_spot.de_call);
         strtoupper (new_spot.dx_call);
 
@@ -555,14 +414,19 @@ static bool wsjtxParseStatusMsg (const SBox &box, uint8_t **bpp)
 
 /* display the given error message and shut down the connection.
  */
-static void showDXClusterErr (const SBox &box, const char *msg)
+static void showDXClusterErr (const SBox &box, const char *fmt, ...)
 {
-        char buf[300];
-        snprintf (buf, sizeof(buf), "DX Cluster error: %s", msg);
+        char buf[500];
+        va_list ap;
+        va_start (ap, fmt);
+        size_t ml = snprintf (buf, sizeof(buf), _FX("DX Cluster error: "));
+        vsnprintf (buf+ml, sizeof(buf)-ml, fmt, ap);
+        va_end (ap);
+
         plotMessage (box, RA8875_RED, buf);
 
         // log
-        dxcLog (_FX("%s\n"), msg);
+        dxcLog (_FX("%s\n"), buf);
 
         // shut down connection
         closeDXCluster();
@@ -613,9 +477,7 @@ static bool connectDXCluster (const SBox &box)
 {
         // check max connection rate
         if (maxConnRate()) {
-            char buf[100];
-            snprintf (buf, sizeof(buf), _FX("Max %d connections/hr limit"), MAX_CPHR);
-            showDXClusterErr (box, buf);
+            showDXClusterErr (box, _FX("Max %d connections/hr limit"), MAX_CPHR);
             return (false);
         }
 
@@ -639,10 +501,8 @@ static bool connectDXCluster (const SBox &box)
                 // reformat as IPAddress
                 unsigned o1, o2, o3, o4;
                 if (sscanf (dxhost, "%u.%u.%u.%u", &o1, &o2, &o3, &o4) != 4) {
-                    char emsg[100];
-                    snprintf (emsg, sizeof(emsg), _FX("Multicast address must be formatted as a.b.c.d: %s"),
+                    showDXClusterErr (box, _FX("Multicast address must be formatted as a.b.c.d: %s"),
                                                     dxhost);
-                    showDXClusterErr (box, emsg);
                     return (false);
                 }
                 IPAddress ifIP(0,0,0,0);                        // ignored
@@ -734,8 +594,7 @@ static bool connectDXCluster (const SBox &box)
                         dx_client.println(dx_cmds[i]);
                         dxcLog (_FX("> %s\n"), dx_cmds[i]);
                         if (!lookForDXClusterPrompt()) {
-                            snprintf (buf, bufl, _FX("Err from %s\n"), dx_cmds[i]);
-                            showDXClusterErr (box, buf);
+                            showDXClusterErr (box, _FX("Err from cmd: %s"), dx_cmds[i]);
                             return (false);
                         }
                     }
@@ -761,7 +620,7 @@ static bool connectDXCluster (const SBox &box)
         }
 
         // sorry
-        showDXClusterErr (box, _FX("Connection failed"));    // also calls dx_client.stop()
+        showDXClusterErr (box, _FX("%s:%d Connection failed"), dxhost, dxport);    // calls dx_client.stop()
         return (false);
 }
 
@@ -948,13 +807,13 @@ static bool crackClusterSpot (char line[], DXClusterSpot &news)
         // find locations
         LatLong ll;
 
-        if (!getDXClusterSpotLL (news.de_call, ll))
+        if (!call2LL (news.de_call, ll))
             return (false);
         news.de_lat = ll.lat;
         news.de_lng = ll.lng;
         ll2maidenhead (news.de_grid, ll);
 
-        if (!getDXClusterSpotLL (news.dx_call, ll))
+        if (!call2LL (news.dx_call, ll))
             return (false);
         news.dx_lat = ll.lat;
         news.dx_lng = ll.lng;
@@ -998,10 +857,15 @@ bool updateDXCluster(const SBox &box)
                 // crack
                 DXClusterSpot new_spot;
                 if (crackClusterSpot (line, new_spot)) {
-                    // note and display
                     last_action = millis();
-                    addDXClusterSpot (box, new_spot);
-                    any_new = true;
+
+                    // add and display unless not on exclusive watch list
+                    if (showOnlyOnDXWatchList() && !onDXWatchList(new_spot.dx_call)) {
+                        dxcLog (_FX("%s not on watch list\n"), new_spot.dx_call);
+                    } else {
+                        addDXClusterSpot (box, new_spot);
+                        any_new = true;
+                    }
                 }
             }
 
@@ -1237,7 +1101,7 @@ void drawDXCLabelOnMap (const DXClusterSpot &spot)
                 drawMapTag (spot.dx_call, spot.dx_map.map_b, txt_color, bg_color);
             } else {
                 char prefix[MAX_PREF_LEN];
-                call2Prefix (spot.dx_call, prefix);
+                findCallPrefix (spot.dx_call, prefix);
                 drawMapTag (prefix, spot.dx_map.map_b, txt_color, bg_color);
             }
         } else if (dotSpots()) {
@@ -1330,7 +1194,7 @@ void setDXCSpotPosition (DXClusterSpot &s)
             if (plotSpotCallsigns())
                 tag = s.dx_call;
             else {
-                call2Prefix (s.dx_call, prefix);
+                findCallPrefix (s.dx_call, prefix);
                 tag = prefix;
             }
 

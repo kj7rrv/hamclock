@@ -1588,8 +1588,10 @@ static void *ws_accept(void *data)
 
 			pthread_detach(client_thread);
 		}
-		else 
+		else  {
+                        printf ("More than %d WS connections\n", MAX_CLIENTS);
 			close_socket(new_sock);
+                }
 	}
 	free(data);
 	return (data);
@@ -1677,7 +1679,7 @@ int ws_socket(struct ws_events *evs, uint16_t port, int thread_loop,
 	listen(*sock, MAX_CLIENTS);
 
 	/* Wait for incoming connections. */
-	printf("Waiting for incoming connections...\n");
+	// printf("Waiting for incoming connections...\n");
 	memset(client_socks, -1, sizeof(client_socks));
 
 	/* Accept connections. */

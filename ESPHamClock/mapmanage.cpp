@@ -1164,16 +1164,11 @@ void drawMapScale()
 
     // determine DRAP marker location, if used
     uint16_t drap_x = 0;
-    if (core_map == CM_DRAP) {
-        SPWxValue ssn, flux, kp, swind, drap, bz, bt;
-        NOAASpaceWx noaaspw;
-        float path[BMTRX_COLS];
-        char xray[10];
-        time_t noaaspw_age, xray_age, path_age;
-        getSpaceWeather (ssn, flux, kp, swind, drap, bz, bt, noaaspw,noaaspw_age,xray,xray_age,path,path_age);
-        if (drap.age < 1800 && drap.value != SPW_ERR) {
+    if (!prop_map.active && core_map == CM_DRAP) {
+        checkDRAP();
+        if (space_wx[SPCWX_DRAP].value != SPW_ERR) {
             // find drap marker but beware range overflow and leave room for full width
-            float v = CLAMPF (drap.value, _MS_MINV, _MS_MAXV);
+            float v = CLAMPF (space_wx[SPCWX_DRAP].value, _MS_MINV, _MS_MAXV);
             drap_x = CLAMPF (_MS_V2X(v), mapscale_b.x+3, mapscale_b.x + mapscale_b.w - 4);
         }
     }
@@ -1190,7 +1185,7 @@ void drawMapScale()
     const char *my_title;
 
     // prep values and center x locations
-    if (core_map == CM_WX && !useMetricUnits()) {
+    if (!prop_map.active && core_map == CM_WX && !useMetricUnits()) {
 
         // switch to F scale
         my_title = "Degs F";

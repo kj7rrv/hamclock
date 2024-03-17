@@ -45,7 +45,7 @@ Adafruit_MCP23X17::Adafruit_MCP23X17(void)
 
     #if defined(_NATIVE_GPIOD_LINUX)
 
-        chip = NULL;
+        gpiochip = NULL;
 
     #endif
 
@@ -71,12 +71,12 @@ Adafruit_MCP23X17::~Adafruit_MCP23X17(void)
 {
     #if defined(_NATIVE_GPIOD_LINUX)
 
-        if (chip) {
+        if (gpiochip) {
             for (int i = 0; i < MCP_N_LINES; i++)
                 if (lines[i])
                     gpiod_line_release (lines[i]);
-            gpiod_chip_close (chip);
-            chip = NULL;
+            gpiod_chip_close (gpiochip);
+            gpiochip = NULL;
         }
 
     #endif
@@ -106,7 +106,7 @@ gpiod_line *Adafruit_MCP23X17::getGPIODLine (int rpi_pin)
 
     // set up line on first call
     if (!lines[rpi_pin]) {
-        lines[rpi_pin] = gpiod_chip_get_line (chip, rpi_pin);
+        lines[rpi_pin] = gpiod_chip_get_line (gpiochip, rpi_pin);
         if (!lines[rpi_pin]) {
             printf ("MCP: getGPIODLine(%d): no line for rpi_pin\n", rpi_pin);
             exit(1);
@@ -191,21 +191,25 @@ bool Adafruit_MCP23X17::begin_I2C (uint8_t addr)
     #if defined(_NATIVE_GPIOD_LINUX)
 
         // gpiod is preferred but can't tell at compile time if it's new enough to support pullups.
-        // GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP was added as an enum in version 1.6 for sure, maybe 1.5
+        // GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP was added as an enum in version 1.6 for sure, maybe 1.5.
+        // the pullup flag is an enum, not a define, so we can't know if we can use it an compile time.
 
         if (GPIOOk() && atof(gpiod_version_string()) >= 1.6) {
 
             // ok, gpiod should be new enough to support pullups
-
-            // the pullup flag is an enum, not a define, so we can't know if we can use it an compile time
             pullup_flag = GPIOD_BIT(5);         // straight from gpiod.h
 
-            chip = gpiod_chip_open_by_number(0);
-            if (chip) {
-                printf ("MCP: found gpiod linux chip %s\n", gpiod_chip_name(chip));
-                any_ok = true;
-            } else
-                printf ("MCP: gpiod_chip_open_by_number(0) failed: %s\n", strerror(errno));
+            // find the proper chip by looking for a typical GPIO line. pi5 4? older 0?
+            struct gpiod_chip_iter *iter = gpiod_chip_iter_new();
+            gpiod_foreach_chip (iter, gpiochip) {
+                if (gpiod_chip_find_line (gpiochip, "GPIO27") != NULL)
+                    break;
+            }
+            gpiod_chip_iter_free_noclose (iter);        // leave most recent successful chip open, if any
+            if (gpiochip)
+                printf ("MCP: found %s\n", gpiod_chip_name(gpiochip));
+            else
+                printf ("MCP: no suitable /dev/gpiochip found\n");
         }
 
     #endif
@@ -269,7 +273,7 @@ void Adafruit_MCP23X17::pinMode (uint8_t mcp_pin, uint8_t mode)
 
     #if defined (_NATIVE_GPIOD_LINUX)
 
-        if (chip) {
+        if (gpiochip) {
 
             // map MCP pin to RPi native
             uint8_t rpi_pin;
@@ -436,7 +440,7 @@ uint8_t Adafruit_MCP23X17::digitalRead(uint8_t mcp_pin)
 
     #if defined (_NATIVE_GPIOD_LINUX)
 
-        if (chip) {
+        if (gpiochip) {
 
             // map pin to RPi native
             uint8_t rpi_pin;
@@ -556,7 +560,7 @@ void Adafruit_MCP23X17::digitalWrite(uint8_t mcp_pin, uint8_t value)
 
     #if defined(_NATIVE_GPIOD_LINUX)
 
-        if (chip) {
+        if (gpiochip) {
 
             // map pin to RPi native
             uint8_t rpi_pin;

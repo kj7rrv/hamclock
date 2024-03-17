@@ -890,7 +890,7 @@ bool checkADIFTouch (const SCoord &s, const SBox &box)
     // tap in body means reread the file, if one is set
     if (getADIFilename()) {
         from_set_adif = false;
-        scheduleNewADIF();
+        scheduleNewPlot(PLOT_CH_ADIF);
     }
 
     // ours

@@ -125,8 +125,8 @@ static uint16_t n_gpath;                        // actual number in use
 static uint32_t gpath_time;                     // millis() when great path was drawn, else 0
 static SBox prefix_b;                           // where to show DX prefix text
 
-// manage using DX cluster prefix or one from nearestPrefix()
-static bool dx_prefix_use_override;             // whether to use dx_override_prefixp[] or nearestPrefix()
+// manage using a known DX cluster prefix or one derived from nearest LL
+static bool dx_prefix_use_override;             // whether to use dx_override_prefixp[] or ll2Prefix()
 static char dx_override_prefix[MAX_PREF_LEN];
 
 // longest interval between calls to resetWatchdog(), ms
@@ -182,7 +182,7 @@ static void shutdown(void);
 static void defaultState()
 {
     // try to insure screen is back on -- har!
-    setFullBrightness();
+    brightnessOn();
 
     // return all IO pins to stable defaults
     SWresetIO();
@@ -756,6 +756,15 @@ void drawOneTimeDE()
     de_c = de_c_save;
 }
 
+static void drawDXMarker (bool force)
+{
+    if (force || showDXMarker()) {
+        tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
+        tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
+        tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
+    }
+}
+
 /* draw the one-time portion of dx_info either because we just booted or because
  * we are transitioning back from being in sat mode
  */
@@ -814,18 +823,14 @@ void initScreen()
     drawOneTimeDE();
     drawOneTimeDX();
 
-    // set up beacon box
-    resetWatchdog();
-    (void) drawNCDXFBox();
-
     // enable clocks
     showClocks();
     drawMainPageStopwatch(true);
 
     // start 
+    resetWatchdog();
     initEarthMap();
     initWiFiRetry();
-    drawBME280Panes();
     drawUptime(true);
     drawScreenLock();
 
@@ -946,9 +951,9 @@ static void checkTouch()
         if (TZMenu (de_tz, de_ll)) {
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
-            scheduleNewMoon();
-            scheduleNewSDO();
-            scheduleNewBC();
+            scheduleNewPlot(PLOT_CH_MOON);
+            scheduleNewPlot(PLOT_CH_SDO);
+            scheduleNewPlot(PLOT_CH_BC);
         }
         drawDEInfo();   // erase regardless
     } else if (!dx_info_for_sat && inBox (s, dx_tz.box)) {
@@ -968,7 +973,7 @@ static void checkTouch()
         show_lp = !show_lp;
         NVWriteUInt8 (NV_LP, show_lp);
         drawDXInfo ();
-        scheduleNewBC();
+        scheduleNewPlot(PLOT_CH_BC);
         scheduleNewVOACAPMap(prop_map);
     } else if (inBox (s, askde_b)) {
         // N.B. askde overlaps the desrss box
@@ -1100,7 +1105,7 @@ void newDX (LatLong &ll, const char grid[MAID_CHARLEN], const char *ovprefix)
         drawDXCursorPrefix();
 
     // show DX weather and update band conditions if showing
-    scheduleNewBC();
+    scheduleNewPlot(PLOT_CH_BC);
     showDXWX();                 // after schedules to accommodate reverts
 
     // persist
@@ -1177,12 +1182,12 @@ void newDE (LatLong &ll, const char grid[MAID_CHARLEN])
     NVWriteFloat (NV_DE_LNG, de_ll.lng_d);
 
     // more updates that depend on DE regardless of projection
-    scheduleNewMoon();
-    scheduleNewSDO();
-    scheduleNewBC();
+    scheduleNewPlot(PLOT_CH_MOON);
+    scheduleNewPlot(PLOT_CH_SDO);
+    scheduleNewPlot(PLOT_CH_BC);
+    scheduleNewPlot(PLOT_CH_PSK);
     scheduleNewVOACAPMap(prop_map);
     sendDXClusterDELLGrid();
-    scheduleNewPSK();
     showDEWX();                 // after schedules to accommodate reverts
     if (setNewSatCircumstance())
         drawSatPass();
@@ -1479,15 +1484,6 @@ bool waiting4DXPath()
     }
 
     return (true);
-}
-
-void drawDXMarker (bool force)
-{
-    if (force || showDXMarker()) {
-        tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
-        tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
-        tft.fillCircle (dx_c.s.x, dx_c.s.y, 2, RA8875_BLACK);
-    }
 }
 
 /* return the bounding box of the given string in the current font.
@@ -2231,45 +2227,10 @@ static void unsetDXPrefixOverride ()
 static void setDXPrefixOverride (const char *ovprefix)
 {
     // extract
-    call2Prefix (ovprefix, dx_override_prefix);
+    findCallPrefix (ovprefix, dx_override_prefix);
 
     // flag ready
     dx_prefix_use_override = true;
-}
-
-/* extract the prefix from the given call sign -- this is magic
- */
-void call2Prefix (const char *call, char prefix[MAX_PREF_LEN])
-{
-    // init
-    memset (prefix, 0, MAX_PREF_LEN);
-
-    // copy call into prefix; if contains / usually use the shorter side
-    const char *slash = strchr (call, '/');
-    if (slash) {
-        const char *right = slash+1;
-        size_t llen = slash - call;
-        size_t rlen = strlen (right);
-        const char *slash2 = strchr (right, '/');
-        if (slash2)
-            rlen = slash2 - right;              // don't count past 2nd slash
-
-        if (rlen <= 1 || llen <= rlen || !strcmp(right,"MM") || !strcmp(right,"AM")
-                        || !strncmp (right, "QRP", 3) || strspn(right,"0123456789") == rlen)
-            memcpy (prefix, call, llen >= MAX_PREF_LEN ? MAX_PREF_LEN-1 : llen); 
-        else
-            memcpy (prefix, right, rlen >= MAX_PREF_LEN ? MAX_PREF_LEN-1 : rlen); 
-    } else
-        memcpy (prefix, call, MAX_PREF_LEN-1);
-
-    // truncate after right-most digit
-    for (int i = MAX_PREF_LEN-1; --i >= 0; ) {
-        if (isdigit(prefix[i])) {
-            prefix[i+1] = '\0';
-            break;
-        }
-    }
-
 }
 
 /* return the override prefix else nearest one based on ll, if any
@@ -2281,7 +2242,7 @@ bool getDXPrefix (char p[MAX_PREF_LEN+1])
         p[MAX_PREF_LEN] = '\0';
         return (true);
     } else {
-        return (nearestPrefix (dx_ll, p));
+        return (ll2Prefix (dx_ll, p));
     }
 }
 

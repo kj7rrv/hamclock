@@ -557,9 +557,6 @@ bool waitForUser (UserInput &ui)
     ui.kbchar = 0;
     ui.tap = {0, 0};
 
-    // insure screen is on
-    setFullBrightness();
-
     for(;;) {
 
         if (readCalTouchWS(ui.tap) != TT_NONE) {

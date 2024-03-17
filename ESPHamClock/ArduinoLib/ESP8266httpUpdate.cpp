@@ -294,9 +294,9 @@ t_httpUpdate_return ESPhttpUpdate::update(WiFiClient &client, const char *url)
 	// within the new source tree, make the same target we were made with
         printf ("OTA: making %s\n", our_make);
     #ifdef _IS_FREEBSD
-	if (!runCommand (false, 15, 95, N_MAKE_LINES, "cd %s/%s && gmake -j 4 %s",tmp_dir,make_dir,our_make)) {
+	if (!runCommand (false, 15, 95, N_MAKE_LINES, "cd %s/%s && gmake -j 3 %s",tmp_dir,make_dir,our_make)) {
     #else
-	if (!runCommand (false, 15, 95, N_MAKE_LINES, "cd %s/%s && make -j 4 %s",tmp_dir,make_dir,our_make)) {
+	if (!runCommand (false, 15, 95, N_MAKE_LINES, "cd %s/%s && make -j 3 %s",tmp_dir,make_dir,our_make)) {
     #endif
             cleanupDir (tmp_dir);
 	    return (HTTP_UPDATE_FAILED);

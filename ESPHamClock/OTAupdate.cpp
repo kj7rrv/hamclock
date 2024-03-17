@@ -152,7 +152,7 @@ bool askOTAupdate(char *new_ver)
 
     // list changes
     WiFiClient v_client;
-    uint16_t liney = INFO_Y+LH;
+    uint16_t liney = INFO_Y;
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     if (wifiOk() && v_client.connect (backend_host, backend_port)) {
         resetWatchdog();
@@ -172,16 +172,16 @@ bool askOTAupdate(char *new_ver)
             goto out;
         }
 
-        // remaining lines are changes
+        // remaining lines are changes, reserce last for 'more info' message if all won't fit
         while (getTCPLine (v_client, line, sizeof(line), NULL)) {
+            liney += LH;
             tft.setCursor (INDENT, liney);
-            (void) maxStringW (line, tft.width()-2*INDENT);
-            tft.print(line);
-            if ((liney += LH) >= tft.height()-LH-10) {
-                tft.setCursor (INDENT, liney);
+            if (liney >= tft.height()-LH) {
                 tft.print(F("    for more information see clearskyinstitute.com/ham/HamClock"));
                 break;
             }
+            (void) maxStringW (line, tft.width()-2*INDENT);
+            tft.print(line);
         }
     }
   out:

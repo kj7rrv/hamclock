@@ -985,7 +985,7 @@ void updateClocks(bool all)
         // update BC time marker if new hour and up
         if (prev_hr != tm_wo.Hour) {
             PlotPane bc_pane = findPaneChoiceNow(PLOT_CH_BC);
-            if (bc_pane != PANE_NONE)
+            if (bc_pane != PANE_NONE && bc_matrix.ok)
                 plotBandConditions (plot_b[bc_pane], 0, NULL, NULL);
         }
 
@@ -1292,9 +1292,9 @@ void changeTime (time_t t)
     if (setNewSatCircumstance ())
         drawSatPass();
     initEarthMap();
-    scheduleNewMoon();
-    scheduleNewSDO();
-    scheduleNewBC();
+    scheduleNewPlot(PLOT_CH_MOON);
+    scheduleNewPlot(PLOT_CH_SDO);
+    scheduleNewPlot(PLOT_CH_BC);
 }
 
 /* show menu of timezone offsets +- a few hours from nominal.

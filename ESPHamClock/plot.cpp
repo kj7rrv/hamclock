@@ -526,7 +526,7 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
         uint16_t p_x = PLEFT_X + PLOT_W*p_col/PLOT_COLS;
         for (int m_col = 0; m_col < BMTRX_COLS; m_col++) {
             // get reliability
-            uint8_t rel = (*bmp)[m_row][m_col];
+            uint8_t rel = bmp->m[m_row][m_col];
 
             // choose color similar to fetchVOACAPArea.pl
             // rel:    0     10         33         66          100
@@ -554,7 +554,6 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
         tft.drawLine (PLEFT_X, y, PRIGHT_X, y, GRID_COLOR);
     }
 
-    // printFreeHeap (F("plotBandConditions"));
 }
 
 /* print the NOAA RSG Space Weather Scales in the given box.
@@ -567,7 +566,7 @@ void plotNOAASWx (const SBox &box, const NOAASpaceWx &noaaspw)
     prepPlotBox (box);
 
     // title
-    tft.setTextColor(RA8875_YELLOW);
+    tft.setTextColor(NOAASPW_COLOR);
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
     uint16_t h = box.h/5-2;                             // text row height
     const char *title = _FX("NOAA SpaceWx");

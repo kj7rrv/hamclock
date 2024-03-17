@@ -415,15 +415,15 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
                 continue;
 
             // parse -- error message if not recognized
-            char dxcall[12], iso[20], dxgrid[7], mode[8], id[12];       // N.B. match sscanf field lengths
+            char dxcall[20], iso[20], dxgrid[7], mode[8], id[12];       // N.B. match sscanf field lengths
             float lat, lng;
             unsigned long hz;
             // JI1ORE,430510000,2023-02-19T07:00:14,CW,QM05,35.7566,140.189,JA-1234
-            if (sscanf (line, _FX("%11[^,],%lu,%19[^,],%7[^,],%6[^,],%f,%f,%11s"),
+            if (sscanf (line, _FX("%19[^,],%lu,%19[^,],%7[^,],%6[^,],%f,%f,%11s"),
                                 dxcall, &hz, iso, mode, dxgrid, &lat, &lng, id) != 8) {
 
                 // maybe a blank mode?
-                if (sscanf (line, _FX("%11[^,],%lu,%19[^,],,%6[^,],%f,%f,%11s"),
+                if (sscanf (line, _FX("%19[^,],%lu,%19[^,],,%6[^,],%f,%f,%11s"),
                                 dxcall, &hz, iso, dxgrid, &lat, &lng, id) != 7) {
                     Serial.printf (_FX("ONTA: bogus line: %s\n"), line);
 
@@ -432,6 +432,12 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
                 }
                 // .. yup that was it
                 mode[0] = '\0';
+            }
+
+            // ignore long calls
+            if (strlen (dxcall) >= MAX_SPOTCALL_LEN) {
+                Serial.printf (_FX("ONTA: ignoring long call: %s\n"), line);
+                continue;
             }
 
             // ignore GHz spots because they are too wide to print
@@ -455,11 +461,11 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
             memset (new_sp, 0, sizeof(*new_sp));
 
             // repurpose de_call for id, de_grid for list name
-            strncpy (new_sp->de_call, id, sizeof(new_sp->de_call));
-            strncpy (new_sp->de_grid, osp->prog, sizeof(new_sp->de_grid)-1);
-            strncpy (new_sp->dx_call, dxcall, sizeof(new_sp->dx_call));
-            strncpy (new_sp->dx_grid, dxgrid, sizeof(new_sp->dx_grid));
-            strncpy (new_sp->mode, mode, sizeof(new_sp->mode));
+            memcpy (new_sp->de_call, id, sizeof(new_sp->de_call));
+            memcpy (new_sp->de_grid, osp->prog, sizeof(new_sp->de_grid)-1);
+            memcpy (new_sp->dx_call, dxcall, sizeof(new_sp->dx_call));
+            memcpy (new_sp->dx_grid, dxgrid, sizeof(new_sp->dx_grid));
+            memcpy (new_sp->mode, mode, sizeof(new_sp->mode));
             new_sp->dx_lat = deg2rad(lat);
             new_sp->dx_lng = deg2rad(lng);
             new_sp->de_lat = de_ll.lat;

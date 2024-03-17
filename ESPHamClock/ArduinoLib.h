@@ -82,6 +82,8 @@ extern void setCenterLng (int16_t l);
 extern const char *backend_host;
 extern int backend_port;
 extern int liveweb_port;
+extern int liveweb_max;
+extern const int liveweb_maxmax;
 extern int restful_port;
 extern bool skip_skip;
 extern bool init_iploc;

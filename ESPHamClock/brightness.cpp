@@ -92,10 +92,13 @@ static uint8_t user_max, user_min;              // user's on and off brightness 
 static bool support_onoff;                      // whether we support display on/off
 static bool support_dim;                        // whether we support display fine brightness control
 
-#if defined(_IS_LINUX_RPI) || defined(_USE_FB0)
-// RPi path to set DSI brightness, write 0 .. 255
-static const char dsi_path_buster[] = "/sys/class/backlight/rpi_backlight/brightness";
-static const char dsi_path_bullseye[] = "/sys/class/backlight/10-0045/brightness";
+#if defined(_SUPPORT_DSI)
+// RPi path to set DSI brightness, write 0 .. 255 string to control
+static const char *dsi_paths[] = {
+    "/sys/class/backlight/rpi_backlight/brightness",            // buster
+    "/sys/class/backlight/10-0045/brightness",                  // bullseye
+    "/sys/class/backlight/6-0045/brightness",                   // bookworm
+};
 #endif
 static const char *dsi_path = "x";              // one of above if one works, non-null now just for lint
 
@@ -175,6 +178,9 @@ static void setDisplayBrightness(bool log)
                         { "wlr-randr", "--output", "HDMI-A-1", want_on ? "--on" : "--off", NULL},
                         { NULL }
                     };
+
+                    // needed if running automatically
+                    setenv ("WAYLAND_DISPLAY", "wayland-1", 0);
 
                     for (int i = been_here ? 3 : 0; i < NARRAY(argvs); i++) {
                         const char **argv = argvs[i];
@@ -761,7 +767,7 @@ static void engageDisplayBrightness(bool log)
 }
 
 
-#if !defined(_WEB_ONLY) && (defined(_IS_LINUX_RPI) || defined(_USE_FB0))
+#if defined(_SUPPORT_DSI)
 
 /* return whether this is a linux RPi connected to a DSI display
  */
@@ -774,17 +780,14 @@ static bool isRPiDSI()
 
             resetWatchdog();
 
-            // try both
+            // try all
             dsi_path = NULL;
-            int dsifd = open (dsi_path_buster, O_WRONLY);
-            if (dsifd >= 0) {
-                dsi_path = dsi_path_buster;
-                close (dsifd);
-            } else {
-                dsifd = open (dsi_path_bullseye, O_WRONLY);
+            for (int i = 0; i < NARRAY(dsi_paths); i++) {
+                int dsifd = open (dsi_paths[i], O_WRONLY);
                 if (dsifd >= 0) {
-                    dsi_path = dsi_path_bullseye;
+                    dsi_path = dsi_paths[i];
                     close (dsifd);
+                    break;
                 }
             }
 
@@ -1345,13 +1348,4 @@ bool getDisplayOnOffTimes (int dow, uint16_t &on, uint16_t &off)
     } else {
         return (false);
     }
-}
-
-
-/* call to force full brightness, for example just before shutting down.
- */
-void setFullBrightness()
-{
-    bpwm = BPWM_MAX;
-    setDisplayBrightness (true);
 }

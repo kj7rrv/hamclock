@@ -101,7 +101,7 @@ bool plotChoiceIsAvailable (PlotChoice ch)
     case PLOT_CH_FLUX:          // fallthru
     case PLOT_CH_KP:            // fallthru
     case PLOT_CH_MOON:          // fallthru
-    case PLOT_CH_NOAASWX:       // fallthru
+    case PLOT_CH_NOAASPW:       // fallthru
     case PLOT_CH_SSN:           // fallthru
     case PLOT_CH_XRAY:          // fallthru
     case PLOT_CH_SDO:           // fallthru
@@ -444,15 +444,14 @@ bool checkPlotTouch (const SCoord &s, PlotPane pp, TouchType tt)
         break;
     case PLOT_CH_SSN:
         if (!in_top) {
-            plotMap (_FX("/ssn/ssn-history.txt"), _FX("SIDC Sunspot History"), SSPOT_COLOR);
+            plotMap (_FX("/ssn/ssn-history.txt"), _FX("SIDC Sunspot History"), SSN_COLOR);
             initEarthMap();
             return(true);
         }
         break;
     case PLOT_CH_FLUX:
         if (!in_top) {
-            plotMap (_FX("/solar-flux/solarflux-history.txt"), _FX("10.7 cm Solar Flux History"),
-                                SFLUX_COLOR);
+            plotMap (_FX("/solar-flux/solarflux-history.txt"), _FX("10.7 cm Solar Flux History"),SFLUX_COLOR);
             initEarthMap();
             return(true);
         }
@@ -655,6 +654,202 @@ void showRotatingBorder ()
 
 }
 
+/* read a bmp image from the given connection and display in the given box.
+ * return true else false with short reason in ynot[].
+ * N.B. either way we do NOT close client.
+ */
+bool installBMP (WiFiClient &client, const SBox &box, char ynot[], size_t ynot_len)
+{
+    // stay alert
+    resetWatchdog();
+    updateClocks(false);
+
+    // composite types
+    union { char c[4]; uint32_t x; } i32;
+    union { char c[2]; uint16_t x; } i16;
+
+    // keep track of our offset in the image file
+    uint32_t byte_os = 0;
+    char c;
+
+    // read first two bytes to confirm correct format
+    if (!getTCPChar(client,&c) || c != 'B' || !getTCPChar(client,&c) || c != 'M') {
+        snprintf (ynot, ynot_len, _FX("File not BMP"));
+        return (false);
+    }
+    byte_os += 2;
+
+    // skip down to byte 10 which is the offset to the pixels offset
+    while (byte_os++ < 10) {
+        if (!getTCPChar(client,&c)) {
+            snprintf (ynot, ynot_len, _FX("Header offset error"));
+            return (false);
+        }
+    }
+    for (uint8_t i = 0; i < 4; i++, byte_os++) {
+        if (!getTCPChar(client,&i32.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Pix_start error"));
+            return (false);
+        }
+    }
+    uint32_t pix_start = i32.x;
+    // Serial.printf (_FX("pixels start at %d\n"), pix_start);
+
+    // next word is subheader size, must be 40 BITMAPINFOHEADER
+    for (uint8_t i = 0; i < 4; i++, byte_os++) {
+        if (!getTCPChar(client,&i32.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Hdr size error"));
+            return (false);
+        }
+    }
+    uint32_t subhdr_size = i32.x;
+    if (subhdr_size != 40) {
+        Serial.printf (_FX("DIB must be 40: %d\n"), subhdr_size);
+        snprintf (ynot, ynot_len, _FX("DIB err"));
+        return (false);
+    }
+
+    // next word is width
+    for (uint8_t i = 0; i < 4; i++, byte_os++) {
+        if (!getTCPChar(client,&i32.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Width error"));
+            return (false);
+        }
+    }
+    int32_t img_w = i32.x;
+
+    // next word is height
+    for (uint8_t i = 0; i < 4; i++, byte_os++) {
+        if (!getTCPChar(client,&i32.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Height error"));
+            return (false);
+        }
+    }
+    int32_t img_h = i32.x;
+    int32_t n_pix = img_w*img_h;
+    Serial.printf (_FX("image is %d x %d = %d\n"), img_w, img_h, img_w*img_h);
+
+    // next short is n color planes
+    for (uint8_t i = 0; i < 2; i++, byte_os++) {
+        if (!getTCPChar(client,&i16.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Planes error"));
+            return (false);
+        }
+    }
+    uint16_t n_planes = i16.x;
+    if (n_planes != 1) {
+        Serial.printf (_FX("planes must be 1: %d\n"), n_planes);
+        snprintf (ynot, ynot_len, _FX("N Planes error"));
+        return (false);
+    }
+
+    // next short is bits per pixel
+    for (uint8_t i = 0; i < 2; i++, byte_os++) {
+        if (!getTCPChar(client,&i16.c[i])) {
+            snprintf (ynot, ynot_len, _FX("bits/pix error"));
+            return (false);
+        }
+    }
+    uint16_t n_bpp = i16.x;
+    if (n_bpp != 24) {
+        Serial.printf (_FX("bpp must be 24: %d\n"), n_bpp);
+        snprintf (ynot, ynot_len, _FX("BPP error"));
+        return (false);
+    }
+
+    // next word is compression method
+    for (uint8_t i = 0; i < 4; i++, byte_os++) {
+        if (!getTCPChar(client,&i32.c[i])) {
+            snprintf (ynot, ynot_len, _FX("Compression error"));
+            return (false);
+        }
+    }
+    uint32_t comp = i32.x;
+    if (comp != 0) {
+        Serial.printf (_FX("compression must be 0: %d\n"), comp);
+        snprintf (ynot, ynot_len, _FX("Comp error"));
+        return (false);
+    }
+
+    // skip down to start of pixels
+    while (byte_os++ <= pix_start) {
+        if (!getTCPChar(client,&c)) {
+            snprintf (ynot, ynot_len, _FX("Header 3 error"));
+            return (false);
+        }
+    }
+
+    // prep logical box
+    prepPlotBox (box);
+
+    // display box depends on actual output size.
+    SBox v_b;
+    v_b.x = box.x * tft.SCALESZ;
+    v_b.y = box.y * tft.SCALESZ;
+    v_b.w = box.w * tft.SCALESZ;
+    v_b.h = box.h * tft.SCALESZ;
+
+    // center the image within v_b
+    uint16_t imgx_border = img_w > v_b.w ? (img_w - v_b.w)/2 : 0;
+    uint16_t imgy_border = img_h > v_b.h ? (img_h - v_b.h)/2 : 0;
+    uint16_t boxx_border = img_w < v_b.w ? (v_b.w - img_w)/2 : 0;
+    uint16_t boxy_border = img_h < v_b.h ? (v_b.h - img_h)/2 : 0;
+
+    // scan all pixels ...
+    for (uint16_t img_y = 0; img_y < img_h; img_y++) {
+
+        // keep time active
+        resetWatchdog();
+        updateClocks(false);
+
+        for (uint16_t img_x = 0; img_x < img_w; img_x++) {
+
+            char b, g, r;
+
+            // read next pixel -- note order!
+            if (!getTCPChar (client, &b) || !getTCPChar (client, &g) || !getTCPChar (client, &r)) {
+                // allow a little loss because ESP TCP stack can fall behind while also drawing
+                int32_t n_draw = img_y*img_w + img_x;
+                if (n_draw > 9*n_pix/10) {
+                    // close enough
+                    Serial.printf (_FX("read error after %d pixels but good enough\n"), n_draw);
+                    break;
+                } else {
+                    Serial.printf (_FX("read error after %d pixels\n"), n_draw);
+                    snprintf (ynot, ynot_len, _FX("File is short"));
+                    return (false);
+                }
+            }
+
+            // ... but only draw what fits inside box
+            if (img_x > imgx_border && img_x < img_w - imgx_border - tft.SCALESZ
+                        && img_y > imgy_border && img_y < img_h - imgy_border - tft.SCALESZ) {
+
+                uint8_t ur = r;
+                uint8_t ug = g;
+                uint8_t ub = b;
+                uint16_t color16 = RGB565(ur,ug,ub);
+                tft.drawPixelRaw (v_b.x + boxx_border + img_x - imgx_border,
+                        v_b.y + v_b.h - (boxy_border + img_y - imgy_border) - 1, color16); // vertical flip
+            }
+        }
+
+        // skip padding to bring total row length to multiple of 4
+        uint8_t extra = img_w % 4;
+        if (extra > 0) {
+            for (uint8_t i = 0; i < 4 - extra; i++) {
+                if (!getTCPChar(client,&c)) {
+                    snprintf (ynot, ynot_len, _FX("Row padding error"));
+                    return (false);
+                }
+            }
+        }
+    }
+
+    // finally!
+    return (true);
+}
+
 /* download the given hamclock url containing a bmp image and display in the given box.
  * show error messages in the given color.
  * return whether all ok
@@ -669,10 +864,6 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
     if (wifiOk() && client.connect(backend_host, backend_port)) {
         updateClocks(false);
 
-        // composite types
-        union { char c[4]; uint32_t x; } i32;
-        union { char c[2]; uint16_t x; } i16;
-
         // query web page
         httpHCGET (client, backend_host, hc_url);
 
@@ -682,185 +873,15 @@ bool drawHTTPBMP (const char *hc_url, const SBox &box, uint16_t color)
             goto out;
         }
 
-        // keep track of our offset in the image file
-        uint32_t byte_os = 0;
-        char c;
-
-        // read first two bytes to confirm correct format
-        if (!getTCPChar(client,&c) || c != 'B' || !getTCPChar(client,&c) || c != 'M') {
-            plotMessage (box, color, _FX("File not BMP"));
-            goto out;
+        // proceed
+        char ynot[100];
+        size_t prefix_l = snprintf (ynot, sizeof(ynot), _FX("Image error: "));
+        if (installBMP (client, box, ynot+prefix_l, sizeof(ynot)-prefix_l)) {
+            // Serial.println (F("image complete"));
+            ok = true;
+        } else {
+            plotMessage (box, color, ynot);
         }
-        byte_os += 2;
-
-        // skip down to byte 10 which is the offset to the pixels offset
-        while (byte_os++ < 10) {
-            if (!getTCPChar(client,&c)) {
-                plotMessage (box, color, _FX("Header offset error"));
-                goto out;
-            }
-        }
-        for (uint8_t i = 0; i < 4; i++, byte_os++) {
-            if (!getTCPChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("Pix_start error"));
-                goto out;
-            }
-        }
-        uint32_t pix_start = i32.x;
-        // Serial.printf (_FX("pixels start at %d\n"), pix_start);
-
-        // next word is subheader size, must be 40 BITMAPINFOHEADER
-        for (uint8_t i = 0; i < 4; i++, byte_os++) {
-            if (!getTCPChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("Hdr size error"));
-                goto out;
-            }
-        }
-        uint32_t subhdr_size = i32.x;
-        if (subhdr_size != 40) {
-            Serial.printf (_FX("DIB must be 40: %d\n"), subhdr_size);
-            plotMessage (box, color, _FX("DIB err"));
-            goto out;
-        }
-
-        // next word is width
-        for (uint8_t i = 0; i < 4; i++, byte_os++) {
-            if (!getTCPChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("Width error"));
-                goto out;
-            }
-        }
-        int32_t img_w = i32.x;
-
-        // next word is height
-        for (uint8_t i = 0; i < 4; i++, byte_os++) {
-            if (!getTCPChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("Height error"));
-                goto out;
-            }
-        }
-        int32_t img_h = i32.x;
-        int32_t n_pix = img_w*img_h;
-        Serial.printf (_FX("image is %d x %d = %d\n"), img_w, img_h, img_w*img_h);
-
-        // next short is n color planes
-        for (uint8_t i = 0; i < 2; i++, byte_os++) {
-            if (!getTCPChar(client,&i16.c[i])) {
-                plotMessage (box, color, _FX("Planes error"));
-                goto out;
-            }
-        }
-        uint16_t n_planes = i16.x;
-        if (n_planes != 1) {
-            Serial.printf (_FX("planes must be 1: %d\n"), n_planes);
-            plotMessage (box, color, _FX("N Planes error"));
-            goto out;
-        }
-
-        // next short is bits per pixel
-        for (uint8_t i = 0; i < 2; i++, byte_os++) {
-            if (!getTCPChar(client,&i16.c[i])) {
-                plotMessage (box, color, _FX("bits/pix error"));
-                goto out;
-            }
-        }
-        uint16_t n_bpp = i16.x;
-        if (n_bpp != 24) {
-            Serial.printf (_FX("bpp must be 24: %d\n"), n_bpp);
-            plotMessage (box, color, _FX("BPP error"));
-            goto out;
-        }
-
-        // next word is compression method
-        for (uint8_t i = 0; i < 4; i++, byte_os++) {
-            if (!getTCPChar(client,&i32.c[i])) {
-                plotMessage (box, color, _FX("Compression error"));
-                goto out;
-            }
-        }
-        uint32_t comp = i32.x;
-        if (comp != 0) {
-            Serial.printf (_FX("compression must be 0: %d\n"), comp);
-            plotMessage (box, color, _FX("Comp error"));
-            goto out;
-        }
-
-        // skip down to start of pixels
-        while (byte_os++ <= pix_start) {
-            if (!getTCPChar(client,&c)) {
-                plotMessage (box, color, _FX("Header 3 error"));
-                goto out;
-            }
-        }
-
-        // prep logical box
-        prepPlotBox (box);
-
-        // display box depends on actual output size.
-        SBox v_b;
-        v_b.x = box.x * tft.SCALESZ;
-        v_b.y = box.y * tft.SCALESZ;
-        v_b.w = box.w * tft.SCALESZ;
-        v_b.h = box.h * tft.SCALESZ;
-
-        // clip and center the image within v_b
-        uint16_t xborder = img_w > v_b.w ? (img_w - v_b.w)/2 : 0;
-        uint16_t yborder = img_h > v_b.h ? (img_h - v_b.h)/2 : 0;
-
-        // scan all pixels ...
-        for (uint16_t img_y = 0; img_y < img_h; img_y++) {
-
-            // keep time active
-            resetWatchdog();
-            updateClocks(false);
-
-            for (uint16_t img_x = 0; img_x < img_w; img_x++) {
-
-                char b, g, r;
-
-                // read next pixel -- note order!
-                if (!getTCPChar (client, &b) || !getTCPChar (client, &g) || !getTCPChar (client, &r)) {
-                    // allow a little loss because ESP TCP stack can fall behind while also drawing
-                    int32_t n_draw = img_y*img_w + img_x;
-                    if (n_draw > 9*n_pix/10) {
-                        // close enough
-                        Serial.printf (_FX("read error after %d pixels but good enough\n"), n_draw);
-                        ok = true;
-                        goto out;
-                    } else {
-                        Serial.printf (_FX("read error after %d pixels\n"), n_draw);
-                        plotMessage (box, color, _FX("File is short"));
-                        goto out;
-                    }
-                }
-
-                // ... but only draw if fits inside border
-                if (img_x > xborder && img_x < xborder + v_b.w - tft.SCALESZ
-                            && img_y > yborder && img_y < yborder + v_b.h - tft.SCALESZ) {
-
-                    uint8_t ur = r;
-                    uint8_t ug = g;
-                    uint8_t ub = b;
-                    uint16_t color16 = RGB565(ur,ug,ub);
-                    tft.drawPixelRaw (v_b.x + img_x - xborder,
-                                v_b.y + v_b.h - (img_y - yborder) - 1, color16); // vertical flip
-                }
-            }
-
-            // skip padding to bring total row length to multiple of 4
-            uint8_t extra = img_w % 4;
-            if (extra > 0) {
-                for (uint8_t i = 0; i < 4 - extra; i++) {
-                    if (!getTCPChar(client,&c)) {
-                        plotMessage (box, color, _FX("Row padding error"));
-                        goto out;
-                    }
-                }
-            }
-        }
-
-        // Serial.println (F("image complete"));
-        ok = true;
 
     } else {
         plotMessage (box, color, _FX("Connection failed"));

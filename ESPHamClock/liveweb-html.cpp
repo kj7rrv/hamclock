@@ -38,6 +38,7 @@ char live_html[] =  R"_raw_html_(
         const MOUSE_HOLD_MS = 3000;     // mouse down duration to implement hold action
         const APP_W = 800;              // app coord system width
         const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
+        const RELOAD_KEY = "reload";    // sessionStorage key to manage reloads
 
         // state
         var ws;                         // Websocket
@@ -286,17 +287,38 @@ char live_html[] =  R"_raw_html_(
             runSoon (getFullImage);
         });
 
-        // reload this page as last resort, probably because server process restarted
+        // reload this page a few times, presumably hamclock was restarted but don't try forever
         function reloadThisPage() {
 
-            console.log ('* reloading');
-            setTimeout (function() {
-                try {
-                    window.location.reload(true);
-                } catch(err) {
-                    console.log('* reload err: ' + err);
-                }
-            }, 2000);
+            // use sessionStorage to detect reloading
+            var s = sessionStorage.getItem (RELOAD_KEY);
+
+            if (s) {
+
+                // already loaded once, just report without restart but remove key to allow manual reloading
+                sessionStorage.removeItem (RELOAD_KEY);
+
+                ctx.fillStyle = "black";
+                ctx.fillRect (0, 0, 1000, 1000);
+                ctx.fillStyle = "orange";
+                ctx.font = "30px sans-serif";
+                ctx.fillText ("No connection", 50, 50);
+
+            } else {
+
+                // record key so we can detect subsequent reload
+                sessionStorage.setItem (RELOAD_KEY, "one");
+
+                console.log ('* reloading');
+                setTimeout (function() {
+                    try {
+                        window.location.reload(true);
+                    } catch(err) {
+                        console.log('* reload err: ' + err);
+                    }
+                }, 3000);               // setup waits for 10 seconds
+
+            }
         }
 
 
@@ -321,12 +343,10 @@ char live_html[] =  R"_raw_html_(
             ws = new WebSocket ( ws_proto + ws_host);
             ws.binaryType = "arraybuffer";
             ws.onopen = function () {
-                if (ws_verbose)
-                    console.log('WS connection established.');
+                console.log('WS connection established.');
             };
             ws.onclose = function () {
-                if (ws_verbose)
-                    console.log('WS connection closed.');
+                console.log('WS connection closed.');
                 reloadThisPage();
             };
             ws.onerror = function (e) {
@@ -348,6 +368,8 @@ char live_html[] =  R"_raw_html_(
                             ws_abdata = 0;
                         } else {
                             drawFullImage (data8);
+                            // allow restart
+                            sessionStorage.removeItem (RELOAD_KEY);
                         }
                         // ask for updates regardless
                         runSoon (getUpdate);

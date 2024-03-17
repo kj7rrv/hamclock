@@ -73,6 +73,12 @@
     #define _SUPPORT_ADIFILE
 #endif
 
+// whether to even look for DSI touchscreen
+#if !defined(_WEB_ONLY) && (defined(_IS_LINUX_RPI) || defined(_USE_FB0))
+    #define _SUPPORT_DSI
+#endif
+
+
 // full res app, map, moon and running man sizes
 #if defined(_CLOCK_1600x960)
 
@@ -266,7 +272,7 @@ extern const char *auxtime_names[AUXT_N];
     X(PLOT_CH_FLUX,         "Solar_Flux")       \
     X(PLOT_CH_KP,           "Planetary_K")      \
     X(PLOT_CH_MOON,         "Moon")             \
-    X(PLOT_CH_NOAASWX,      "Space_Wx")         \
+    X(PLOT_CH_NOAASPW,      "NOAA_SpcWx")       \
     X(PLOT_CH_SSN,          "Sunspot_N")        \
     X(PLOT_CH_XRAY,         "X-Ray")            \
     X(PLOT_CH_GIMBAL,       "Rotator")          \
@@ -307,18 +313,14 @@ typedef enum {
 
 
 
-#define N_NOAASW_C      3       // n categories : R, S and G
-#define N_NOAASW_V      4       // values per cat : current and 3 days predictions
+#define N_NOAASW_C      3               // n categories : R, S and G
+#define N_NOAASW_V      4               // values per cat : current and 3 days predictions
 typedef struct {
-    char cat[N_NOAASW_C];
-    int val[N_NOAASW_C][N_NOAASW_V];
+    bool ok;                            // whether all val are good
+    char cat[N_NOAASW_C];               // categories R S G
+    int val[N_NOAASW_C][N_NOAASW_V];    // serverity codes
+    time_t next_update;                 // when next to retrieve
 } NOAASpaceWx;
-
-typedef struct {
-    float value;                // from pane update
-    time_t age;                 // secs old
-} SPWxValue;
-
 
 
 // screen coords of box ul and size
@@ -535,7 +537,6 @@ typedef struct {
 
 
 extern void drawDXTime(void);
-extern void drawDXMarker(bool force);
 extern void drawAllSymbols(bool beacons_too);
 extern void drawTZ(const TZInfo &tzi);
 extern bool inBox (const SCoord &s, const SBox &b);
@@ -571,7 +572,6 @@ extern void drawMapTag (const char *tag, const SBox &box, uint16_t txt_color = R
 extern void setDXPrefixOverride (char p[MAX_PREF_LEN]);
 extern bool getDXPrefix (char p[MAX_PREF_LEN+1]);
 extern void drawScreenLock(void);
-extern void call2Prefix (const char *call, char prefix[MAX_PREF_LEN]);
 extern void setOnAir (bool on);
 extern void getDefaultCallsign(void);
 extern void drawCallsign (bool all);
@@ -762,7 +762,6 @@ extern void brightnessOff(void);
 extern bool setDisplayOnOffTimes (int dow, uint16_t on, uint16_t off, int &idle);
 extern bool getDisplayOnOffTimes (int dow, uint16_t &on, uint16_t &off);
 extern bool getDisplayInfo (uint16_t &percent, uint16_t &idle_min, uint16_t &idle_left_sec);
-extern void setFullBrightness(void);
 extern bool brDimmableOk(void);
 extern bool brOnOffOk(void);
 extern bool found_phot, found_ltr;
@@ -853,7 +852,7 @@ extern bool crackMonth (const char *name, int *monp);
 #define DYELLOW RGB565(255,212,112)
 
 extern void hsvtorgb(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t h, uint8_t s, uint8_t v);
-extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t b);
+// extern void rgbtohsv(uint8_t *h, uint8_t *s, uint8_t *v, uint8_t r, uint8_t g, uint8_t b);
 extern uint16_t HSV565 (uint8_t h, uint8_t s, uint8_t v);
 
 
@@ -968,7 +967,6 @@ extern void drawMoreEarth (void);
 extern void eraseDEMarker (void);
 extern void eraseDEAPMarker (void);
 extern void drawDEMarker (bool force);
-extern bool showDEAPMarker(void);
 extern bool showDXMarker(void);
 extern bool showDEMarker(void);
 extern void drawDEAPMarker (void);
@@ -997,7 +995,6 @@ extern bool waiting4DXPath(void);
 extern void eraseSCircle (const SCircle &c);
 extern void drawRSSBox (void);
 extern void eraseRSSBox (void);
-extern void drawMapMenu(void);
 extern void roundLatLong (LatLong &ll);
 extern void initScreen(void);
 extern bool checkOnAir(void);
@@ -1298,7 +1295,7 @@ typedef enum {
     DF_N
 } DateFormat;
 
-#define N_DXCLCMDS      4                       // n dx cluster user commands
+#define N_DXCLCMDS      12                      // n dx cluster user commands
 #define THINPATHSZ      ((tft.SCALESZ+1)/2)     // NV_MAPSPOTS thin raw path size
 #define WIDEPATHSZ      (tft.SCALESZ+1)         // NV_MAPSPOTS wide raw path size
 
@@ -1339,7 +1336,7 @@ extern const char *getCallsign(void);
 extern bool setCallsign (const char *cs);
 extern const char *getDXClusterHost(void);
 extern int getDXClusterPort(void);
-extern bool setDXCluster (char *host, const char *port_str, char ynot[]);
+extern bool setDXCluster (char *host, char *port_str, char ynot[]);
 extern int getDXClusterPort(void);
 extern bool useMetricUnits(void);
 extern bool useGeoIP(void);
@@ -1387,6 +1384,10 @@ extern const char *getADIFilename(void);
 extern bool scrollTopToBottom(void);
 extern int nMoreScrollRows(void);
 extern bool useOSTime (void);
+extern bool showOnlyOnDXWatchList(void);
+extern bool autoSortSpaceWx(void);
+extern bool showNewDXDEWx(void);
+
 
 
 
@@ -1587,7 +1588,6 @@ extern const uint16_t moon_image[HC_MOON_W*HC_MOON_H] PROGMEM;
 extern void updateBeacons (bool immediate, bool erase_too);
 extern void updateBeaconScreenLocations(void);
 extern void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS]);
-extern void drawBeaconKey(void);
 extern void doNCDXFBoxTouch (const SCoord &s);
 extern bool drawNCDXFBox(void);
 extern void initBRBRotset(void);
@@ -1743,7 +1743,7 @@ typedef enum {
     NV_DXCMD2,                  // dx cluster command 2
 
     NV_DXCMD3,                  // dx cluster command 3
-    NV_DXCMDUSED,               // bitmask of dx cluster commands in use
+    NV_DXCMDUSED,               // deprecated as of V3.06
     NV_PSK_MODEBITS,            // live spots mode: bit 0: on=psk off=wspr bit 1: on=bycall off=bygrid
     NV_PSK_BANDS,               // live spots bands: bit mask 0 .. 11 160 .. 2m
     NV_160M_COLOR,              // 160 m path color as RGB 565
@@ -1787,6 +1787,20 @@ typedef enum {
     NV_DXWLIST,                 // DX watch list
     NV_SCROLLDIR,               // 0=bottom 1=top
     NV_SCROLLLEN,               // n more lines to scroll
+    NV_DXCMD4,                  // dx cluster command 4
+    NV_DXCMD5,                  // dx cluster command 5
+
+    NV_DXCMD6,                  // dx cluster command 6
+    NV_DXCMD7,                  // dx cluster command 7
+    NV_DXCMD8,                  // dx cluster command 8
+    NV_DXCMD9,                  // dx cluster command 9
+    NV_DXCMD10,                 // dx cluster command 10
+
+    NV_DXCMD11,                 // dx cluster command 11
+    NV_DXCMDMASK,               // bitmask of dx cluster commands in use
+    NV_DXWLISTMASK,             // 0: on, 2: off, 3: only
+    NV_AUTOSW,                  // whether to sort space wx by relevance
+    NV_NEWDXDEWX,               // whether to show new DX or DE weather
 
     NV_N
 
@@ -1894,10 +1908,14 @@ extern bool overAnyOnTheAirSpots(const SCoord &s);
  */
 
 #define BMTRX_ROWS      24                              // time: UTC 0 .. 23
-#define BMTRX_COLS      PROPBAND_N                      // bands: 80-40-30-20-17-15-12-10
-typedef uint8_t BandCdtnMatrix[BMTRX_ROWS][BMTRX_COLS]; // percent circuit reliability as matrix of 24 rows
-                                                        // UTC 0 .. 23, 8 band cols 80-40-30-20-17-15-12-10.
+#define BMTRX_COLS      PROPBAND_N                      // PropMapBand bands: 80-40-30-20-17-15-12-10
+typedef struct {
+    bool ok;                                            // whether matrix is valid
+    uint8_t m[BMTRX_ROWS][BMTRX_COLS];                  // percent circuit reliability as matrix of 24 rows
+    time_t next_update;                                 // when next to retrieve
+} BandCdtnMatrix;
 
+extern bool installBMP (WiFiClient &client, const SBox &box, char ynot[], size_t ynot_len);
 extern void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, char *config_str);
 extern bool plotXY (const SBox &box, float x[], float y[], int nxy, const char *xlabel,
         const char *ylabel, uint16_t color, float y_min, float y_max, float big_value);
@@ -1971,7 +1989,11 @@ extern bool paneComboOk (const uint32_t new_rotsets[PANE_N]);
  *
  */
 
-extern bool nearestPrefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1]);
+extern bool ll2Prefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1]);
+extern bool call2LL (const char *call, LatLong &ll);
+extern void findCallPrefix (const char *call, char prefix[MAX_PREF_LEN]);
+
+
 
 
 
@@ -2048,7 +2070,6 @@ extern uint8_t psk_showdist;
 
 extern bool updatePSKReporter (const SBox &box);
 extern bool checkPSKTouch (const SCoord &s, const SBox &box);
-extern void drawPSKPane (const SBox &box);
 extern void initPSKState(void);
 extern void savePSKState(void);
 extern void drawFarthestPSKSpots(void);
@@ -2152,6 +2173,58 @@ extern bool updateSDOPane (const SBox &box, bool image_too);
 extern bool isSDORotating(void);
 
 
+
+
+
+
+/*********************************************************************************************
+ *
+ * spacewx.cpp
+ *
+ */
+
+
+/* consolidated space weather enum and stats. #define X to extract desired components.
+ * N.B. set rank to desired value when autoSortSpaceWx() is false
+ */
+#define SPCWX_DATA                                                      \
+    X(SPCWX_SSN,        PLOT_CH_SSN,     SPW_ERR, 9, 0, 1, 0)           \
+    X(SPCWX_XRAY,       PLOT_CH_XRAY,    SPW_ERR, 1, 0, 1, 0)           \
+    X(SPCWX_FLUX,       PLOT_CH_FLUX,    SPW_ERR, 0, 0, 1, 0)           \
+    X(SPCWX_KP,         PLOT_CH_KP,      SPW_ERR, 2, 0, 1, 0)           \
+    X(SPCWX_SOLWIND,    PLOT_CH_SOLWIND, SPW_ERR, 9, 0, 1, 0)           \
+    X(SPCWX_DRAP,       PLOT_CH_DRAP,    SPW_ERR, 9, 0, 1, 0)           \
+    X(SPCWX_BZ,         PLOT_CH_BZBT,    SPW_ERR, 3, 0, 1, 0)           \
+    X(SPCWX_NOAASPW,    PLOT_CH_NOAASPW, SPW_ERR, 9, 0, 1, 0)        /* value will be max noaa_sw.val[] */
+
+#define X(a,b,c,d,e,f,g) a,                     // expands SPCWX_DATA to each enum and comma
+typedef enum {
+    SPCWX_DATA
+    SPCWX_N
+} SPCWX_t;
+#undef X
+
+/* manage the display and sorting of space weather in NCDXF box
+ */
+typedef struct {
+    SPCWX_t sp;                                 // which one we are
+    PlotChoice pc;                              // corresponding plot choice
+    float value;                                // current value, or SPW_ERR
+    int rank;                                   // display order for NCDXF, 0 is top
+    time_t next_update;                         // next scheduled update unless this stat a visible pane
+    float m, b;                                 // slope and intercept to convert value when finding rank
+} SpaceWeather_t;
+
+#define SPW_ERR (-9999)                         // cookie value for bad space weather stat value
+
+extern SpaceWeather_t space_wx[SPCWX_N];
+extern NOAASpaceWx noaa_sw;                     // current and three day forecast of RGS space weather effects
+
+extern bool checkDRAP (void);
+
+extern void doSpaceStatsTouch (const SCoord &s);
+extern void drawSpaceStats(uint16_t color);
+extern bool checkSpaceWx(void);
 
 
 
@@ -2281,19 +2354,12 @@ extern bool parseWebCommand (WebArgs &wa, char line[], size_t line_len);
 
 
 extern char *trim (char *str);
-extern void startPlainText (WiFiClient &client);
 extern void initWebServer(void);
 extern void checkWebServer(bool ro);
 extern TouchType readCalTouchWS (SCoord &s);
 extern const char platform[];
 extern void runNextDemoCommand(void);
 extern bool bypass_pw;
-
-#if defined(__GNUC__)
-extern void sendHTTPError (WiFiClient &client, const char *fmt, ...) __attribute__ ((format(__printf__,2,3)));
-#else
-extern void sendHTTPError (WiFiClient &client, const char *fmt, ...);
-#endif
 
 
 
@@ -2303,8 +2369,80 @@ extern void sendHTTPError (WiFiClient &client, const char *fmt, ...);
  *
  */
 
-#define SSPOT_COLOR     RA8875_CYAN             // plot and history color
-#define SFLUX_COLOR     RA8875_GREEN            // plot and history color
+// core map update intervals
+#if defined(_IS_ESP8266)
+#define DRAPMAP_INTERVAL        (900)                   // polling interval, secs -- save FLASH writes
+#else
+#define DRAPMAP_INTERVAL        (300)                   // polling interval, secs
+#endif // _IS_ESP8266
+#define OTHER_MAPS_INTERVAL     (1800)                  // polling interval, secs
+
+
+// Bz Bt solar magnetic flux info, new data posted every few minutes
+#define BZBT_INTERVAL           (120)                   // polling interval, secs
+#define BZBT_BZCOLOR            RGB565(230,75,74)       // BZ plot color
+#define BZBT_BTCOLOR            RGB565(100,100,200)     // BT plot color
+#define BZBT_NV                 (6*25)                  // n lines to collect = 25 hours @ 10 mins per line
+extern bool retrieveBzBt (float bzbt_hrsold[BZBT_NV], float bz[BZBT_NV], float bt[BZBT_NV]);
+
+
+// solar wind info, new data posted every five minutes
+#define SWIND_INTERVAL          (340)                   // polling interval, secs
+#define SWIND_COLOR             RA8875_MAGENTA          // loading message text color
+#define SWIND_DT                (10*60)                 // data interval, secs
+#define SWIND_PER               (24*3600)               // data period, secs
+#define SWIND_MAXN              (SWIND_PER/SWIND_DT)    // max expected SW values
+#define SWIND_MINN              10                      // minimum require SW values
+extern int retrieveSolarWind(float x[SWIND_MAXN], float y[SWIND_MAXN]);
+
+
+// sunspot info, new data posted daily
+#define SSN_INTERVAL            (3400)                  // polling interval, secs
+#define SSN_COLOR               RA8875_CYAN             // plot and history color
+#define SSN_NV                  31                      // n ssn to plot, 1 per day back 30 days, including 0
+extern bool retrieveSunSpots (float x[SSN_NV], float ssn[SSN_NV]);
+
+// solar flux info, new data posted three times a day
+#define SFLUX_NV                99                      // n solar flux values, three per day for 33 days
+#define SFLUX_INTERVAL          (3300)                  // polling interval, secs
+#define SFLUX_COLOR             RA8875_GREEN            // plot and history color
+extern bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV]);
+
+
+// DRAP plot info, new data posted every few minutes
+// collect 24 hours of max value found in each 10 minute interval
+#define DRAPDATA_INTERVAL       (10*60)                 // interval, seconds
+#define DRAPPLOT_INTERVAL       (DRAPMAP_INTERVAL+5)    // polling interval, secs. N.B. avoid race with MAP
+#define DRAPDATA_PERIOD         (24*3600)               // total period, seconds
+#define DRAPDATA_NPTS           (DRAPDATA_PERIOD/DRAPDATA_INTERVAL)     // number of points to download
+#define DRAPPLOT_COLOR          RGB565(188,143,143)     // plotting color
+extern bool retrieveDRAP (float x[DRAPDATA_NPTS], float y[DRAPDATA_NPTS]);
+
+
+// kp historical and pnedicted info, new data posted every 3 hours
+#define KP_INTERVAL             (3500)                  // polling period, secs
+#define KP_COLOR                RA8875_YELLOW           // loading message text color
+#define KP_VPD                  8                       // number of values per day
+#define KP_NHD                  7                       // N historical days
+#define KP_NPD                  2                       // N predicted days
+#define KP_NV                   ((KP_NHD+KP_NPD)*KP_VPD)// N total Kp values
+extern bool retrieveKp (float kpx[KP_NV], float kp[KP_NV]);
+
+
+// xray info, new data posted every 10 minutes
+#define XRAY_INTERVAL           (610)                   // polling interval, secs
+#define XRAY_LCOLOR             RGB565(255,50,50)       // long wavelength plot color, reddish
+#define XRAY_SCOLOR             RGB565(50,50,255)       // short wavelength plot color, blueish
+#define XRAY_NV                 (6*25)                  // n lines to collect = 25 hours @ 10 mins per line
+extern bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XRAY_NV]);
+
+
+// space weather pane update intervals
+#define NOAASPW_INTERVAL        (3700)                  // polling interval, secs
+#define NOAASPW_COLOR           RGB565(154,205,210)     // plotting color
+extern bool retrieveNOAASWx(void);
+
+
 
 typedef struct {
     const char *server;                         // name of server
@@ -2312,18 +2450,9 @@ typedef struct {
 } NTPServer;
 #define NTP_TOO_LONG 5000U                      // too long response time, millis()
 
-#define SPW_ERR (-9999)                         // bad cookie value for space weather stats
-
 extern void initSys (void);
 extern void initWiFiRetry(void);
-extern void scheduleNewMoon(void);
-extern void scheduleNewBC(void);
-extern void scheduleNewSDO(void);
-extern void scheduleNewPSK(void);
-extern void scheduleNewDXC(void);
-extern void scheduleNewPOTA(void);
-extern void scheduleNewSOTA(void);
-extern void scheduleNewADIF(void);
+extern void scheduleNewPlot (PlotChoice ch);
 extern void scheduleNewVOACAPMap(PropMapSetting &pm);
 extern void scheduleNewCoreMap(CoreMaps cm);
 extern void updateWiFi(void);
@@ -2335,7 +2464,6 @@ extern void scheduleRSSNow(void);
 extern bool getTCPLine (WiFiClient &client, char line[], uint16_t line_len, uint16_t *ll);
 extern void sendUserAgent (WiFiClient &client);
 extern bool wifiOk(void);
-extern void httpGET (WiFiClient &client, const char *server, const char *page);
 extern void httpHCGET (WiFiClient &client, const char *server, const char *hc_page);
 extern void httpHCPGET (WiFiClient &client, const char *server, const char *hc_page_progmem);
 extern bool httpSkipHeader (WiFiClient &client);
@@ -2344,27 +2472,26 @@ extern void FWIFIPR (WiFiClient &client, const __FlashStringHelper *str);
 extern void FWIFIPRLN (WiFiClient &client, const __FlashStringHelper *str);
 extern int getNTPServers (const NTPServer **listp);
 extern bool setRSSTitle (const char *title, int &n_titles, int &max_titles);
-extern bool checkSpaceStats(void);
 extern void doSpaceStatsTouch (const SCoord &s);
-extern void drawSpaceStats(uint16_t color);
-extern bool getBCMatrix (BandCdtnMatrix &bm);
 extern time_t nextPaneRotation (PlotPane pp);
+extern time_t nextWiFiRetry (PlotChoice pc);
 
 
 extern char remote_addr[16];
-
-
-
+extern time_t next_update[PANE_N];
 extern uint8_t rss_interval;
 
-#define N_BCMODES       6               // n voacap modes
+
+#define N_BCMODES       6                       // n voacap modes
 typedef struct {
-    const char *name;                   // mode such as CW, SSB, etc
-    uint8_t value;                      // voacap sensitivity value
+    const char *name;                           // mode such as CW, SSB, etc
+    uint8_t value;                              // voacap sensitivity value
 } BCModeSetting;
 extern const BCModeSetting bc_modes[N_BCMODES];
+
 extern uint8_t findBCModeValue (const char *name);
 extern const char *findBCModeName (uint8_t value);
+extern BandCdtnMatrix bc_matrix;
 extern uint8_t bc_modevalue;
 extern uint16_t bc_power;
 extern float bc_toa;
@@ -2372,10 +2499,9 @@ extern uint8_t bc_utc_tl;
 extern const int n_bc_powers;
 extern uint16_t bc_powers[];
 
-extern void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, 
-    SPWxValue &drap, SPWxValue &bz, SPWxValue &bt,
-    NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,
-    float pathrel[BMTRX_COLS], time_t &pathrel_age);
+extern bool checkBandConditions (void);
+
+extern char *xrayLevel (float xray, char *buf);
 
 
 

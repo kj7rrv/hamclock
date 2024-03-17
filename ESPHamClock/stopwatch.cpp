@@ -868,7 +868,7 @@ static bool drawBCDEWxInfo(void)
  */
 static void drawBCSpaceWxInfo (bool all)
 {
-    if (checkSpaceStats() || all)
+    if (checkSpaceWx() || all)
         drawSpaceStats(sw_col);   
 }
 

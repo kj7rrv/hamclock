@@ -22,8 +22,9 @@ bool liveweb_fs_ready;                                  // set when ok to send f
 
 #if defined(_IS_UNIX)
 
-#include "ws.h"                                         // web socket library
 
+// web socket library
+#include "ws.h"
 
 // import png writer -- complete implementation in a header file -- amazing.
 // https://github.com/nothings/stb
@@ -31,11 +32,12 @@ bool liveweb_fs_ready;                                  // set when ok to send f
 #include "stb_image_write.h"
 
 
-// trace level
-static int live_verbose = 0;                            // more chatter if > 0
-
 // our public endpoint port
 int liveweb_port = LIVEWEB_PORT;                        // server port -- can be changed with -w
+
+// max allowed connections -- must be <= ws.h::MAX_CLIENTS
+int liveweb_max = 10;
+const int liveweb_maxmax = MAX_CLIENTS;                 // max max for -help
 
 
 // png format is 3 bytes per pixel
@@ -46,9 +48,13 @@ int liveweb_port = LIVEWEB_PORT;                        // server port -- can be
 #define COMP_RGB        3                               // composition request code for RGB pixels
 
 
-// list of last complete scene on browser for each web socket
+// trace level
+static int live_verbose = 0;                            // more chatter if > 0
+
+
+// complete scene on browser for each web socket
 typedef struct {
-    ws_cli_conn_t *client;                              // opaque pointer unique to each connection
+    ws_cli_conn_t *client;                              // opaque pointer unique to each connection, else NULL
     uint8_t *pixels;                                    // this client's current display image
 } SessionInfo;
 static SessionInfo *si_list;                            // malloced list
@@ -113,16 +119,12 @@ static uint8_t *getSIPixels (ws_cli_conn_t *client)
         }
     }
 
-    // capture pixels address 
+    // capture pixels address before unlocking
     uint8_t *pixels = NULL;
     if (found_sip)
         pixels = found_sip->pixels;
-    else {
-        if (ws_close_client (client) < 0)
-            Serial.printf ("LIVE: client %s: failed to close after missing pixels\n", ws_getaddress(client));
-        else
-            Serial.printf ("LIVE: client %s: closed because missing pixels\n", ws_getaddress(client));
-    }
+    else
+        Serial.printf ("LIVE: client %s: missing pixels\n", ws_getaddress(client));
 
     // unlock
     pthread_mutex_unlock (&si_lock);
@@ -248,6 +250,8 @@ static void updateExistingClient (ws_cli_conn_t *client)
     // now create one wide image containing each region as a separate sprite.
     // remember each region must work as a separate image of size lx1 blocks.
     uint8_t *chg_regns = (uint8_t*) malloc (n_bloks * BLOK_NBYTES);
+    if (!chg_regns)
+        bye ("No memory for sprites %d\n", n_bloks);
     uint8_t *chg0 = chg_regns;
     for (int ry = 0; ry < BLOK_H; ry++) {
         for (int i = 0; i < n_regns; i++) {
@@ -550,10 +554,10 @@ static void sendLiveFavicon (FILE *sockfp)
  */
 static void ws_onopen(ws_cli_conn_t *client)
 {
+    Serial.printf ("LIVE: client %s: new websocket request\n", ws_getaddress(client));
+
     // protect list while manipulating -- N.B. unlock before returning!
     pthread_mutex_lock (&si_lock);
-
-    Serial.printf ("LIVE: client %s: new websocket request\n", ws_getaddress(client));
 
     // scan for unused entry to reuse
     SessionInfo *new_sip = NULL;
@@ -561,28 +565,36 @@ static void ws_onopen(ws_cli_conn_t *client)
         SessionInfo *sip = &si_list[i];
         if (!sip->client) {
             new_sip = sip;
+            // insure no stale pixels
             if (new_sip->pixels) {
-                free (new_sip);
-                new_sip = NULL;
+                free (new_sip->pixels);
+                new_sip->pixels = NULL;
             }
             break;
         }
     }
 
-    // grow list if can't find one to reuse
+    // grow list up to liveweb_max if none found for reuse.
     if (!new_sip) {
-        si_list = (SessionInfo *) realloc (si_list, (si_n + 1) * sizeof(SessionInfo));
-        if (!si_list)
-            bye ("No memory for new live session info %d\n", si_n);
-        new_sip = &si_list[si_n++];
-        memset (new_sip, 0, sizeof (*new_sip));
+        if (si_n < liveweb_max) {
+            si_list = (SessionInfo *) realloc (si_list, (si_n + 1) * sizeof(SessionInfo));
+            if (!si_list)
+                bye ("No memory for new live session info %d\n", si_n);
+            new_sip = &si_list[si_n++];
+            memset (new_sip, 0, sizeof (*new_sip));
+        } else {
+            Serial.printf ("LIVE: hit max %d connections\n", liveweb_max);
+            ws_close_client (client);
+        }
     }
 
-    // init, including memory for pixels but don't capture until client asks for them
-    new_sip->client = client;
-    new_sip->pixels = (uint8_t *) malloc (LIVE_NBYTES);
-    if (!new_sip->pixels)
-        bye ("No memory for new live session pixels\n");
+    // init including memory for pixels but don't capture until client asks for them
+    if (new_sip) {
+        new_sip->client = client;
+        new_sip->pixels = (uint8_t *) malloc (LIVE_NBYTES);
+        if (!new_sip->pixels)
+            bye ("No memory for new live session pixels\n");
+    }
 
     // ok
     pthread_mutex_unlock (&si_lock);
@@ -599,6 +611,7 @@ static void ws_onclose (ws_cli_conn_t *client)
         SessionInfo *sip = &si_list[i];
         if (sip->client == client) {
             sip->client = NULL;
+            // recycle pixel memory
             if (sip->pixels) {
                 free (sip->pixels);
                 sip->pixels = NULL;
@@ -607,8 +620,8 @@ static void ws_onclose (ws_cli_conn_t *client)
         }
     }
 
-    // if get here, client was not found in si_list
-    Serial.printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
+    // if get here, client was not found in si_list -- usually just because we closed because too many 
+    // Serial.printf ("LIVE: client %s: disappeared after closing websocket\n", ws_getaddress(client));
 }
 
 /* callback when browser sends us a message on a websocket
@@ -693,11 +706,15 @@ void initLiveWeb (bool verbose)
         // just report
 
         if (liveweb_port > 0)
-            tftMsg (verbose, 0, "Live Web server on port %d", liveweb_port);
+            tftMsg (verbose, 0, "Live Web port %d max %d", liveweb_port, liveweb_max);
         else
-            tftMsg (verbose, 0, "Live Web server is disabled");
+            tftMsg (verbose, 0, "Live Web server disabled");
 
     } else {
+
+        // insure liveweb_max <= ws.h::MAX_CLIENTS
+        if (liveweb_max > MAX_CLIENTS)
+            bye ("liveweb_max %d > %d\n", liveweb_max, MAX_CLIENTS);
 
         // handle all write errors inline
         signal (SIGPIPE, SIG_IGN);

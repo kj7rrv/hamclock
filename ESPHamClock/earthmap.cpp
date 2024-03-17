@@ -97,7 +97,7 @@ void eraseDEAPMarker()
 
 /* return whether to display the DE antipode
  */
-bool showDEAPMarker()
+static bool showDEAPMarker()
 {
     return (map_proj != MAPP_AZIM1 && !dx_info_for_sat && overMap(deap_c.s));
 }
@@ -838,7 +838,7 @@ static void drawMouseLoc()
         // prefix, else blank
         tft.setCursor (tx+ML_INDENT, ty += ML_LINEDY);
         char prefix[MAX_PREF_LEN+1];
-        if (nearestPrefix (city ? city_ll : ll, prefix))
+        if (ll2Prefix (city ? city_ll : ll, prefix))
             tft.printf ("Pfx %5s", prefix);
 
         // blank so wx is on same rows on all formats
@@ -1072,7 +1072,7 @@ void drawRSSBox()
 
 /* draw, perform and engage results of the map View menu
  */
-void drawMapMenu()
+static void drawMapMenu()
 {
 
     enum MIName {     // menu items -- N.B. must be in same order as mitems[]

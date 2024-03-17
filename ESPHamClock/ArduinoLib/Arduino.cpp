@@ -250,7 +250,8 @@ static void logOS()
             fclose(fp);
         }
 
-        (void) system ("uname -a");
+        if ((system ("uname -a") >> 8) != 0)
+            printf ("uname failed\n");
 }
 
 /* show version info
@@ -261,47 +262,52 @@ static void showVersion()
         fprintf (stderr, "built as %s\n", our_make);
 }
 
-/* show usage and exit(1)
+/* show error or usage then exit(1)
  */
 static void usage (const char *errfmt, ...)
 {
-        char *slash = strrchr (our_argv[0], '/');
-        char *me = slash ? slash+1 : our_argv[0];
-
         if (errfmt) {
             va_list ap;
             va_start (ap, errfmt);
             fprintf (stderr, "Usage error: ");
             vfprintf (stderr, errfmt, ap);
             va_end (ap);
-            if (!strchr(errfmt, '\n'))
-                fprintf (stderr, "\n");
+            fprintf (stderr, "\n");
+        } else {
+            char *slash = strrchr (our_argv[0], '/');
+            char *me = slash ? slash+1 : our_argv[0];
+
+            fprintf (stderr, "Purpose: display time and other information useful to amateur radio operators\n");
+            fprintf (stderr, "Usage: %s [options]\n", me);
+            fprintf (stderr, "Version %s\n", hc_version);
+            fprintf (stderr, "Options:\n");
+            fprintf (stderr, " -a l : set gimbal trace level\n");
+            fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,
+                                    backend_port);
+            fprintf (stderr, " -c   : disable all touch events from web interface\n");
+            fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
+            fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default is %d\n",
+                                    RESTFUL_PORT);
+            fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
+            fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
+            fprintf (stderr, " -h   : print this help summary then exit\n");
+            fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
+            fprintf (stderr, " -k   : start in normal mode, ie, don't offer Setup or wait for Skips\n");
+            fprintf (stderr, " -l l : set Mercator or Robinson center longitude to l degrees, +E; requires -k\n");
+            fprintf (stderr, " -m   : enable demo mode\n");
+            fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",
+                                    defaultAppDir().c_str());
+            fprintf (stderr, " -p f : require passwords in file f formatted as lines of \"category password\"\n");
+            fprintf (stderr, "        categories: changeUTC exit newde newdx reboot restart setup shutdown unlock upgrade\n");
+            fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
+            fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
+            fprintf (stderr, " -v   : show version info then exit\n");
+            fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",
+                                    LIVEWEB_PORT);
+            fprintf (stderr, " -x n : set n max live web connections; max %d; default %d\n", liveweb_maxmax,
+                                    liveweb_max);
+            fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
         }
-
-        fprintf (stderr, "Purpose: display time and other information useful to amateur radio operators\n");
-        fprintf (stderr, "Usage: %s [options]\n", me);
-        fprintf (stderr, "Options:\n");
-        fprintf (stderr, " -a l : set gimbal trace level\n");
-        fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,backend_port);
-        fprintf (stderr, " -c   : disable all touch events from web interface\n");
-        fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
-        fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default %d\n", RESTFUL_PORT);
-
-        fprintf (stderr, " -f o : force display full screen initially to \"on\" or \"off\"\n");
-        fprintf (stderr, " -g   : init DE using geolocation with current public IP; requires -k\n");
-        fprintf (stderr, " -h   : print this help summary then exit\n");
-        fprintf (stderr, " -i i : init DE using geolocation with IP i; requires -k\n");
-        fprintf (stderr, " -k   : start immediately in normal mode, ie, don't offer Setup or wait for Skips\n");
-        fprintf (stderr, " -l l : set Mercator or Mollweide center longitude to l degrees, +E; requires -k\n");
-        fprintf (stderr, " -m   : enable demo mode\n");
-        fprintf (stderr, " -o   : write diagnostic log to stdout instead of in %s\n",defaultAppDir().c_str());
-        fprintf (stderr, " -p f : require passwords in file f formatted as lines of \"category password\"\n");
-        fprintf (stderr, "        categories: changeUTC exit newde newdx reboot restart setup shutdown unlock upgrade\n");
-        fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
-        fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
-        fprintf (stderr, " -v   : show version info then exit\n");
-        fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",LIVEWEB_PORT);
-        fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
 
         exit(1);
 }
@@ -315,6 +321,7 @@ static void crackArgs (int ac, char *av[])
         bool fs_set = false;
         const char *new_appdir = NULL;
         bool cl_set = false;
+        int max_lw = 0;
 
          while (--ac && **++av == '-') {
             char *s = *av;
@@ -418,8 +425,8 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing percentage for -t");
                     max_cpu_usage = atoi (*++av)/100.0F;
-                    if (max_cpu_usage <0.1F || max_cpu_usage>1)
-                        usage ("-t percentage must be 10 .. 100");
+                    if (max_cpu_usage < 0.1F || max_cpu_usage>1)
+                        usage ("-t percentage must be [10,100]");
                     ac--;
                     break;
                 case 'v':
@@ -431,11 +438,16 @@ static void crackArgs (int ac, char *av[])
                         usage ("missing web port number for -w");
                     liveweb_port = atoi(*++av);
                     if (liveweb_port != -1 && (liveweb_port < 1 || liveweb_port > 65535))
-                        usage ("-w port must be -1 or [1,65535");
+                        usage ("-w port must be -1 or [1,65535]");
                     ac--;
                     break;
                 case 'x':
-                    usage ("-x is no longer supported -- replaced with direct web \"make\" targets");
+                    if (ac < 2)
+                        usage ("missing max live web for -x");
+                    max_lw = atoi(*++av);
+                    if (max_lw < 1 || max_lw > liveweb_maxmax)
+                        usage ("-x must be [1,%d]", liveweb_maxmax);
+                    ac--;
                     break;
                 case 'y':
                     want_kbcursor = true;
@@ -460,6 +472,9 @@ static void crackArgs (int ac, char *av[])
         if (liveweb_port == restful_port && liveweb_port > 0 && restful_port > 0)
             usage ("Live web and RESTful ports may not be equal: %d %d", liveweb_port, restful_port);
 
+        // change liveweb_max if set here
+        if (max_lw > 0)
+            liveweb_max = max_lw;
 
         // prepare our working directory in our_dir
         mkAppDir (new_appdir);

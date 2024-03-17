@@ -22,68 +22,30 @@ static uint8_t n_rss_titles, rss_title_i;       // n titles and rolling index
 static bool rss_local;                          // if set: don't poll server, assume local titles
 uint8_t rss_interval = RSS_DEF_INT;             // polling period, secs
 
-// kp historical and predicted info, new data posted every 3 hours
-#define KP_INTERVAL     (3500+randIvl(300))     // polling period, secs
-#define KP_COLOR        RA8875_YELLOW           // loading message text color
-static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
-#define KP_VPD           8                      // number of values per day
-#define KP_NHD           7                      // N historical days
-#define KP_NPD           2                      // N predicted days
-#define KP_NV            ((KP_NHD+KP_NPD)*KP_VPD) // N total Kp values
-
-// xray info, new data posted every 10 minutes
-#define XRAY_INTERVAL   (610+randIvl(30))       // polling interval, secs
-#define XRAY_LCOLOR     RGB565(255,50,50)       // long wavelength plot color, reddish
-#define XRAY_SCOLOR     RGB565(50,50,255)       // short wavelength plot color, blueish
-static const char xray_page[] PROGMEM = "/xray/xray.txt";
-#define XRAY_NV         (6*25)                  // n lines to collect = 25 hours @ 10 mins per line
-
 // contest info, new data posted every Monday
-#define CONTESTS_INTERVAL (3600+randIvl(1000))  // polling interval, secs
+#define CONTESTS_INTERVAL (3600)                // polling interval, secs
 
 // OnTheAir posts can be very rapid
-#define ONTA_INTERVAL   (60+randIvl(15))        // polling interval, secs
-
-// sunspot info, new data posted daily
-#define SSPOT_INTERVAL  (3400+randIvl(300))     // polling interval, secs
-static const char ssn_page[] PROGMEM = "/ssn/ssn-31.txt";
-#define SSPOT_NV        31                      // n ssn to plot, 1 per day back 30 days, including 0
-
-// solar flux info, new data posted three times a day
-#define SFLUX_INTERVAL  (3300+randIvl(300))     // polling interval, secs
-static const char sf_page[] PROGMEM = "/solar-flux/solarflux-99.txt";
-#define SFLUX_NV        99                      // n solar flux values, three per day for 33 days
-
-// Bz Bt solar magnetic flux info, new data posted every few minutes
-#define BZBT_INTERVAL   (120+randIvl(30))       // polling interval, secs
-#define BZBT_BZCOLOR    RGB565(230,75,74)       // BZ plot color
-#define BZBT_BTCOLOR    RGB565(100,100,200)     // BT plot color
-static const char bzbt_page[] PROGMEM = "/Bz/Bz.txt";
-#define BZBT_NV         (6*25)                  // n lines to collect = 25 hours @ 10 mins per line
-
-// solar wind info, new data posted every five minutes
-#define SWIND_INTERVAL  (340+randIvl(30))       // polling interval, secs
-#define SWIND_COLOR     RA8875_MAGENTA          // loading message text color
-static const char swind_page[] PROGMEM = "/solar-wind/swind-24hr.txt";
+#define ONTA_INTERVAL   (60)                    // polling interval, secs
 
 // world wx table update, new data every hour but N.B. make it longer than OTHER_MAPS_INTERVAL
-#define WWX_INTERVAL    (2300+randIvl(200))     // polling interval, secs
+#define WWX_INTERVAL    (2300)                  // polling interval, secs
 
 // ADIF pane
 #define ADIF_INTERVAL   30                      // polling interval, secs
 
 // band conditions and voacap map, models change each hour
-#define BC_INTERVAL     (2400+randIvl(200))     // polling interval, secs
-#define VOACAP_INTERVAL (2500+randIvl(200))     // polling interval, secs
+#define BC_INTERVAL     (2400)                  // polling interval, secs
+#define VOACAP_INTERVAL (2500)                  // polling interval, secs
 uint16_t bc_powers[] = {1, 5, 10, 50, 100, 500, 1000};
 const int n_bc_powers = NARRAY(bc_powers);
 static const char bc_page[] = "/fetchBandConditions.pl";
-static BandCdtnMatrix bc_matrix;                // percentage reliability for each band
 static time_t bc_time;                          // nowWO() when bc_matrix was loaded
+static time_t map_time;                         // nowWO() when map was loaded
+BandCdtnMatrix bc_matrix;                       // percentage reliability for each band
 uint16_t bc_power;                              // VOACAP power setting
 float bc_toa;                                   // VOACAP take off angle
 uint8_t bc_utc_tl;                              // label band conditions timeline in utc else DE local
-static time_t map_time;                         // nowWO() when map was loaded
 
 uint8_t bc_modevalue;                           // VOACAP sensitivity value
 const BCModeSetting bc_modes[N_BCMODES] {
@@ -109,43 +71,22 @@ const char *findBCModeName (uint8_t value)      // find name given value, else N
     return (NULL);
 }
 
-// core map update intervals
-#if defined(_IS_ESP8266)
-#define DRAPMAP_INTERVAL    (900+randIvl(60))   // polling interval, secs -- save FLASH writes
-#else
-#define DRAPMAP_INTERVAL    (300+randIvl(60))   // polling interval, secs
-#endif // _IS_ESP8266
-#define OTHER_MAPS_INTERVAL (1800+randIvl(200)) // polling interval, secs
-
-// DRAP plot info, new data posted every few minutes
-// collect 24 hours of max value found in each 10 minute interval
-#define DRAPDATA_INTERVAL       (10*60)                                 // interval, seconds
-#define DRAPDATA_PERIOD         (24*3600)                               // total period, seconds
-#define DRAPDATA_NPTS           (DRAPDATA_PERIOD/DRAPDATA_INTERVAL)     // number of points to download
-#define DRAPPLOT_INTERVAL       (DRAPMAP_INTERVAL+5)    // polling interval, secs. N.B. avoid race with MAP
-#define DRAPPLOT_COLOR  RGB565(188,143,143)                             // plotting color
-static const char drap_page[] PROGMEM = "/drap/stats.txt";
-
-// NOAA RSG space weather scales
-#define NOAASWX_INTERVAL    (3700+randIvl(300)) // polling interval, secs
-static const char noaaswx_page[] PROGMEM = "/NOAASpaceWX/noaaswx.txt";
-
 // geolocation web page
-static const char locip_page[] = "/fetchIPGeoloc.pl";
+static const char locip_page[] PROGMEM = "/fetchIPGeoloc.pl";
 
 // SDO images
 #define SDO_INTERVAL     40                     // annotation update interval, secs
-#define SDO_ROT_INTERVAL (90+randIvl(20))       // image and annotation interval when rotating, secs
+#define SDO_ROT_INTERVAL (90)                   // image and annotation interval when rotating, secs
 
 // weather displays
-#define DEWX_INTERVAL   (1700+randIvl(200))     // polling interval, secs
-#define DXWX_INTERVAL   (1600+randIvl(200))     // polling interval, secs
+#define DEWX_INTERVAL   (1700)                  // polling interval, secs
+#define DXWX_INTERVAL   (1600)                  // polling interval, secs
 
 // moon display
 #define MOON_INTERVAL   50                      // annotation update interval, secs
 
 // Live spots
-#define PSK_INTERVAL    (90+randIvl(20))        // polling period. secs
+#define PSK_INTERVAL    (120)                   // polling period. secs
 
 // list of default NTP servers unless user has set their own
 static NTPServer ntp_list[] = {                 // init times to 0 insures all get tried initially
@@ -160,10 +101,10 @@ static NTPServer ntp_list[] = {                 // init times to 0 insures all g
 
 
 // web site retry interval, secs
-#define WIFI_RETRY      (15+randIvl(5))
+#define WIFI_RETRY      (15)
 
 // pane auto rotation period in seconds
-#define ROTATION_INTERVAL       (40+randIvl(5))                 // default pane rotation interval, s
+#define ROTATION_INTERVAL       (40)            // default pane rotation interval, s
 
 /* "reverting" refers to restoring pane1 after it shows DE or DX weather.
  * pane1_reverting tells panes that can do partial updates that a full update is required.
@@ -177,23 +118,11 @@ static time_t pane1_revtime;
  * 0 will refresh immediately.
  * reset all in initWiFiRetry()
  */
-static time_t next_update[PANE_N];
+time_t next_update[PANE_N];
 static time_t next_map;
 static time_t next_wwx;
 static time_t next_rss;
 
-// persisent space weather data and refresh time for use by getSpaceWeather() and drawSpaceStats()
-static time_t ssn_update, xray_update, sflux_update, kp_update, noaa_update, swind_update, bzbt_update;
-static time_t drap_update, path_update;
-static float ssn_spw = SPW_ERR;
-static float xray_spw = SPW_ERR;
-static float sflux_spw = SPW_ERR;
-static float kp_spw = SPW_ERR;
-static float swind_spw = SPW_ERR;
-static float drap_spw = SPW_ERR;
-static float bz_spw = SPW_ERR, bt_spw = SPW_ERR;
-static float path_spw[BMTRX_COLS]; 
-static NOAASpaceWx noaa_spw;
 
 // fwd local funcs
 static bool updateDRAP(SBox &box);
@@ -202,18 +131,12 @@ static bool updateXRay(const SBox &box);
 static bool updateSunSpots(const SBox &box);
 static bool updateSolarFlux(const SBox &box);
 static bool updateBzBt(const SBox &box);
-static bool updateBandConditions(const SBox &box);
+static void updateBandConditions(const SBox &box, bool);
 static bool updateNOAASWx(const SBox &box);
 static bool updateSolarWind(const SBox &box);
 static bool updateRSS (void);
 static uint32_t crackBE32 (uint8_t bp[]);
 
-/* return a random number [-n,n] intended for randomizing update intervals
- */
-static int randIvl(int n)
-{
-    return (random(2*n+1) - n);
-}
 
 /* return absolute difference in two time_t regardless of time_t implementation is signed or unsigned.
  */
@@ -253,12 +176,12 @@ static time_t nextWiFiRetry (const char *str)
 
 /* calls nextWiFiRetry() and logs the given plot choice.
  */
-static time_t nextWiFiRetry (PlotChoice ch)
+time_t nextWiFiRetry (PlotChoice pc)
 {
     time_t next_try = nextWiFiRetry();
     int dt = next_try - myNow();
     int nm = millis()/1000+dt;
-    Serial.printf (_FX("Next %s retry in %d sec at %d\n"), plot_names[ch], dt, nm);
+    Serial.printf (_FX("Next %s retry in %d sec at %d\n"), plot_names[pc], dt, nm);
     return (next_try);
 }
 
@@ -313,9 +236,10 @@ static void geolocateIP (const char *ip)
     if (wifiOk() && iploc_client.connect(backend_host, backend_port)) {
 
         // create proper query
-        size_t l = snprintf (llline, sizeof(llline), "%s", locip_page);
+        strcpy_P (llline, locip_page);
+        size_t l = sizeof(locip_page) - 1;              // not EOS
         if (ip)
-            l += snprintf (llline+l, sizeof(llline)-l, "?IP=%s", ip);
+            l += snprintf (llline+l, sizeof(llline)-l, _FX("?IP=%s"), ip);
         Serial.println(llline);
 
         // send
@@ -656,35 +580,6 @@ void initSys()
     }
 }
 
-/* update BandConditions pane in box b if needed or requested.
- */
-static void checkBandConditions (const SBox &b, bool force)
-{
-    // skip if not currently showing
-    PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
-    if (bc_pp == PANE_NONE)
-        return;
-
-    // update if asked to or out of sync with prop map or it's time to refresh or it's just been a while
-    bool update_bc = force || (prop_map.active && tdiff(bc_time,map_time)>=3600)
-                           || (myNow() > next_update[bc_pp])
-                           || (tdiff (nowWO(), bc_time) >= 3600);
-    if (!update_bc)
-        return;
-
-    if (updateBandConditions(b)) {
-        // worked ok so reschedule later
-        next_update[bc_pp] = nextPaneUpdate (bc_pp, BC_INTERVAL);
-        bc_time = nowWO();
-    } else {
-        // retry soon
-        next_update[bc_pp] = nextWiFiRetry(PLOT_CH_BC);
-
-        // if problem persists more than an hour, this prevents the tdiff's above from being true every time
-        map_time = bc_time = nowWO() - 1000;
-    }
-}
-
 /* check if time to update background map
  */
 static void checkMap(void)
@@ -694,7 +589,7 @@ static void checkMap(void)
 
     // note whether BC is up
     PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
-    bool bc_up = bc_pp != PANE_NONE;
+    bool bc_up = bc_pp != PANE_NONE && bc_matrix.ok;
 
     // check VOACAP first
     if (prop_map.active) {
@@ -778,7 +673,7 @@ static void checkMap(void)
 
 /* given a GOES XRAY Flux value, return its event level designation in buf.
  */
-static char *xrayLevel (float xray, char *buf)
+char *xrayLevel (float xray, char *buf)
 {
     if (xray == SPW_ERR)
         strcpy (buf, "Err");
@@ -797,633 +692,140 @@ static char *xrayLevel (float xray, char *buf)
 }
 
 
-
-/* retrieve latest sun spot indices and time scale in days from now.
- * return whether all ok
+/* retrieve bc_matrix and optional config line underneath PLOT_CH_BC.
+ * return whether at least config line was received (even if data was not)
  */
-static bool retrieveSunSpots (float x[SSPOT_NV], float ssn[SSPOT_NV])
+static bool retrieveBandConditions (char *config)
 {
-    char line[100];
-    WiFiClient ss_client;
+    char buf[100];
+    WiFiClient bc_client;
     bool ok = false;
 
-    // mark value as bad until proven otherwise
-    ssn_spw = SPW_ERR;
+    // init data unknown
+    bc_matrix.ok = false;
 
-    Serial.println(ssn_page);
+    // build query
+    const size_t qsize = sizeof(bc_page)+200;
+    StackMalloc query_mem (qsize);
+    char *query = (char *) query_mem.getMem();
+    time_t t = nowWO();
+    snprintf (query, qsize,
+        _FX("%s?YEAR=%d&MONTH=%d&RXLAT=%.3f&RXLNG=%.3f&TXLAT=%.3f&TXLNG=%.3f&UTC=%d&PATH=%d&POW=%d&MODE=%d&TOA=%.1f"),
+        bc_page, year(t), month(t), dx_ll.lat_d, dx_ll.lng_d, de_ll.lat_d, de_ll.lng_d,
+        hour(t), show_lp, bc_power, bc_modevalue, bc_toa);
+
+    Serial.println (query);
     resetWatchdog();
-    if (wifiOk() && ss_client.connect(backend_host, backend_port)) {
-        updateClocks(false);
-
-        // query web page
-        httpHCPGET (ss_client, backend_host, ssn_page);
-
-        // skip response header
-        if (!httpSkipHeader (ss_client)) {
-            Serial.print (F("SSN header fail\n"));
-            goto out;
-        }
-
-        // read lines into ssn array and build corresponding time value
-        int8_t ssn_i;
-        for (ssn_i = 0; ssn_i < SSPOT_NV && getTCPLine (ss_client, line, sizeof(line), NULL); ssn_i++) {
-            ssn[ssn_i] = atof(line+11);
-            x[ssn_i] = 1-SSPOT_NV + ssn_i;
-        }
-
-        updateClocks(false);
-        resetWatchdog();
-
-        // ok if all received
-        if (ssn_i == SSPOT_NV) {
-
-            ok = true;
-
-            // capture latest for getSpaceWeather() and drawSpaceStats()
-            ssn_spw = ssn[SSPOT_NV-1];
-            ssn_update = myNow();
-
-        } else {
-
-            Serial.printf (_FX("SSN: data short %d / %d\n"), ssn_i, SSPOT_NV);
-        }
-    }
-
-    // clean up
-out:
-    ss_client.stop();
-    resetWatchdog();
-    return (ok);
-}
-
-
-/* retrieve latest and predicted solar flux indices, return whether all ok.
- */
-static bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
-{
-    StackMalloc line_mem(120);
-    char *line = (char *) line_mem.getMem();
-    WiFiClient sf_client;
-    bool ok = false;
-
-    // mark value as bad until proven otherwise
-    sflux_spw = SPW_ERR;
-
-    Serial.println (sf_page);
-    resetWatchdog();
-    if (wifiOk() && sf_client.connect(backend_host, backend_port)) {
+    if (wifiOk() && bc_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
         // query web page
-        httpHCPGET (sf_client, backend_host, sf_page);
+        httpHCGET (bc_client, backend_host, query);
 
-        // skip response header
-        if (!httpSkipHeader (sf_client)) {
-            Serial.print (F("SFlux header fail\n"));
+        // skip header
+        if (!httpSkipHeader (bc_client)) {
+            Serial.println (F("BC: no header"));
             goto out;
         }
 
-        // read lines into flux array and build corresponding time value
-        int8_t sflux_i;
-        for (sflux_i = 0; sflux_i < SFLUX_NV && getTCPLine(sf_client, line, line_mem.getSize(), NULL);
-                                                                        sflux_i++) {
-            sflux[sflux_i] = atof(line);
-            x[sflux_i] = (sflux_i - (SFLUX_NV-9-1))/3.0F;   // 3x(30 days history + 3 days predictions)
-        }
-
-        // ok if found all
-        updateClocks(false);
-        resetWatchdog();
-        if (sflux_i == SFLUX_NV) {
-
-            // capture current value for getSpaceWeather() and drawSpaceStats()
-            sflux_spw = sflux[SFLUX_NV-10];         // current value, not predictions
-            sflux_update = myNow();
-            ok = true;
-
-        } else {
-
-            Serial.printf (_FX("SFlux data short: %d / %d\n"), sflux_i, SFLUX_NV);
-        }
-    }
-
-    // clean up
-out:
-    sf_client.stop();
-    resetWatchdog();
-    return (ok);
-}
-
-/* update sflux_spw if not recently done so my pane.
- * return whether a new value is ready.
- */
-static bool checkSolarFlux (void)
-{
-    // use our own delay unless being shown in a pane
-    static time_t next_sflux;
-    PlotPane sflux_pp = findPaneForChoice (PLOT_CH_FLUX);
-    time_t *next_p = sflux_pp == PANE_NONE ? &next_sflux : &next_update[sflux_pp];
-
-    if (myNow() < *next_p)
-        return (false);
-
-    StackMalloc x_mem(SFLUX_NV*sizeof(float));
-    StackMalloc sflux_mem(SFLUX_NV*sizeof(float));
-    float *x = (float *) x_mem.getMem();
-    float *sflux = (float *) sflux_mem.getMem();
-
-    bool ok = retrievSolarFlux (x, sflux);
-    if (ok) {
-
-        // schedule next
-        *next_p = myNow() + SFLUX_INTERVAL;
-
-    } else {
-
-        // schedule retry
-        *next_p = nextWiFiRetry(PLOT_CH_FLUX);
-    }
-
-    // true, albeit may be SPW_ERR
-    return (true);
-}
-
-
-/* retrieve and plot latest DRAP frequencies, return whether all ok.
- */
-static bool retrieveDRAP (float x[DRAPDATA_NPTS], float y[DRAPDATA_NPTS])
-{
-    #define _DRAPDATA_MAXMI     (DRAPDATA_NPTS/10)                      // max allowed missing intervals
-    #define _DRAP_MINGOODI      (DRAPDATA_NPTS-3600/DRAPDATA_INTERVAL)  // min index with good data
-
-    char line[100];                                                     // text line
-    WiFiClient drap_client;                                             // wifi client connection
-    bool ok = false;                                                    // set iff all ok
-
-    // want to find any holes in data so init x values to all 0
-    memset (x, 0, DRAPDATA_NPTS*sizeof(float));
-
-    // want max in each interval so init y values to all 0
-    memset (y, 0, DRAPDATA_NPTS*sizeof(float));
-
-    // mark data as bad until proven otherwise
-    drap_spw = SPW_ERR;
-
-    Serial.println (drap_page);
-    resetWatchdog();
-    if (wifiOk() && drap_client.connect(backend_host, backend_port)) {
-        updateClocks(false);
-        resetWatchdog();
-
-        // query web page
-        httpHCPGET (drap_client, backend_host, drap_page);
-
-        // skip response header
-        if (!httpSkipHeader (drap_client)) {
-            Serial.print (F("DRAP header short\n"));
+        // next line is CSV path reliability for the requested time between DX and DE, 9 bands 80-10m
+        if (!getTCPLine (bc_client, buf, sizeof(buf), NULL)) {
+            Serial.println (F("BC: No response"));
             goto out;
         }
+        // Serial.printf (_FX("BC response: %s\n"), buf);
 
-        // init state
-        time_t t_now = myNow();
-
-        // read lines, oldest first
-        int n_lines = 0;
-        while (getTCPLine (drap_client, line, sizeof(line), NULL)) {
-            n_lines++;
-
-            // crack
-            long utime;
-            float min, max, mean;
-            if (sscanf (line, _FX("%ld : %f %f %f"), &utime, &min, &max, &mean) != 4) {
-                Serial.printf (_FX("DRAP: garbled: %s\n"), line);
-                goto out;
-            }
-            // Serial.printf (_FX("DRAP: %ld %g %g %g\n", utime, min, max, mean);
-
-            // find age for this datum, skip if crazy new or too old
-            int age = t_now - utime;
-            int xi = DRAPDATA_NPTS*(DRAPDATA_PERIOD - age)/DRAPDATA_PERIOD;
-            if (xi < 0 || xi >= DRAPDATA_NPTS) {
-                // Serial.printf (_FX("DRAP: skipping age %g hrs\n"), age/3600.0F);
-                continue;
-            }
-            x[xi] = age/(-3600.0F);                             // seconds to hours ago
-
-            // set in array if larger
-            if (max > y[xi]) {
-                // if (y[xi] > 0)
-                    // Serial.printf (_FX("DRAP: saw xi %d utime %ld age %d again\n"), xi, utime, age);
-                y[xi] = max;
-            }
-
-            // Serial.printf (_FX("DRAP %3d %6d: %g %g\n"), xi, age, x[xi], y[xi]);
-        }
-        Serial.printf (_FX("DRAP: read %d lines\n"), n_lines);
-
-        // look alive
-        updateClocks(false);
-        resetWatchdog();
-
-        // check for missing data
-        int n_missing = 0;
-        int maxi_good = 0;
-        for (int i = 0; i < DRAPDATA_NPTS; i++) {
-            if (x[i] == 0) {
-                x[i] = (DRAPDATA_PERIOD - i*DRAPDATA_PERIOD/DRAPDATA_NPTS)/-3600.0F;
-                if (i > 0)
-                    y[i] = y[i-1];                      // fill with previous
-                Serial.printf (_FX("DRAP: filling missing interval %d at age %g hrs to %g\n"), i, x[i], y[i]);
-                n_missing++;
-            } else {
-                maxi_good = i;
-            }
-        }
-
-        // check for too much missing or newest too old
-        if (n_missing > _DRAPDATA_MAXMI) {
-            Serial.print (F("DRAP: data too sparse\n"));
+        // next line is configuration summary, save if interested
+        if (!getTCPLine (bc_client, buf, sizeof(buf), NULL)) {
+            Serial.println (F("BC: No config"));
             goto out;
         }
-        if (maxi_good < _DRAP_MINGOODI) {
-            Serial.print (F("DRAP: data too old\n"));
-            goto out;
-        }
+        // Serial.printf (_FX("BC config: %s\n"), buf);
+        if (config)
+            strcpy (config, buf);
 
-        // capture for getSpaceWeather()
-        drap_spw = y[DRAPDATA_NPTS-1];
-        drap_update = t_now;
-
-        // ok!
+        // transaction for at least config is ok
         ok = true;
 
-    } else {
-
-        Serial.print (F("DRAP: connection failed\n"));
-    }
-
-    // clean up
-out:
-    drap_client.stop();
-    resetWatchdog();
-    return (ok);
-}
-
-/* update drap_spw if not recently done so by its pane.
- * return whether a new value is ready.
- */
-static bool checkDRAP ()
-{
-    // use our own delay unless being shown in a pane
-    static time_t next_drap;
-    PlotPane drap_pp = findPaneForChoice (PLOT_CH_DRAP);
-    time_t *next_p = drap_pp == PANE_NONE ? &next_drap : &next_update[drap_pp];
-
-    if (myNow() < *next_p)
-        return (false);
-
-    StackMalloc x_mem(DRAPDATA_NPTS*sizeof(float));
-    StackMalloc y_mem(DRAPDATA_NPTS*sizeof(float));
-    float *x = (float*)x_mem.getMem();
-    float *y = (float*)y_mem.getMem();
-
-    bool ok = retrieveDRAP (x, y);
-    if (ok) {
-
-        // schedule next
-        *next_p = myNow() + DRAPPLOT_INTERVAL;
-
-    } else {
-
-        // schedule retry
-        *next_p = nextWiFiRetry(PLOT_CH_DRAP);
-    }
-
-    // true, albeit may be SPW_ERR
-    return (true);
-}
-
-/* retrieve latest and predicted kp indices, return whether all ok
- */
-static bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
-{
-    int kp_i = 0;                                       // next kp index to use
-    char line[100];                                     // text line
-    WiFiClient kp_client;                               // wifi client connection
-    bool ok = false;                                    // set iff all ok
-
-    // mark value as bad until proven otherwise
-    kp_spw = SPW_ERR;
-
-    Serial.println(kp_page);
-    resetWatchdog();
-    if (wifiOk() && kp_client.connect(backend_host, backend_port)) {
+        // keep time fresh
         updateClocks(false);
         resetWatchdog();
 
-        // query web page
-        httpHCPGET (kp_client, backend_host, kp_page);
+        // next 24 lines are reliability matrix.
+        // N.B. col 1 is UTC but runs from 1 .. 24, 24 is really 0
+        // lines include data for 9 bands, 80-10, but we drop 60 for BandCdtnMatrix
+        float rel[BMTRX_COLS];          // values are path reliability 0 .. 1
+        for (int r = 0; r < BMTRX_ROWS; r++) {
 
-        // skip response header
-        if (!httpSkipHeader (kp_client)) {
-            Serial.print (F("Kp header short\n"));
-            goto out;
+            // read next row
+            if (!getTCPLine (bc_client, buf, sizeof(buf), NULL)) {
+                Serial.printf (_FX("BC: fail row %d"), r);
+                goto out;
+            }
+
+            // crack row, skipping 60 m
+            int utc_hr;
+            if (sscanf(buf, _FX("%d %f,%*f,%f,%f,%f,%f,%f,%f,%f"), &utc_hr,
+                        &rel[0], &rel[1], &rel[2], &rel[3], &rel[4], &rel[5], &rel[6], &rel[7])
+                            != BMTRX_COLS + 1) {
+                Serial.printf (_FX("BC: bad matrix line: %s\n"), buf);
+                goto out;
+            }
+
+            // insure correct utc
+            utc_hr %= 24;
+
+            // add to bc_matrix as integer percent
+            for (int c = 0; c < BMTRX_COLS; c++)
+                bc_matrix.m[utc_hr][c] = (uint8_t)(100*rel[c]);
         }
 
-        // read lines into kp array and build x
-        const int now_i = KP_NHD*KP_VPD-1;              // last historic is now
-        for (kp_i = 0; kp_i < KP_NV && getTCPLine (kp_client, line, sizeof(line), NULL); kp_i++) {
-            kp[kp_i] = atof(line);
-            kpx[kp_i] = (kp_i-now_i)/(float)KP_VPD;
-            // Serial.printf ("%2d%c: kp[%5.3f] = %g from \"%s\"\n", kp_i, kp_i == now_i ? '*' : ' ', kpx[kp_i], kp[kp_i], line);
-        }
+        // #define _TEST_BAND_MATRIX
+        #if defined(_TEST_BAND_MATRIX)
+            for (int r = 0; r < BMTRX_ROWS; r++)                    // time 0 .. 23
+                for (int c = 0; c < BMTRX_COLS; c++)                // band 80 .. 10
+                    bc_matrix.m[r][c] = 100*r*c/BMTRX_ROWS/BMTRX_COLS;
+        #endif
 
-        // ok if all
-        if (kp_i == KP_NV) {
+        // matrix ok
+        bc_matrix.ok = true;
 
-            // save current (not last!) value for getSpaceWeather()
-            kp_spw = kp[now_i];
-            kp_update = myNow();
-
-            ok = true;
-
-        } else {
-
-            Serial.printf (_FX("Kp data short: %d of %d\n"), kp_i, KP_NV);
-        }
+    } else {
+        Serial.println (F("VOACAP connection failed"));
     }
+
+out:
 
     // clean up
-out:
-    kp_client.stop();
+    bc_client.stop();
     resetWatchdog();
     return (ok);
 }
 
-/* update kp_spw if not recently done so by its pane.
- * return whether a new value is ready.
+
+/* update bc_matrix if not recently done so by its pane.
+ * return whether new data are ready, even if not ok.
  */
-static bool checkKp (void)
+bool checkBandConditions (void)
 {
-    // use our own delay unless being shown in a pane
-    static time_t next_kp;
-    PlotPane kp_pp = findPaneForChoice (PLOT_CH_KP);
-    time_t *next_p = kp_pp == PANE_NONE ? &next_kp : &next_update[kp_pp];
+    PlotPane bc_pp = findPaneForChoice (PLOT_CH_BC);
+    time_t *next_p = bc_pp == PANE_NONE ? &bc_matrix.next_update : &next_update[bc_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc kpx_mem(KP_NV*sizeof(float));
-    StackMalloc kp_mem(KP_NV*sizeof(float));
-    float *kpx = (float*)kpx_mem.getMem();              // days ago
-    float *kp = (float*)kp_mem.getMem();                // kp collection
+    bool ok = retrieveBandConditions(NULL);
+    if (ok)
+        *next_p = myNow() + BC_INTERVAL;
+    else
+        *next_p = nextWiFiRetry(PLOT_CH_BC);
 
-    bool ok = retrieveKp (kpx, kp);
-    if (ok) {
-
-        // schedule next
-        *next_p = myNow() + KP_INTERVAL;
-
-    } else {
-
-        // schedule retry
-        *next_p = nextWiFiRetry(PLOT_CH_KP);
-    }
-
-    // true, albeit may be SPW_ERR
+    // true, albeit data might not be ok
     return (true);
 }
 
-/* retrieve latest xray indices, return whether all ok
- */
-static bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XRAY_NV])
-{
-    uint8_t xray_i;                                     // next index to use
-    WiFiClient xray_client;
-    char line[100];
-    uint16_t ll;
-    bool ok = false;
 
-    // mark value as bad until proven otherwise
-    xray_spw = SPW_ERR;
-
-    Serial.println(xray_page);
-    resetWatchdog();
-    if (wifiOk() && xray_client.connect(backend_host, backend_port)) {
-        updateClocks(false);
-
-        // query web page
-        httpHCPGET (xray_client, backend_host, xray_page);
-
-        // soak up remaining header
-        if (!httpSkipHeader (xray_client)) {
-            Serial.print (F("XRay header short\n"));
-            goto out;
-        }
-
-        // collect content lines and extract both wavelength intensities
-        xray_i = 0;
-        float raw_lxray = 0;
-        while (xray_i < XRAY_NV && getTCPLine (xray_client, line, sizeof(line), &ll)) {
-            // Serial.println(line);
-
-            if (line[0] == '2' && ll >= 56) {
-
-                // short
-                float s = atof(line+35);
-                if (s <= 0)                             // missing values are set to -1.00e+05, also guard 0
-                    s = 1e-9;
-                sxray[xray_i] = log10f(s);
-
-                // long
-                float l = atof(line+47);
-                if (l <= 0)                             // missing values are set to -1.00e+05, also guard 0
-                    l = 1e-9;
-                lxray[xray_i] = log10f(l);
-                raw_lxray = l;                          // last one will be current
-
-                // time in hours back from 0
-                x[xray_i] = (xray_i-XRAY_NV)/6.0;       // 6 entries per hour
-
-                // good
-                xray_i++;
-            }
-        }
-
-        // proceed iff we found all
-        if (xray_i == XRAY_NV) {
-
-            // capture for getSpaceWeather() and drawSpaceStats()
-            xray_spw = raw_lxray;
-            xray_update = myNow();
-
-            ok = true;
-
-        } else {
-
-            Serial.printf (_FX("XRay data short %d of %d\n"), xray_i, XRAY_NV);
-        }
-    }
-
-out:
-
-    xray_client.stop();
-    resetWatchdog();
-    return (ok);
-}
-
-/* update xray_spw if not recently done so by its pane.
- * return whether a new value is ready.
- */
-static bool checkXRay (void)
-{
-    // use our own delay unless being shown in a pane
-    static time_t next_xray;
-    PlotPane xray_pp = findPaneForChoice (PLOT_CH_XRAY);
-    time_t *next_p = xray_pp == PANE_NONE ? &next_xray : &next_update[xray_pp];
-
-    if (myNow() < *next_p)
-        return (false);
-
-    StackMalloc lxray_mem(XRAY_NV*sizeof(float));
-    StackMalloc sxray_mem(XRAY_NV*sizeof(float));
-    StackMalloc x_mem(XRAY_NV*sizeof(float));
-    float *lxray = (float *) lxray_mem.getMem();        // long wavelength values
-    float *sxray = (float *) sxray_mem.getMem();        // short wavelength values
-    float *x = (float *) x_mem.getMem();                // x coords of plot
-
-    bool ok = retrieveXRay (lxray, sxray, x);
-    if (ok) {
-
-        // schedule next
-        *next_p = myNow() + XRAY_INTERVAL;
-
-    } else {
-
-        // schedule retry
-        *next_p = nextWiFiRetry(PLOT_CH_XRAY);
-    }
-
-    // true, albeit may be SPW_ERR
-    return (true);
-}
-
-/* retrieve latest bzbt indices, return whether all ok
- */
-static bool retrieveBzBt (float bzbt_hrsold[BZBT_NV], float bz[BZBT_NV], float bt[BZBT_NV])
-{
-    int bzbt_i;                                     // next index to use
-    WiFiClient bzbt_client;
-    char line[100];
-    bool ok = false;
-    time_t t0 = myNow();
-
-    // mark value as bad until proven otherwise
-    bz_spw = bt_spw = SPW_ERR;
-
-    Serial.println(bzbt_page);
-    resetWatchdog();
-    if (wifiOk() && bzbt_client.connect(backend_host, backend_port)) {
-        updateClocks(false);
-
-        // query web page
-        httpHCPGET (bzbt_client, backend_host, bzbt_page);
-
-        // skip over remaining header
-        if (!httpSkipHeader (bzbt_client)) {
-            Serial.print (F("BZBT: header short\n"));
-            goto out;
-        }
-
-        // collect content lines and extract both magnetic values, oldest first (newest last :-)
-        // # UNIX        Bx     By     Bz     Bt
-        // 1684087500    1.0   -2.7   -3.2    4.3
-        bzbt_i = 0;
-        while (bzbt_i < BZBT_NV && getTCPLine (bzbt_client, line, sizeof(line), NULL)) {
-
-            // crack
-            // Serial.printf("BZBT: %d %s\n", bzbt_i, line);
-            long unix;
-            float this_bz, this_bt;
-            if (sscanf (line, "%ld %*f %*f %f %f", &unix, &this_bz, &this_bt) != 3) {
-                // Serial.printf ("BZBT: rejecting %s\n", line);
-                continue;
-            }
-
-            // store at bzbt_i
-            bz[bzbt_i] = this_bz;
-            bt[bzbt_i] = this_bt;
-
-            // time in hours back from now but clamp at 0 in case we are slightly late
-            bzbt_hrsold[bzbt_i] = unix < t0 ? (unix - t0)/3600.0 : 0;
-
-            // good
-            bzbt_i++;
-        }
-
-        // proceed iff we found all and current
-        if (bzbt_i == BZBT_NV && bzbt_hrsold[BZBT_NV-1] > -0.25F) {
-
-            // capture latest for getSpaceWeather() and drawSpaceStats()
-            bz_spw = bz[BZBT_NV-1];
-            bt_spw = bt[BZBT_NV-1];
-            bzbt_update = t0 + 3600*bzbt_hrsold[BZBT_NV-1];
-
-            // good!
-            ok = true;
-
-        } else {
-
-            if (bzbt_i < BZBT_NV)
-                Serial.printf (_FX("BZBT: data short %d of %d\n"), bzbt_i, BZBT_NV);
-            else
-                Serial.printf (_FX("BZBT: data %g hrs old\n"), -bzbt_hrsold[BZBT_NV-1]);
-        }
-    }
-
-out:
-
-    bzbt_client.stop();
-    resetWatchdog();
-    return (ok);
-}
-
-/* update bz_spw and bt_spw if not recently done so by its pane.
- * return whether a new value is ready.
- */
-static bool checkBzBt(void)
-{
-    // use our own delay unless being shown in a pane
-    static time_t next_bzbt;
-    PlotPane bzbt_pp = findPaneForChoice (PLOT_CH_BZBT);
-    time_t *next_p = bzbt_pp == PANE_NONE ? &next_bzbt : &next_update[bzbt_pp];
-
-    if (myNow() < *next_p)
-        return (false);
-
-    StackMalloc old_mem(BZBT_NV*sizeof(float));
-    StackMalloc bz_mem(BZBT_NV*sizeof(float));
-    StackMalloc bt_mem(BZBT_NV*sizeof(float));
-    float *old = (float *) old_mem.getMem();
-    float *bz = (float *) bz_mem.getMem();
-    float *bt = (float *) bt_mem.getMem();
-
-    bool ok = retrieveBzBt (old, bz, bt);
-    if (ok) {
-
-        // schedule next
-        *next_p = myNow() + BZBT_INTERVAL;
-
-    } else {
-
-        // schedule retry
-        *next_p = nextWiFiRetry(PLOT_CH_BZBT);
-    }
-
-    // true, albeit may be SPW_ERR
-    return (true);
-}
 
 /* check for tap at s known to be within BandConditions box b:
  *    tapping left-half band toggles REF map, right-half toggles TOA map
@@ -1436,8 +838,8 @@ static bool checkBzBt(void)
  */
 bool checkBCTouch (const SCoord &s, const SBox &b)
 {
-    // not ours if tap title or not in our box
-    if (!inBox (s, b) || s.y < b.y+PANETITLE_H)
+    // not ours if not in our box or tapped titled or data not valid
+    if (!inBox (s, b) || s.y < b.y+PANETITLE_H || !bc_matrix.ok)
         return (false);
 
     // tap area for power cycle
@@ -1492,7 +894,8 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
             mi.group = 1;
             mi.indent = 5;
             mi.label = labels[i];
-            snprintf (labels[i], sizeof(labels[i]), "%d watt%s", bc_powers[i], bc_powers[i] > 1 ? "s" : ""); 
+            snprintf (labels[i], sizeof(labels[i]), _FX("%d watt%s"), bc_powers[i],
+                                bc_powers[i] > 1 ? "s" : ""); 
         };
 
         SBox menu_b;
@@ -1517,7 +920,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
         bool power_changed = new_power != bc_power;
         bc_power = new_power;
         NVWriteUInt16 (NV_BCPOWER, bc_power);
-        checkBandConditions (b, true);
+        updateBandConditions (b, true);
         if (power_changed)
             scheduleNewVOACAPMap(prop_map);
 
@@ -1552,7 +955,7 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
             NVWriteUInt8 (NV_BCMODE, bc_modevalue);
             scheduleNewVOACAPMap(prop_map);
         }
-        checkBandConditions (b, true);
+        updateBandConditions (b, true);
 
     } else if (inBox (s, toa_b)) {
 
@@ -1587,14 +990,14 @@ bool checkBCTouch (const SCoord &s, const SBox &b)
             NVWriteFloat (NV_BCTOA, bc_toa);
             scheduleNewVOACAPMap(prop_map);
         }
-        checkBandConditions (b, true);
+        updateBandConditions (b, true);
 
     } else if (inBox (s, splp_b)) {
 
         // toggle short/long path -- update DX info too
         show_lp = !show_lp;
         NVWriteUInt8 (NV_LP, show_lp);
-        checkBandConditions (b, true);
+        updateBandConditions (b, true);
         drawDXInfo ();
         scheduleNewVOACAPMap(prop_map);
     
@@ -1699,7 +1102,7 @@ static void checkBRB (time_t t)
 
         case BRB_SHOW_SWSTATS:
             // only if new space stats
-            if (checkSpaceStats())
+            if (checkSpaceWx())
                 (void) drawNCDXFBox();
             break;
 
@@ -1743,10 +1146,10 @@ static void revertPane1 (uint32_t dt)
  * N.B. we might change plot_ch but we NEVER change plot_rotset here
  * N.B. it's harmless to set pane to same choice again.
  */
-bool setPlotChoice (PlotPane pp, PlotChoice ch)
+bool setPlotChoice (PlotPane pp, PlotChoice pc)
 {
     // ignore if new choice is already in some other pane
-    PlotPane pp_now = findPaneForChoice (ch);
+    PlotPane pp_now = findPaneForChoice (pc);
     if (pp_now != PANE_NONE && pp_now != pp)
         return (false);
 
@@ -1754,7 +1157,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
     SBox &box = plot_b[pp];
 
     // first check a few plot types that require extra tests or processing.
-    switch (ch) {
+    switch (pc) {
     case PLOT_CH_DXCLUSTER:
         if (!useDXCluster() || pp == PANE_1)    // cluster not allowed on pane 1 to avoid disconnect for wx
             return (false);
@@ -1766,22 +1169,22 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
     case PLOT_CH_TEMPERATURE:
         if (getNBMEConnected() == 0)
             return (false);
-        drawOneBME280Pane (box, ch);
+        drawOneBME280Pane (box, pc);
         break;
     case PLOT_CH_PRESSURE:
         if (getNBMEConnected() == 0)
             return (false);
-        drawOneBME280Pane (box, ch);
+        drawOneBME280Pane (box, pc);
         break;
     case PLOT_CH_HUMIDITY:
         if (getNBMEConnected() == 0)
             return (false);
-        drawOneBME280Pane (box, ch);
+        drawOneBME280Pane (box, pc);
         break;
     case PLOT_CH_DEWPOINT:
         if (getNBMEConnected() == 0)
             return (false);
-        drawOneBME280Pane (box, ch);
+        drawOneBME280Pane (box, pc);
         break;
     case PLOT_CH_COUNTDOWN:
         if (getSWEngineState(NULL,NULL) != SWE_COUNTDOWN)
@@ -1794,7 +1197,7 @@ bool setPlotChoice (PlotPane pp, PlotChoice ch)
     }
 
     // ok, commit choice to the given pane with immediate refresh
-    plot_ch[pp] = ch;
+    plot_ch[pp] = pc;
     next_update[pp] = 0;
 
     // insure DX and gimbal are off if no longer selected for display
@@ -1827,7 +1230,7 @@ void updateWiFi(void)
     for (int i = PANE_1; i < PANE_N; i++) {
 
         SBox &box = plot_b[i];
-        PlotChoice ch = plot_ch[i];
+        PlotChoice pc = plot_ch[i];
         PlotPane pp = (PlotPane)i;
         bool new_rot_ch = false;
 
@@ -1835,14 +1238,14 @@ void updateWiFi(void)
         if (paneIsRotating(pp) && next_update[i] > 0 && t0 >= next_update[i]) {
             setPlotChoice (pp, getNextRotationChoice(pp, plot_ch[pp]));
             new_rot_ch = true;
-            ch = plot_ch[pp];
+            pc = plot_ch[pp];
         }
 
-        switch (ch) {
+        switch (pc) {
 
         case PLOT_CH_BC:
-            // does its own timing
-            checkBandConditions (box, false);
+            // does its own timing to sync with prop_map and age
+            updateBandConditions (box, t0 >= next_update[pp]);
             break;
 
         case PLOT_CH_DEWX:
@@ -1850,7 +1253,7 @@ void updateWiFi(void)
                 if (updateDEWX(box))
                     next_update[pp] = nextPaneUpdate (pp, DEWX_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1859,7 +1262,7 @@ void updateWiFi(void)
                 if (updateDXCluster(box))
                     next_update[pp] = 0;   // constant poll
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1868,7 +1271,7 @@ void updateWiFi(void)
                 if (updateDXWX(box))
                     next_update[pp] = nextPaneUpdate (pp, DXWX_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1877,7 +1280,7 @@ void updateWiFi(void)
                 if (updateSolarFlux(box))
                     next_update[pp] = nextPaneUpdate (pp, SFLUX_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1886,7 +1289,7 @@ void updateWiFi(void)
                 if (updateKp(box))
                     next_update[pp] = nextPaneUpdate (pp, KP_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1898,21 +1301,21 @@ void updateWiFi(void)
             }
             break;
 
-        case PLOT_CH_NOAASWX:
+        case PLOT_CH_NOAASPW:
             if (t0 >= next_update[pp]) {
                 if (updateNOAASWx(box))
-                    next_update[pp] = nextPaneUpdate (pp, NOAASWX_INTERVAL);
+                    next_update[pp] = nextPaneUpdate (pp, NOAASPW_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
         case PLOT_CH_SSN:
             if (t0 >= next_update[pp]) {
                 if (updateSunSpots(box))
-                    next_update[pp] = nextPaneUpdate (pp, SSPOT_INTERVAL);
+                    next_update[pp] = nextPaneUpdate (pp, SSN_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1921,7 +1324,7 @@ void updateWiFi(void)
                 if (updateXRay(box))
                     next_update[pp] = nextPaneUpdate (pp, XRAY_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1937,10 +1340,10 @@ void updateWiFi(void)
         case PLOT_CH_HUMIDITY:                  // fallthru
         case PLOT_CH_DEWPOINT:
             if (t0 >= next_update[pp]) {
-                drawOneBME280Pane (box, ch);
+                drawOneBME280Pane (box, pc);
                 next_update[pp] = nextPaneUpdate (pp, ROTATION_INTERVAL);
             } else if (newBME280data()) {
-                drawOneBME280Pane (box, ch);
+                drawOneBME280Pane (box, pc);
             }
             break;
 
@@ -1950,7 +1353,7 @@ void updateWiFi(void)
                     next_update[pp] = nextPaneUpdate (pp,
                                     (isSDORotating() ? SDO_ROT_INTERVAL : SDO_INTERVAL));
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
                 pane1_reverting = false;
             }
             break;
@@ -1960,7 +1363,7 @@ void updateWiFi(void)
                 if (updateSolarWind(box))
                     next_update[pp] = nextPaneUpdate (pp, SWIND_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1969,7 +1372,7 @@ void updateWiFi(void)
                 if (updateDRAP(box))
                     next_update[pp] = nextPaneUpdate (pp, DRAPPLOT_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1982,7 +1385,7 @@ void updateWiFi(void)
                 if (updateContests(box))
                     next_update[pp] = nextPaneUpdate (pp, CONTESTS_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -1991,7 +1394,7 @@ void updateWiFi(void)
                 if (updatePSKReporter(box))
                     next_update[pp] = nextPaneUpdate (pp, PSK_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -2000,7 +1403,7 @@ void updateWiFi(void)
                 if (updateBzBt(box))
                     next_update[pp] = nextPaneUpdate (pp, BZBT_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -2009,7 +1412,7 @@ void updateWiFi(void)
                 if (updateOnTheAir(box, ONTA_POTA))
                     next_update[pp] = nextPaneUpdate (pp, ONTA_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -2018,7 +1421,7 @@ void updateWiFi(void)
                 if (updateOnTheAir(box, ONTA_SOTA))
                     next_update[pp] = nextPaneUpdate (pp, ONTA_INTERVAL);
                 else
-                    next_update[pp] = nextWiFiRetry(ch);
+                    next_update[pp] = nextWiFiRetry(pc);
             }
             break;
 
@@ -2421,7 +1824,7 @@ void sendUserAgent (WiFiClient &client)
 
 /* issue an HTTP Get for an arbitary page
  */
-void httpGET (WiFiClient &client, const char *server, const char *page)
+static void httpGET (WiFiClient &client, const char *server, const char *page)
 {
     resetWatchdog();
 
@@ -2535,7 +1938,7 @@ static bool updateKp(SBox &box)
         resetWatchdog();
 
         // plot
-        plotXY (box, kpx, kp, KP_NV, _FX("Days"), _FX("Planetary Kp"), KP_COLOR, 0, 9, kp_spw);
+        plotXY (box,kpx,kp,KP_NV,_FX("Days"),_FX("Planetary Kp"),KP_COLOR,0,9,space_wx[SPCWX_KP].value);
 
         // update NCDXF box if up for this
         if (brb_mode == BRB_SHOW_SWSTATS)
@@ -2571,7 +1974,7 @@ static bool updateXRay(const SBox &box)
         plotXYstr (box, x, lxray, XRAY_NV, _FX("Hours"), _FX("GOES 16 X-Ray"), XRAY_LCOLOR,
                                 -9, -2, NULL)
                  && plotXYstr (box, x, sxray, XRAY_NV, NULL, NULL, XRAY_SCOLOR, -9, -2,     
-                                xrayLevel(xray_spw, level_str));
+                                xrayLevel(space_wx[SPCWX_XRAY].value, level_str));
 
         // update NCDXF box if up for this
         if (brb_mode == BRB_SHOW_SWSTATS)
@@ -2590,8 +1993,8 @@ static bool updateXRay(const SBox &box)
  */
 static bool updateSunSpots (const SBox &box)
 {
-    StackMalloc x_ssn((SSPOT_NV)*sizeof(float));
-    StackMalloc x_x((SSPOT_NV)*sizeof(float));
+    StackMalloc x_ssn((SSN_NV)*sizeof(float));
+    StackMalloc x_x((SSN_NV)*sizeof(float));
     float *ssn = (float*)x_ssn.getMem();
     float *x = (float*)x_x.getMem();
 
@@ -2604,15 +2007,15 @@ static bool updateSunSpots (const SBox &box)
 
         // plot, showing value as traditional whole number
         char label[20];
-        snprintf (label, sizeof(label), "%.0f", ssn[SSPOT_NV-1]);
-        plotXYstr (box, x, ssn, SSPOT_NV, _FX("Days"), _FX("Sunspot Number"), SSPOT_COLOR, 0,0, label);
+        snprintf (label, sizeof(label), _FX("%.0f"), ssn[SSN_NV-1]);
+        plotXYstr (box, x, ssn, SSN_NV, _FX("Days"), _FX("Sunspot Number"), SSN_COLOR, 0,0, label);
 
         // update NCDXF box if up for this
         if (brb_mode == BRB_SHOW_SWSTATS)
             drawSpaceStats(RA8875_BLACK);
 
     } else {
-        plotMessage (box, SSPOT_COLOR, _FX("SSN connection failed"));
+        plotMessage (box, SSN_COLOR, _FX("SSN connection failed"));
     }
 
     // done
@@ -2657,97 +2060,26 @@ static bool updateSolarFlux(const SBox &box)
 static bool updateSolarWind(const SBox &box)
 {
     // max lines to collect, oldest first
-    #define     SOLWINDDT       (10*60)         // interval, secs
-    #define     SOLWINDP        (24*3600)       // period, secs
-    #define     NSOLWIND        (SOLWINDP/SOLWINDDT)
-    StackMalloc x_mem(NSOLWIND*sizeof(float));  // hours ago 
-    StackMalloc y_mem(NSOLWIND*sizeof(float));  // wind
+    StackMalloc x_mem(SWIND_MAXN*sizeof(float));  // hours ago 
+    StackMalloc y_mem(SWIND_MAXN*sizeof(float));  // wind
     float *x = (float *) x_mem.getMem();
     float *y = (float *) y_mem.getMem();
-    WiFiClient swind_client;
-    char line[80];
-    bool ok = false;
 
-    // mark value as bad until proven otherwise
-    swind_spw = SPW_ERR;
+    // get wind and plot if ok
+    int nsw = retrieveSolarWind (x, y);
+    if (nsw >= SWIND_MINN) {
 
-    Serial.println (swind_page);
-    resetWatchdog();
-    if (wifiOk() && swind_client.connect(backend_host, backend_port)) {
         updateClocks(false);
         resetWatchdog();
 
-        // query web page
-        httpHCPGET (swind_client, backend_host, swind_page);
-
-        // skip response header
-        if (!httpSkipHeader (swind_client)) {
-            plotMessage (box, SWIND_COLOR, _FX("Wind header short"));
-            goto out;
-        }
-
-        // read lines into wind array and build corresponding x/y values
-        time_t t0 = myNow();
-        time_t start_t = t0 - SOLWINDP;
-        time_t prev_unixs = 0;
-        float max_y = 0;
-        int nsw;
-        for (nsw = 0; nsw < NSOLWIND && getTCPLine (swind_client, line, sizeof(line), NULL); ) {
-            // Serial.printf (_FX("Swind %3d: %s\n"), nsw, line);
-            long unixs;         // unix seconds
-            float density;      // /cm^2
-            float speed;        // km/s
-            if (sscanf (line, "%ld %f %f", &unixs, &density, &speed) != 3) {
-                plotMessage (box, SWIND_COLOR, _FX("Wind data garbled"));
-                goto out;
-            }
-
-            // want y axis to be 10^12 /s /m^2
-            float this_y = density * speed * 1e-3;
-
-            // capture largest value in this period for getSpaceWeather()
-            if (this_y > max_y)
-                max_y = this_y;
-
-            // skip until find within period and new interval or always included last
-            if ((unixs < start_t || unixs - prev_unixs < SOLWINDDT) && nsw != NSOLWIND-1)
-                continue;
-            prev_unixs = unixs;
-
-            // want x axis to be hours back from now
-            x[nsw] = (t0 - unixs)/(-3600.0F);
-            y[nsw] = max_y;
-            // Serial.printf (_FX("Swind %3d %5.2f %5.2f\n"), nsw, x[nsw], y[nsw]);
-
-            // good one
-            max_y = 0;
-            nsw++;
-        }
-
-        // plot if found at least a few
-        updateClocks(false);
-        resetWatchdog();
-        if (nsw >= 10
-                && plotXY (box, x, y, nsw, _FX("Hours"), _FX("Solar wind"), SWIND_COLOR, 0, 0, y[nsw-1])) {
-
-            // capture for getSpaceWeather()
-            swind_spw = y[nsw-1];
-            swind_update = t0;
-            ok = true;
-
-        } else {
-            plotMessage (box, SWIND_COLOR, _FX("Sol Wind data error"));
-        }
+        plotXY (box, x, y, nsw, _FX("Hours"), _FX("Solar wind"), SWIND_COLOR, 0, 0, y[nsw-1]);
 
     } else {
         plotMessage (box, SWIND_COLOR, _FX("Sol Wind connection failed"));
     }
 
-    // clean up
-out:
-    swind_client.stop();
-    resetWatchdog();
-    return (ok);
+    // done
+    return (nsw >= SWIND_MINN);
 }
 
 /* retrieve and plot latest BZBT indices, return whether all ok
@@ -2773,16 +2105,20 @@ static bool updateBzBt (const SBox &box)
             if (f25 < 0 && hrsold[i] >= -25)
                 f25 = i;
             if (f25 >= 0) {
-                if (bz[i] < min_bzbt) min_bzbt = bz[i];
-                else if (bz[i] > max_bzbt) max_bzbt = bz[i];
-                if (bt[i] < min_bzbt) min_bzbt = bt[i];
-                else if (bt[i] > max_bzbt) max_bzbt = bt[i];
+                if (bz[i] < min_bzbt)
+                    min_bzbt = bz[i];
+                else if (bz[i] > max_bzbt)
+                    max_bzbt = bz[i];
+                if (bt[i] < min_bzbt)
+                    min_bzbt = bt[i];
+                else if (bt[i] > max_bzbt)
+                    max_bzbt = bt[i];
             }
         }
 
         // plot
         char bz_label[30];
-        snprintf (bz_label, sizeof(bz_label), "%.1f", bz[BZBT_NV-1]);         // newest Bz
+        snprintf (bz_label, sizeof(bz_label), _FX("%.1f"), bz[BZBT_NV-1]);         // newest Bz
         plotXYstr (box, hrsold+f25, bz+f25, BZBT_NV-f25, _FX("Hours"), _FX("Solar Bz and Bt, nT"),
                                     BZBT_BZCOLOR, min_bzbt, max_bzbt, NULL)
                  && plotXYstr (box, hrsold+f25, bt+f25, BZBT_NV-f25, NULL, NULL,
@@ -2801,192 +2137,54 @@ static bool updateBzBt (const SBox &box)
     return (ok);
 }
 
-/* retrieve and draw latest band conditions in the given box, return whether all ok.
+/* retrieve and draw latest band conditions in box b if needed or requested.
  */
-static bool updateBandConditions(const SBox &box)
+static void updateBandConditions(const SBox &box, bool force)
 {
-    StackMalloc response_mem(100);
-    StackMalloc config_mem(100);
-    char *response = (char *) response_mem.getMem();
-    char *config = (char *) config_mem.getMem();
-    WiFiClient bc_client;
-    bool ok = false;
+    // skip if not currently showing
+    PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
+    if (bc_pp == PANE_NONE)
+        return;
 
+    // update if asked to or out of sync with prop map or it's just been a while
+    bool update_bc = force || (prop_map.active && tdiff(bc_time,map_time)>=3600)
+                           || (tdiff (nowWO(), bc_time) >= 3600);
+    if (!update_bc)
+        return;
 
-    // build query
-    const size_t qsize = sizeof(bc_page)+200;
-    StackMalloc query_mem (qsize);
-    char *query = (char *) query_mem.getMem();
-    time_t t = nowWO();
-    snprintf (query, qsize,
-        _FX("%s?YEAR=%d&MONTH=%d&RXLAT=%.3f&RXLNG=%.3f&TXLAT=%.3f&TXLNG=%.3f&UTC=%d&PATH=%d&POW=%d&MODE=%d&TOA=%.1f"),
-        bc_page, year(t), month(t), dx_ll.lat_d, dx_ll.lng_d, de_ll.lat_d, de_ll.lng_d,
-        hour(t), show_lp, bc_power, bc_modevalue, bc_toa);
-
-    Serial.println (query);
-    resetWatchdog();
-    if (wifiOk() && bc_client.connect(backend_host, backend_port)) {
-        updateClocks(false);
-        resetWatchdog();
-
-        // query web page
-        httpHCGET (bc_client, backend_host, query);
-
-        // skip header
-        if (!httpSkipHeader (bc_client)) {
-            plotMessage (box, RA8875_RED, _FX("BC: no header"));
-            goto out;
-        }
-
-        // next line is CSV path reliability for the requested time between DX and DE, 9 bands 80-10m
-        if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
-            plotMessage (box, RA8875_RED, _FX("BC: No response"));
-            goto out;
-        }
-
-        // next line is configuration summary
-        if (!getTCPLine (bc_client, config, config_mem.getSize(), NULL)) {
-            Serial.println(response);
-            plotMessage (box, RA8875_RED, _FX("BC: No config"));
-            goto out;
-        }
-
-        // Serial.printf (_FX("BC response: %s\n"), response);
-        // Serial.printf (_FX("BC config: %s\n"), config);
-
-        // keep time fresh
-        updateClocks(false);
-        resetWatchdog();
-
-        // get current utc hour for path_spw
-        int t_hr = hour(t);
-
-        // next 24 lines are reliability matrix.
-        // N.B. col 1 is UTC but runs from 1 .. 24, 24 is really 0
-        // lines include data for 9 bands, 80-10, but we drop 60 for BandCdtnMatrix
-        float rel[BMTRX_COLS];          // values are path reliability 0 .. 1
-        memset (&bc_matrix, 0, sizeof(bc_matrix));
-        for (int r = 0; r < BMTRX_ROWS; r++) {
-
-            // read next row
-            if (!getTCPLine (bc_client, response, response_mem.getSize(), NULL)) {
-                Serial.printf (_FX("BC: fail row %d"), r);
-                plotMessage (box, RA8875_RED, _FX("No matrix"));
-                goto out;
-            }
-
-            // crack next row, skipping 60 m
-            int utc_hr;
-            if (sscanf(response, _FX("%d %f,%*f,%f,%f,%f,%f,%f,%f,%f"), &utc_hr,
-                        &rel[0], &rel[1], &rel[2], &rel[3], &rel[4], &rel[5], &rel[6], &rel[7])
-                            != BMTRX_COLS + 1) {
-                Serial.printf (_FX("BC: bad matrix line: %s\n"), response);
-                plotMessage (box, RA8875_RED, _FX("Bad matrix"));
-                goto out;
-            }
-
-            // correct utc
-            utc_hr %= 24;
-
-            // add to bc_matrix as integer percent
-            for (int c = 0; c < BMTRX_COLS; c++)
-                bc_matrix[utc_hr][c] = (uint8_t)(100*rel[c]);
-
-            // copy to path_spw for getSpaceWeather() if correct time
-            if (utc_hr == t_hr) {
-                memcpy (path_spw, rel, BMTRX_COLS*sizeof(float));
-                path_update = myNow();
-            }
-        }
-
-        // #define _TEST_BAND_MATRIX
-        #if defined(_TEST_BAND_MATRIX)
-            for (int r = 0; r < BMTRX_ROWS; r++)                    // time 0 .. 23
-                for (int c = 0; c < BMTRX_COLS; c++)                // band 80 .. 10
-                    bc_matrix[r][c] = 100*r*c/BMTRX_ROWS/BMTRX_COLS;
-                    // (*mp)[r][c] = (float)r/BMTRX_ROWS;
-        #endif
-
-        // ok!
+    char config[100];
+    if (retrieveBandConditions (config) && bc_matrix.ok) {
         plotBandConditions (box, 0, &bc_matrix, config);
-        ok = true;
 
+        // worked ok so reschedule later
+        next_update[bc_pp] = nextPaneUpdate (bc_pp, BC_INTERVAL);
+        bc_time = nowWO();
     } else {
-        plotMessage (box, RA8875_RED, _FX("VOACAP connection failed"));
-    }
+        // trouble, retry soon
 
-    // clean up
-out:
-    bc_client.stop();
-    resetWatchdog();
-    return (ok);
+        if (bc_matrix.ok)
+            plotMessage (box, RA8875_RED, _FX("VOACAP connection failed"));
+        else
+            plotMessage (box, RA8875_RED, _FX("VOACAP data invalid"));
+
+        next_update[bc_pp] = nextWiFiRetry(PLOT_CH_BC);
+
+        // if problem persists more than an hour, this prevents the tdiff's above from being true every time
+        map_time = bc_time = nowWO() - 1000;
+    }
 }
 
 /* display the RSG NOAA solar environment scale values.
  */
 static bool updateNOAASWx(const SBox &box)
 {
-    // expecting 3 reply lines of the form, anything else is an error message
-    //  R  0 0 0 0
-    //  S  0 0 0 0
-    //  G  0 0 0 0
-    char line[100];
-    bool ok = false;
-
-    // TCP client
-    WiFiClient noaaswx_client;
-
-    // starting msg
-        
-    // read scales
-    Serial.println(noaaswx_page);
-    resetWatchdog();
-    if (wifiOk() && noaaswx_client.connect(backend_host, backend_port)) {
-
-        resetWatchdog();
+    bool ok = retrieveNOAASWx();
+    if (ok) {
         updateClocks(false);
-
-        // fetch page
-        httpHCPGET (noaaswx_client, backend_host, noaaswx_page);
-
-        // skip header then read the data lines
-        if (httpSkipHeader (noaaswx_client)) {
-
-            for (int i = 0; i < N_NOAASW_C; i++) {
-
-                // read next line
-                if (!getTCPLine (noaaswx_client, line, sizeof(line), NULL)) {
-                    plotMessage (box, RA8875_RED, _FX("NOAASW missing data"));
-                    goto out;
-                }
-                // Serial.printf (_FX("NOAA: %d %s\n"), i, line);
-
-                // parse
-                // sprintf (line, _FX("%c 1 2 3 4"), 'A'+i);  // test line
-                if (sscanf (line, _FX("%c %d %d %d %d"), &noaa_spw.cat[i], &noaa_spw.val[i][0],
-                                &noaa_spw.val[i][1], &noaa_spw.val[i][2], &noaa_spw.val[i][3]) != 5) {
-                    plotMessage (box, RA8875_RED, line);
-                    goto out;
-                }
-            }
-
-            // all ok: mark for getSpaceWeather() and display
-            noaa_update = myNow();
-            plotNOAASWx (box, noaa_spw);
-            ok = true;
-
-        } else {
-            plotMessage (box, RA8875_RED, _FX("NOAASW header short"));
-            goto out;
-        }
+        resetWatchdog();
+        plotNOAASWx (box, noaa_sw);
     } else
         plotMessage (box, RA8875_RED, _FX("NOAASW connection failed"));
-
-out:
-
-    // finished with connection
-    noaaswx_client.stop();
-
     return (ok);
 }
 
@@ -3229,80 +2427,18 @@ void initWiFiRetry()
     memset (next_update, 0, sizeof(next_update));
     next_wwx = 0;
     next_rss = 0;
+    brb_updateT = 0;
 }
 
-/* called to schedule an update to the moon pane if anywhere in rotation.
- * if moon is on PANE_1 defer for a revert in progress otherwise schedule immediately.
+/* handy way to schedule a fresh plot update.
+ * if moon, sdo or bc is on PANE_1 defer for a revert in progress otherwise schedule immediately.
  */
-void scheduleNewMoon()
+void scheduleNewPlot (PlotChoice pc)
 {
-    PlotPane moon_pp = findPaneForChoice (PLOT_CH_MOON);
-    if (moon_pp != PANE_NONE && (moon_pp != PANE_1 || !pane1_reverting))
-        next_update[moon_pp] = 0;
-}
-
-/* handy way to schedule a fresh pane update for simple cases
- */
-static void scheduleNewPane (PlotChoice ch)
-{
-    PlotPane pp = findPaneForChoice (ch);
-    if (pp != PANE_NONE)
+    PlotPane pp = findPaneForChoice (pc);
+    if (pp != PANE_NONE && (pp != PANE_1 || !pane1_reverting
+                                         || (pc != PLOT_CH_MOON && pc != PLOT_CH_SDO && pc != PLOT_CH_BC)))
         next_update[pp] = 0;
-}
-
-/* called to schedule an update to the live spots pane if anywhere in rotation
- */
-void scheduleNewPSK()
-{
-    scheduleNewPane (PLOT_CH_PSK);
-}
-
-/* called to schedule an update to the DX Cluster pane if anywhere in rotation
- */
-void scheduleNewDXC()
-{
-    scheduleNewPane (PLOT_CH_DXCLUSTER);
-}
-
-/* called to schedule an update to the POTA pane if anywhere in rotation
- */
-void scheduleNewPOTA()
-{
-    scheduleNewPane (PLOT_CH_POTA);
-}
-
-/* called to schedule an update to the SOTA pane if anywhere in rotation
- */
-void scheduleNewSOTA()
-{
-    scheduleNewPane (PLOT_CH_SOTA);
-}
-
-/* called to schedule an update to the ADIF pane if anywhere in rotation
- */
-void scheduleNewADIF()
-{
-    scheduleNewPane (PLOT_CH_ADIF);
-}
-
-/* called to schedule an update to the SDO pane if anywhere in rotation.
- * if SDO is on PANE_1 defer for a revert in progress otherwise schedule immediately.
- */
-void scheduleNewSDO()
-{
-    PlotPane sdo_pp = findPaneForChoice (PLOT_CH_SDO);
-    if (sdo_pp != PANE_NONE && (sdo_pp != PANE_1 || !pane1_reverting))
-        next_update[sdo_pp] = 0;
-}
-
-/* called to schedule an update to the band conditions pane if up now.
- * if BC is on PANE_1 defer for a revert in progress otherwise schedule immediately.
- */
-void scheduleNewBC()
-{
-    PlotPane bc_pp = findPaneChoiceNow (PLOT_CH_BC);
-    if (bc_pp != PANE_NONE && (bc_pp != PANE_1 || !pane1_reverting))
-        next_update[bc_pp] = 0;
 }
 
 /* called to schedule an immediate update of the given VOACAP map.
@@ -3328,86 +2464,35 @@ void scheduleNewCoreMap(CoreMaps cm)
 }
 
 /* display the current DE weather.
- * if already assigned to any pane just update now, else show in PANE_1 then arrange to linger
+ * if already assigned to any pane just update now,
+ * else if enabled show in PANE_1 then arrange to linger before resuming original pane choice.
  */
 void showDEWX()
 {
     PlotPane dewx_pp = findPaneChoiceNow (PLOT_CH_DEWX);
     if (dewx_pp != PANE_NONE)
         next_update[dewx_pp] = 0;
-    else {
-        // revert whether worked or not
+    else if (showNewDXDEWx()) {
+        // show immediately then schedule revert whether worked or not
         (void) updateDEWX (plot_b[PANE_1]);
         revertPane1 (DXPATH_LINGER);
     }
 }
 
 /* display the current DX weather.
- * if already assigned to any pane just update now, else show in PANE_1 then arrange to linger
+ * if already assigned to any pane just update now,
+ * else if enabled show in PANE_1 then arrange to linger before resuming original pane choice.
  */
 void showDXWX()
 {
     PlotPane dxwx_pp = findPaneChoiceNow (PLOT_CH_DXWX);
     if (dxwx_pp != PANE_NONE)
         next_update[dxwx_pp] = 0;
-    else {
-        // revert whether worked or not
+    else if (showNewDXDEWx()) {
+        // show immediately then schedule revert whether worked or not
         (void) updateDXWX (plot_b[PANE_1]);
         revertPane1 (DXPATH_LINGER);
     }
-}
-
-/* return most recent space weather info and its age. values never read will be ancient.
- * most are value+age but xray is a string and pathrel is an array of BMTRX_COLS.
- * N.B. values will be SPW_ERR if unknown.
- */
-void getSpaceWeather (SPWxValue &ssn, SPWxValue &sflux, SPWxValue &kp, SPWxValue &swind, SPWxValue &drap,
-SPWxValue &bz, SPWxValue &bt, NOAASpaceWx &noaaspw, time_t &noaaspw_age, char xray[], time_t &xray_age,
-float pathrel[BMTRX_COLS], time_t &pathrel_age)
-{
-    // time now for ages
-    time_t t0 = myNow();
-
-    // update
-    checkSolarFlux();
-    checkKp();
-    checkXRay();
-    checkBzBt();
-    checkDRAP();
-
-    // these are easy scalars
-    ssn.value = ssn_spw;
-    ssn.age = t0 - ssn_update;
-    sflux.value = sflux_spw;
-    sflux.age = t0 - sflux_update;
-    kp.value = kp_spw;
-    kp.age = t0 - kp_update;
-    swind.value = swind_spw;
-    swind.age = t0 - swind_update;
-    drap.value = drap_spw;
-    drap.age = t0 - drap_update;
-    bz.value = bz_spw;
-    bz.age = t0 - bzbt_update;
-    bt.value = bt_spw;
-    bt.age = t0 - bzbt_update;
-
-    // easy struct but beware never set yet
-    if (!noaa_spw.cat[0]) {
-        noaa_spw.cat[0] = 'R';
-        noaa_spw.cat[1] = 'S';
-        noaa_spw.cat[2] = 'G';
-    }
-    noaaspw = noaa_spw;
-    noaaspw_age = t0 - noaa_update;
-
-    // xray is a string
-    (void) xrayLevel (xray_spw, xray);  // handles 0 ok
-    xray_age = t0 - xray_update;
-
-    // VOACAP path reliability is an array
-    for (int i = 0; i < BMTRX_COLS; i++)
-        pathrel[i] = path_spw[i];
-    pathrel_age = t0 - path_update;
 }
 
 /* return current NTP response time list.
@@ -3419,14 +2504,6 @@ int getNTPServers (const NTPServer **listp)
     return (N_NTP);
 }
 
-/* get the current BandCdtnMatrix conditions.
- * return whether values are less than an hour old.
- */
-bool getBCMatrix (BandCdtnMatrix &bm)
-{
-    memcpy (&bm, &bc_matrix, sizeof(bm));
-    return (tdiff(bc_time,nowWO()) < 3600);
-}
 
 /* used by web server to control local RSS title list.
  * if title == NULL
@@ -3485,86 +2562,6 @@ bool setRSSTitle (const char *title, int &n_titles, int &max_titles)
 
     // ok
     return (true);
-}
-
-/* return whether any stats shown in the SpcWx pane have changed.
- */
-bool checkSpaceStats(void)
-{
-    return (checkSolarFlux() || checkKp() || checkXRay() || checkBzBt());
-}
-
-/* given touch location s known to be within NCDXF_b, insure the given space stat is in a visible Pane.
- * N.B. coordinate with drawSpaceStats()
- */
-void doSpaceStatsTouch (const SCoord &s)
-{
-    // list of pane choices
-    PlotChoice pcs[NCDXF_B_NFIELDS];
-    pcs[0] = PLOT_CH_SSN;
-    pcs[1] = PLOT_CH_FLUX;
-    pcs[2] = PLOT_CH_XRAY;
-    pcs[3] = PLOT_CH_KP;
-
-    // do it
-    doNCDXFStatsTouch (s, pcs);
-}
-
-/* draw selected *_spw in NCDXF_b.
- * use the given color for everything unless black then use the associated pane colors.
- */
-void drawSpaceStats(uint16_t color)
-{
-    // arrays for drawNCDXFStats()
-    static const char err[] = "Err";
-    char titles[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN] = {
-        "SFI",
-        "X-Ray",
-        "Kp",
-        "Bz",
-    };
-    char values[NCDXF_B_NFIELDS][NCDXF_B_MAXLEN];
-    uint16_t colors[NCDXF_B_NFIELDS];
-    int i = 0;
-
-    // SFI
-    if (sflux_spw == SPW_ERR)
-        strcpy (values[i], err);
-    else
-        snprintf (values[i], sizeof(values[i]), "%.1f", sflux_spw);
-    colors[i] = SFLUX_COLOR;
-    i++;
-
-    // Xray
-    xrayLevel(xray_spw, values[i]);
-    colors[i] = RGB565(255,134,0);      // XRAY_LCOLOR is too alarming
-    i++;
-
-    // Kp
-    if (kp_spw == SPW_ERR)
-        strcpy (values[i], err);
-    else
-        snprintf (values[i], sizeof(values[i]), "%.1f", kp_spw);
-    colors[i] = KP_COLOR;
-    i++;
-
-    // Bz
-    if (bz_spw == SPW_ERR)
-        strcpy (values[i], err);
-    else {
-        if (fabsf(bz_spw) < 100)
-            snprintf (values[i], sizeof(values[i]), "%.1f", bz_spw);
-        else
-            snprintf (values[i], sizeof(values[i]), "%.0f", bz_spw);
-    }
-    colors[i] = BZBT_BZCOLOR;
-    i++;
-
-    if (i != NCDXF_B_NFIELDS)
-        fatalError (_FX("drawSpaceStats wrong count %d"), i);
-
-    // do it
-    drawNCDXFStats (color, titles, values, colors);
 }
 
 /* return when the given pane will next update.

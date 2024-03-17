@@ -22,6 +22,14 @@ const char platform[] = "HamClock-UNIX";
 #endif
 
 
+#if defined(__GNUC__)
+static void sendHTTPError (WiFiClient &client, const char *fmt, ...) __attribute__ ((format(__printf__,2,3)));
+#else
+static void sendHTTPError (WiFiClient &client, const char *fmt, ...);
+#endif
+
+
+
 // persistent server listening for restful connections
 static WiFiServer *restful_server;
 int restful_port = RESTFUL_PORT;
@@ -367,7 +375,7 @@ static bool replaceEncoding (char *from)
 
 /* send initial response indicating body will be plain text
  */
-void startPlainText (WiFiClient &client)
+static void startPlainText (WiFiClient &client)
 {
     resetWatchdog();
 
@@ -382,7 +390,7 @@ void startPlainText (WiFiClient &client)
 /* send the given message as HTTP error 400 Bad request.
  * N.B. we expect the resulting message to include a final newline.
  */
-void sendHTTPError (WiFiClient &client, const char *fmt, ...)
+static void sendHTTPError (WiFiClient &client, const char *fmt, ...)
 {
     resetWatchdog();
 
@@ -1436,21 +1444,6 @@ static bool getWiFiSensorData (WiFiClient &client, char line[], size_t line_len)
     return (true);
 }
 
-/* given age in seconds, set string to short approx description.
- */
-static char *ageStr (long secs, char *str, size_t str_len)
-{
-    if (secs < 60)
-        snprintf (str, str_len, _FX("%2ld secs"), secs);
-    else if (secs < 3600)
-        snprintf (str, str_len, _FX("%2ld mins"), secs/60);
-    else if (secs < 24*3600)
-        snprintf (str, str_len, _FX("%2ld hrs"), secs/3600);
-    else 
-        snprintf (str, str_len, _FX("1+ days"));
-    return (str);
-}
-
 /* send the current space weather stats to client
  */
 static bool getWiFiSpaceWx (WiFiClient &client, char *unused_line, size_t line_len)
@@ -1461,59 +1454,55 @@ static bool getWiFiSpaceWx (WiFiClient &client, char *unused_line, size_t line_l
     // send html header
     startPlainText(client);
 
-    // collect info
-    SPWxValue ssn, flux, kp, swind, drap, bz, bt;
-    NOAASpaceWx noaaspw;
-    float path[BMTRX_COLS];
-    char xray[10];
-    time_t noaaspw_age, xray_age, path_age;
-    getSpaceWeather (ssn, flux, kp, swind, drap, bz, bt, noaaspw, noaaspw_age, xray, xray_age, path,path_age);
+    // update info
+    checkSpaceWx();
+    checkBandConditions();
 
-    // send values and ages
+    // send values
     char buf[100];
-    char age[30];
+    char xray_str[10];
 
-    client.print (F(" Datum     Value      Age\n"));
-    client.print (F("-------- ---------  -------\n"));
+    client.print (F(" Datum     Value\n"));
+    client.print (F("-------- ---------\n"));
 
-    snprintf (buf, sizeof(buf), _FX("SSN      %9.1f  %s\n"), ssn.value, ageStr(ssn.age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("SSN      %9.1f\n"), space_wx[SPCWX_SSN].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("KP        %8.0f  %s\n"), kp.value, ageStr(kp.age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("KP        %8.1f\n"), space_wx[SPCWX_KP].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("FLUX     %9.1f  %s\n"), flux.value, ageStr(flux.age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("FLUX     %9.1f\n"), space_wx[SPCWX_FLUX].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("XRAY      %8s  %s\n"), xray, ageStr(xray_age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("XRAY      %8s\n"), xrayLevel(space_wx[SPCWX_XRAY].value, xray_str));
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("SOLWIND   %8.1f  %s\n"), swind.value, ageStr(swind.age,age,sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("SOLWIND   %8.1f\n"), space_wx[SPCWX_SOLWIND].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("DRAP      %8.1f  %s\n"), drap.value, ageStr(drap.age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("DRAP      %8.1f\n"), space_wx[SPCWX_DRAP].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("Bz        %8.1f  %s\n"), bz.value, ageStr(bz.age, age, sizeof(age)));
+    snprintf (buf, sizeof(buf), _FX("Bz        %8.1f\n"), space_wx[SPCWX_BZ].value);
     client.print (buf);
 
-    snprintf (buf, sizeof(buf), _FX("Bt        %8.1f  %s\n"), bt.value, ageStr(bt.age, age, sizeof(age)));
-    client.print (buf);
 
-    for (int i = 0; i < BMTRX_COLS; i++) {
-        int band = propMap2Band ((PropMapBand)i);
-        // match format in plotBandConditions()
-        snprintf (buf, sizeof(buf), _FX("DEDX_%02dm  %8.0f  %s\n"), band, 99*path[i],
-                                ageStr(path_age, age, sizeof(age)));
-        client.print (buf);
-    }
-
-    for (int i = 0; i < N_NOAASW_C; i++) {
-        for (int j = 0; j < N_NOAASW_V; j++) {
-            snprintf (buf, sizeof(buf), _FX("NSPW_%c%d   %8d  %s\n"), noaaspw.cat[i], j, noaaspw.val[i][j],
-                    ageStr(noaaspw_age, age, sizeof(age)));
+    // show path reliability for the current hour
+    if (bc_matrix.ok) {
+        int hr = hour(myNow());
+        for (int i = BMTRX_COLS; --i >= 0; ) {
+            int band = propMap2Band ((PropMapBand)i);
+            snprintf (buf, sizeof(buf), _FX("DEDX_%02dm  %8d\n"), band, bc_matrix.m[hr][i]);
             client.print (buf);
         }
+    }
+
+    // show NOAA conditions formatted similar to PLOT_CH_NOAASPW
+    for (int i = 0; i < N_NOAASW_C; i++) {
+        size_t bl = snprintf (buf, sizeof(buf), _FX("NSPW_%c    "), noaa_sw.cat[i]);
+        for (int j = 0; j < N_NOAASW_V; j++)
+            bl += snprintf (buf+bl, sizeof(buf)-bl, _FX(" %d"), noaa_sw.val[i][j]);
+        client.println (buf);
     }
 
     // ok
@@ -1621,15 +1610,14 @@ static bool getWiFiSys (WiFiClient &client, char *unused_line, size_t line_len)
     return (true);
 }
 
-/* report the current VOACAP Band Conditions matrix, if not too old
+/* report the current VOACAP Band Conditions matrix
  */
 static bool getWiFiVOACAP (WiFiClient &client, char *line, size_t line_len)
 {
-    // bm is a matrix of 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
-    BandCdtnMatrix bm;
-    if (!getBCMatrix (bm)) {
-        (void) snprintf (line, line_len, _FX("not available"));
-        return(false);
+    // bale if not valid
+    if (!bc_matrix.ok) {
+        (void) snprintf (line, line_len, _FX("VOACAP data not valid"));
+        return (false);
     }
 
     // send html header
@@ -1655,8 +1643,8 @@ static bool getWiFiVOACAP (WiFiClient &client, char *line, size_t line_len)
             // shift so current time is first column
             int m_row = (p_col + utc_hour_now + 48) % 24;
 
-            // get reliability
-            uint8_t rel = bm[m_row][m_col];
+            // bc_matrix is a matrix of 24 rows of UTC 0 .. 23, 8 columns of bands 80-40-30-20-17-15-12-10.
+            uint8_t rel = bc_matrix.m[m_row][m_col];
 
             buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("%3d"), rel);
         }
@@ -1983,7 +1971,7 @@ static bool setWiFiCluster (WiFiClient &client, char line[], size_t line_len)
 
     // handy
     char *host = (char*) wa.value[0];   // setDXCluster will trim
-    const char *port = wa.value[1];
+    char *port = (char*) wa.value[1];   // setDXCluster will trim
 
     // try to save
     if (!setDXCluster (host, port, line))
@@ -2394,9 +2382,9 @@ static bool setWiFiNewDEDX_helper (WiFiClient &client, bool new_dx, char line[],
             de_tz.tz_secs = atof(tz)*3600;        // hours to seconds
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
-            scheduleNewMoon();
-            scheduleNewSDO();
-            scheduleNewBC();
+            scheduleNewPlot(PLOT_CH_MOON);
+            scheduleNewPlot(PLOT_CH_SDO);
+            scheduleNewPlot(PLOT_CH_BC);
             drawDEInfo();
         }
     }
@@ -2480,10 +2468,10 @@ static bool setWiFiMapColor (WiFiClient &client, char line[], size_t line_len)
     initEarthMap();
 
     // update panes that use band colors -- they know whether they are really in use
-    scheduleNewPSK();
-    scheduleNewDXC();
-    scheduleNewPOTA();
-    scheduleNewSOTA();
+    scheduleNewPlot(PLOT_CH_PSK);
+    scheduleNewPlot(PLOT_CH_DXCLUSTER);
+    scheduleNewPlot(PLOT_CH_POTA);
+    scheduleNewPlot(PLOT_CH_SOTA);
     if (brb_mode == BRB_SHOW_BEACONS)
         (void) drawNCDXFBox();
 
@@ -2773,6 +2761,7 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
     wa.nargs = 0;
     wa.name[wa.nargs++] = "file";
     wa.name[wa.nargs++] = "none";
+    wa.name[wa.nargs++] = "pane";
 
     // parse
     if (!parseWebCommand (wa, line, line_len))
@@ -2784,20 +2773,28 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
 
     if (found_file) {
 
+        // pane arg is 1-based pane number
+        int pane_1 = wa.found[2] ? atoi(wa.value[2]) : 3;       // default 3
+        if (pane_1 < 1 || pane_1 > PANE_N) {
+            strcpy (line, _FX("Bad pane num"));
+            return (false);
+        }
+        PlotPane pane_0 = (PlotPane)(pane_1 - 1);
+
         // POST content immediately follows header
         int n = readADIFWiFiClient (client, content_length, line, line_len);
         if (n < 0) {
-            scheduleNewADIF();
+            scheduleNewPlot(PLOT_CH_ADIF);
             return (false);                     // line[] already filled with error message
         }
 
-        // nice to put ADIF pane up somewhere
-        if (setPlotChoice (PANE_3, PLOT_CH_ADIF))
-            plot_rotset[PANE_3] |= (1 << PLOT_CH_ADIF);
+        // nice to put ADIF pane up too
+        if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE && setPlotChoice (pane_0, PLOT_CH_ADIF))
+            plot_rotset[pane_0] |= (1 << PLOT_CH_ADIF);
 
         // tell adif new spots are from us and refresh
         from_set_adif = true;
-        scheduleNewADIF();
+        scheduleNewPlot(PLOT_CH_ADIF);
 
         // reply count
         startPlainText (client);
@@ -2814,7 +2811,7 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
 
             // tell adif to use file and refresh
             from_set_adif = false;
-            scheduleNewADIF();
+            scheduleNewPlot(PLOT_CH_ADIF);
 
             // ack
             startPlainText (client);
@@ -2832,6 +2829,59 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
         strcpy_P (line, garbcmd);
         return (false);
     }
+}
+
+/* load a BMP file via POST or turn off.
+ */
+static bool setWiFiloadBMP (WiFiClient &client, char line[], size_t line_len)
+{
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "file";
+    wa.name[wa.nargs++] = "none";
+    wa.name[wa.nargs++] = "pane";
+
+    // parse
+    if (!parseWebCommand (wa, line, line_len))
+        return (false);
+
+    // check which
+    bool found_file = wa.found[0] && wa.value[0] == NULL;       // no arg
+    bool found_none = wa.found[1] && wa.value[1] == NULL;       // no arg
+
+    // pane arg, which is 1-based, is required
+    if (!wa.found[2] || !wa.value[2]) {
+        snprintf (line, line_len, _FX("pane is required"));
+        return(false);
+    }
+    int pane_1 = atoi(wa.value[2]);
+    if (pane_1 < 1 || pane_1 > PANE_N) {
+        strcpy (line, _FX("Bad pane num"));
+        return (false);
+    }
+    PlotPane pane_0 = (PlotPane)(pane_1 - 1);
+
+    if (found_file) {
+
+        // POST content immediately follows header
+        if (!installBMP (client, plot_b[pane_0], line, line_len))
+            return (false);             // error already in line[]
+
+    } else if (found_none) {
+
+        // restore pane
+        scheduleNewPlot(plot_ch[pane_0]);
+
+    } else {
+        strcpy_P (line, garbcmd);
+        return (false);
+    }
+
+    // ack
+    startPlainText (client);
+    client.print (F("ok"));
+    return (true);
 }
 
 /* control RSS list:
@@ -3278,6 +3328,12 @@ static bool setWiFiTouch (WiFiClient &client, char line[], size_t line_len)
  */
 static bool setWiFiVOACAP (WiFiClient &client, char line[], size_t line_len)
 {
+    // bale if not valid
+    if (!bc_matrix.ok) {
+        (void) snprintf (line, line_len, _FX("VOACAP data not valid"));
+        return (false);
+    }
+
     // define all possible args
     WebArgs wa;
     wa.nargs = 0;
@@ -3405,7 +3461,7 @@ static bool setWiFiVOACAP (WiFiClient &client, char line[], size_t line_len)
         bc_utc_tl = new_utc;
         bc_toa = new_toa;
         scheduleNewVOACAPMap (new_pms);
-        scheduleNewBC();        // this will also update time line
+        scheduleNewPlot(PLOT_CH_BC);        // this will also update time line
     } else if (new_utc != bc_utc_tl) {
         // only changing timeline units
         bc_utc_tl = new_utc;
@@ -3666,7 +3722,7 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
     psk_maxage_mins = new_age;
     psk_showdist = new_dist;
     savePSKState();
-    scheduleNewPSK();
+    scheduleNewPlot(PLOT_CH_PSK);
 
     // ack
     startPlainText (client);
@@ -3777,9 +3833,10 @@ static const CmdTble command_table[] PROGMEM = {
     { "get_sys.txt ",       getWiFiSys,            "get system stats" },
     { "get_time.txt ",      getWiFiTime,           "get current time" },
     { "get_voacap.txt ",    getWiFiVOACAP,         "get current band conditions matrix" },
-    { "set_adif?",          setWiFiADIF,           "file POST|none" },
+    { "set_adif?",          setWiFiADIF,           "file POST&pane=[123]|none" },
     { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
     { "set_auxtime?",       setWiFiAuxTime,        "format=[one_from_menu]" },
+    { "set_bmp?",           setWiFiloadBMP,        "file POST&pane=[123]|none" },
     { "set_cluster?",       setWiFiCluster,        "host=xxx&port=yyy" },
     { "set_defmt?",         setWiFiDEformat,       "fmt=[one_from_menu]&atin=RSAtAt|RSInAgo" },
     { "set_displayOnOff?",  setWiFiDisplayOnOff,   "on|off" },
@@ -3873,6 +3930,15 @@ static bool runWebserverCommand (WiFiClient &client, bool ro, char *command, siz
     return (false);
 }
 
+/* return whether the given line is a valid POST command
+ */
+static bool isPOST (const char *line)
+{
+    return (strncmp (line, _FX("POST /set_rss?"), 14) == 0
+            || strncmp (line, _FX("POST /set_adif?"), 15) == 0
+            || strncmp (line, _FX("POST /set_bmp?"), 14) == 0);
+}
+
 /* service remote restful connection.
  * if ro, only accept the get commands and a few more as listed in roCommandOk().
  * N.B. caller must close client, we don't.
@@ -3888,11 +3954,10 @@ static void serveRemote(WiFiClient &client, bool ro)
         return;
     }
 
-    // first line must be the GET except set_rss and set_adif which can be POST
-    if (strncmp (line, _FX("GET /"), 5) && strncmp (line, _FX("POST /set_rss?"), 14)
-                                && strncmp (line, _FX("POST /set_adif?"), 15)) {
+    // first line must be the GET except a few can be POST
+    if (strncmp (line, _FX("GET /"), 5) && !isPOST (line)) {
         Serial.println (line);
-        sendHTTPError (client, _FX("Method must be GET (or POST with set_rss or set_adif)\n"));
+        sendHTTPError (client, _FX("Method must be GET or POST\n"));
         return;
     }
     // Serial.printf ("web: %s\n", line);
@@ -4266,20 +4331,13 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
 
     case DEMO_VOACAP:
         {
-            // find hottest band if recently updated
-            SPWxValue ssn, flux, kp, swind, drap, bz, bt;
-            NOAASpaceWx noaaspw;
-            float path[BMTRX_COLS];
-            char xray[10];
-            time_t noaaspw_age, xray_age, path_age;
-            getSpaceWeather (ssn,flux,kp,swind,drap,bz,bt,noaaspw,noaaspw_age,xray,xray_age,path,path_age);
-            if (path_age < 2*3600) {
-
-                // pick band with best propagation
-                float best_rel = 0;
+            if (checkBandConditions() && bc_matrix.ok) {
+                // find hottest band now
+                int hr = hour(myNow());
+                uint8_t best_rel = 0;
                 for (int i = 0; i < BMTRX_COLS; i++) {
-                    if (path[i] > best_rel) {
-                        best_rel = path[i];
+                    if (bc_matrix.m[hr][i] > best_rel) {
+                        best_rel = bc_matrix.m[hr][i];
                         prop_map.band = (PropMapBand)i;
                     }
                 }
@@ -4293,9 +4351,9 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
                 demoMsg (ok, choice, msg, msg_len, _FX("VOACAP %s"), getMapStyle(ps));
 
             } else {
-                // too old to use
+                // failed to update
                 ok = false;
-                demoMsg (ok, choice, msg, msg_len, _FX("VOACAP too old"));
+                demoMsg (ok, choice, msg, msg_len, _FX("VOACAP failed"));
             }
         }
         break;
