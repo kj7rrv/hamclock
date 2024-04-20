@@ -40,11 +40,11 @@
 
 
 // control layout geometry
-#define SCR_DX          (PLOTBOX_W-26)          // x offset from box left to center of both scroll arrows
+#define SCR_DX          20                      // x offset back from box right to center of scroll arrows
 #define SCRUP_DY        9                       // y offset from box top to center of up arrow
 #define SCRDW_DY        23                      // y offset from box top to center of down arrow
-#define SCR_W           6                       // scrol arrow width
-#define SCR_H           10                      // scrol arrow height
+#define SCR_W           6                       // scroll arrow width
+#define SCR_H           10                      // scroll arrow height
 
 
 /* draw or erase the up scroll control as needed.
@@ -55,11 +55,12 @@ void ScrollState::drawScrollUpControl (const SBox &box, uint16_t color) const
 
         // up arrow
 
-        const uint16_t x0 = box.x + SCR_DX;                   // top point
+        const uint16_t scr_dx = box.w - SCR_DX;                 // center
+        const uint16_t x0 = box.x + scr_dx;                     // top point
         const uint16_t y0 = box.y + SCRUP_DY - SCR_H/2;
-        const uint16_t x1 = box.x + SCR_DX - SCR_W/2;         // LL
+        const uint16_t x1 = box.x + scr_dx - SCR_W/2;           // LL
         const uint16_t y1 = box.y + SCRUP_DY + SCR_H/2;
-        const uint16_t x2 = box.x + SCR_DX + SCR_W/2;         // LR
+        const uint16_t x2 = box.x + scr_dx + SCR_W/2;           // LR
         const uint16_t y2 = box.y + SCRUP_DY + SCR_H/2;
 
         tft.fillRect (x2+1, y0+1, box.x + box.w - x2 - 2, SCR_H, RA8875_BLACK);
@@ -83,11 +84,12 @@ void ScrollState::drawScrollDownControl (const SBox &box, uint16_t color) const
 
         // down arrow 
 
-        const uint16_t x0 = box.x + SCR_DX - SCR_W/2;         // UL
+        const uint16_t scr_dx = box.w - SCR_DX;                 // center
+        const uint16_t x0 = box.x + scr_dx - SCR_W/2;           // UL
         const uint16_t y0 = box.y + SCRDW_DY - SCR_H/2;
-        const uint16_t x1 = box.x + SCR_DX + SCR_W/2;         // UR
+        const uint16_t x1 = box.x + scr_dx + SCR_W/2;           // UR
         const uint16_t y1 = box.y + SCRDW_DY - SCR_H/2;
-        const uint16_t x2 = box.x + SCR_DX;                   // bottom point
+        const uint16_t x2 = box.x + scr_dx;                     // bottom point
         const uint16_t y2 = box.y + SCRDW_DY + SCR_H/2;
 
         tft.fillRect (x1+1, y0+1, box.x + box.w - x1 - 2, SCR_H, RA8875_BLACK);
@@ -110,14 +112,15 @@ void ScrollState::drawScrollDownControl (const SBox &box, uint16_t color) const
  */
 bool ScrollState::checkScrollUpTouch (const SCoord &s, const SBox &b) const
 {
-    return (s.x > b.x + 3*b.w/4 && s.y <= b.y + SCRUP_DY + SCR_H/2);
+    return (s.x > b.x + b.w - SCR_DX - SCR_W && s.y <= b.y + SCRUP_DY + SCR_H/2);
 }
 
 /* return whether tap at s within box b means to scroll down
  */
 bool ScrollState::checkScrollDownTouch (const SCoord &s, const SBox &b) const
 {
-    return (s.x > b.x + 3*b.w/4 && s.y > b.y + SCRUP_DY + SCR_H/2 && s.y < b.y + SCRDW_DY + SCR_H/2);
+    return (s.x > b.x + b.w - SCR_DX - SCR_W
+                && s.y > b.y + SCRUP_DY + SCR_H/2 && s.y < b.y + SCRDW_DY + SCR_H/2);
 }
 
 
@@ -219,23 +222,20 @@ void ScrollState::scrollToNewest (void)
 }
 
 /* given a display row index, which always start with 0 on top, find the corresponding data array index.
- * return whether atually within range.
+ * return whether actually within range.
  */
 bool ScrollState::findDataIndex (int display_row, int &array_index) const
 {
-    int ok;
+    int i;
 
-    if (scrollTopToBottom()) {
-        int i = top_vis - display_row;
-        ok = i >= 0;
-        if (ok)
-            array_index = i;
-    } else {
-        int i = top_vis - max_vis + 1 + display_row;
-        ok = i < n_data;
-        if (ok)
-            array_index = i;
-    }
+    if (scrollTopToBottom())
+        i = top_vis - display_row;
+    else
+        i = top_vis - max_vis + 1 + display_row;
+
+    bool ok = i >= 0 && i < n_data;
+    if (ok)
+        array_index = i;
 
     return (ok);
 }

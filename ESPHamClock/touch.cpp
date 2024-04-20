@@ -313,7 +313,7 @@ TouchType readCalTouch (SCoord &s)
     // convert to screen coords via calibration matrix
     touch2Screen (x, y, s);
 
-    Serial.printf(_FX("Touch @ %lu s: \t%4d %4d\ttype %d\n"), millis()/1000U, s.x, s.y, (int)tt);
+    Serial.printf(_FX("Touch @ %u s: \t%4d %4d\ttype %d\n"), millis()/1000U, s.x, s.y, (int)tt);
 
     // return hold or tap
     return (tt);

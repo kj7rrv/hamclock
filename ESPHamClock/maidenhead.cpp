@@ -117,26 +117,11 @@ void setNVMaidenhead(NV_Name nv, LatLong &ll)
 }
 
 /* return the given maidenhead value from NV.
- * use *OLD version if new one not set yet
  */
 void getNVMaidenhead (NV_Name nv, char maid[MAID_CHARLEN])
 {
-    if (!NVReadString (nv, maid)) {
-        // new value never used yet, try to set from old values
-        NV_Name old_nv = nv == NV_DE_GRID ? NV_DE_GRID_OLD : NV_DX_GRID_OLD;
-        uint32_t old_grid;
-        if (NVReadUInt32 (old_nv, &old_grid)) {
-            // unpack as 4 chars
-            memcpy (maid, &old_grid, 4);
-            maid[5] = 0;
-        } else {
-            // no old either, return 0/0
-            LatLong ll;
-            ll.lat_d = ll.lng_d = 0;
-            ll2maidenhead (maid, ll);
-        }
-        NVWriteString (nv, maid);
-    }
+    if (!NVReadString (nv, maid))
+        fatalError (_FX("getNVMaidenhead invalid %d"), (int)nv);
 }
 
 #endif // !_UNIT_TEST

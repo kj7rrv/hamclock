@@ -1014,7 +1014,8 @@ void updateClocks(bool all)
 
     drawAuxTime (all, t_wo, tm_wo);
 
-    if (draw_other_times) {
+    // draw other misc time items unless showing pane 0
+    if (draw_other_times && !SHOWING_PANE_0()) {
 
         // DE pane
         switch (de_time_fmt) {
@@ -1257,8 +1258,12 @@ bool checkClockTouch (SCoord &s)
 
     if (ours) {
         // restore under menu
-        drawOneTimeDE();
-        drawDEInfo();
+        if (SHOWING_PANE_0())
+            scheduleNewPlot (plot_ch[PANE_0]);
+        else {
+            drawOneTimeDE();
+            drawDEInfo();
+        }
     }
 
     return (ours);
@@ -1391,37 +1396,84 @@ void formatSexa (float dt_hrs, int &a, char &sep, int &b)
     b = (int)((dt_hrs-(int)dt_hrs)*60);
 }
 
-/* format a representation of the given age in seconds in line[] exactly 4 chars long.
+/* format a representation of the given age into line[] exactly cols chars long.
  * return line.
  */
-char *formatAge4 (time_t age, char *line, int line_l)
+char *formatAge (time_t age, char *line, int line_l, int cols)
 {
+    // eh?
     if (age < 0)
         age = 0;
 
-    if (age < 60) {
-        snprintf (line, line_l, _FX("%3ds"), (int)age);
-    } else if (age < 60.0F*59.5F) {
-        snprintf (line, line_l, _FX("%3.0fm"), age/60.0F);
-    } else if (age < (3600*23.5F)) {
-        float hours = age/3600.0F;
-        if (hours < 9.95F)
-            snprintf (line, line_l, _FX("%3.1fh"), hours);
+    switch (cols) {
+
+    case 1:
+
+        // show minutes up thru 9 else +
+        if (age < 10*60-30)
+            snprintf (line, line_l, _FX("%d"), (int)(age/60));
         else
-            snprintf (line, line_l, _FX("%3.0fh"), hours);
-    } else if (age < 31492800L) {                // 3600.0F*24.0F*364.5F
-        float days = age/(3600.0F*24.0F);
-        if (days < 9.95F)
-            snprintf (line, line_l, _FX("%3.1fd"), days);
+            strcpy (line, _FX("+"));
+        break;
+
+    case 2:
+
+        // show minutes up thru 59 else hrs up thru 9 then +
+        if (age < 60*60-30)
+            snprintf (line, line_l, _FX("%d"), (int)(age/60));
+        else if (age < 10*60*60-1800)
+            snprintf (line, line_l, _FX("%dh"), (int)(age/(60*60)));
         else
-            snprintf (line, line_l, _FX("%3.0fd"), days);
-    } else {
-        float years = age/(3600.0F*24.0F*365.0F);
-        if (years < 9.95F)
-            snprintf (line, line_l, _FX("%3.1fy"), years);
-        else
-            snprintf (line, line_l, _FX("%3.0fy"), years);
+            strcpy (line, _FX("+"));
+        break;
+
+    case 3:
+
+        // show seconds up thru 59, mins up thru 59, hrs up thru 23 then dy+
+        if (age < 60) {
+            snprintf (line, line_l, _FX("%2lds"), age);
+        } else if (age < (60*60)) {
+            snprintf (line, line_l, _FX("%2ldm"), age/60);
+        } else if (age < (3600*24-1800)) {
+            snprintf (line, line_l, _FX("%2ldh"), age/(60*60));
+        } else {
+            strcpy (line, _FX("dy+"));
+        }
+        break;
+
+    case 4:
+
+        // show seconds thru years(!)
+        if (age < 60) {
+            snprintf (line, line_l, _FX("%3lds"), age);
+        } else if (age < (60*60)) {
+            snprintf (line, line_l, _FX("%3ldm"), age/60);
+        } else if (age < (24*60*60-1800)) {
+            float hours = age/3600.0F;
+            if (hours < 9.95F)
+                snprintf (line, line_l, _FX("%3.1fh"), hours);
+            else
+                snprintf (line, line_l, _FX("%3.0fh"), hours);
+        } else if (age < 3600*(24*365-12)) {
+            float days = age/(3600*24.0F);
+            if (days < 9.95F)
+                snprintf (line, line_l, _FX("%3.1fd"), days);
+            else
+                snprintf (line, line_l, _FX("%3.0fd"), days);
+        } else {
+            float years = age/(3600*24*365.0F);
+            if (years < 9.95F)
+                snprintf (line, line_l, _FX("%3.1fy"), years);
+            else
+                snprintf (line, line_l, _FX("%3.0fy"), years);
+        }
+        break;
+
+    default:
+        fatalError(_FX("formatAge bad cols %d"), cols);
+        break;
     }
+
     return (line);
 }
 

@@ -28,7 +28,7 @@ static uint16_t getWiFiMeterColor (const SBox &box, uint16_t x)
         return (RA8875_GREEN);
     float frac = powf((float)(x - box.x)/box.w, pwr);
     uint8_t h = 85*frac;                // hue 0 is red, 255/3 = 85 is green
-    return (HSV565(h,255,255));
+    return (HSV_2_RGB565(h,255,255));
 }
 
 /* read wifi signal strength.
@@ -52,7 +52,7 @@ bool readWiFiRSSI(int &rssi)
 int runWiFiMeter(bool warn, bool &ignore_on)
 {
     // prep
-    Serial.printf (_FX("WiFiM @ %lu start Ignore %s\n"), millis()/1000U, ignore_on ? "on" : "off");
+    Serial.printf (_FX("WiFiM @ %u start Ignore %s\n"), millis()/1000U, ignore_on ? "on" : "off");
     wifi_meter_up = true;
     eraseScreen();
     closeDXCluster();
@@ -154,7 +154,7 @@ int runWiFiMeter(bool warn, bool &ignore_on)
 
             // log occassionally
             if (timesUp (&log_t, 1000))
-                Serial.printf (_FX("WiFiM @ %lu %d\n"), log_t/1000U, rssi);
+                Serial.printf (_FX("WiFiM @ %u %d\n"), log_t/1000U, rssi);
         }
 
         // check touch
@@ -170,13 +170,13 @@ int runWiFiMeter(bool warn, bool &ignore_on)
 
             // check controls
             if (inBox (tap, dismiss_b)) {
-                Serial.printf (_FX("WiFiM @ %lu Resume\n"), millis()/1000U);
+                Serial.printf (_FX("WiFiM @ %u Resume\n"), millis()/1000U);
                 done = true;
             } else if (inBox (tap, ignore_b)) {
                 ignore_on = !ignore_on;
                 drawStringInBox ("Ignore", ignore_b, ignore_on, RA8875_GREEN);
                 if (ignore_on) {
-                    Serial.printf (_FX("WiFiM @ %lu Ignore\n"), millis()/1000U);
+                    Serial.printf (_FX("WiFiM @ %u Ignore\n"), millis()/1000U);
                     done = true;
                 }
             }

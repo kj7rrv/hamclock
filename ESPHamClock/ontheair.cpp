@@ -12,20 +12,14 @@ const char *onta_names[ONTA_N] = {
 #undef X
 
 
+// config
 #define POTA_COLOR      RGB565(150,250,255)             // title and spot text color
 #define SOTA_COLOR      RGB565(250,0,0)                 // title and spot text color
-
 #define COUNT_DY        32                              // dy of count
 #define START_DY        47                              // dy of first row
 #define ONTA_ROWDY      14                              // dy of each successive row
-#define ONTA_INDENT     1                               // l-r border -- very tight fit
-#define MAX_LINE        27                              // max line length, including EOS
-#define MAX_VIS         ((PLOTBOX_H - START_DY)/ONTA_ROWDY)             // max visible rows
-
-
-// max spots to keep
-#define MAX_SPOTS       (MAX_VIS+nMoreScrollRows())
-
+#define LL_PANE_0       23                              // line length for PANE_0
+#define LL_PANE_123     27                              // line length for others
 
 
 /* qsort-style function to compare two DXClusterSpot by freq
@@ -88,7 +82,7 @@ static const ONTASortInfo onta_sorts[ONTAS_N] = {
 
 // one ONTA state info
 typedef struct {
-    const char *page;                           // query to query page
+    const char *page;                           // query page in PROGMEM
     const char *prog;                           // project name, SOTA POTA etc
     uint16_t color;                             // title color
     uint8_t whoami;                             // one of ONTAProgram
@@ -99,16 +93,18 @@ typedef struct {
     DXClusterSpot *spots;                       // malloced collection, smallest sort field first
 } ONTAState;
 
+static const char pota_page[] PROGMEM = "/POTA/pota-activators.txt";
+static const char sota_page[] PROGMEM = "/SOTA/sota-activators.txt";
 
 // current program states
 // N.B. must assign in same order as ONTAProgram
+// N.B. page is in PROGMEM
 static ONTAState onta_state[ONTA_N] = { 
-    { "/POTA/pota-activators.txt", onta_names[ONTA_POTA], POTA_COLOR, ONTA_POTA,
-                NV_ONTASPOTA, PLOT_CH_POTA, ONTAS_AGE, {MAX_VIS, 0, 0}, NULL },
-    { "/SOTA/sota-activators.txt", onta_names[ONTA_SOTA], SOTA_COLOR, ONTA_SOTA,
-                NV_ONTASSOTA, PLOT_CH_SOTA, ONTAS_AGE, {MAX_VIS, 0, 0}, NULL },
+    { pota_page, onta_names[ONTA_POTA], POTA_COLOR, ONTA_POTA, NV_ONTASPOTA, PLOT_CH_POTA, ONTAS_AGE},
+    { sota_page, onta_names[ONTA_SOTA], SOTA_COLOR, ONTA_SOTA, NV_ONTASSOTA, PLOT_CH_SOTA, ONTAS_AGE},
 };
 
+static int max_spots;
 
 /* save each ONTA sort choices
  */
@@ -137,55 +133,55 @@ static void initONTASorts(void)
 }
 
 
-/* create a line of text for the given spot.
+/* create a line of text that fits within the box used for PANE_0 or PANE-123 for the given spot.
  */
-static void formatONTASpot (const DXClusterSpot &spot, const ONTAState *osp, char line[MAX_LINE], int &flen)
+static void formatONTASpot (const DXClusterSpot &spot, const ONTAState *osp, const SBox &box,
+    char *line, size_t l_len, int &freq_len)
 {
-    // n chars in each field; all lengths are sans EOS and intervening gaps
-    const unsigned ID_LEN = osp->whoami == ONTA_POTA ? 7 : 10;
-    const unsigned AGE_LEN = osp->whoami == ONTA_POTA ? 3 : 1;
-    #define FREQ_LEN        6
-    #define CALL_LEN        (MAX_LINE - FREQ_LEN - AGE_LEN - ID_LEN - 4) // -EOS and -3 spaces
+    if (BOX_IS_PANE_0(box)) {
 
-    // pretty freq + trailing space
-    int l = snprintf (line, MAX_LINE, _FX("%*.0f "), FREQ_LEN, spot.kHz);
+        // n chars in each field; all lengths are sans EOS and intervening gaps
+        const unsigned AGE_LEN = 3;
+        const unsigned FREQ_LEN = 6;
+        const unsigned CALL_LEN = (LL_PANE_0 - FREQ_LEN - AGE_LEN - 3);     // sans EOS and -2 spaces
 
-    // return n chars in frequency
-    flen = l - 1;               // sans trailing space
+        // pretty freq + trailing space
+        size_t l = snprintf (line, l_len, _FX("%*.0f "), FREQ_LEN, spot.kHz);
 
-    // add dx call; truncate if too long or look for / and use longest side
-    if (strlen (spot.dx_call) > CALL_LEN) {
-        const char *slash = strchr (spot.dx_call, '/');
-        if (slash) {
-            // use longest section
-            int left_len = slash - spot.dx_call;
-            int rite_len = strlen (slash+1);
-            if (left_len > rite_len)
-                l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"), CALL_LEN, left_len, spot.dx_call);
-            else
-                l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"),CALL_LEN, CALL_LEN, spot.dx_call+left_len+1);
-        } else {
-            // no choice but to truncate
-            l += snprintf (line+l, MAX_LINE-l, _FX("%.*s"), CALL_LEN, spot.dx_call);
-        }
+        // return n chars in frequency
+        freq_len = FREQ_LEN;
+
+        // add dx call
+        l += snprintf (line+l, l_len-l, _FX("%-*.*s "), CALL_LEN, CALL_LEN, spot.dx_call);
+
+        // age on right, 3 columns
+        int age = myNow() - spot.spotted;
+        (void) formatAge (age, line+l, l_len-l, 3);
+
     } else {
-        // fits ok as-is
-        l += snprintf (line+l, MAX_LINE-l, _FX("%-*.*s"), CALL_LEN, CALL_LEN, spot.dx_call);
+
+        // n chars in each field; all lengths are sans EOS and intervening gaps
+        const unsigned ID_LEN = osp->whoami == ONTA_POTA ? 7 : 10;
+        const unsigned AGE_LEN = osp->whoami == ONTA_POTA ? 3 : 1;
+        const unsigned FREQ_LEN = 6;
+        const unsigned CALL_LEN = (LL_PANE_123 - FREQ_LEN - AGE_LEN - ID_LEN - 4);   // sans EOS and -3 spaces
+
+        // pretty freq + trailing space
+        size_t l = snprintf (line, l_len, _FX("%*.0f "), FREQ_LEN, spot.kHz);
+
+        // return n chars in frequency
+        freq_len = FREQ_LEN;
+
+        // add dx call
+        l += snprintf (line+l, l_len-l, _FX("%-*.*s "), CALL_LEN, CALL_LEN, spot.dx_call);
+
+        // spot id
+        l += snprintf (line+l, l_len-l, _FX("%-*.*s "), ID_LEN, ID_LEN, spot.de_call);
+
+        // age on right
+        int age = myNow() - spot.spotted;
+        (void) formatAge (age, line+l, l_len-l, osp->whoami == ONTA_SOTA ? 1 : 3);
     }
-
-    // leading space then spot id
-    l += snprintf (line+l, MAX_LINE-l, _FX(" %*.*s"), ID_LEN, ID_LEN, spot.de_call);
-
-    // age on right
-    int age_min = (myNow() - spot.spotted + 30)/60;
-    if (osp->whoami == ONTA_SOTA) {
-        // only room for 1 column
-        if (age_min < 10)
-            snprintf (line+l, MAX_LINE-l, _FX(" %d"), age_min);
-        else
-            snprintf (line+l, MAX_LINE-l, _FX(" +"));
-    } else
-        snprintf (line+l, MAX_LINE-l, _FX(" %2dm"), age_min);
 }
 
 /* redraw all visible otaspots in the given pane box.
@@ -195,7 +191,7 @@ static void drawONTAVisSpots (const SBox &box, const ONTAState *osp)
 {
     tft.fillRect (box.x+1, box.y + START_DY-1, box.w-2, box.h - START_DY - 1, RA8875_BLACK);
     selectFontStyle (LIGHT_FONT, FAST_FONT);
-    uint16_t x = box.x + ONTA_INDENT;
+    uint16_t x = box.x + 1;
     uint16_t y0 = box.y + START_DY;
 
     // draw otaspots top_vis on top
@@ -205,9 +201,9 @@ static void drawONTAVisSpots (const SBox &box, const ONTAState *osp)
         for (int i = min_i; i <= max_i; i++) {
             // get info line
             const DXClusterSpot &spot = osp->spots[i];
-            char line[MAX_LINE];
-            int flen;
-            formatONTASpot (spot, osp, line, flen);
+            char line[50];
+            int freq_len;
+            formatONTASpot (spot, osp, box, line, sizeof(line), freq_len);
 
             // set y location
             uint16_t y = y0 + osp->ss.getDisplayRow(i) * ONTA_ROWDY;
@@ -216,13 +212,13 @@ static void drawONTAVisSpots (const SBox &box, const ONTAState *osp)
             uint16_t bg_col = getBandColor ((long)(spot.kHz*1000));           // wants Hz
             uint16_t txt_col = getGoodTextColor (bg_col);
             tft.setTextColor(txt_col);
-            tft.fillRect (x, y-1, flen*6, ONTA_ROWDY-3, bg_col);
+            tft.fillRect (x, y-1, freq_len*6, ONTA_ROWDY-3, bg_col);
             tft.setCursor (x, y);
-            tft.printf (_FX("%*.*s"), flen, flen, line);
+            tft.printf (_FX("%*.*s"), freq_len, freq_len, line);
 
             // show remainder of line in white
             tft.setTextColor(RA8875_WHITE);
-            tft.printf (line+flen);
+            tft.printf (line+freq_len);
         }
     }
 
@@ -365,15 +361,16 @@ static ONTAState *getONTAState (ONTAProgram whoami)
 
 /* reset storage for the given program
  */
-static void resetONTAStorage (ONTAState *osp)
+static void resetONTAStorage (const SBox &box, ONTAState *osp)
 {
     free (osp->spots);
     osp->spots = NULL;
-    osp->ss.n_data = 0;
-    osp->ss.top_vis = 0;
+
+    osp->ss.init ((box.h - START_DY)/ONTA_ROWDY, 0, 0);         // max_vis, top_vis, n_data = 0;
+    max_spots = osp->ss.max_vis + nMoreScrollRows();
 }
 
-/* read fresh ontheair info and draw pane in box.
+/* read fresh ontheair info and draw pane in box, beware thinner PANE_0
  */
 bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
 {
@@ -381,7 +378,7 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
     ONTAState *osp = getONTAState (whoami);
 
     // reset
-    resetONTAStorage (osp);
+    resetONTAStorage (box, osp);
 
     initONTASorts();
     int n_read = 0;
@@ -401,7 +398,7 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
         updateClocks(false);
 
         // fetch page and skip header
-        httpHCGET (onta_client, backend_host, osp->page);
+        httpHCPGET (onta_client, backend_host, osp->page);
         if (!httpSkipHeader (onta_client)) {
             Serial.print (F("OnTheAir download failed\n"));
             snprintf (line, sizeof(line), _FX("%s header error"), osp->prog);
@@ -446,11 +443,11 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
                 continue;
             }
 
-            // append to spots list up to MAX_SPOTS
-            if (osp->ss.n_data == MAX_SPOTS) {
+            // append to spots list up to max_spots
+            if (osp->ss.n_data == max_spots) {
                 // no more so shift out the oldest
-                memmove (osp->spots, &osp->spots[1], (MAX_SPOTS-1) * sizeof(DXClusterSpot));
-                osp->ss.n_data = MAX_SPOTS - 1;
+                memmove (osp->spots, &osp->spots[1], (max_spots-1) * sizeof(DXClusterSpot));
+                osp->ss.n_data = max_spots - 1;
             } else {
                 // add 1 more
                 osp->spots = (DXClusterSpot*) realloc (osp->spots, (osp->ss.n_data+1)*sizeof(DXClusterSpot));
@@ -478,7 +475,7 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
         }
 
         // fresh screen coords
-        updateOnTheAirSpotScreenLocations();
+        updateOnTheAirSpotMapLocations();
 
         // ok, even if none found
         ok = true;
@@ -492,7 +489,7 @@ out:
         osp->ss.scrollToNewest();
         drawONTA (box, osp);
     } else {
-        resetONTAStorage (osp);
+        resetONTAStorage (box, osp);
         plotMessage (box, RA8875_RED, line);
     }
 
@@ -534,7 +531,7 @@ bool checkOnTheAirTouch (const SCoord &s, const SBox &box, ONTAProgram whoami)
 
     // tapped a row, engage if defined
     int spot_row;
-    int vis_row = (s.y - START_DY)/ONTA_ROWDY;
+    int vis_row = (s.y - (box.y + START_DY))/ONTA_ROWDY;
     if (osp->ss.findDataIndex (vis_row, spot_row))
         engageONTARow (osp->spots[spot_row]);
 
@@ -607,7 +604,7 @@ void drawOnTheAirSpotsOnMap (void)
 
 /* update screen coords of each OTA spot, called ostensibly when projection changes.
  */
-void updateOnTheAirSpotScreenLocations (void)
+void updateOnTheAirSpotMapLocations (void)
 {
     for (int i = 0; i < ONTA_N; i++) {
         ONTAState *osp = &onta_state[i];
@@ -649,15 +646,4 @@ bool getClosestOnTheAirSpot (const LatLong &ll, DXClusterSpot *dxc_closest, LatL
     }
 
     return (found_any);
-}
-
-/* reset storage if no longer being used
- */
-void checkOnTheAirActive(void)
-{
-    for (int i = 0; i < ONTA_N; i++) {
-        ONTAState *osp = &onta_state[i];
-        if (osp->spots && findPaneForChoice ((PlotChoice)osp->PLOT_CH_id) == PANE_NONE)
-            resetONTAStorage (osp);
-    }
 }

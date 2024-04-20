@@ -4,7 +4,7 @@
 #include "HamClock.h"
 
 #define BORDER_COLOR    GRAY
-#define GRID_COLOR      RGB565(35,35,35)
+#define GRID_COLOR      RGB565(55,55,55)
 #define TICKLEN         2                       // length of plot tickmarks, pixels
 #define TGAP            10                      // top gap for title
 #define BGAP            15                      // bottom gap for x labels
@@ -163,9 +163,12 @@ uint16_t color, float y_min, float y_max, char *label_str)
             }
         }
 
-        // y label is title over plot
+        // y label is title over plot, beware spilling off right edge
         uint16_t tl = getTextWidth(ylabel);
-        tft.setCursor (box.x+LGAP+(box.w-LGAP-tl)/2, box.y+(TGAP-FONTH)/2+1);
+        uint16_t ttx = box.x + LGAP + (box.w-LGAP-tl)/2;
+        if (ttx + tl >= box.x + box.w)
+            ttx = box.x + box.w - tl;
+        tft.setCursor (ttx, box.y+(TGAP-FONTH)/2+1);
         tft.print (ylabel);
 
         // x labels and tickmarks just below plot
@@ -535,7 +538,7 @@ void plotBandConditions (const SBox &box, int busy, const BandCdtnMatrix *bmp, c
             uint8_t h, s = 250, v;
             v = rel < 10 ? 0 : 250;
             h = rel < 33 ? 0 : (rel < 66 ? 43 : 85);
-            uint16_t color = HSV565 (h, s, v);
+            uint16_t color = HSV_2_RGB565 (h, s, v);
 
             // draw color box
             int p_row = m_col;
@@ -653,10 +656,14 @@ void prepPlotBox (const SBox &box)
     // erase all
     fillSBox (box, RA8875_BLACK);
 
-    // not bottom so it appears to connect with map top
+    // not bottom so it appears to connect with map top...
     uint16_t rx = box.x+box.w-1;
     uint16_t by = box.y+box.h-1;
     tft.drawLine (box.x, box.y, box.x, by, BORDER_COLOR);               // left
     tft.drawLine (box.x, box.y, rx, box.y, BORDER_COLOR);               // top
     tft.drawLine (rx, box.y, rx, by, BORDER_COLOR);                     // right
+
+    // ... unless showing de/dx pane
+    if (memcmp (&box, &plot_b[PANE_0], sizeof(SBox)) == 0)
+        tft.drawLine (box.x, by, rx, by, BORDER_COLOR);                 // bottom
 }

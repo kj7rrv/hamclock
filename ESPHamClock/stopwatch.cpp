@@ -152,7 +152,7 @@ static void setAlarmPin (bool set)
 #define ALM_EX          420                     // alarm time display box x
 #define ALM_EY          ALM_Y0                  // alarm time display box y
 #define ALM_EW          SW_CDP_W                // alarm time display box w
-#define ALM_TOVFLOW     (24U*60U)               // hrmn overflow value
+#define ALM_NVARMED     (24U*60U)               // add to hrmn when stored in NV_ALARMCLOCK to indicate armed
 #define ALM_RINGTO      60000                   // alarm clock ringing timeout, millis
 
 // countdown params
@@ -198,10 +198,10 @@ static void setAlarmPin (bool set)
 #define BAC_DATEY       2                       // date box Y -- just to anchor text
 #define BAC_DATEW       200                     // date box width -- used just for tapping
 #define BAC_DATEH       150                     // date box height -- used just for tapping
-#define BAC_WXX         (800-PLOTBOX_W-1)       // weather box X
+#define BAC_WXX         (800-PLOTBOX123_W-1)    // weather box X
 #define BAC_WXY         5                       // weather box Y
-#define BAC_WXW         PLOTBOX_W               // weather box width
-#define BAC_WXH         PLOTBOX_H               // weather box height
+#define BAC_WXW         PLOTBOX123_W            // weather box width
+#define BAC_WXH         PLOTBOX123_H            // weather box height
 #define BAC_WXGDT       (30L*60*1000)           // weather update period when good, millis
 #define BAC_WXFDT       (6*1000)                // weather update period when fail, millis
 
@@ -294,7 +294,7 @@ static void saveSWNV()
 
     uint16_t acode = alarm_hrmn;
     if (alarm_state != ALMS_OFF)
-        acode += ALM_TOVFLOW;
+        acode += ALM_NVARMED;
     NVWriteUInt16 (NV_ALARMCLOCK, acode);
 }
 
@@ -315,7 +315,7 @@ static uint32_t getCountdownLeft()
  */
 static void setSWColor()
 {
-    sw_col = HSV565 (sw_hue, SW_HSV_S, SW_HSV_V);
+    sw_col = HSV_2_RGB565 (sw_hue, SW_HSV_S, SW_HSV_V);
 }
 
 /* draw the current countdown_period if currently on the main SW page
@@ -339,7 +339,7 @@ static void drawColorScale()
 
     // rainbow
     for (uint16_t dx = 0; dx < color_b.w; dx++) {
-        uint16_t c = HSV565 (255*dx/color_b.w, SW_HSV_S, SW_HSV_V);
+        uint16_t c = HSV_2_RGB565 (255*dx/color_b.w, SW_HSV_S, SW_HSV_V);
         tft.drawPixel (color_b.x + dx, color_b.y + color_b.h/2, c);
     }
 
@@ -1538,7 +1538,7 @@ static void showAlarmRinging()
 
         // overwrite pane, wait here until dismiss, refresh pane
         const PlotPane alarm_pane = PANE_2;
-        SBox &b = plot_b[alarm_pane];
+        const SBox &b = plot_b[alarm_pane];
 
         // close down other network systems if using this pane
         if (findPaneChoiceNow(PLOT_CH_DXCLUSTER) == alarm_pane)
@@ -1992,8 +1992,8 @@ void initStopwatch()
         alarm_state = ALMS_OFF;
         NVWriteUInt16 (NV_ALARMCLOCK, 0);
     }
-    if (alarm_hrmn >= ALM_TOVFLOW) {
-        alarm_hrmn = alarm_hrmn % ALM_TOVFLOW;
+    if (alarm_hrmn >= ALM_NVARMED) {
+        alarm_hrmn = alarm_hrmn % ALM_NVARMED;
         alarm_state = ALMS_ARMED;
     }
 

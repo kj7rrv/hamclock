@@ -19,6 +19,7 @@
 time_t last_live;                                       // last live update; public for wifi.cpp
 bool no_web_touch;                                      // disable web touch events
 bool liveweb_fs_ready;                                  // set when ok to send fullscreen command
+char *liveweb_openurl;                                  // a url to attempt to open
 
 #if defined(_IS_UNIX)
 
@@ -336,12 +337,23 @@ static void sendClientPNG (ws_cli_conn_t *client)
         Serial.printf ("LIVE: client %s: sent full PNG\n", ws_getaddress(client));
 }
 
-/* send message as to whether or not display in full screen
+/* send message that user wants full screen.
+ * N.B. coordinate with liveweb-html
  */
 static void sendFullScreen(ws_cli_conn_t *client)
 {
-    char fs[3] = {99, 91, getX11FullScreen()};          // see liveweb-html
-    ws_sendframe_bin (client, fs, 3);
+    ws_sendframe_txt (client, "full-screen");
+}
+
+/* send message to open a url.
+ * N.B. coordinate with liveweb-html
+ */
+static void sendURL (ws_cli_conn_t *client, const char *url)
+{
+    StackMalloc opencmd_mem(strlen(url)+50);
+    char *opencmd = (char *)opencmd_mem.getMem();
+    snprintf (opencmd, opencmd_mem.getSize(), "open %s", url);
+    ws_sendframe_txt (client, opencmd);
 }
 
 /* client running liveweb-html.cpp is asking for a complete screen capture as png file.
@@ -355,16 +367,25 @@ static void getLivePNG (ws_cli_conn_t *client, char args[], size_t args_len)
 }
 
 /* client running liveweb-html.cpp is asking for incremental screen update.
- * we also send fullscreen if ready from setup.cpp. must send continuously because it only
- *   works a short while after a GUI interaction and we don't know when those will occur.
+ * we might also send a message to enable fullscreen once ready from setup.cpp. must be sent continuously
+ *   because we can't tell when user reloaded their page.
+ * we might also try to open liveweb_openurl
  */
 static void getLiveUpdate (ws_cli_conn_t *client, char args[], size_t args_len)
 {
     (void)args;
     (void)args_len;
 
-    if (liveweb_fs_ready && getX11FullScreen())
+    // inform we want full screen
+    if (liveweb_fs_ready && getWebFullScreen())
         sendFullScreen (client);
+
+    // inform to open a URL -- N.B. free and set to NULL after making attempt
+    if (liveweb_openurl) {
+        sendURL (client, liveweb_openurl);
+        free (liveweb_openurl);
+        liveweb_openurl = NULL;
+    }
 
     updateExistingClient (client);
 }

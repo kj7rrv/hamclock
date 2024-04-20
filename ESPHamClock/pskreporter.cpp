@@ -321,13 +321,14 @@ static void drawPSKPane (const SBox &box)
     tft.print (where_how);
 
     // table
-    #define TBLGAP (box.w/20)
+    #define TBLHGAP (box.w/20)
     #define TBCOLW (43*box.w/100)
+    #define TBLRH (PLOTBOX123_H/PSKBAND_N)      // really each /2 but that loses too much precision
     for (int i = 0; i < PSKBAND_N; i++) {
         int row = i % (PSKBAND_N/2);
         int col = i / (PSKBAND_N/2);
-        uint16_t x = box.x + TBLGAP + col*(TBCOLW+TBLGAP);
-        uint16_t y = box.y + 3*box.h/8 + row*(box.h/2)/(PSKBAND_N/2);
+        uint16_t x = box.x + TBLHGAP + col*(TBCOLW+TBLHGAP);
+        uint16_t y = box.y + 3*box.h/8 + row*TBLRH;
         char report[30];
         if (psk_showdist) {
             float d = bstats[i].maxkm;

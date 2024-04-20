@@ -280,6 +280,7 @@ static void usage (const char *errfmt, ...)
             fprintf (stderr, "Purpose: display time and other information useful to amateur radio operators\n");
             fprintf (stderr, "Usage: %s [options]\n", me);
             fprintf (stderr, "Version %s\n", hc_version);
+            fprintf (stderr, "Built as %s\n", our_make);
             fprintf (stderr, "Options:\n");
             fprintf (stderr, " -a l : set gimbal trace level\n");
             fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,
@@ -383,7 +384,8 @@ static void crackArgs (int ac, char *av[])
                 case 'g':
                     init_iploc = true;
                     break;
-                case 'h':
+                case 'h':                       // fallthru
+                case '-':                       // in case --help
                     usage (NULL);
                     break;
                 case 'i':

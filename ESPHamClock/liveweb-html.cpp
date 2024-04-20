@@ -52,7 +52,7 @@ char live_html[] =  R"_raw_html_(
         var pointerdown_x = 0;          // location of pointerdown event
         var pointerdown_y = 0;          // location of pointerdown event
         var pointermove_ms = 0;         // Date.now when pointermove event
-        var fs_success = 0;             // whether setting full screen has ever succeeded
+        var want_fs, tried_fs;          // whether user wants full screen and has succeeded once
         var cvs, ctx;                   // handy
 
         // define functions, onLoad follows near the bottom
@@ -239,6 +239,8 @@ char live_html[] =  R"_raw_html_(
 
         // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
         window.addEventListener('keydown', function(event) {
+            // check if user wants to go full screen
+            checkFullScreen();
 
             // get char name or map arrow keys to vi
             var key;
@@ -329,8 +331,18 @@ char live_html[] =  R"_raw_html_(
                 setTimeout (sendWSMsg, 500, msg);
             } else {
                 if (ws_verbose)
-                    console.log ('sendWSMsg ' + msg);
+                    console.log ('sendWSMsg: ' + msg);
                 ws.send (msg);
+            }
+        }
+
+        // try once to engage full screen if desired.
+        // N.B. must be called from a user action
+        function checkFullScreen() {
+            if (want_fs && !tried_fs) {
+                console.log ("engaging FS");
+                document.documentElement.requestFullscreen()
+                tried_fs = true;
             }
         }
 
@@ -357,9 +369,12 @@ char live_html[] =  R"_raw_html_(
 
             // respond to hamclock messages
             ws.onmessage = function (e) {
-                if (ws_verbose)
+                if (ws_verbose > 1)
                     console.log ('ws onmessage length ' + e.data.byteLength);
+
                 if (e.data instanceof ArrayBuffer) {
+                    // received whole or update image
+
                     var data8 = new Uint8Array (e.data);
                     if (data8[0] == 137 && data8[1] == 80 && data8[2] == 78 && data8[3] == 71) {
                         // this is a PNG image -- show whole if alone else assume its part of an update
@@ -373,23 +388,40 @@ char live_html[] =  R"_raw_html_(
                         }
                         // ask for updates regardless
                         runSoon (getUpdate);
-                    } else if (data8[0] == 99 && data8[1] == 91) {      // see liveweb.cpp
-                        // this is a message whether to be in full screen mode.
-                        // only succeed once in case user wants to cancel
-                        if (data8[2]) {
-                            if (!fs_success) {
-                                if (document.fullscreenElement)
-                                    fs_success = 1;
-                                else
-                                    document.documentElement.requestFullscreen();
-                            }
-                        }
                     } else {
                         // this is an update patch collection
                         ws_abdata = e.data;
                     }
+
+                } else if (typeof e.data === 'string') {
+                    // received text message
+
+                    if (ws_verbose)
+                        console.log ('rxWSMsg: ', e.data);
+
+                    if (e.data === 'full-screen') {
+                        // record user wants full screen, won't actually happen until they click.
+                        // message arrives continuously because client can't tell if user reloaded page.
+                        if (!want_fs) {
+                            console.log ("user wants FS");
+                            tried_fs = false;
+                            want_fs = true;
+                        }
+                    }
+
+                    else if (e.data.substring(0,5) == 'open ') {
+                        // try to open a url
+                        var url = e.data.substring(5);
+                        console.log('opening ', url);
+                        if (!window.open(url))
+                            console.log ("Failed to open ", url);
+                    }
+
+                } else {
+                    console.log ("Unknown WS data: ", e.data);
                 }
             }
+
             
             // handy access to canvas and drawing context
             cvs = document.getElementById('hamclock-cvs');
@@ -398,6 +430,9 @@ char live_html[] =  R"_raw_html_(
 
             // pointerdown: record time and position
             cvs.addEventListener ('pointerdown', function(event) {
+                // check if user wants to go full screen
+                checkFullScreen();
+
                 // all ours
                 event.preventDefault();
 

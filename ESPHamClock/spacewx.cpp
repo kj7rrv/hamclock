@@ -14,6 +14,7 @@ static const char drap_page[] PROGMEM = "/drap/stats.txt";
 static const char kp_page[] PROGMEM = "/geomag/kindex.txt";
 static const char xray_page[] PROGMEM = "/xray/xray.txt";
 static const char noaaswx_page[] PROGMEM = "/NOAASpaceWX/noaaswx.txt";
+static const char aurora_page[] PROGMEM = "/aurora/aurora.txt";
 static const char sw_rank_page[] PROGMEM = "/NOAASpaceWX/rank_coeffs.txt";
 
 // space weather stats
@@ -65,7 +66,7 @@ static bool initSWMB(void)
         httpHCPGET (sw_client, backend_host, sw_rank_page);
 
         if (!httpSkipHeader (sw_client)) {
-            Serial.println (F("AUTOSW: rank page header short"));
+            Serial.println (F("RANKSW: rank page header short"));
             goto out;
         }
 
@@ -74,7 +75,7 @@ static bool initSWMB(void)
         for (int n_c = 0; n_c < SPCWX_N; ) {
             // read line
             if (!getTCPLine (sw_client, line, sizeof(line), NULL)) {
-                Serial.printf (_FX("AUTOSW: rank file is short: %d/%d\n"), n_c/SPCWX_N);
+                Serial.printf (_FX("RANKSW: rank file is short: %d/%d\n"), n_c, SPCWX_N);
                 goto out;
             }
 
@@ -85,7 +86,7 @@ static bool initSWMB(void)
             // require matching index and m and b coeffs
             int get_i;
             if (sscanf (line, _FX("%d %f %f"), &get_i, &m[n_c], &b[n_c]) != 3 || get_i != n_c) {
-                Serial.printf (_FX("AUTOSW: bad rank line: %s\n"), line);
+                Serial.printf (_FX("RANKSW: bad rank line: %s\n"), line);
                 goto out;
             }
 
@@ -94,12 +95,12 @@ static bool initSWMB(void)
         }
 
         // all good, log and store
-        Serial.println (F("AUTOSW:   Coeffs Name       m       b"));
+        Serial.println (F("RANKSW:   Coeffs Name       m       b"));
         for (int i = 0; i < SPCWX_N; i++) {
             SpaceWeather_t &swi = space_wx[i];
             swi.m = m[i];
             swi.b = b[i];
-            Serial.printf (_FX("AUTOSW: %13s %7g %7g\n"), plot_names[swi.pc], swi.m, swi.b);
+            Serial.printf (_FX("RANKSW: %13s %7g %7g\n"), plot_names[swi.pc], swi.m, swi.b);
         }
 
         ok = true;
@@ -115,7 +116,7 @@ static bool initSWMB(void)
 
 /* go through space_wx and set the rank according to the importance of each value.
  */
-static void rankSpaceWx()
+static void sortSpaceWx()
 {
     // try one time to init all space_wx m and b first time, note and always bale if fail.
     static bool set_mb, mb_ok;
@@ -123,7 +124,7 @@ static void rankSpaceWx()
         set_mb = true;
         mb_ok = initSWMB();
         if (!mb_ok)
-            Serial.println (F("AUTOSW: no ranking available -- using default"));
+            Serial.println (F("RANKSW: no ranking available -- using default"));
     }
     if (!mb_ok)
         return;                 // use default ranking
@@ -134,12 +135,12 @@ static void rankSpaceWx()
     qsort (sw_sort, SPCWX_N, sizeof(SpaceWeather_t), swQSF);
     
     // set and record rank of each entry
-    Serial.println (F("AUTOSW: rank      name    value score"));
+    Serial.println (F("RANKSW: rank      name    value score"));
     for (int i = 0; i < SPCWX_N; i++) {
         SPCWX_t spi = sw_sort[i].sp;
         SpaceWeather_t &swi = space_wx[spi];
         swi.rank = i;
-        Serial.printf (_FX("AUTOSW: %d %12s %8.2g %3d\n"), i, plot_names[swi.pc], swi.value,
+        Serial.printf (_FX("RANKSW: %d %12s %8.2g %3d\n"), i, plot_names[swi.pc], swi.value,
                                 SW_RANKV(&swi));
     }
 }
@@ -187,7 +188,7 @@ void drawSpaceStats(uint16_t color)
                     if (space_wx[SPCWX_SSN].value == SPW_ERR)
                         strcpy (values[i], err);
                     else
-                        snprintf (values[i], sizeof(values[i]), _FX("%.1f"), space_wx[SPCWX_SSN].value);
+                        snprintf (values[i], sizeof(values[i]), _FX("%.0f"), space_wx[SPCWX_SSN].value);
                     colors[i] = SSN_COLOR;
                     break;
 
@@ -202,7 +203,7 @@ void drawSpaceStats(uint16_t color)
                     if (space_wx[SPCWX_FLUX].value == SPW_ERR)
                         strcpy (values[i], err);
                     else
-                        snprintf (values[i], sizeof(values[i]), _FX("%.1f"), space_wx[SPCWX_FLUX].value);
+                        snprintf (values[i], sizeof(values[i]), _FX("%.0f"), space_wx[SPCWX_FLUX].value);
                     colors[i] = SFLUX_COLOR;
                     break;
 
@@ -229,7 +230,7 @@ void drawSpaceStats(uint16_t color)
                     if (space_wx[SPCWX_DRAP].value == SPW_ERR)
                         strcpy (values[i], err);
                     else
-                        snprintf (values[i], sizeof(values[i]), _FX("%.1f"), space_wx[SPCWX_DRAP].value);
+                        snprintf (values[i], sizeof(values[i]), _FX("%.0f"), space_wx[SPCWX_DRAP].value);
                     colors[i] = DRAPPLOT_COLOR;
                     break;
 
@@ -237,12 +238,8 @@ void drawSpaceStats(uint16_t color)
                     strcpy (titles[i], _FX("Bz"));
                     if (space_wx[SPCWX_BZ].value == SPW_ERR)
                         strcpy (values[i], err);
-                    else {
-                        if (fabsf(space_wx[SPCWX_BZ].value) < 100)
-                            snprintf (values[i], sizeof(values[i]), _FX("%.1f"), space_wx[SPCWX_BZ].value);
-                        else
-                            snprintf (values[i], sizeof(values[i]), _FX("%.0f"), space_wx[SPCWX_BZ].value);
-                    }
+                    else
+                        snprintf (values[i], sizeof(values[i]), _FX("%.1f"), space_wx[SPCWX_BZ].value);
                     colors[i] = BZBT_BZCOLOR;
                     break;
 
@@ -253,6 +250,15 @@ void drawSpaceStats(uint16_t color)
                     else
                         strcpy (values[i], err);
                     colors[i] = NOAASPW_COLOR;
+                    break;
+
+                case SPCWX_AURORA:
+                    strcpy (titles[i], _FX("Aurora"));
+                    if (noaa_sw.ok)
+                        snprintf (values[i], sizeof(values[i]), _FX("%.0f"), space_wx[SPCWX_AURORA].value);
+                    else
+                        strcpy (values[i], err);
+                    colors[i] = AURORA_COLOR;
                     break;
 
                 case SPCWX_N:
@@ -341,16 +347,14 @@ static bool checkSunSpots (void)
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc x_ssn((SSN_NV)*sizeof(float));
-    StackMalloc x_x((SSN_NV)*sizeof(float));
-    float *ssn = (float*)x_ssn.getMem();
-    float *x = (float*)x_x.getMem();
+    float x[SSN_NV];
+    float ssn[SSN_NV];
 
     bool ok = retrieveSunSpots (x, ssn);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + SSN_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_SSN, SSN_INTERVAL);
 
     } else {
 
@@ -429,22 +433,20 @@ out:
 static bool checkSolarFlux (void)
 {
     // use our own delay unless being shown in a pane
-    PlotPane sflux_pp = findPaneForChoice (PLOT_CH_FLUX);
+    PlotPane sflux_pp = findPaneChoiceNow (PLOT_CH_FLUX);
     time_t *next_p = sflux_pp == PANE_NONE ? &space_wx[SPCWX_FLUX].next_update : &next_update[sflux_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc x_mem(SFLUX_NV*sizeof(float));
-    StackMalloc sflux_mem(SFLUX_NV*sizeof(float));
-    float *x = (float *) x_mem.getMem();
-    float *sflux = (float *) sflux_mem.getMem();
+    float x[SFLUX_NV];
+    float sflux[SFLUX_NV];
 
     bool ok = retrievSolarFlux (x, sflux);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + SFLUX_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_FLUX, SFLUX_INTERVAL);
 
     } else {
 
@@ -584,22 +586,20 @@ out:
 bool checkDRAP ()
 {
     // use our own delay unless being shown in a pane
-    PlotPane drap_pp = findPaneForChoice (PLOT_CH_DRAP);
+    PlotPane drap_pp = findPaneChoiceNow (PLOT_CH_DRAP);
     time_t *next_p = drap_pp == PANE_NONE ? &space_wx[SPCWX_DRAP].next_update : &next_update[drap_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc x_mem(DRAPDATA_NPTS*sizeof(float));
-    StackMalloc y_mem(DRAPDATA_NPTS*sizeof(float));
-    float *x = (float*)x_mem.getMem();
-    float *y = (float*)y_mem.getMem();
+    float x[DRAPDATA_NPTS];
+    float y[DRAPDATA_NPTS];
 
     bool ok = retrieveDRAP (x, y);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + DRAPPLOT_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_DRAP, DRAPPLOT_INTERVAL);
 
     } else {
 
@@ -676,22 +676,20 @@ out:
 static bool checkKp (void)
 {
     // use our own delay unless being shown in a pane
-    PlotPane kp_pp = findPaneForChoice (PLOT_CH_KP);
+    PlotPane kp_pp = findPaneChoiceNow (PLOT_CH_KP);
     time_t *next_p = kp_pp == PANE_NONE ? &space_wx[SPCWX_KP].next_update : &next_update[kp_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc kpx_mem(KP_NV*sizeof(float));
-    StackMalloc kp_mem(KP_NV*sizeof(float));
-    float *kpx = (float*)kpx_mem.getMem();              // days ago
-    float *kp = (float*)kp_mem.getMem();                // kp collection
+    float kpx[KP_NV];
+    float kp[KP_NV];
 
     bool ok = retrieveKp (kpx, kp);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + KP_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_KP, KP_INTERVAL);
 
     } else {
 
@@ -706,7 +704,7 @@ static bool checkKp (void)
 /* retrieve latest xray indices.
  * return whether transaction was ok (even if data was not)
  */
-bool retrieveXRay (float lxray[XRAY_NV], float sxray[XRAY_NV], float x[XRAY_NV])
+bool retrieveXRay (float x[XRAY_NV], float lxray[XRAY_NV], float sxray[XRAY_NV])
 {
     uint8_t xray_i;                                     // next index to use
     WiFiClient xray_client;
@@ -789,24 +787,21 @@ out:
 static bool checkXRay (void)
 {
     // use our own delay unless being shown in a pane
-    PlotPane xray_pp = findPaneForChoice (PLOT_CH_XRAY);
+    PlotPane xray_pp = findPaneChoiceNow (PLOT_CH_XRAY);
     time_t *next_p = xray_pp == PANE_NONE ? &space_wx[SPCWX_XRAY].next_update : &next_update[xray_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc lxray_mem(XRAY_NV*sizeof(float));
-    StackMalloc sxray_mem(XRAY_NV*sizeof(float));
-    StackMalloc x_mem(XRAY_NV*sizeof(float));
-    float *lxray = (float *) lxray_mem.getMem();        // long wavelength values
-    float *sxray = (float *) sxray_mem.getMem();        // short wavelength values
-    float *x = (float *) x_mem.getMem();                // x coords of plot
+    float x[XRAY_NV];                           // x coords of plot
+    float lxray[XRAY_NV];                       // long wavelength values
+    float sxray[XRAY_NV];                       // short wavelength values
 
-    bool ok = retrieveXRay (lxray, sxray, x);
+    bool ok = retrieveXRay (x, lxray, sxray);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + XRAY_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_XRAY, XRAY_INTERVAL);
 
     } else {
 
@@ -904,24 +899,21 @@ out:
 static bool checkBzBt(void)
 {
     // use our own delay unless being shown in a pane
-    PlotPane bzbt_pp = findPaneForChoice (PLOT_CH_BZBT);
+    PlotPane bzbt_pp = findPaneChoiceNow (PLOT_CH_BZBT);
     time_t *next_p = bzbt_pp == PANE_NONE ? &space_wx[SPCWX_BZ].next_update : &next_update[bzbt_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc old_mem(BZBT_NV*sizeof(float));
-    StackMalloc bz_mem(BZBT_NV*sizeof(float));
-    StackMalloc bt_mem(BZBT_NV*sizeof(float));
-    float *old = (float *) old_mem.getMem();
-    float *bz = (float *) bz_mem.getMem();
-    float *bt = (float *) bt_mem.getMem();
+    float old[BZBT_NV];
+    float bz[BZBT_NV];
+    float bt[BZBT_NV];
 
     bool ok = retrieveBzBt (old, bz, bt);
     if (ok) {
 
         // schedule next
-        *next_p = myNow() + BZBT_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_BZBT, BZBT_INTERVAL);
 
     } else {
 
@@ -1027,22 +1019,20 @@ out:
 static bool checkSolarWind (void)
 {
     // use our own delay unless being shown in a pane
-    PlotPane swind_pp = findPaneForChoice (PLOT_CH_SOLWIND);
+    PlotPane swind_pp = findPaneChoiceNow (PLOT_CH_SOLWIND);
     time_t *next_p = swind_pp == PANE_NONE ? &space_wx[SPCWX_SOLWIND].next_update : &next_update[swind_pp];
 
     if (myNow() < *next_p)
         return (false);
 
-    StackMalloc x_mem(SWIND_MAXN*sizeof(float));  // hours ago
-    StackMalloc y_mem(SWIND_MAXN*sizeof(float));  // wind
-    float *x = (float *) x_mem.getMem();
-    float *y = (float *) y_mem.getMem();
+    float x[SWIND_MAXN];                        // hours ago
+    float y[SWIND_MAXN];                        // wind
 
     int nsw = retrieveSolarWind (x, y);
     if (nsw >= SWIND_MINN) {
 
         // schedule next
-        *next_p = myNow() + SWIND_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_SOLWIND, SWIND_INTERVAL);
 
     } else {
 
@@ -1152,7 +1142,7 @@ out:
  */
 static bool checkNOAASWx (void)
 {
-    PlotPane noaasw_pp = findPaneForChoice (PLOT_CH_NOAASPW);
+    PlotPane noaasw_pp = findPaneChoiceNow (PLOT_CH_NOAASPW);
     time_t *next_p = noaasw_pp == PANE_NONE ? &noaa_sw.next_update : &next_update[noaasw_pp];
 
     if (myNow() < *next_p)
@@ -1161,7 +1151,7 @@ static bool checkNOAASWx (void)
     if (retrieveNOAASWx()) {
 
         // schedule next
-        *next_p = myNow() + NOAASPW_INTERVAL;
+        *next_p = nextPaneUpdate (PLOT_CH_NOAASPW, NOAASPW_INTERVAL);
 
     } else {
 
@@ -1170,6 +1160,139 @@ static bool checkNOAASWx (void)
     }
 
     // true, albeit may be !noaa_sp.ok
+    return (true);
+}
+
+/* retrieve last 24 hrs of Aurora prediction percentages and space_wx[SPCWX_AURORA].
+ * return whether transaction was ok (even if data was not)
+ */
+bool retrieveAurora (Aurora_t &a)
+{
+    WiFiClient aurora_client;                                           // wifi client connection
+    char line[50];                                                      // text line
+    bool ok = false;                                                    // set iff all ok
+
+    // mark data as bad until proven otherwise
+    space_wx[SPCWX_AURORA].value = SPW_ERR;
+    a.ok = false;
+
+    Serial.println (aurora_page);
+    resetWatchdog();
+    if (wifiOk() && aurora_client.connect(backend_host, backend_port)) {
+        updateClocks(false);
+        resetWatchdog();
+
+        // query web page
+        httpHCPGET (aurora_client, backend_host, aurora_page);
+
+        // skip response header
+        if (!httpSkipHeader (aurora_client)) {
+            Serial.print (F("AURORA: header short\n"));
+            goto out;
+        }
+
+        // transaction itself is successful
+        ok = true;
+
+        // init state
+        time_t t_now = myNow();
+        float prev_age = 1e10;
+        int n_lines = 0;
+        a.n_points = 0;
+
+        // read lines keep up to AURORA_NPTS newest
+        while (getTCPLine (aurora_client, line, sizeof(line), NULL)) {
+            n_lines++;
+
+            // crack
+            long utime;
+            float percent;
+            if (sscanf (line, _FX("%ld %f"), &utime, &percent) != 2) {
+                Serial.printf (_FX("AURORA: garbled: %s\n"), line);
+                goto out;
+            }
+            // Serial.printf (_FX("AURORA: %ld %g\n", utime, percent
+
+            // find age for this datum, skip if crazy new or too old or out of order
+            float age = (t_now - utime)/3600.0F;        // seconds to hours
+            if (age < 0 || age > AURORA_MAXAGE || age >= prev_age) {
+                Serial.printf (_FX("AURORA: skipping age %g hrs\n"), age);
+                continue;
+            }
+            prev_age = age;
+
+            // add to list, shift out oldest if full
+            if (a.n_points == AURORA_MAXPTS) {
+                memmove (&a.age_hrs[0], &a.age_hrs[1], (AURORA_MAXPTS-1)*sizeof(float));
+                memmove (&a.percent[0], &a.percent[1], (AURORA_MAXPTS-1)*sizeof(float));
+                a.n_points = AURORA_MAXPTS - 1;
+            }
+            a.age_hrs[a.n_points] = -age;               // want "ago"
+            a.percent[a.n_points] = percent;
+            a.n_points++;
+        }
+
+        // look alive
+        updateClocks(false);
+        resetWatchdog();
+
+        // require at least a few recent
+        if (a.n_points < 5) {
+            Serial.printf (_FX("AURORA: only %d points\n"), a.n_points);
+        } else if (a.age_hrs[a.n_points-1] <= -1.0F) {
+            Serial.printf (_FX("AURORA: newest is too old: %g hrs\n"), -a.age_hrs[a.n_points-1]);
+        } else {
+            // good
+            a.ok = true;
+
+            Serial.printf (_FX("AURORA: found %d points [%g,%g] hrs old\n"), a.n_points,
+                    -a.age_hrs[0], -a.age_hrs[a.n_points-1]);
+
+            // capture newest value for space wx
+            space_wx[SPCWX_AURORA].value = a.percent[a.n_points-1];
+        }
+
+    } else {
+
+        Serial.print (F("AURORA: connection failed\n"));
+    }
+
+out:
+
+    // clean up
+    aurora_client.stop();
+    resetWatchdog();
+    return (ok);
+}
+
+/* update SPCWX_AURORA if not recently done so by its pane.
+ * return whether a new value is ready.
+ */
+bool checkAurora ()
+{
+    // use our own delay unless being shown in a pane
+    PlotPane aurora_pp = findPaneChoiceNow (PLOT_CH_AURORA);
+    time_t *next_p = aurora_pp == PANE_NONE ? &space_wx[SPCWX_AURORA].next_update : &next_update[aurora_pp];
+
+    if (myNow() < *next_p)
+        return (false);
+
+    // all this work just to set space_wx[SPCWX_AURORA]
+    Aurora_t a;
+    bool ok = retrieveAurora (a);
+
+    if (ok) {
+
+        // schedule next
+        *next_p = nextPaneUpdate (PLOT_CH_AURORA, AURORA_INTERVAL);
+
+    } else {
+
+        // schedule retry
+        *next_p = nextWiFiRetry(PLOT_CH_AURORA);
+    }
+
+    // true, albeit may be SPW_ERR
     return (true);
 }
 
@@ -1187,13 +1310,14 @@ bool checkSpaceWx()
     bool sw = checkSolarWind();
     bool ss = checkSunSpots();
     bool na = checkNOAASWx();
+    bool au = checkAurora();
 
     // check whether any
-    bool any_new = sf || kp || xr || bz || dr || sw || ss || na;
+    bool any_new = sf || kp || xr || bz || dr || sw || ss || na || au;
 
     // if so, redo ranking if desired
-    if (any_new && autoSortSpaceWx())
-        rankSpaceWx();
+    if (any_new && rankSpaceWx())
+        sortSpaceWx();
 
     return (any_new);
 }

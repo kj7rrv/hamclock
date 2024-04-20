@@ -70,6 +70,7 @@ typedef enum {
     DEMO_EME,
     DEMO_AUXTIME,
     DEMO_PSKMASK,
+    DEMO_PANE0,
 
     DEMO_N,
 
@@ -422,31 +423,35 @@ static void reportPaneChoices (WiFiClient &client, PlotPane pp)
 {
     // which pane
     char buf[100];
-    snprintf (buf, sizeof(buf), "Pane%d     ", (int)pp+1);
+    snprintf (buf, sizeof(buf), _FX("Pane%d    "), (int)pp);
     client.print(buf);
 
-    // always start with current then any others in rotset
+    // current choice
     PlotChoice pc_now = plot_ch[pp];
-    client.print(plot_names[pc_now]);
-    if (pc_now == PLOT_CH_BC) {
-        snprintf (buf, sizeof(buf), _FX("/%dW"), bc_power);
-        client.print(buf);
-    }
-    if (paneIsRotating(pp)) {
-        time_t t0 = myNow();
-        PlotChoice pc_next = pc_now;
-        while ((pc_next = getNextRotationChoice (pp, pc_next)) != pc_now) {
-            size_t l = snprintf (buf, sizeof(buf), ",%s", plot_names[pc_next]);
-            if (pc_next == PLOT_CH_BC)
-                snprintf (buf+l, sizeof(buf)-l, _FX("/%dW"), bc_power);
-            client.print(buf);
+
+    // print rotset, flagging current
+    if (pc_now == PLOT_CH_NONE) {                               // possible in PANE_0
+        client.println(F(" off"));
+    } else {
+        // list current first then any others in rotset
+        snprintf (buf, sizeof(buf), _FX(" %s"), plot_names[pc_now]);
+        client.print (buf);
+        for (int i = 0; i < PLOT_CH_N; i++) {
+            if (i != pc_now && plot_rotset[pp] & (1<<i)) {
+                snprintf (buf, sizeof(buf), _FX(" %s"), plot_names[i]);
+                client.print (buf);
+            }
         }
-        time_t sleft = nextPaneRotation(pp) - t0;
-        if (sleft >= 0)         // count be << 0 if just scheduled
-            snprintf (buf, sizeof(buf), _FX(" rotating in %02lld:%02lld"), sleft/60LL, sleft%60LL);
-        client.print(buf);
+
+        // show next rotation, if any
+        if (paneIsRotating(pp)) {
+            snprintf (buf, sizeof(buf), _FX(" rotating in %ld seconds"), next_update[pp] - myNow());
+            client.print (buf);
+        }
+
+        // done
+        client.println();
     }
-    client.println();
 }
 
 /* format the current stopwatch state into buf
@@ -1007,7 +1012,7 @@ static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_le
     client.print(buf);
 
     // report panes
-    for (int pp = 0; pp < PANE_N; pp++)
+    for (int pp = PANE_0; pp < PANE_N; pp++)
         reportPaneChoices (client, (PlotPane)pp);
 
     // report psk if active
@@ -1030,16 +1035,15 @@ static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_le
         int j = (brb_mode + i) % BRB_N; // start list with current
         if (brb_rotset & (1 << j)) {
             if (j != brb_mode)
-                FWIFIPR (client, F(","));
+                FWIFIPR (client, F(", "));
             client.print(brb_names[j]);
         }
     }
-    if (BRBIsRotating()) {
-        int sleft = brb_updateT - myNow();
-        snprintf (buf, sizeof(buf), _FX(" rotating in %02d:%02d\n"), sleft/60, sleft%60);
-    } else
-        strcpy (buf, "\n");
-    client.print (buf);
+    if (BRBIsRotating())
+        snprintf (buf, sizeof(buf), _FX(" rotating in %ld seconds"),  brb_updateT - myNow());
+    else
+        buf[0] = '\0';
+    client.println (buf);
 
     // report display brightness and timers
     uint16_t pcon, t_idle, t_idle_left;
@@ -1484,6 +1488,12 @@ static bool getWiFiSpaceWx (WiFiClient &client, char *unused_line, size_t line_l
     client.print (buf);
 
     snprintf (buf, sizeof(buf), _FX("Bz        %8.1f\n"), space_wx[SPCWX_BZ].value);
+    client.print (buf);
+
+    snprintf (buf, sizeof(buf), _FX("NOAA      %8.0f\n"), space_wx[SPCWX_NOAASPW].value);
+    client.print (buf);
+
+    snprintf (buf, sizeof(buf), _FX("Aurora    %8.0f\n"), space_wx[SPCWX_AURORA].value);
     client.print (buf);
 
 
@@ -2773,13 +2783,13 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
 
     if (found_file) {
 
-        // pane arg is 1-based pane number
-        int pane_1 = wa.found[2] ? atoi(wa.value[2]) : 3;       // default 3
-        if (pane_1 < 1 || pane_1 > PANE_N) {
+        // pane arg
+        int pane = wa.found[2] ? atoi(wa.value[2]) : PANE_3;
+        if (pane < PANE_0 || pane >= PANE_N) {
             strcpy (line, _FX("Bad pane num"));
             return (false);
         }
-        PlotPane pane_0 = (PlotPane)(pane_1 - 1);
+        PlotPane pp = (PlotPane)pane;
 
         // POST content immediately follows header
         int n = readADIFWiFiClient (client, content_length, line, line_len);
@@ -2789,8 +2799,8 @@ static bool setWiFiADIF (WiFiClient &client, char line[], size_t line_len)
         }
 
         // nice to put ADIF pane up too
-        if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE && setPlotChoice (pane_0, PLOT_CH_ADIF))
-            plot_rotset[pane_0] |= (1 << PLOT_CH_ADIF);
+        if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE && setPlotChoice (pp, PLOT_CH_ADIF))
+            plot_rotset[pane] |= (1 << PLOT_CH_ADIF);
 
         // tell adif new spots are from us and refresh
         from_set_adif = true;
@@ -2850,28 +2860,27 @@ static bool setWiFiloadBMP (WiFiClient &client, char line[], size_t line_len)
     bool found_file = wa.found[0] && wa.value[0] == NULL;       // no arg
     bool found_none = wa.found[1] && wa.value[1] == NULL;       // no arg
 
-    // pane arg, which is 1-based, is required
+    // pane arg is required
     if (!wa.found[2] || !wa.value[2]) {
         snprintf (line, line_len, _FX("pane is required"));
         return(false);
     }
-    int pane_1 = atoi(wa.value[2]);
-    if (pane_1 < 1 || pane_1 > PANE_N) {
+    int pane = atoi(wa.value[2]);
+    if (pane < PANE_1 || pane >= PANE_N) {
         strcpy (line, _FX("Bad pane num"));
         return (false);
     }
-    PlotPane pane_0 = (PlotPane)(pane_1 - 1);
 
     if (found_file) {
 
         // POST content immediately follows header
-        if (!installBMP (client, plot_b[pane_0], line, line_len))
+        if (!installBMP (client, plot_b[pane], line, line_len))
             return (false);             // error already in line[]
 
     } else if (found_none) {
 
         // restore pane
-        scheduleNewPlot(plot_ch[pane_0]);
+        scheduleNewPlot(plot_ch[pane]);
 
     } else {
         strcpy_P (line, garbcmd);
@@ -2992,109 +3001,133 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
  */
 static bool setWiFiPane (WiFiClient &client, char line[], size_t line_len)
 {
-    // first arg is 1-based pane number
-    int pane_1;
-    char *equals;               // 
-    if (sscanf (line, _FX("Pane%d"), &pane_1) != 1 || (equals = strchr(line,'=')) == NULL) {
+    // first arg is pane number
+    int pane;
+    char *equals;
+    if (sscanf (line, _FX("Pane%d"), &pane) != 1 || (equals = strchr(line,'=')) == NULL) {
         strcpy_P (line, garbcmd);
         return (false);
     }
-
-    // convert pane_1 to PlotPane
-    if (pane_1 < 1 || pane_1 > PANE_N) {
+    if (pane < PANE_0 || pane >= PANE_N) {
         strcpy (line, _FX("Bad pane num"));
         return (false);
     }
-    PlotPane pp = (PlotPane)(pane_1-1);
+    PlotPane pp = (PlotPane)(pane);
 
-    // convert remaining args to list of PlotChoices
-    PlotChoice pc[PLOT_CH_N];           // max size, only first n_pc in use
-    int n_pc = 0;
-    char *start = equals + 1;
-    for (char *tok = NULL; (tok = strtok (start, ",")) != NULL; start = NULL) {
+    // look for special case Pane0=off if on now
+    if (strcmp (line, _FX("Pane0=off")) == 0) {
+        if (SHOWING_PANE_0()) {
+            restoreNormPANE0();
+            startPlainText (client);
+            client.println (F("ok"));
+        } else {
+            strcpy (line, "Pane 0 is not on");
+            return (false);
+        }
+    } else {
 
-        // tok is within line, so copy it so we can use line for err msg
-        char tok_copy[30];
-        strncpy (tok_copy, tok, sizeof(tok_copy));
-        tok_copy[sizeof(tok_copy)-1] = '\0';
+        // convert remaining args to list of PlotChoices
+        PlotChoice pc[PLOT_CH_N];           // max size, only first n_pc in use
+        int n_pc = 0;
+        char *start = equals + 1;
+        for (char *tok = NULL; (tok = strtok (start, ",")) != NULL; start = NULL) {
 
-        // find tok in plot_names
-        PlotChoice tok_pc = PLOT_CH_NONE;
-        for (int i = 0; i < PLOT_CH_N; i++) {
-            if (strcmp (tok_copy, plot_names[i]) == 0) {
-                tok_pc = (PlotChoice)i;
-                break;
+            // tok is within line, so copy it so we can use line for err msg
+            char tok_copy[30];
+            strncpy (tok_copy, tok, sizeof(tok_copy));
+            tok_copy[sizeof(tok_copy)-1] = '\0';
+
+            // find tok in plot_names
+            PlotChoice tok_pc = PLOT_CH_NONE;
+            for (int i = 0; i < PLOT_CH_N; i++) {
+                if (strcmp (tok_copy, plot_names[i]) == 0) {
+                    tok_pc = (PlotChoice)i;
+                    break;
+                }
             }
+
+            // found?
+            if (tok_pc == PLOT_CH_NONE) {
+                snprintf (line, line_len, _FX("Unknown choice for pane %d: %s"), pane, tok_copy);
+                return (false);
+            }
+
+            // ok on PANE_0?
+            if (pp == PANE_0 && tok_pc != PLOT_CH_ADIF && tok_pc != PLOT_CH_CONTESTS
+                        && tok_pc != PLOT_CH_DXCLUSTER && tok_pc != PLOT_CH_POTA && tok_pc != PLOT_CH_SOTA) {
+                strcpy (line, _FX("not supported on Pane 0"));
+                return (false);
+            }
+
+            // in use elsewhere?
+            PlotPane inuse_pp = findPaneForChoice(tok_pc);
+            if (inuse_pp != PANE_NONE && inuse_pp != pp) {
+                snprintf (line, line_len, _FX("%s already set in pane %d"), tok_copy, (int)inuse_pp);
+                return (false);
+            }
+
+            // dx cluster?
+            if (tok_pc == PLOT_CH_DXCLUSTER && pp == PANE_1 && showNewDXDEWx()) {
+                snprintf (line, line_len, _FX("%s not allowed on pane 1"), tok_copy);
+                return (false);
+            }
+
+            // available?
+            if (!plotChoiceIsAvailable(tok_pc)) {
+                snprintf (line, line_len, _FX("%s is not available"), tok_copy);
+                return (false);
+            }
+
+            // room for more?
+            if (n_pc == PLOT_CH_N) {
+                snprintf (line, line_len, _FX("too many choices"));
+                return (false);
+            }
+
+            // ok!
+            pc[n_pc++] = tok_pc;
         }
 
-        // found?
-        if (tok_pc == PLOT_CH_NONE) {
-            snprintf (line, line_len, _FX("Unknown choice for pane %d: %s"), pane_1, tok_copy);
+        // require at least 1
+        if (n_pc == 0) {
+            snprintf (line, line_len, _FX("specify at least one choice for pane %d"), pane);
             return (false);
         }
 
-        // in use elsewhere?
-        PlotPane inuse_pp = findPaneForChoice(tok_pc);
-        if (inuse_pp != PANE_NONE && inuse_pp != pp) {
-            snprintf (line, line_len, _FX("%s already set in pane %d"), tok_copy, (int)inuse_pp+1);
-            return (false);
-        }
-        
-        // dx cluster?
-        if (tok_pc == PLOT_CH_DXCLUSTER && pp == PANE_1) {
-            snprintf (line, line_len, _FX("%s not allowed on pane 1"), tok_copy);
+        // build candidate rotset
+        uint32_t new_rotset = 0;
+        for (int i = 0; i < n_pc; i++)
+            new_rotset |= (1 << pc[i]);
+
+        // DXC must appear alone
+        if ((new_rotset & (1<<PLOT_CH_DXCLUSTER)) && (new_rotset & ~(1<<PLOT_CH_DXCLUSTER))) {
+            strcpy (line, _FX("DX Cluster must be alone"));
             return (false);
         }
 
-        // available?
-        if (!plotChoiceIsAvailable(tok_pc)) {
-            snprintf (line, line_len, _FX("%s is not available"), tok_copy);
+        // check memory usage ok
+        uint32_t new_sets[PANE_N];
+        memcpy (new_sets, plot_rotset, sizeof(new_sets));
+        new_sets[pp] = new_rotset;
+        if (isSatDefined() && !paneComboOk(new_sets)) {
+            snprintf (line, line_len, _FX("too many panes with satellite"));
             return (false);
         }
 
-        // room for more?
-        if (n_pc == PLOT_CH_N) {
-            snprintf (line, line_len, _FX("too many choices"));
+        // ok! engage new rotset and show first in list
+        plot_rotset[pp] = new_rotset;
+        if (!setPlotChoice (pp, pc[0])) {
+            snprintf (line, line_len, _FX("%s failed for pane %d"), plot_names[pc[0]], pane);
             return (false);
         }
+
+        // note
+        logPaneRotSet(pp, pc[0]);
 
         // ok!
-        pc[n_pc++] = tok_pc;
+        startPlainText (client);
+        reportPaneChoices (client, pp);
     }
-
-    // require at least 1
-    if (n_pc == 0) {
-        snprintf (line, line_len, _FX("specify at least one choice for pane %d"), pane_1);
-        return (false);
-    }
-
-    // build candidate rotset
-    uint32_t new_rotset = 0;
-    for (int i = 0; i < n_pc; i++)
-        new_rotset |= (1 << pc[i]);
-
-    // check ok
-    uint32_t new_sets[PANE_N];
-    memcpy (new_sets, plot_rotset, sizeof(new_sets));
-    new_sets[pp] = new_rotset;
-    if (isSatDefined() && !paneComboOk(new_sets)) {
-        snprintf (line, line_len, _FX("too many panes with satellite"));
-        return (false);
-    }
-
-    // ok! show first in list
-    plot_rotset[pp] = new_rotset;
-    if (!setPlotChoice (pp, pc[0])) {
-        snprintf (line, line_len, _FX("%s failed for pane %d"), plot_names[pc[0]], pane_1);
-        return (false);
-    }
-
-    // note
-    logPaneRotSet(pp, pc[0]);
-
-    // ok!
-    startPlainText (client);
-    reportPaneChoices (client, pp);
 
     // good
     return (true);
@@ -3833,7 +3866,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "get_sys.txt ",       getWiFiSys,            "get system stats" },
     { "get_time.txt ",      getWiFiTime,           "get current time" },
     { "get_voacap.txt ",    getWiFiVOACAP,         "get current band conditions matrix" },
-    { "set_adif?",          setWiFiADIF,           "file POST&pane=[123]|none" },
+    { "set_adif?",          setWiFiADIF,           "file POST&pane=[0123]|none" },
     { "set_alarm?",         setWiFiAlarm,          "state=off|armed&time=HR:MN" },
     { "set_auxtime?",       setWiFiAuxTime,        "format=[one_from_menu]" },
     { "set_bmp?",           setWiFiloadBMP,        "file POST&pane=[123]|none" },
@@ -3848,7 +3881,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
     { "set_newde?",         setWiFiNewDE,          "grid=AB12&lat=X&lng=Y&TZ=local-utc?call=AA0XYZ" },
     { "set_newdx?",         setWiFiNewDX,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
-    { "set_pane?",          setWiFiPane,           "Pane[123]=X,Y,Z... any from:" },
+    { "set_pane?",          setWiFiPane,           "Pane[0123]=X,Y,Z... any from:" },
     { "set_rotator?",       setWiFiRotator,        "state=[un]stop|[un]auto&az=X&el=X" },
     { "set_rss?",           setWiFiRSS,            "reset|add=X|network|interval=secs|on|off|file POST" },
     { "set_satname?",       setWiFiSatName,        "abc|none" },
@@ -4124,9 +4157,9 @@ void runNextDemoCommand()
     static const uint8_t item_probs[DEMO_N] = {
 
                 // 0
-        8,      // DEMO_PANE1
-        8,      // DEMO_PANE2
-        8,      // DEMO_PANE3
+        6,      // DEMO_PANE1
+        6,      // DEMO_PANE2
+        6,      // DEMO_PANE3
         4,      // DEMO_RSS
         9,      // DEMO_NEWDX
 
@@ -4149,6 +4182,7 @@ void runNextDemoCommand()
         5,      // DEMO_EME
         6,      // DEMO_AUXTIME
         1,      // DEMO_PSKMASK
+        6,      // DEMO_PANE0
     };
 
     // record previous choice to avoid repeats
@@ -4218,15 +4252,49 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
     bool ok = false;
 
     switch (choice) {
+    case DEMO_PANE0:
+        {
+            // toggle
+            if (SHOWING_PANE_0()) {
+                restoreNormPANE0();
+                ok = true;
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 0 restored"));
+            } else {
+                // select an appropriate choice for PANE_0
+                PlotChoice pc = PLOT_CH_NONE;
+                for (int i = 0; i < 5 && pc == PLOT_CH_NONE; i++) {
+                    PlotChoice pc_new;
+                    switch (i) {
+                    case 0: pc_new = PLOT_CH_ADIF; break;
+                    case 1: pc_new = PLOT_CH_CONTESTS; break;
+                    case 2: pc_new = PLOT_CH_POTA; break;
+                    case 3: pc_new = PLOT_CH_SOTA; break;
+                    case 4: pc_new = PLOT_CH_DXCLUSTER; break;
+                    }
+                    if (plotChoiceIsAvailable(pc_new) && findPaneForChoice(pc_new) == PANE_NONE)
+                        pc = pc_new;
+                }
+                ok = pc != PLOT_CH_NONE && setPlotChoice (PANE_0, pc);
+                if (ok) {
+                    plot_rotset[PANE_0] = (1 << pc);   // no auto rotation
+                    logPaneRotSet (PANE_0, pc);
+                    demoMsg (ok, choice, msg, msg_len, _FX("Pane 0 now %s"), plot_names[pc]);
+                } else
+                    demoMsg (ok, choice, msg, msg_len, _FX("Pane 0 no choices"));
+            }
+        }
+        break;
+
     case DEMO_PANE1:
         {
             PlotChoice pc = getAnyAvailableChoice();
             ok = setPlotChoice (PANE_1, pc);
             if (ok) {
                 plot_rotset[PANE_1] = (1 << pc);   // no auto rotation
-                savePlotOps();
-            }
-            demoMsg (ok, choice, msg, msg_len, _FX("Pane 1 %s"), plot_names[pc]);
+                logPaneRotSet (PANE_1, pc);
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 1 now %s"), plot_names[pc]);
+            } else
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 1 no choices"));
         }
         break;
 
@@ -4236,9 +4304,10 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
             ok = setPlotChoice (PANE_2, pc);
             if (ok) {
                 plot_rotset[PANE_2] = (1 << pc);   // no auto rotation
-                savePlotOps();
-            }
-            demoMsg (ok, choice, msg, msg_len, _FX("Pane 2 %s"), plot_names[pc]);
+                logPaneRotSet (PANE_2, pc);
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 2 now %s"), plot_names[pc]);
+            } else
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 2 no choices"));
         }
         break;
 
@@ -4248,9 +4317,10 @@ static bool runDemoChoice (DemoChoice choice, bool &slow, char msg[], size_t msg
             ok = setPlotChoice (PANE_3, pc);
             if (ok) {
                 plot_rotset[PANE_3] = (1 << pc);   // no auto rotation
-                savePlotOps();
-            }
-            demoMsg (ok, choice, msg, msg_len, _FX("Pane 3 %s"), plot_names[pc]);
+                logPaneRotSet (PANE_3, pc);
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 3 now %s"), plot_names[pc]);
+            } else
+                demoMsg (ok, choice, msg, msg_len, _FX("Pane 3 no choices"));
         }
         break;
 

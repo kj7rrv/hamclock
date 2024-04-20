@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <string>
 
 
 // N.B. keep showDefines() up to date
@@ -95,6 +96,7 @@ extern time_t usr_datetime;
 extern const char *getI2CFilename(void);
 extern bool GPIOOk(void);
 extern const char *hc_version;
+extern std::string our_dir;
 extern void doExit(void);
 extern bool testPassword (const char *category, const char *candidate_pw);
 

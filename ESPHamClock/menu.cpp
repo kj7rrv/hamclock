@@ -7,11 +7,11 @@
 // allow setting some/all these in Menu?
 #define MENU_TBM        2               // top and bottom margin
 #define MENU_RM         2               // right margin
-#define MENU_RH         10              // row height
+#define MENU_RH         11              // row height
 #define MENU_IS         6               // indicator size
 #define MENU_BB         4               // ok/cancel button horizontal border
 #define MENU_BDX        2               // ok/cancel button text horizontal offset
-#define MENU_BDY        1               // ok/cancel button text vertical offset
+#define MENU_BDY        2               // ok/cancel button text vertical offset
 #define MENU_TIMEOUT    MENU_TO         // timeout, millis
 #define MENU_FGC        RA8875_WHITE    // normal foreground color
 #define MENU_BGC        RA8875_BLACK    // normal background color

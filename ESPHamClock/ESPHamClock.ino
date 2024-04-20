@@ -32,7 +32,7 @@ TZInfo de_tz = {{75, 158, 50, 17}, DE_COLOR, 0};
 TZInfo dx_tz = {{75, 307, 50, 17}, DX_COLOR, 0};
 
 // NCDFX box, also used for brightness, on/off controls and space wx stats
-SBox NCDXF_b = {740, 0, 60, PLOTBOX_H};
+SBox NCDXF_b = {740, 0, 60, PLOTBOX123_H};
 
 // common "skip" button in several places
 SBox skip_b    = {730,10,55,35};
@@ -89,7 +89,8 @@ static SBox wifi_b;                             // wifi info
 static bool rssi_ignore;                        // allow op to ignore low wifi power
 static int rssi_avg;                            // running rssi mean
 #define RSSI_ALPHA 0.5F                         // rssi blending coefficient
-#define CSINFO_DROP     3                       // gap below cs_info
+#define CSINFO_DROP     2                       // gap below cs_info
+#define CSINFO_H        9                       // up/wifi/version box heights
 static MCPPoller onair_poller;                  // pin polling control
 
 // de and dx sun rise/set boxes, dxsrss_b also used for DX prefix depending on dxsrss
@@ -162,7 +163,6 @@ static void checkTouch(void);
 static void drawUptime(bool force);
 static void drawWiFiInfo(void);
 static void toggleLockScreen(void);
-static void drawDEFormatMenu(void);
 static void eraseDXPath(void);
 static void eraseDXMarker(void);
 static void drawRainbow (SBox &box);
@@ -305,11 +305,20 @@ void setup()
     char stack;
     stack_start = &stack;
 
+
+
     #if defined(_IS_ESP8266)
-    // life
+
+    // show life
     pinMode(LIFE_LED, OUTPUT);
     digitalWrite (LIFE_LED, HIGH);
+
+    // skip first line for debugger
+    Serial.println(_FX(""));
+
     #endif // _IS_ESP8266
+
+
 
     // this just reset the soft timeout, the hard timeout is still 6 seconds
     ESP.wdtDisable();
@@ -320,7 +329,7 @@ void setup()
     do {
         wdDelay(500);
     } while (!Serial);
-    Serial.printf("\nHamClock version %s platform %s\n", hc_version, platform);
+    Serial.printf(_FX("HamClock version %s platform %s\n"), hc_version, platform);
 
     // show config
     showDefines();
@@ -437,9 +446,9 @@ void setup()
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (RA8875_WHITE);
     tft.setCursor (10,100);
-    tft.print("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    tft.print(_F("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
     tft.setCursor (10,120);
-    tft.print("abcdefghijklmnopqrstuvwxyz");
+    tft.print(_F("abcdefghijklmnopqrstuvwxyz"));
     tft.setCursor (10,140);
     tft.print(R"(0123456789 ~!@#$%^&*()_+{}|:"<>? `-=[]\;',./)");
 
@@ -460,6 +469,20 @@ void setup()
 
     // run Setup at full brighness
     clockSetup();
+
+    // init pan and zoom
+    if (!NVReadUInt8 (NV_ZOOM, &pan_zoom.zoom)) {
+        pan_zoom.zoom = MIN_ZOOM;
+        NVWriteUInt8 (NV_ZOOM, pan_zoom.zoom);
+    }
+    if (!NVReadInt16 (NV_PANX, &pan_zoom.pan_x)) {
+        pan_zoom.pan_x = 0;
+        NVWriteInt16 (NV_PANX, pan_zoom.pan_x);
+    }
+    if (!NVReadInt16 (NV_PANY, &pan_zoom.pan_y)) {
+        pan_zoom.pan_y = 0;
+        NVWriteInt16 (NV_PANY, pan_zoom.pan_y);
+    }
 
     // initialize MCP23017, fails gracefully so just log whether found
     found_mcp = mcp.begin_I2C();
@@ -500,8 +523,8 @@ void setup()
     // position the map box in lower right -- border is drawn outside
     map_b.w = EARTH_W;
     map_b.h = EARTH_H;
-    map_b.x = tft.width() - map_b.w - 1;        // 1 in from edge for border
-    map_b.y = tft.height() - map_b.h - 1;       // 1 in from edge for border
+    map_b.x = tft.width() - map_b.w - 1;        // allow 1 for right border
+    map_b.y = tft.height() - map_b.h - 1;       // allow 1 for bottom border
 
     // position View button in upper left
     view_btn_b.x = map_b.x;
@@ -515,17 +538,17 @@ void setup()
     cs_info.box.w = 230;
     cs_info.box.h = 52;
 
-    // wifi box
-    wifi_b.x = cs_info.box.x + 68;              // a little past Uptime
+    // wifi info box
+    wifi_b.x = cs_info.box.x + 66;              // a little past Uptime
     wifi_b.y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
-    wifi_b.w = 114;
-    wifi_b.h = 8;
+    wifi_b.w = 116;
+    wifi_b.h = CSINFO_H;
 
     // version box
     version_b.w = 46;
     version_b.x = cs_info.box.x+cs_info.box.w-version_b.w;
     version_b.y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
-    version_b.h = 8;
+    version_b.h = CSINFO_H;
 
     // start WiFi, maps and set de_ll.lat_d/de_ll.lng_d from geolocation or gpsd as desired -- uses tftMsg()
     initSys();
@@ -553,23 +576,24 @@ void setup()
     initPlotPanes();
 
     // init rest of de info
-    de_info_b.x = 1;
+    de_info_b.x = 1;                    // inside the border
     de_info_b.y = 185;                  // below DE: line
     de_info_b.w = map_b.x - 2;          // just inside border
-    de_info_b.h = 110;
+    de_info_b.h = 109;                  // just above the DE-DX border at y 294
     uint16_t devspace = de_info_b.h/DE_INFO_ROWS;
     askde_b.x = de_info_b.x + 1;
     askde_b.y = de_info_b.y;
     askde_b.w = de_info_b.w - 2;
     askde_b.h = 3*devspace;
-    desrss_b.x = de_info_b.x + de_info_b.w/2;
-    desrss_b.y = de_info_b.y + 2*devspace;
-    desrss_b.w = de_info_b.w/2;
-    desrss_b.h = devspace;
     de_maid_b.x = de_info_b.x;
-    de_maid_b.y = de_info_b.y+(DE_INFO_ROWS-1)*de_info_b.h/DE_INFO_ROWS;
+    de_maid_b.y = de_info_b.y + 2*devspace;
     de_maid_b.w = de_info_b.w/2;
     de_maid_b.h = devspace;
+    desrss_b.x = de_info_b.x + de_info_b.w/2;
+    desrss_b.y = de_maid_b.y;
+    desrss_b.w = de_info_b.w/2;
+    desrss_b.h = devspace;
+
     if (!NVReadUInt8(NV_DE_SRSS, &desrss)) {
         desrss = false;
         NVWriteUInt8(NV_DE_SRSS, desrss);
@@ -593,8 +617,8 @@ void setup()
         show_lp = false;
         NVWriteUInt8 (NV_LP, show_lp);
     }
-    dx_info_b.x = 1;
-    dx_info_b.y = 295;
+    dx_info_b.x = 1;                    // inside the border
+    dx_info_b.y = 295;                  // DE-DX border at y 294
     dx_info_b.w = de_info_b.w;
     dx_info_b.h = 184;
     uint16_t dxvspace = dx_info_b.h/DX_INFO_ROWS;
@@ -741,7 +765,15 @@ void loop()
  */
 void drawOneTimeDE()
 {
-    tft.drawLine (0, map_b.y-1, map_b.x, map_b.y-1, GRAY);                        // top
+    if (SHOWING_PANE_0())
+        return;
+
+    // outside the box
+    // N.B. de_info_b does not include the DE: line
+    uint16_t top_y = map_b.y - 1;                       // top border y
+    uint16_t bot_y = de_info_b.y + de_info_b.h;         // yes, we want 1 farther for bottom border line
+    tft.fillRect (de_info_b.x-1, top_y, de_info_b.w+2, bot_y - top_y + 1, RA8875_BLACK);
+    tft.drawRect (de_info_b.x-1, top_y, de_info_b.w+2, bot_y - top_y + 1, GRAY);
 
     selectFontStyle (BOLD_FONT, SMALL_FONT);
     tft.setTextColor(DE_COLOR);
@@ -758,6 +790,10 @@ void drawOneTimeDE()
 
 static void drawDXMarker (bool force)
 {
+    // check for being off zoomed mercator map
+    if (dx_c.s.x == 0)
+        return;
+
     if (force || showDXMarker()) {
         tft.fillCircle (dx_c.s.x, dx_c.s.y, DX_R, DX_COLOR);
         tft.drawCircle (dx_c.s.x, dx_c.s.y, DX_R, RA8875_BLACK);
@@ -770,12 +806,16 @@ static void drawDXMarker (bool force)
  */
 void drawOneTimeDX()
 {
+    if (SHOWING_PANE_0())
+        return;
+
     if (dx_info_for_sat) {
         // sat
         drawSatPass();
     } else {
-        // fresh
-        tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK); // avoid borders
+        // outside the box
+        tft.fillRect (dx_info_b.x-1, dx_info_b.y-1, dx_info_b.w+2, dx_info_b.h+2, RA8875_BLACK);
+        tft.drawRect (dx_info_b.x-1, dx_info_b.y-1, dx_info_b.w+2, dx_info_b.h+2, GRAY);
 
         // title
         selectFontStyle (BOLD_FONT, SMALL_FONT);
@@ -816,7 +856,6 @@ void initScreen()
     tft.drawLine (0, map_b.y-1, 0, tft.height()-1, GRAY);                               // left
     tft.drawLine (tft.width()-1, map_b.y-1, tft.width()-1, tft.height()-1, GRAY);       // right
     tft.drawLine (map_b.x-1, map_b.y-1, map_b.x-1, tft.height()-1, GRAY);               // left of map
-    tft.drawLine (0, dx_info_b.y, map_b.x-1, dx_info_b.y, GRAY);                        // de/dx divider
 
     // one-time info
     setNewSatCircumstance();
@@ -913,7 +952,7 @@ static void checkTouch()
 
     drainTouch();
 
-    // check all touch locations, ones that can be over map checked first
+    // check all touch locations, ones that can be over map checked first and beware showing PANE_0
     LatLong ll;
     if (inBox (s, view_btn_b)) {
         // set flag to draw map menu at next opportunity
@@ -924,30 +963,20 @@ static void checkTouch()
         eraseDXPath();                  // declutter to emphasize sat track
         drawAllSymbols(true);
     } else if (!overViewBtn(s, DX_R) && s2ll (s, ll)) {
-        // new DE or DX.
+        // everywhere else over the map run the popup
         roundLL (ll);
-        int mcl;
-        if (tt == TT_HOLD) {
-            // map hold: update DE
-            // assume op wants city, if showing
-            if (names_on)
-                (void) getNearestCity (ll, ll, mcl);
-            newDE (ll, NULL);
-        } else {
-            // just an ordinary map location: update DX
-            // assume op wants city, if showing
-            if (names_on)
-                (void) getNearestCity (ll, ll, mcl);
-            newDX (ll, NULL, NULL);
-        }
-    } else if (inBox (s, de_title_b)) {
+        map_popup.pending = true;
+        map_popup.s = s;
+        map_popup.ll = ll;
+        map_popup.tt = tt;
+    } else if (!SHOWING_PANE_0() && inBox (s, de_title_b)) {
         drawDEFormatMenu();
     } else if (inBox (s, stopwatch_b)) {
         // check this before checkClockTouch
         checkStopwatchTouch(tt);
     } else if (checkClockTouch(s)) {
         updateClocks(true);
-    } else if (inBox (s, de_tz.box)) {
+    } else if (!SHOWING_PANE_0() && inBox (s, de_tz.box)) {
         if (TZMenu (de_tz, de_ll)) {
             NVWriteInt32 (NV_DE_TZ, de_tz.tz_secs);
             drawTZ (de_tz);
@@ -956,12 +985,12 @@ static void checkTouch()
             scheduleNewPlot(PLOT_CH_BC);
         }
         drawDEInfo();   // erase regardless
-    } else if (!dx_info_for_sat && inBox (s, dx_tz.box)) {
+    } else if (!SHOWING_PANE_0() && !dx_info_for_sat && inBox (s, dx_tz.box)) {
         if (TZMenu (dx_tz, dx_ll)) {
             NVWriteInt32 (NV_DX_TZ, dx_tz.tz_secs);
             drawTZ (dx_tz);
         }
-        drawDXInfo();   // erase regardless
+        drawDXInfo();   // restore regardless
     } else if (checkCallsignTouchFG(s)) {
         NVWriteUInt16 (NV_CALL_FG_COLOR, cs_info.fg_color);
         drawCallsign (false);   // just foreground
@@ -969,13 +998,13 @@ static void checkTouch()
         NVWriteUInt16 (NV_CALL_BG_COLOR, cs_info.bg_color);
         NVWriteUInt8 (NV_CALL_BG_RAINBOW, cs_info.bg_rainbow);
         drawCallsign (true);    // fg and bg
-    } else if (!dx_info_for_sat && checkPathDirTouch(s)) {
+    } else if (!SHOWING_PANE_0() && !dx_info_for_sat && checkPathDirTouch(s)) {
         show_lp = !show_lp;
         NVWriteUInt8 (NV_LP, show_lp);
         drawDXInfo ();
         scheduleNewPlot(PLOT_CH_BC);
         scheduleNewVOACAPMap(prop_map);
-    } else if (inBox (s, askde_b)) {
+    } else if (!SHOWING_PANE_0() && inBox (s, askde_b)) {
         // N.B. askde overlaps the desrss box
         if (de_time_fmt == DETIME_INFO && inBox (s, desrss_b)) {
             desrss = !desrss;
@@ -989,7 +1018,7 @@ static void checkTouch()
             else
                 drawDEInfo();
         }
-    } else if (!dx_info_for_sat && inBox (s, askdx_b)) {
+    } else if (!SHOWING_PANE_0() && !dx_info_for_sat && inBox (s, askdx_b)) {
         // N.B. askdx overlaps the dxsrss box
         if (inBox (s, dxsrss_b)) {
             dxsrss = (dxsrss+1)%DXSRSS_N;
@@ -1003,8 +1032,10 @@ static void checkTouch()
             } else
                 drawDXInfo();
         }
-    } else if (!dx_info_for_sat && inCircle(s, dx_marker_c)) {
+    } else if (!SHOWING_PANE_0() && !dx_info_for_sat && inCircle(s, dx_marker_c)) {
         newDX (dx_ll, NULL, NULL);
+    } else if (SHOWING_PANE_0() && checkPlotTouch(s, PANE_0, tt)) {
+        updateWiFi();
     } else if (checkPlotTouch(s, PANE_1, tt)) {
         updateWiFi();
     } else if (checkPlotTouch(s, PANE_2, tt)) {
@@ -1013,10 +1044,10 @@ static void checkTouch()
         updateWiFi();
     } else if (inBox (s, NCDXF_b)) {
         doNCDXFBoxTouch(s);
-    } else if (checkSatNameTouch(s)) {
+    } else if (!SHOWING_PANE_0() && checkSatNameTouch(s)) {
         dx_info_for_sat = querySatSelection();
         initScreen();
-    } else if (dx_info_for_sat && inBox (s, dx_info_b)) {
+    } else if (!SHOWING_PANE_0() && dx_info_for_sat && inBox (s, dx_info_b)) {
         drawDXSatMenu(s);
     } else if (inBox (s, version_b)) {
         char nv[50];
@@ -1314,6 +1345,10 @@ bool checkCallsignTouchBG (SCoord &b)
  */
 static void eraseDXMarker()
 {
+    // check for being off zoomed mercator map
+    if (dx_c.s.x == 0)
+        return;
+
     eraseSCircle (dx_c);
 
     // restore sat name in case hit
@@ -1438,7 +1473,7 @@ void drawDXPath ()
     // Serial.printf (_FX("n_gpath %u -> %u\n"), MAX_GPATH, n_gpath);
     gpath = (SCoord *) realloc (gpath, n_gpath * sizeof(SCoord));
     if (!gpath && n_gpath > 0)
-        fatalError("realloc gpath: %d", n_gpath);
+        fatalError(_FX("realloc gpath: %d"), n_gpath);
 
 #else // UNIX
 
@@ -1708,7 +1743,7 @@ static void drawRainbow (SBox &box)
     tft.graphicsMode();
     for (uint16_t x = box.x; x < box.x+box.w; x++) {
         uint8_t h = 255*((x+x0-box.x)%box.w)/box.w;
-        tft.fillRect (x, box.y, 1, box.h, HSV565(h,255,255));
+        tft.fillRect (x, box.y, 1, box.h, HSV_2_RGB565(h,255,255));
     }
 }
 
@@ -1735,7 +1770,9 @@ static void drawVersion(bool force)
     snprintf (line, sizeof(line), _FX("Ver %s"), hc_version);
     uint16_t vw = getTextWidth (line);
     tft.setTextColor (col);
-    tft.setCursor (version_b.x+version_b.w-vw, version_b.y);        // right justify
+    tft.setCursor (version_b.x+version_b.w-vw, version_b.y+1);        // right justify
+    fillSBox (version_b, RA8875_BLACK);
+    // drawSBox (version_b, RA8875_GREEN);         // RBF
     tft.print (line);
 }
 
@@ -1754,62 +1791,96 @@ static void drawWiFiInfo()
     char str[40];
     str[0] = '\0';
 
-    // toggle rssi and ip, or just ip if no wifi
-    static bool rssi_ip_toggle;
-    if (rssi_ip_toggle && millis() > 30000) {   // ignore first 30 seconds, reports of flakeness
+    // rotate through several display options
 
-        // show RSSI, if working, and show meter if too low and not ignored
+    typedef enum {
+        WDSP_RSSI,                      // show RSSI
+        WDSP_LIP,                       // show local IP
+        WDSP_PIP                        // show public IP
+    } WiFiDisplay_t;
 
-        static int prev_logv;           // for only logging large changes
+    static WiFiDisplay_t wdsp = WDSP_RSSI;
 
-        // read
-        int rssi;
-        if (readWiFiRSSI(rssi)) {
+    switch (wdsp) {
 
-            // Serial.printf ("**************************** %d\n", rssi);
+    case WDSP_RSSI: {
 
-            // blend, or use as-is if first time
-            rssi_avg = prev_logv == 0 ? rssi : roundf(rssi*RSSI_ALPHA + rssi_avg*(1-RSSI_ALPHA));
+            static int prev_logv;           // for only logging large changes
 
-            // show meter if too low unless ignored
-            if (!rssi_ignore && rssi_avg < MIN_WIFI_RSSI)
-                rssi_avg = runWiFiMeter (true, rssi_ignore);     // full effect of last reading
+            // read
+            int rssi;
+            if (millis() > 30000 && readWiFiRSSI(rssi)) {       // initial ignore, reports of flakeness
 
-            // display value
-            snprintf (str, sizeof(str), _FX("  WiFi %4d dBm"), rssi_avg);
-            tft.setTextColor (rssi_avg < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
+                // Serial.printf ("**************************** %d\n", rssi);
 
-            // log if changed more than a few db
-            if (abs(rssi_avg-prev_logv) > 3) {
-                Serial.printf (_FX("Up %lu s: RSSI %d\n"), millis()/1000U, rssi_avg);
-                prev_logv = rssi_avg;
+                // blend, or use as-is if first time
+                rssi_avg = prev_logv == 0 ? rssi : roundf(rssi*RSSI_ALPHA + rssi_avg*(1-RSSI_ALPHA));
+
+                // show meter if too low unless ignored
+                if (!rssi_ignore && rssi_avg < MIN_WIFI_RSSI)
+                    rssi_avg = runWiFiMeter (true, rssi_ignore);     // full effect of last reading
+
+                // display value
+                snprintf (str, sizeof(str), _FX("WiFi %4d dBm"), rssi_avg);
+                tft.setTextColor (rssi_avg < MIN_WIFI_RSSI ? RA8875_RED : GRAY);
+
+                // log if changed more than a few db
+                if (abs(rssi_avg-prev_logv) > 3) {
+                    Serial.printf (_FX("Up %u s: RSSI %d\n"), millis()/1000U, rssi_avg);
+                    prev_logv = rssi_avg;
+                }
             }
         }
 
-    } else {
+        // rotate next
+        wdsp = WDSP_LIP;
 
-        // show IP
-        IPAddress ip = WiFi.localIP();
-        bool net_ok = ip[0] != '\0';
-        if (net_ok) {
-            snprintf (str, sizeof(str), _FX("IP %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
+        break;
+
+    case WDSP_LIP: {
+
+            IPAddress ip = WiFi.localIP();
+            bool net_ok = ip[0] != '\0';
+            if (net_ok) {
+                snprintf (str, sizeof(str), _FX("LIP %d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
+                tft.setTextColor (GRAY);
+            } else {
+                strcpy (str, _FX("No Network"));
+                tft.setTextColor (RA8875_RED);
+            }
+        }
+
+        // rotate next
+        wdsp = WDSP_PIP;
+
+        break;
+
+    case WDSP_PIP:
+
+        if (remote_addr[0]) {
+            snprintf (str, sizeof(str), _FX("PIP %s"), remote_addr);
             tft.setTextColor (GRAY);
         } else {
-            strcpy (str, "    No Network");
+            strcpy (str, _FX("No Network"));
             tft.setTextColor (RA8875_RED);
         }
+
+        // rotate next
+        wdsp = WDSP_RSSI;
+
+        break;
+
     }
 
+    // show if successful
     if (str[0]) {
         selectFontStyle (LIGHT_FONT, FAST_FONT);
-        tft.fillRect (wifi_b.x, wifi_b.y-1, wifi_b.w, wifi_b.h, RA8875_BLACK);
-        tft.setCursor (wifi_b.x, wifi_b.y);
+        uint16_t sw = getTextWidth(str);
+        fillSBox (wifi_b, RA8875_BLACK);
+        // drawSBox (wifi_b, RA8875_GREEN);                // RBF
+        tft.setCursor (wifi_b.x+(wifi_b.w-sw)/2, wifi_b.y+1);
         tft.print(str);
     }
-
-    // toggle
-    rssi_ip_toggle = !rssi_ip_toggle;
-
 }
 
 static void prepUptime()
@@ -1818,10 +1889,11 @@ static void prepUptime()
 
     const uint16_t x = cs_info.box.x;
     const uint16_t y = cs_info.box.y+cs_info.box.h+CSINFO_DROP;
-    tft.fillRect (x+11, y-1, 50, 11, RA8875_BLACK);
+    tft.fillRect (x+11, y, 50, CSINFO_H, RA8875_BLACK);         // Skip "Up"
+    // tft.drawRect (x+11, y, 50, CSINFO_H, RA8875_GREEN);         // RBF
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     tft.setTextColor (GRAY);
-    tft.setCursor (x, y);
+    tft.setCursor (x, y+1);
     tft.print (F("Up "));
 }
 
@@ -2089,7 +2161,7 @@ void tftMsg (bool verbose, uint32_t dwell_ms, const char *fmt, ...)
         buf[--l] = '\0';
 
     // log
-    Serial.println(buf);
+    Serial.printf (_FX("TFTMSG: %s\n"), buf);
 
     // done unless verbose
     if (!verbose)
@@ -2178,18 +2250,61 @@ void drawScreenLock()
 
 /* offer menu of DE format options and engage selection
  */
-static void drawDEFormatMenu()
+void drawDEFormatMenu()
 {
-    // menu of each DETIME_*
-    #define _MI_INDENT  5
-    MenuItem mitems[DETIME_N] = {
-        {MENU_1OFN, de_time_fmt == DETIME_INFO,        1, _MI_INDENT, detime_names[DETIME_INFO]},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      1, _MI_INDENT, detime_names[DETIME_ANALOG]},
-        {MENU_1OFN, de_time_fmt == DETIME_CAL,         1, _MI_INDENT, detime_names[DETIME_CAL]},
-        {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, 1, _MI_INDENT, detime_names[DETIME_ANALOG_DTTM]},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  1, _MI_INDENT, detime_names[DETIME_DIGITAL_12]},
-        {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  1, _MI_INDENT, detime_names[DETIME_DIGITAL_24]},
+    // minor and Major indent
+    const int mi = 2;
+    const int Mi = 8;
+
+    MenuItem mitems[13] = {
+
+        // outer menu is whether to display the DE pane or use both DE+DX for a pane choice
+        {MENU_1OFN, !SHOWING_PANE_0(), 1, mi, "DE format:"},
+
+            // top submenu is list of de display formats
+            {MENU_1OFN, de_time_fmt == DETIME_INFO,        2, Mi, detime_names[DETIME_INFO]},
+            {MENU_1OFN, de_time_fmt == DETIME_ANALOG,      2, Mi, detime_names[DETIME_ANALOG]},
+            {MENU_1OFN, de_time_fmt == DETIME_CAL,         2, Mi, detime_names[DETIME_CAL]},
+            {MENU_1OFN, de_time_fmt == DETIME_ANALOG_DTTM, 2, Mi, detime_names[DETIME_ANALOG_DTTM]},
+            {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_12,  2, Mi, detime_names[DETIME_DIGITAL_12]},
+            {MENU_1OFN, de_time_fmt == DETIME_DIGITAL_24,  2, Mi, detime_names[DETIME_DIGITAL_24]},
+
+        {MENU_1OFN, SHOWING_PANE_0(), 1, mi, "Data Panes:"},
+
+            // bottom submenu is list of possible pane choices, see next.
+            // N.B. don't include ones already in play in the top set
+
     };
+
+    PlotPane pp = findPaneForChoice (PLOT_CH_ADIF);
+    bool available =  plotChoiceIsAvailable(PLOT_CH_ADIF) && (pp == PANE_NONE || pp == PANE_0);
+    MenuFieldType type = available ? MENU_AL1OFN : MENU_IGNORE;
+    mitems[8] = {type, !!(plot_rotset[PANE_0] & (1<<PLOT_CH_ADIF)), 3, Mi, plot_names[PLOT_CH_ADIF]};
+
+
+    pp = findPaneForChoice (PLOT_CH_CONTESTS);
+    available = plotChoiceIsAvailable(PLOT_CH_CONTESTS) && (pp == PANE_NONE || pp == PANE_0);
+    type = available ? MENU_AL1OFN : MENU_IGNORE;
+    mitems[9] = {type, !!(plot_rotset[PANE_0] & (1<<PLOT_CH_CONTESTS)), 3, Mi, plot_names[PLOT_CH_CONTESTS]};
+
+
+    pp = findPaneForChoice (PLOT_CH_DXCLUSTER);
+    available = plotChoiceIsAvailable(PLOT_CH_DXCLUSTER) && (pp == PANE_NONE || pp == PANE_0);
+    type = available ? MENU_AL1OFN : MENU_IGNORE;
+    mitems[10] = {type, !!(plot_rotset[PANE_0] & (1<<PLOT_CH_DXCLUSTER)), 3,Mi,plot_names[PLOT_CH_DXCLUSTER]};
+
+
+    pp = findPaneForChoice (PLOT_CH_POTA);
+    available = plotChoiceIsAvailable(PLOT_CH_POTA) && (pp == PANE_NONE || pp == PANE_0);
+    type = available ? MENU_AL1OFN : MENU_IGNORE;
+    mitems[11] = {type, !!(plot_rotset[PANE_0] & (1<<PLOT_CH_POTA)), 3, Mi, plot_names[PLOT_CH_POTA]};
+
+
+    pp = findPaneForChoice (PLOT_CH_SOTA);
+    available = plotChoiceIsAvailable(PLOT_CH_SOTA) && (pp == PANE_NONE || pp == PANE_0);
+    type = available ? MENU_AL1OFN : MENU_IGNORE;
+    mitems[12] = {type, !!(plot_rotset[PANE_0] & (1<<PLOT_CH_SOTA)), 3, Mi, plot_names[PLOT_CH_SOTA]};
+
 
     // create a box for the menu
     SBox menu_b;
@@ -2201,18 +2316,73 @@ static void drawDEFormatMenu()
     SBox ok_b;
     MenuInfo menu = {menu_b, ok_b, false, false, 1, NARRAY(mitems), mitems};
     if (runMenu (menu)) {
-        // capture and save new value
-        for (int i = 0; i < DETIME_N; i++) {
-            if (mitems[i].set) {
-                de_time_fmt = i;
-                break;
+
+        // capture and save new state
+
+        if (mitems[0].set) {
+
+            // set desired detime format
+
+            int new_fmt = -1;
+            for (int i = 0; i < DETIME_N; i++) {
+                if (mitems[i+1].set) {
+                    new_fmt = i;
+                    break;
+                }
+            }
+
+            // paranoid
+            if (new_fmt < 0)
+                fatalError (_FX("drawDEFormatMenu: No de fmt"));
+
+            // set fmt and turn off PANE_0
+            de_time_fmt = (uint8_t)new_fmt;
+            NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
+            plot_ch[PANE_0] = PLOT_CH_NONE;
+            plot_rotset[PANE_0] = 0;
+
+        } else {
+
+            // get new collection of plot choices
+            uint32_t new_rotset = 0;
+            if (mitems[8].set)
+                new_rotset |= (1 << PLOT_CH_ADIF);
+            if (mitems[9].set)
+                new_rotset |= (1 << PLOT_CH_CONTESTS);
+            if (mitems[10].set)
+                new_rotset |= (1 << PLOT_CH_DXCLUSTER);
+            if (mitems[11].set)
+                new_rotset |= (1 << PLOT_CH_POTA);
+            if (mitems[12].set)
+                new_rotset |= (1 << PLOT_CH_SOTA);
+
+            // paranoid
+            if (new_rotset == 0)
+                fatalError (_FX("drawDEFormatMenu: No rotset"));
+
+            if (!enforceDXCAlone (plot_b[PANE_0], new_rotset)) {
+
+                // ok!
+                plot_rotset[PANE_0] = new_rotset;
+
+                // pick any one as current
+                for (int i = 0; i < PLOT_CH_N; i++) {
+                    if (plot_rotset[PANE_0] & (1 << i)) {
+                        plot_ch[PANE_0] = (PlotChoice) i;
+                        break;
+                    }
+                }
             }
         }
-        NVWriteUInt8(NV_DE_TIMEFMT, de_time_fmt);
     }
 
-    // draw new state, even if no change in order to erase
-    drawDEInfo();
+    // set PANE_0 choice, even if none
+    setPlotChoice (PANE_0, plot_ch[PANE_0]);
+    logPaneRotSet (PANE_0, plot_ch[PANE_0]);
+
+    // redraw if normal
+    if (!SHOWING_PANE_0())
+        restoreNormPANE0();
 }
 
 /* resume using nearestPrefix
@@ -2493,13 +2663,14 @@ bool timesUp (uint32_t *prev, uint32_t atleast_dt)
 /* called to post our diagnostics files to the server for later analysis.
  * include the ip in the name which identifies us using our public IP address.
  */
-void postDiags (void)
+static void postDiags (void)
 {
-    WiFiClient pd;
+    WiFiClient pd_client;
+    const char *rsp_msg;
 
-    // build filename relative to hamclock server root dir and id
+    // build a unique filename relative to hamclock server root dir and id
     char fn[300];
-    snprintf (fn, sizeof(fn), "/ham/HamClock/diagnostic-logs/dl-%lld-%s-%u.txt", (long long)myNow(),
+    snprintf (fn, sizeof(fn), _FX("/ham/HamClock/diagnostic-logs/dl-%lld-%s-%u.txt"), (long long)myNow(),
                                                 remote_addr, ESP.getChipId());
 
     // get total size of all diag files for content length
@@ -2515,40 +2686,79 @@ void postDiags (void)
     if (stat (EEPROM.getFilename(), &s) == 0)
         cl += s.st_size;
 
-    Serial.printf ("DP: %d %s\n", cl, fn);
+    Serial.printf ("PD: %d %s\n", cl, fn);
 
-    if (pd.connect (backend_host, backend_port)) {
+    if (pd_client.connect (backend_host, backend_port)) {
 
         char buf[4096];
         int buf_l = 0;
 
         // hand-crafted POST header, move to its own func if ever used for something else
-        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, "POST %s HTTP\r\n", fn);
-        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, "Content-Length: %d\r\n", cl);
-        pd.print (buf);
-        sendUserAgent (pd);
-        pd.print ("\r\n");
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("POST %s HTTP\r\n"), fn);
+        buf_l += snprintf (buf+buf_l, sizeof(buf)-buf_l, _FX("Content-Length: %d\r\n"), cl);
+        pd_client.print (buf);
+        sendUserAgent (pd_client);
+        pd_client.print ("\r\n");
 
         // just concat each file including eeprom
         for (int i = 0; i <= N_DIAG_FILES; i++) {                       // 1 more for eeprom
             std::string dp = i < N_DIAG_FILES ? our_dir + diag_files[i] : EEPROM.getFilename();
             FILE *fp = fopen (dp.c_str(), "r");
             if (fp) {
-                Serial.printf ("DP:   %s\n", dp.c_str());
+                Serial.printf ("PD:   %s\n", dp.c_str());
                 int n_r;
                 while ((n_r = fread (buf, 1, sizeof(buf), fp)) > 0)
-                    pd.write ((uint8_t*)buf, n_r);
+                    pd_client.write ((uint8_t*)buf, n_r);
                 fclose (fp);
             }
         }
         
-        pd.stop();
+        pd_client.stop();
+        rsp_msg = _FX("Success");
 
-    } else
-        Serial.printf ("postDiags() failed to connect to %s:%d\n", backend_host, backend_port);
+    } else {
 
+        Serial.printf (_FX("postDiags() failed to connect to %s:%d\n"), backend_host, backend_port);
+        rsp_msg  = _FX("Fail -- please try again");
+    }
+
+    // show ack or err
+    eraseScreen();
+    uint16_t ml = getTextWidth(rsp_msg);
+    tft.setCursor ((800-ml)/2, 200);
+    tft.print (rsp_msg);
+    wdDelay(2000);
 }
+
 #endif // _IS_UNIX
+
+/* attempt to open the given web page in a new browser tab.
+ * use xdg-open to engage a local browser and set liveweb_openurl for our instance.
+ *   on macos: sudo port install xdg-utils
+ *   on ubuntu or RPi: sudo apt install xdg-utils
+ *   on redhat: sudo yum install xdg-utils
+ */
+void openURL (const char *url)
+{
+#if defined(_IS_UNIX)
+
+#if !defined(_WEB_ONLY)
+    // try running xdg-open
+    StackMalloc cmd_mem(strlen(url) + 50);
+    char *cmd = (char *) cmd_mem.getMem();
+    snprintf (cmd, cmd_mem.getSize(), "xdg-open %s &", url);
+    if ((system (cmd) >> 8) != 0)
+        Serial.printf (_FX("URL: fail: %s\n"), url);
+    else
+        Serial.printf (_FX("URL: ok: %s\n"), url);
+#endif // !_WEB_ONLY
+
+    // try telling our own page -- liveweb will free() once it has been sent
+    if (!liveweb_openurl)
+        liveweb_openurl = strdup (url);
+
+#endif // _IS_UNIX
+}
 
 
 /* shutdown helper that asks Are You Sure in the given box.
@@ -2755,43 +2965,43 @@ static void shutdown(void)
         break;
  #if defined(_IS_UNIX)
     case _SDC_EXIT:
-        if (askPasswd ("exit", true)) {
+        if (askPasswd (_FX("exit"), true)) {
             Serial.print (_FX("Exiting\n"));
             doExit();
         }
         // resume normal ops
-        break;                  // ;-)
+        break;
     case _SDC_POSTDIAGS:
         postDiags();
         initScreen();
         break;
     case _SDC_REBOOT:
-        if (askPasswd ("reboot", true)) {
+        if (askPasswd (_FX("reboot"), true)) {
             eraseScreen();
             selectFontStyle (BOLD_FONT, SMALL_FONT);
-            drawStringInBox ("Rebooting...", sdctl[3].box, true, sdctl[3].color);
-            tft.drawPR();            // forces immediate effect
-            Serial.print ("Rebooting\n");
-            int x = system ("sudo reboot");
+            drawStringInBox (_FX("Rebooting..."), sdctl[3].box, true, sdctl[3].color);
+            tft.drawPR();                                       // forces immediate effect
+            Serial.print (_FX("Rebooting\n"));
+            int x = system (_FX("/usr/sbin/reboot"));           // presumes suid root
             if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
                 doExit();
             else
-                Serial.printf ("system(reboot) returns %d\n", x);
+                Serial.printf (_FX("system(reboot) returns %d\n"), x);
         }
         // resume normal ops
         break;
     case _SDC_SHUTDOWN:
-        if (askPasswd ("shutdown", true)) {
+        if (askPasswd (_FX("shutdown"), true)) {
             eraseScreen();
             selectFontStyle (BOLD_FONT, SMALL_FONT);
-            drawStringInBox ("Shutting down...", sdctl[4].box, true, sdctl[4].color);
+            drawStringInBox (_FX("Shutting down..."), sdctl[4].box, true, sdctl[4].color);
             tft.drawPR();            // forces immediate effect
-            Serial.print ("Shutting down\n");
-            int x = system ("sudo poweroff || sudo halt");
+            Serial.print (_FX("Shutting down\n"));
+            int x = system (_FX("/usr/sbin/poweroff || /usr/sbin/halt"));           // presumes suid root
             if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
                 doExit();
             else
-                Serial.printf ("system(poweroff) returns %d\n", x);
+                Serial.printf (_FX("system(poweroff) returns %d\n"), x);
         }
         // resume normal ops
         break;
@@ -2823,7 +3033,7 @@ void doExit()
         // all we can do
         doReboot();
     #else
-        Serial.printf ("doExit()\n");
+        Serial.printf (_FX("doExit()\n"));
         defaultState();
         #if defined(_USE_FB0)
             // X11 calls doExit on window close, so drawing would be recursive back to that thread
@@ -2849,7 +3059,7 @@ void fatalError (const char *fmt, ...)
             msg = (char *) malloc (mem_len -= mem_inc);
             if (!msg) {
                 // no mem at all, at least show fmt
-                Serial.printf (fmt);
+                Serial.printf (_FX("fatalError: %s\n"), fmt);
                 doExit();
             }
             stop = true;
@@ -2864,7 +3074,7 @@ void fatalError (const char *fmt, ...)
     }
 
     // log for sure
-    Serial.printf ("Fatal: %s\n", msg);
+    Serial.printf (_FX("Fatal: %s\n"), msg);
 
     // it may still be very early so wait a short while for display
     for (int i = 0; i < 20; i++) {

@@ -154,7 +154,7 @@ static void drawMPSetup (time_t t0)
         const uint16_t dark = RGB565(50,50,50);
 
         // title
-        const char *title = "Lunar Elevation at DE and DX";
+        const char *title = _FX("Lunar Elevation at DE and DX");
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
         uint16_t tw = getTextWidth(title);
         tft.setCursor (map_b.x + (map_b.w-tw)/2, map_b.y + 30);

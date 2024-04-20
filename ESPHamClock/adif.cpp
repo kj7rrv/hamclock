@@ -8,18 +8,16 @@
 
 // #define _TRACE                                       // debug RBF
 
+bool from_set_adif;                                     // set when spots are loaded via RESTful set_adif
 
 #define ADIF_COLOR      RGB565 (255,228,225)            // misty rose
+#define LISTING_Y0      47                              // first entry y down from box top 
+#define LISTING_DY      14                              // listing row separation
+#define FILENM_Y0       32                              // file name down from box top
 
-#if defined(_IS_ESP8266)
-#define MAX_SPOTS         20                            // use less precious ESP mem
-#else
-#define MAX_SPOTS         1000                          // scroll is only wide enough for 3 digits
-#endif
-
-bool from_set_adif;                                     // set when spots are loaded via RESTful set_adif
 static DXClusterSpot *adif_spots;                       // malloced list
-static ScrollState adif_ss = {DXMAX_VIS, 0, 0};         // scrolling controller
+static int max_spots;                                   // max adif_spots
+static ScrollState adif_ss;                             // scroll controller
 
 typedef uint8_t crc_t;                                  // CRC data type
 static crc_t prev_crc;                                  // detect crc change from one file to the next
@@ -605,7 +603,7 @@ static void drawADIFPane (const SBox &box, const char *filename)
         fn_basename = filename;                 // no change
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     uint16_t fnbw = getTextWidth (fn_basename);
-    tft.setCursor (box.x + (box.w-fnbw)/2, box.y + DXSUBTITLE_Y0);
+    tft.setCursor (box.x + (box.w-fnbw)/2, box.y + FILENM_Y0);
     tft.print (fn_basename);
 
     // draw spots
@@ -625,7 +623,7 @@ static void addADIFSpot (const DXClusterSpot &spot)
     #endif
 
     // if already full, just discard spot if older than oldest
-    if (adif_ss.n_data == MAX_SPOTS && spot.spotted < adif_spots[0].spotted)
+    if (adif_ss.n_data == max_spots && spot.spotted < adif_spots[0].spotted)
         return;
 
     // assuming file probably has oldest entries first then each spot is probably newer than any so far,
@@ -634,7 +632,7 @@ static void addADIFSpot (const DXClusterSpot &spot)
     for (new_i = adif_ss.n_data; --new_i >= 0 && spot.spotted < adif_spots[new_i].spotted; )
         continue;
 
-    if (adif_ss.n_data == MAX_SPOTS) {
+    if (adif_ss.n_data == max_spots) {
         // adif_spots is already full: make room by shifting out the oldest up through new_i
         memmove (adif_spots, &adif_spots[1], new_i * sizeof(DXClusterSpot));
     } else {
@@ -666,13 +664,13 @@ static void addADIFSpot (const DXClusterSpot &spot)
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we clear from_set_adif.
  * N.B. caller must close fp
- * N.B. silently trucated to newest MAX_SPOTS
+ * N.B. silently trucated to newest max_spots
  * N.B. errors only reported for broken adif, not missing fields
  */
 static int readADIFile (FILE *fp, char ynot[], int n_ynot)
 {
     // restart list at full capacity
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, max_spots * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
     adif_ss.n_data = 0;
@@ -680,7 +678,7 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
 
-    // crack entire file, but keep only up to MAX_SPOTS newest
+    // crack entire file, but keep only up to max_spots newest
     DXClusterSpot spot;
     ADIFParser adif;
     adif.ps = ADIFPS_STARTFILE;
@@ -719,13 +717,13 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we set from_set_adif.
  * N.B. caller must close connection.
- * N.B. silently trucated to newest MAX_SPOTS
+ * N.B. silently trucated to newest max_spots
  * N.B. errors only reported for broken adif, not missing fields
  */
 int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], int n_ynot)
 {
     // restart list at full capacity
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, max_spots * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
     adif_ss.n_data = 0;
@@ -733,7 +731,7 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
 
-    // crack entire stream, but keep only a max of the MAX_SPOTS newest
+    // crack entire stream, but keep only a max of the max_spots newest
     DXClusterSpot spot;
     ADIFParser adif;
     adif.ps = ADIFPS_STARTFILE;
@@ -774,6 +772,15 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
  */
 void updateADIF (const SBox &box)
 {
+    // init data size and scrolling parameters
+    int max_vis = (box.h - LISTING_Y0)/LISTING_DY;
+    if (max_vis != adif_ss.max_vis) {
+        adif_ss.max_vis = max_vis;
+        adif_ss.top_vis = 0;
+    }
+    adif_ss.n_data = 0;
+    max_spots = adif_ss.max_vis + nMoreScrollRows();
+
     // get full file name, or show web hint
     const char *fn = getADIFilename();
     const char *fn_exp;

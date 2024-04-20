@@ -58,7 +58,6 @@ extern void loop(void);
 
 extern char **our_argv;
 extern char our_make[];
-extern std::string our_dir;
 
 extern void capturePasswords (const char *fn);
 

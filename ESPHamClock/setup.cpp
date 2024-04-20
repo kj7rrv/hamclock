@@ -10,7 +10,6 @@
 #define DEF_SSID        "FiOS-9QRT4-Guest"
 #define DEF_PASS        "Veritium2017"
 
-// feature tests.
 
 // ESP always needs wifi setup, linux with known wpa format is up to user, others never
 #if defined(_IS_ESP8266)
@@ -41,6 +40,7 @@ static bool good_wpa;
     #define _SUPPORT_ADIFILE
     #define _SUPPORT_SPOTPATH
     #define _SUPPORT_SCROLLLEN
+    #define _SUPPORT_CTSL
 #endif // _SHOW_ALL
 
 
@@ -99,14 +99,17 @@ static char i2c_fn[NV_I2CFN_LEN];
 #define NVMS_THIN       0x4                     // NV_MAPSPOTS bit to use THINPATHSZ
 #define NVMS_WIDE       0x8                     // NV_MAPSPOTS bit to use WIDEPATHSZ
 #define R2Y(r)          ((r)*(PR_H+2))          // macro given row index from 0 return screen y
+#define ERRDWELL_MS     3000                    // err message dwell time, ms
+#define BTNDWELL_MS     200                     // button feedback dwell time, ms
 
-// color selector constants
+// color selector layout
 #define CSEL_SCX        435                     // all color control scales x coord
 #define CSEL_COL1X      2                       // tick boxes in column 1 x
 #define CSEL_COL2X      415                     // tick boxes in column 2 x
 #define CSEL_SCY        45                      // top scale y coord
 #define CSEL_SCW        256                     // scale width -- lt this causes roundoff at end
 #define CSEL_SCH        30                      // scale height
+#define CSEL_NW         50                      // number value width
 #define CSEL_SCYG       15                      // scale y gap
 #define CSEL_VDX        20                      // gap dx to value number
 #define CSEL_SCM_C      RA8875_WHITE            // scale marker color
@@ -122,6 +125,23 @@ static char i2c_fn[NV_I2CFN_LEN];
 #define CSEL_NDASH      11                      // n segments in dashed color sample
 #define CSEL_DDY        12                      // demo strip dy down from rot top
 #define CSEL_ADX        32                      // dashed tick box dx from tick box x
+
+// color table save/load layout
+#define CTSL_Y          KB_SPC_Y                // color table save/load row y
+#define CTSL_SL_X       20                      // save/load control label x
+#define CTSL_SA_X       (CTSL_SL_X+90)          // save A control x
+#define CTSL_SA_W       (2*PR_W)                // save A control width
+#define CTSL_SB_X       (CTSL_SA_X+40)          // save B control x
+#define CTSL_SB_W       (2*PR_W)                // save B control width
+#define CTSL_LL_X       (CTSL_SB_X+60)          // load A control label x
+#define CTSL_LA_X       (CTSL_LL_X+120)         // load A control x
+#define CTSL_LA_W       (2*PR_W)                // load A control width
+#define CTSL_LB_X       (CTSL_LA_X+40)          // load B control x
+#define CTSL_LB_W       (2*PR_W)                // load B control width
+#define CTSL_LP_X       (CTSL_LB_X+40)          // load pskreporter control x
+#define CTSL_LP_W       (7*PR_W)                // load pskreporter control width
+#define CTSL_LD_X       (CTSL_LP_X+130)         // load default control x
+#define CTSL_LD_W       (5*PR_W)                // load default control width
 
 // OnOff layout constants
 #define OO_Y0           150                     // top y
@@ -363,7 +383,7 @@ typedef enum {
     DEMO_BPR,
     UNITS_BPR,
     BEARING_BPR,
-    AUTOSW_BPR,
+    RANKSW_BPR,
     NEWDXDEWX_BPR,
     SPOTLBL_BPR,
     SPOTLBLCALL_BPR,
@@ -372,6 +392,7 @@ typedef enum {
     SCROLLDIR_BPR,
     SCROLLLEN_BPR,
     SCROLLBIG_BPR,
+    WEB_FULLSCRN_BPR,
     X11_FULLSCRN_BPR,
     FLIP_BPR,
 
@@ -463,56 +484,63 @@ static BoolPrompt bool_pr[N_BPR] = {
     {3, {250, R2Y(4),   0, PR_H},  {250, R2Y(4),  120, PR_H}, false, NULL, "4800 bps", "38400 bps",KX3ON_BPR},
                                                 // 3x entangled: Off: FX   4800: TF   38400: TT
 
+
+
+
     // "page 5" -- index 4
 
-    {4, {10,  R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL,
+    {4, {10,  R2Y(0), 170, PR_H},  {180, R2Y(0), 150, PR_H}, false, "Date order?", "Mon Day Year", NULL,
                                                                                         DATEFMT_DMYYMD_BPR},
-    {4, {150, R2Y(0), 140, PR_H},  {150, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day",
+    {4, {150, R2Y(0), 170, PR_H},  {180, R2Y(0), 150, PR_H}, false, NULL, "Day Mon Year", "Year Mon Day",
                                                                                         DATEFMT_MDY_BPR},
                                                 // 3x entangled: MDY: FX   DMY: TF  YMD:  TT
 
 
-    {4, {400, R2Y(0), 140, PR_H},  {540, R2Y(0),  90, PR_H}, false, "Log usage?", "Opt-Out", "Opt-In",NOMATE},
+
+    {4, {400, R2Y(0), 170, PR_H},  {570, R2Y(0), 90,  PR_H}, false, "Log usage?", "Opt-Out", "Opt-In",NOMATE},
+                                                // short to miss <page> button
 
 
-
-    {4, {10,  R2Y(1), 140, PR_H},  {150, R2Y(1), 120, PR_H}, false, "Week starts?", "Sunday","Monday",NOMATE},
-    {4, {400, R2Y(1), 140, PR_H},  {540, R2Y(1), 120, PR_H}, false, "Demo mode?", "No", "Yes", NOMATE},
-
-
-    {4, {10,  R2Y(2), 140, PR_H},  {150, R2Y(2), 120, PR_H}, false, "Units?", "Imperial", "Metric", NOMATE},
-    {4, {400, R2Y(2), 140, PR_H},  {540, R2Y(2), 120, PR_H}, false, "Bearings?","True N","Magnetic N",NOMATE},
+    {4, {10,  R2Y(1), 170, PR_H},  {180, R2Y(1), 150, PR_H}, false, "Week starts?", "Sunday","Monday",NOMATE},
+    {4, {400, R2Y(1), 170, PR_H},  {570, R2Y(1), 150, PR_H}, false, "Demo mode?", "No", "Yes", NOMATE},
 
 
-    {4, {10 , R2Y(3), 140, PR_H},  {150, R2Y(3), 120, PR_H}, false, "Auto SpcWx?", "No", "Yes", NOMATE},
-    {4, {400, R2Y(3), 140, PR_H},  {540, R2Y(3), 120, PR_H}, false, "New DX Wx?",  "No", "Yes", NOMATE},
+    {4, {10,  R2Y(2), 170, PR_H},  {180, R2Y(2), 150, PR_H}, false, "Units?", "Imperial", "Metric", NOMATE},
+    {4, {400, R2Y(2), 170, PR_H},  {570, R2Y(2), 150, PR_H}, false, "Bearings?","True N","Magnetic N",NOMATE},
 
 
-    {4, {10,  R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false,"Spot labels?","No","Dot",SPOTLBLCALL_BPR},
-    {4, {150, R2Y(4), 140, PR_H},  {150, R2Y(4), 120, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
+    {4, {10 , R2Y(3), 170, PR_H},  {180, R2Y(3), 150, PR_H}, false, "Rank SpcWx?", "No", "Yes", NOMATE},
+    {4, {400, R2Y(3), 170, PR_H},  {570, R2Y(3), 150, PR_H}, false, "New DX Wx?",  "No", "Yes", NOMATE},
+
+
+    {4, {10,  R2Y(4), 170, PR_H},  {180, R2Y(4), 150, PR_H}, false,"Spot labels?","No","Dot",SPOTLBLCALL_BPR},
+    {4, {150, R2Y(4), 170, PR_H},  {180, R2Y(4), 150, PR_H}, false, NULL, "Prefix", "Call", SPOTLBL_BPR},
                                                 // 4x entangled: No: FF Dot: TF  Prefix: FT  Call: TT
 
 
-    {4, {400, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, "Spot paths?", "No", NULL,SPOTPATHSZ_BPR},
-    {4, {540, R2Y(4), 140, PR_H},  {540, R2Y(4), 120, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
+    {4, {400, R2Y(4), 170, PR_H},  {570, R2Y(4), 150, PR_H}, false, "Spot paths?", "No", NULL,SPOTPATHSZ_BPR},
+    {4, {540, R2Y(4), 170, PR_H},  {570, R2Y(4), 150, PR_H}, false, NULL, "Thin", "Wide", SPOTPATH_BPR},
                                                 // 3x entangled: No: FX  Thin: TF  Wide: TT
 
 
-    {4, {10,  R2Y(5), 140, PR_H},  {150, R2Y(5), 120, PR_H}, false, "Scroll dir?", "Bottom-Up", "Top-Down",
+    {4, {10,  R2Y(5), 170, PR_H},  {180, R2Y(5), 150, PR_H}, false, "Scroll dir?", "Bottom-Up", "Top-Down",
                                                                                                 NOMATE},
 
 
-    {4, {400, R2Y(5), 140, PR_H},  {540, R2Y(5), 120, PR_H}, false, "Scroll length?", "0","10",SCROLLBIG_BPR},
-    {4, {540, R2Y(5), 140, PR_H},  {540, R2Y(5), 120, PR_H}, false, NULL, "25", "50", SCROLLLEN_BPR},
+    {4, {400, R2Y(5), 170, PR_H},  {570, R2Y(5), 150, PR_H}, false, "Scroll length?", "0","10",SCROLLBIG_BPR},
+    {4, {540, R2Y(5), 170, PR_H},  {570, R2Y(5), 150, PR_H}, false, NULL, "25", "50", SCROLLLEN_BPR},
                                                 // 4x entangled:  0: FF  10: TF   25: FT  50: TT
                                                 // FF -> TF -> FT -> TT -> ...
                                                 // N.B. match NSCROLL_X
 
 
-    {4, {10,  R2Y(6), 140, PR_H}, {150, R2Y(6), 120, PR_H}, false, "Full scrn?", "No", "Yes", NOMATE},
+    {4, {10,  R2Y(6), 170, PR_H}, {180, R2Y(6), 150, PR_H}, false, "Full scrn web?", "No", "Yes", NOMATE},
+    {4, {400, R2Y(6), 170, PR_H}, {570, R2Y(6), 150, PR_H}, false, "Full scrn direct?", "No", "Yes", NOMATE},
                                                 // N.B. state box must be wide enough for "Won't fit"
 
-    {4, {400, R2Y(6), 140, PR_H}, {540, R2Y(6), 120, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
+
+
+    {4, {10,  R2Y(7), 170, PR_H}, {180, R2Y(7), 150, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
 
 
 
@@ -585,7 +613,7 @@ static ColSelPrompt csel_pr[N_CSPR] = {
     {{CSEL_COL1X+CSEL_PDX, R2Y(0), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(0)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, DE_COLOR, NV_SHORTPATHCOLOR, "Short path",
+            true, DE_COLOR, NV_SHORTPATHCOLOR, "Short path",
             {CSEL_COL1X+CSEL_ADX, R2Y(0)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(1), CSEL_PW, PR_H},
@@ -597,13 +625,13 @@ static ColSelPrompt csel_pr[N_CSPR] = {
     {{CSEL_COL1X+CSEL_PDX, R2Y(2), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(2)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            true, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path",
+            false, RGB565(175,38,127), NV_SATPATHCOLOR, "Sat path",
             {CSEL_COL1X+CSEL_ADX, R2Y(2)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(3), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(3)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(3)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(236,193,79), NV_SATFOOTCOLOR, "Sat footprint",
+            false, RGB565(236,175,79), NV_SATFOOTCOLOR, "Sat footprint",
             {0, 0, 0, 0}, false, 0, 0, 0},
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(4), CSEL_PW, PR_H},
@@ -656,37 +684,36 @@ static ColSelPrompt csel_pr[N_CSPR] = {
     {{CSEL_COL1X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(11)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(250,250,0), NV_20M_COLOR, "20 m",
+            false, RGB565(255,250,0), NV_20M_COLOR, "20 m",
             {CSEL_COL1X+CSEL_ADX, R2Y(11)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(6)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(60,180,75), NV_17M_COLOR, "17 m",
+            false, RGB565(91,182,10), NV_17M_COLOR, "17 m",
             {CSEL_COL2X+CSEL_ADX, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(7), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(7)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(70,240,240), NV_15M_COLOR, "15 m",
+            false, RGB565(65,255,173), NV_15M_COLOR, "15 m",
             {CSEL_COL2X+CSEL_ADX, R2Y(7)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(8), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(8)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(0,130,200), NV_12M_COLOR, "12 m",
+            false, RGB565(0,130,250), NV_12M_COLOR, "12 m",
             {CSEL_COL2X+CSEL_ADX, R2Y(8)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(9), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(9)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(250,190,212), NV_10M_COLOR, "10 m",
-            {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
+            false, RGB565(250,190,212), NV_10M_COLOR, "10 m", {CSEL_COL2X+CSEL_ADX, R2Y(9)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(10), CSEL_PW, PR_H},
             {CSEL_COL2X, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL2X+CSEL_DDX, R2Y(10)+CSEL_DDY, CSEL_DW, CSEL_DH},
-            false, RGB565(200,150,100), NV_6M_COLOR, "6 m",
+            false, RGB565(140,163,11), NV_6M_COLOR, "6 m",
             {CSEL_COL2X+CSEL_ADX, R2Y(10)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ}, false, 0, 0, 0},
 
     {{CSEL_COL2X+CSEL_PDX, R2Y(11), CSEL_PW, PR_H},
@@ -698,14 +725,24 @@ static ColSelPrompt csel_pr[N_CSPR] = {
 
 
 
-// overall color selector box, easier than 3 separate boxes
-static SBox csel_ctl_b = {CSEL_SCX, CSEL_SCY, CSEL_SCW, 3*CSEL_SCH + 3*CSEL_SCYG};
+// overall color selector box, easier than 3 separate boxes. CSEL_SCYG below each swatch.
+static const SBox csel_ctl_b = {CSEL_SCX, CSEL_SCY, CSEL_SCW+CSEL_VDX+CSEL_NW, 3*CSEL_SCH + 3*CSEL_SCYG};
 
-// handy conversions between x coord and value 0..255.
-// N.B. only valid when x-CSEL_SCX ranges from 0 .. CSEL_SCW-1
+// handy conversions between x coord and color value 0..255.
+// N.B. only valid when x-CSEL_SCX in [0, CSEL_SCW)
 #define X2V(x)  (255*((x)-CSEL_SCX)/(CSEL_SCW-1))
 #define V2X(v)  (CSEL_SCX+(CSEL_SCW-1)*(v)/255)
 
+
+#if defined(_SUPPORT_CTSL)
+// save/load controls
+static const SBox ctsl_save1_b = {CTSL_SA_X, CTSL_Y, CTSL_SA_W, KB_SPC_H};
+static const SBox ctsl_save2_b = {CTSL_SB_X, CTSL_Y, CTSL_SB_W, KB_SPC_H};
+static const SBox ctsl_load1_b = {CTSL_LA_X, CTSL_Y, CTSL_LA_W, KB_SPC_H};
+static const SBox ctsl_load2_b = {CTSL_LB_X, CTSL_Y, CTSL_LB_W, KB_SPC_H};
+static const SBox ctsl_loadp_b = {CTSL_LP_X, CTSL_Y, CTSL_LP_W, KB_SPC_H};
+static const SBox ctsl_loadd_b = {CTSL_LD_X, CTSL_Y, CTSL_LD_W, KB_SPC_H};
+#endif // _SUPPORT_CTSL
 
 
 // virtual qwerty keyboard
@@ -870,7 +907,7 @@ static void logAllPrompts(void)
     // cluster commands
     char clcmdstr[40+NV_DXCLCMD_LEN];
     for (int i = 0; i < N_DXCLCMDS; i++) {
-        snprintf (clcmdstr, sizeof(clcmdstr), "Setup: DXCLCMD%d %s: %s", i,
+        snprintf (clcmdstr, sizeof(clcmdstr), _FX("Setup: DXCLCMD%d %s: %s"), i,
                 bool_pr[DXCLCMD0_BPR+i].state ? " on" : "off", string_pr[DXCLCMD0_SPR+i].v_str);
         Serial.println (clcmdstr);
     }
@@ -1028,7 +1065,7 @@ static void drawSpiderCommandsHeader()
     // labels
     tft.setTextColor (PR_C);
     tft.setCursor (SPIDER_TX, SPIDER_TY);
-    tft.print ("Cluster Commands:");
+    tft.print (_FX("Cluster Commands:"));
 }
 
 static void drawPageButton()
@@ -1040,7 +1077,7 @@ static void drawPageButton()
 
 static void drawDoneButton(bool on)
 {
-    drawStringInBox ("Done", done_b, on, DONE_C);
+    drawStringInBox (_FX("Done"), done_b, on, DONE_C);
 }
 
 
@@ -1051,8 +1088,13 @@ static bool boolIsRelevant (BoolPrompt *bp)
     if (bp->page != cur_page)
         return (false);
 
-#if !defined(_USE_X11) && !defined(_WEB_ONLY)
+#if !defined(_USE_X11)
     if (bp == &bool_pr[X11_FULLSCRN_BPR])
+        return (false);
+#endif
+
+#if defined(_IS_ESP8266)
+    if (bp == &bool_pr[WEB_FULLSCRN_BPR])
         return (false);
 #endif
 
@@ -1355,12 +1397,13 @@ static void nextTabFocus()
         { NULL, &bool_pr[DEMO_BPR] },
         { NULL, &bool_pr[UNITS_BPR] },
         { NULL, &bool_pr[BEARING_BPR] },
-        { NULL, &bool_pr[AUTOSW_BPR] },
+        { NULL, &bool_pr[RANKSW_BPR] },
         { NULL, &bool_pr[NEWDXDEWX_BPR] },
         { NULL, &bool_pr[SPOTLBL_BPR] },
         { NULL, &bool_pr[SPOTPATH_BPR] },
         { NULL, &bool_pr[SCROLLDIR_BPR] },
         { NULL, &bool_pr[SCROLLLEN_BPR] },
+        { NULL, &bool_pr[WEB_FULLSCRN_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
         { NULL, &bool_pr[FLIP_BPR] },
     };
@@ -1689,7 +1732,7 @@ static void drawKeyboard()
     }
 
     drawStringInBox ("", space_b, false, KF_C);
-    drawStringInBox ("Delete", delete_b, false, DEL_C);
+    drawStringInBox (_FX("Delete"), delete_b, false, DEL_C);
 }
 
 
@@ -1872,19 +1915,47 @@ static bool tappedBool (SCoord &s, BoolPrompt **bpp)
  */
 static void getCSelBoxColor (const SCoord &s, uint8_t &r, uint8_t &g, uint8_t &b)
 {
-    // vetical offset into csel_ctl_b
+    // offset withing csel_ctl_b
+    uint16_t dx = s.x - CSEL_SCX;
     uint16_t dy = s.y - CSEL_SCY;
 
-    // new color
-    uint16_t new_v = X2V(s.x);
+    // check whether over color or numeric value
+    if (dx < CSEL_SCW) {
 
-    // update one component to new color depending on y, leave the others unchanged
-    if (dy < CSEL_SCH+CSEL_SCYG/2) {
-        r = new_v;                             // tapped first row
-    } else if (dy < 2*CSEL_SCH+3*CSEL_SCYG/2) {
-        g = new_v;                             // tapped second row
-    } else {
-        b = new_v;                             // tapped third row
+        // inside color box: new color depends on s.x
+        uint16_t new_v = X2V(s.x);
+
+        // update one component to new color depending on y, leave the others unchanged
+        if (dy < CSEL_SCYG/2 + CSEL_SCH) {
+            r = new_v;                          // tapped first row
+        } else if (dy < CSEL_SCYG/2 + CSEL_SCH + CSEL_SCYG + CSEL_SCH) {
+            g = new_v;                          // tapped second row
+        } else {
+            b = new_v;                          // tapped third row
+        }
+
+    } else if (dx > CSEL_SCW + 10) {            // small dead separation between swatch and number
+
+        // over the numeric value: new color is +- 1 depending on dy
+        if (dy < CSEL_SCH/2) {
+            if (r < 255)
+                r += 1;
+        } else if (dy < CSEL_SCH + CSEL_SCYG/2) {
+            if (r > 0)
+                r -= 1;
+        } else if (dy < CSEL_SCH + CSEL_SCYG + CSEL_SCH/2) {
+            if (g < 255)
+                g += 1;
+        } else if (dy < CSEL_SCH + CSEL_SCYG + CSEL_SCH + CSEL_SCYG/2) {
+            if (g > 0)
+                g -= 1;
+        } else if (dy < CSEL_SCH + CSEL_SCYG + CSEL_SCH + CSEL_SCYG + CSEL_SCH/2) {
+            if (b < 255)
+                b += 1;
+        } else {
+            if (b > 0)
+                b -= 1;
+        }
     }
 }
 
@@ -1950,7 +2021,7 @@ static void drawCSelCursor (uint16_t x, int16_t y)
  */
 static void drawCSelValue (uint16_t x, uint16_t y, uint16_t color)
 {
-    tft.fillRect (x, y, 50, CSEL_SCH, RA8875_BLACK);
+    tft.fillRect (x, y, CSEL_NW, CSEL_SCH, RA8875_BLACK);
     tft.setTextColor (RA8875_WHITE);
     tft.setCursor (x, y + CSEL_SCH - 4);
     tft.print(color);
@@ -1971,8 +2042,9 @@ static void drawCSelPromptColor (const ColSelPrompt &p)
     drawCSelValue (CSEL_SCX+CSEL_SCW+CSEL_VDX, CSEL_SCY+2*CSEL_SCH+2*CSEL_SCYG, p.b);
 }
 
+
+
 /* draw the one-time color selector GUI features
- * N.B. we assume screen is already erased.
  */
 static void drawCSelInitGUI()
 {
@@ -1999,14 +2071,145 @@ static void drawCSelInitGUI()
         ColSelPrompt &p = csel_pr[i];
         tft.setTextColor (TX_C);
         tft.setCursor (p.p_box.x, p.p_box.y+p.p_box.h-PR_D);
-        tft.printf ("%s:", p.p_str);
+        tft.printf (_FX("%s:"), p.p_str);
         drawCSelTickBox (p);
         drawCSelDemoSwatch (p);
         drawCSelDashTickBox(p);
         if (p.state)
             drawCSelPromptColor (p);
     }
+
+#if defined (_SUPPORT_CTSL)
+
+    // draw Save controls
+    tft.setTextColor (TX_C);
+    tft.setCursor (CTSL_SL_X, CTSL_Y + PR_A);
+    tft.print (_FX("Save to:"));
+    drawStringInBox (_FX(" A "), ctsl_save1_b, false, BUTTON_C);
+    drawStringInBox (_FX(" B "), ctsl_save2_b, false, BUTTON_C);
+
+    // draw Load controls
+    tft.setTextColor (TX_C);
+    tft.setCursor (CTSL_LL_X, CTSL_Y + PR_A);
+    tft.print (_FX("Load from:"));
+    drawStringInBox (_FX(" A "), ctsl_load1_b, false, BUTTON_C);
+    drawStringInBox (_FX(" B "), ctsl_load2_b, false, BUTTON_C);
+    drawStringInBox (_FX("pskreporter"), ctsl_loadp_b, false, BUTTON_C);
+    drawStringInBox (_FX("default"), ctsl_loadd_b, false, BUTTON_C);
+#endif // _SUPPORT_CTSL
 }
+
+
+#if defined(_SUPPORT_CTSL)
+
+static void colorTableAck (const char *prompt, const SBox &box)
+{
+    drawStringInBox (prompt, box, true, BUTTON_C);
+    wdDelay(BTNDWELL_MS);
+    drawStringInBox (prompt, box, false, BUTTON_C);
+}
+
+/* save the current colors in the given NV table.
+ * prompt and box are to show some feedback.
+ */
+static void saveColorTable (int tbl_i, const char *prompt, const SBox &box)
+{
+    // fill arrays from csel_pr[]
+    uint8_t r[N_CSPR], g[N_CSPR], b[N_CSPR];
+    for (int i = 0; i < N_CSPR; i++) {
+        r[i] = csel_pr[i].r;
+        g[i] = csel_pr[i].g;
+        b[i] = csel_pr[i].b;
+    }
+
+    // save to NV
+    NVWriteColorTable (tbl_i, r, g, b);
+
+    // ack
+    colorTableAck (prompt, box);
+}
+
+/* load the colors from the given NV table.
+ * prompt and box are to show some feedback.
+ */
+static void loadColorTable (int tbl_i, const char *prompt, const SBox &box)
+{
+    // fill arrays from NV
+    uint8_t r[N_CSPR], g[N_CSPR], b[N_CSPR];
+    if (!NVReadColorTable (tbl_i, r, g, b)) {
+
+        // show err briefly
+        drawStringInBox (_FX("Err"), box, false, ERR_C);
+        wdDelay(ERRDWELL_MS);
+        drawStringInBox (prompt, box, false, BUTTON_C);
+
+    } else {
+
+        // ok, load into csel_pr[]
+        for (int i = 0; i < N_CSPR; i++) {
+            csel_pr[i].r = r[i];
+            csel_pr[i].g = g[i];
+            csel_pr[i].b = b[i];
+        }
+
+        // ack
+        colorTableAck (prompt, box);
+
+        // redraw is enough feedback
+        drawCSelInitGUI();
+    }
+}
+
+/* load the path colors to match pskreporter.
+ */
+static void loadPSKColorTable (void)
+{
+    // define pskreporter colors, thanks to G6NHU
+    #define N_PSK       (BAND2_CSPR-BAND160_CSPR+1)     // inclusive
+    static const uint8_t psk_r[N_PSK] = {
+        156, 213,   0,  90, 131, 238, 246, 197, 164, 238, 238, 238
+    };
+    static const uint8_t psk_g[N_PSK] = {
+        250,  89,   0,  89, 214, 198, 242, 161,  48, 113,  60,  56
+    };
+    static const uint8_t psk_b[N_PSK] = {
+         74, 222, 131, 246, 115,  65, 123, 106,  41, 180,  32, 148
+    };
+
+    // load into csel_pr[]
+    for (int i = 0; i < N_PSK; i++) {
+        csel_pr[BAND160_CSPR+i].r = psk_r[i];
+        csel_pr[BAND160_CSPR+i].g = psk_g[i];
+        csel_pr[BAND160_CSPR+i].b = psk_b[i];
+    }
+
+    // ack
+    colorTableAck (_FX("pskreporter"), ctsl_loadp_b);
+
+    // redraw to show done
+    drawCSelInitGUI();
+}
+
+/* load the default colors
+ */
+static void loadDefaultColorTable (void)
+{
+    // load def_c into csel_pr[]
+    for (int i = 0; i < N_CSPR; i++) {
+        csel_pr[i].r = RGB565_R(csel_pr[i].def_c);
+        csel_pr[i].g = RGB565_G(csel_pr[i].def_c);
+        csel_pr[i].b = RGB565_B(csel_pr[i].def_c);
+    }
+
+    // ack
+    colorTableAck (_FX("default"), ctsl_loadd_b);
+
+    // redraw to show done
+    drawCSelInitGUI();
+}
+
+#endif // _SUPPORT_CTSL
+
 
 /* handle a possible touch event while on the color selection page.
  * return whether ours
@@ -2065,6 +2268,27 @@ static bool handleCSelTouch (SCoord &s)
             }
         }
     }
+
+#if defined (_SUPPORT_CTSL)
+    // else check for save/load buttons
+    if (!ours) {
+        ours = true;
+        if (inBox (s, ctsl_save1_b))
+            saveColorTable (1, _FX(" A "), ctsl_save1_b);
+        else if (inBox (s, ctsl_save2_b))
+            saveColorTable (2, _FX(" B "), ctsl_save2_b);
+        else if (inBox (s, ctsl_load1_b))
+            loadColorTable (1, _FX(" A "), ctsl_load1_b);
+        else if (inBox (s, ctsl_load2_b))
+            loadColorTable (2, _FX(" B "), ctsl_load2_b);
+        else if (inBox (s, ctsl_loadp_b))
+            loadPSKColorTable();
+        else if (inBox (s, ctsl_loadd_b))
+            loadDefaultColorTable();
+        else
+            ours = false;
+    }
+#endif // _SUPPORT_CTSL
 
     return (ours);
 }
@@ -2367,7 +2591,7 @@ static bool hostOK (char *host_str, int max_len)
         return (false);
 
     // localhost?
-    if (!strcmp (host_str, "localhost"))
+    if (!strcmp (host_str, _FX("localhost")))
         return (true);
 
     // need at least one dot for TLD or exactly 3 if looks like dotted ip notation
@@ -2615,7 +2839,7 @@ static bool validateStringPrompts (bool show_errors)
                     flagErrField (sp);
 
                     // dwell error flag(s)
-                    wdDelay(3000);
+                    wdDelay(ERRDWELL_MS);
 
                     // restore value with handy cursor placed to edit
                     eraseCursor();
@@ -2754,7 +2978,7 @@ static void initSetup()
     // init gpsd host and option
 
     if (!NVReadString (NV_GPSDHOST, gpsd_host)) {
-        strcpy (gpsd_host, "localhost");
+        strcpy (gpsd_host, _FX("localhost"));
         NVWriteString (NV_GPSDHOST, gpsd_host);
     }
     uint8_t nv_gpsd;
@@ -2814,7 +3038,7 @@ static void initSetup()
     // init rigctld host, port and option
 
     if (!NVReadString (NV_RIGHOST, rig_host)) {
-        strcpy (rig_host, "localhost");
+        strcpy (rig_host, _FX("localhost"));
         NVWriteString (NV_RIGHOST, rig_host);
     }
     if (!NVReadUInt16(NV_RIGPORT, &rig_port)) {
@@ -2832,7 +3056,7 @@ static void initSetup()
     // init rotctld host, port and option
 
     if (!NVReadString (NV_ROTHOST, rot_host)) {
-        strcpy (rot_host, "localhost");
+        strcpy (rot_host, _FX("localhost"));
         NVWriteString (NV_ROTHOST, rot_host);
     }
     if (!NVReadUInt16(NV_ROTPORT, &rot_port)) {
@@ -2850,7 +3074,7 @@ static void initSetup()
     // init flrig host, port and option
 
     if (!NVReadString (NV_FLRIGHOST, flrig_host)) {
-        strcpy (flrig_host, "localhost");
+        strcpy (flrig_host, _FX("localhost"));
         NVWriteString (NV_FLRIGHOST, flrig_host);
     }
     if (!NVReadUInt16(NV_FLRIGPORT, &flrig_port)) {
@@ -2944,7 +3168,7 @@ static void initSetup()
     uint8_t nv_wsjt;
     if (!NVReadUInt8 (NV_WSJT_DX, &nv_wsjt)) {
         // check host for possible backwards compat
-        if (strcasecmp(dx_host,"WSJT-X") == 0 || strcasecmp(dx_host,"JTDX") == 0) {
+        if (strcasecmp(dx_host,_FX("WSJT-X")) == 0 || strcasecmp(dx_host,_FX("JTDX")) == 0) {
             nv_wsjt = 1;
             memset (dx_host, 0, sizeof(dx_host));
             NVWriteString(NV_DXHOST, dx_host);
@@ -3224,11 +3448,11 @@ static void initSetup()
     bool_pr[SCROLLDIR_BPR].state = (scroll_dir != 0);
 
     uint8_t auto_sw;
-    if (!NVReadUInt8 (NV_AUTOSW, &auto_sw)) {
+    if (!NVReadUInt8 (NV_RANKSW, &auto_sw)) {
         auto_sw = 0;
-        NVWriteUInt8 (NV_AUTOSW, auto_sw);
+        NVWriteUInt8 (NV_RANKSW, auto_sw);
     }
-    bool_pr[AUTOSW_BPR].state = (auto_sw != 0);
+    bool_pr[RANKSW_BPR].state = (auto_sw != 0);
 
     uint8_t newdxdewx;
     if (!NVReadUInt8 (NV_NEWDXDEWX, &newdxdewx)) {
@@ -3236,6 +3460,13 @@ static void initSetup()
         NVWriteUInt8 (NV_NEWDXDEWX, newdxdewx);
     }
     bool_pr[NEWDXDEWX_BPR].state = (newdxdewx != 0);
+
+    uint8_t webfs;
+    if (!NVReadUInt8 (NV_WEBFS, &webfs)) {
+        webfs = 0;
+        NVWriteUInt8 (NV_WEBFS, webfs);
+    }
+    bool_pr[WEB_FULLSCRN_BPR].state = (webfs != 0);
 
 
     #if defined(_SUPPORT_SCROLLLEN)
@@ -3277,7 +3508,7 @@ static bool askRun()
 {
     eraseScreen();
 
-    drawStringInBox ("Skip", skip_b, false, TX_C);
+    drawStringInBox (_FX("Skip"), skip_b, false, TX_C);
 
     tft.setTextColor (TX_C);
     tft.setCursor (tft.width()/6, tft.height()/5);
@@ -3307,7 +3538,7 @@ static bool askRun()
         if (tt != TT_NONE || c) {
             drainTouch();
             if (c == 27 || (tt != TT_NONE && inBox (s, skip_b))) {
-                drawStringInBox ("Skip", skip_b, true, TX_C);
+                drawStringInBox (_FX("Skip"), skip_b, true, TX_C);
                 return (false);
             }
                 
@@ -3499,8 +3730,8 @@ static void runSetup()
                         tft.setCursor (bp->s_box.x, bp->s_box.y+PR_H-PR_D);
                         tft.setTextColor (RA8875_RED);
                         eraseBPState (bp);
-                        tft.print ("Won't fit");
-                        wdDelay (2000);
+                        tft.print (_FX("Won't fit"));
+                        wdDelay (ERRDWELL_MS);
                         bp->state = false;
                         drawBPState (bp);
                     }
@@ -3812,8 +4043,9 @@ static void saveParams2NV()
     NVWriteUInt16 (NV_FLRIGPORT, flrig_port);
     NVWriteUInt8 (NV_SCROLLDIR, bool_pr[SCROLLDIR_BPR].state);
     NVWriteUInt8 (NV_SCROLLLEN, nMoreScrollRows());
-    NVWriteUInt8 (NV_AUTOSW, bool_pr[AUTOSW_BPR].state);
+    NVWriteUInt8 (NV_RANKSW, bool_pr[RANKSW_BPR].state);
     NVWriteUInt8 (NV_NEWDXDEWX, bool_pr[NEWDXDEWX_BPR].state);
+    NVWriteUInt8 (NV_WEBFS, bool_pr[WEB_FULLSCRN_BPR].state);
 
     // save and engage user's X11 settings
     uint16_t x11flags = 0;
@@ -4263,11 +4495,18 @@ uint8_t getBrMin()
     return (brDimmableOk() ? bright_min : 0);
 }
 
-/* whether to engage full screen.
+/* whether to engage full screen using X11.
  */
 bool getX11FullScreen(void)
 {
     return (bool_pr[X11_FULLSCRN_BPR].state);
+}
+
+/* whether to engage full screen using the web interface.
+ */
+bool getWebFullScreen(void)
+{
+    return (bool_pr[WEB_FULLSCRN_BPR].state);
 }
 
 /* whether demo mode is requested
@@ -4508,11 +4747,11 @@ int nMoreScrollRows(void)
     return (atoi (getEntangledValue (&bool_pr[SCROLLLEN_BPR], &bool_pr[SCROLLBIG_BPR])));
 }
 
-/* return whether to sort spx wx
+/* return whether to rank spx wx
  */
-bool autoSortSpaceWx(void)
+bool rankSpaceWx(void)
 {
-    return (bool_pr[AUTOSW_BPR].state);
+    return (bool_pr[RANKSW_BPR].state);
 }
 
 /* return whether to automatically show new DX or DE weather in pane 1

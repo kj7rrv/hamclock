@@ -12,25 +12,13 @@
 #define CREDITS_Y0      31                      // dy of credits row
 #define START_DY        47                      // dy of first row
 #define CONTEST_DY      12                      // dy of each successive row
-#define MAX_CTST_LEN    26                      // max contest entry length, not counting EOS
-#define MAX_VIS         ((PLOTBOX_H - START_DY)/CONTEST_DY)     // max visible rows
 
-// require even rows for title/date combos
-#if (MAX_VIS%2) != 0
-#error contests MAX_VIS must be even
-#endif
-
+// URL to access info
 static const char contest_page[] PROGMEM = "/contests/contests.txt";    // just titles
 static const char contest3_page[] PROGMEM = "/contests/contests3.txt";  // with dates
 
-// current collection
-#if defined(_IS_ESP8266)
-#define MAX_CONTESTS    (2*MAX_VIS)             // limit ram use on ESP
-#else
-#define MAX_CONTESTS    50                      // even UNIX doesn't want scrolling crazy long
-#endif
-
-static char *contests[MAX_CONTESTS];            // malloced strings
+static char **contests;                         // malloced list of malloced strings
+static int max_contests;                        // max n contest lines
 static char *credit;                            // malloced credit line
 static uint8_t show_date;                       // whether to show 2nd line with date
 
@@ -83,7 +71,8 @@ class ScrollContest : public ScrollState
         }
 };
 
-static ScrollContest cts_ss = {MAX_VIS, 0, 0};    // scrolling context
+static ScrollContest cts_ss;                    // scrolling context
+
 
 /* draw contests[] in the given pane box
  */
@@ -156,34 +145,33 @@ static void scrollContestDown (const SBox &box)
     }
 }
 
-/* scrub the given line IN PLACE to fit within MAX_CTST_LEN chars
+/* scrub the given line IN PLACE to fit within the given box
  */
-static void scrubContestLine (char *line)
+static void scrubContestLine (char *line, const SBox &box)
 {
-    // nothing to do if already fits
-    int ll = strlen (line);
-    if (ll <= MAX_CTST_LEN)
-        return;
+    // look for a few common phases
+    char *phrase;
+    if ((phrase = strstr (line, _FX("Parks on the Air"))) != NULL)
+        strcpy (phrase, _FX("POTA"));
 
-    // keep chopping off at right-most space
-    char *right_space = NULL;
-    do {
-        right_space = strrchr (line, ' ');
-        if (right_space) {
-            *right_space = '\0';
-            ll = right_space - line;
-        }
-    } while (right_space && ll > MAX_CTST_LEN);
-
-    // then also chop off any final punct char
-    if (right_space > line && ispunct(right_space[-1])) {
-        right_space[-1] = '\0';
-        ll -= 1;
+    // keep chopping off at successive right-most space until fits within box
+    uint16_t lw;                                        // line width in pixels
+    while ((lw = getTextWidth (line)) >= box.w) {
+        char *right_space = strrchr (line, ' ');
+        if (right_space)
+            *right_space = '\0';                        // EOS now at right-most space
+        else
+            break;                                      // still too long but no more spaces to chop
     }
 
-    // just chop if still too long
-    if (ll > MAX_CTST_LEN)
-        line[MAX_CTST_LEN] = '\0';
+    // always chop off any trailing punct char
+    size_t ll = strlen (line);                          // line length in chars
+    if (ll > 0 && ispunct(line[ll-1]))
+        line[--ll] = '\0';
+
+    // well just hack off if still too long
+    while (getTextWidth (line) >= box.w)
+        line[--ll] = '\0';
 }
 
 
@@ -192,7 +180,6 @@ static void scrubContestLine (char *line)
 bool updateContests (const SBox &box)
 {
     WiFiClient ctst_scclient;
-    char line[100];
     bool ok = false;
 
     // get date state
@@ -224,26 +211,44 @@ bool updateContests (const SBox &box)
         // reset contests and credit
         for (int i = 0; i < cts_ss.n_data; i++)
             free (contests[i]);
-        cts_ss.n_data = 0;
-        cts_ss.top_vis = 0;
+        free (contests);
+        contests = NULL;
         free (credit);
         credit = NULL;
 
+        // init scroller and max data size. max_vis must be even if showing date
+        cts_ss.init ((box.h - START_DY)/CONTEST_DY, 0, 0);   // max_vis, top_vis, n_data
+        if (show_date && (cts_ss.max_vis % 2) != 0)
+            cts_ss.max_vis -= 1;
+    #if defined(_IS_ESP8266)
+        max_contests = cts_ss.max_vis;
+    #else
+        max_contests = cts_ss.max_vis + nMoreScrollRows();
+    #endif
+
         // first line is credit
+        char line[100];
         if (!getTCPLine (ctst_scclient, line, sizeof(line), NULL)) {
             Serial.print (F("no credit line\n"));
             goto out;
         }
         credit = strdup (line);
 
-        // ok if get at least the credit message
+        // consider transaction is ok if get at least the credit message
         ok = true;
 
+        // set font for scrubContestLine()
+        selectFontStyle (LIGHT_FONT, FAST_FONT);
+
         // if show_date each pair of lines is contest then date, else all lines are contests
-        while (cts_ss.n_data < MAX_CONTESTS && getTCPLine (ctst_scclient, line, sizeof(line), NULL)) {
+        while (cts_ss.n_data < max_contests && getTCPLine (ctst_scclient, line, sizeof(line), NULL)) {
             // Serial.printf (_FX("Contest %d: %s\n"), cts_ss.n_data, line);
-            scrubContestLine (line);
-            contests[cts_ss.n_data++] = strdup (line);
+            scrubContestLine (line, box);
+            contests = (char **) realloc (contests, (cts_ss.n_data+1) * sizeof(char*));
+            if (!contests)
+                fatalError (_FX("No memory for %d contests"), cts_ss.n_data+1);
+            if ((contests[cts_ss.n_data++] = strdup (line)) == NULL)
+                fatalError (_FX("No memory for d contest %d"), cts_ss.n_data);
         }
 
         // file is newest-first but ScrollState expects oldest-first.
@@ -302,19 +307,13 @@ bool checkContestsTouch (const SCoord &s, const SBox &box)
     } else if (s.y > box.y + 3*box.h/4 && s.x > box.x + 3*box.w/4) {
 
         // tapping near bottom right in contests brings up browser page showing contests
-        //   on macos: sudo port install xdg-utils
-        //   on ubuntu or RPi: sudo apt install xdg-utils
-        //   on redhat: sudo yum install xdg-utils
-        static const char cmd[] = "xdg-open https://www.contestcalendar.com/weeklycont.php";
-        if (system (cmd))
-            Serial.printf (_FX("CTS: fail: %s\n"), cmd);
-        else
-            Serial.printf (_FX("CTS: ok: %s\n"), cmd);
+        openURL ("https://www.contestcalendar.com/weeklycont.php");
+
         return (true);                                  // retain pane regardless
 #endif
 
-    } else if (s.y > box.y + box.h/3) {
-        // toggle and save new option
+    } else {
+        // toggle showing date and save
         show_date = !show_date;
         NVWriteUInt8 (NV_CONTESTS, show_date);
         // refresh pane to show new state

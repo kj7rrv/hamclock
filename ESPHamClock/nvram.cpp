@@ -4,6 +4,9 @@
  *
  * Storage starts at NV_BASE. Items are stored contiguously without gaps. Each item begins with NV_COOKIE
  * followed by the number of bytes listed in nv_sizes[] whose order must match the NV_ defines.
+ *
+ * As a special case, we store two sets of path colors at the very end, just before FLASH_SECTOR_SIZE.
+ * Each consists of NV_COOKIE followed by N_CSPR triples of uint8_t r, g and b bytes.
  */
 
 #include "HamClock.h"
@@ -11,6 +14,11 @@
 
 #define NV_BASE         55      // base address, move anywhere else to effectively start fresh
 #define NV_COOKIE       0x5A    // magic cookie to decide whether a value is valid
+
+// starting address of each color collection
+#define CSEL_TBLSZ      (N_CSPR*3)                              // table size, bytes
+#define CSEL_SET1_ADDR  (FLASH_SECTOR_SIZE - 2*(1+CSEL_TBLSZ))  // NV_COOKIE then first table
+#define CSEL_SET2_ADDR  (FLASH_SECTOR_SIZE - 1*(1+CSEL_TBLSZ))  // NV_COOKIE then second table 
 
 
 /* number of bytes for each NV_Name.
@@ -30,8 +38,8 @@ static const uint8_t nv_sizes[NV_N] = {
     4,                          // NV_DE_LAT
 
     4,                          // NV_DE_LNG
-    4,                          // NV_DE_GRID_OLD
-    1,                          // NV_DX_DST    not used
+    4,                          // NV_PANE0ROTSET
+    1,                          // NV_PLOT_0
     4,                          // NV_DX_LAT
     4,                          // NV_DX_LNG
 
@@ -200,8 +208,13 @@ static const uint8_t nv_sizes[NV_N] = {
     NV_DXCLCMD_LEN,             // NV_DXCMD11
     2,                          // NV_DXCMDMASK
     1,                          // NV_DXWLISTMASK
-    1,                          // NV_AUTOSW
+    1,                          // NV_RANKSW
     1,                          // NV_NEWDXDEWX
+
+    1,                          // NV_WEBFS
+    1,                          // NV_ZOOM
+    2,                          // NV_PANX
+    2,                          // NV_PANY
 
 };
 
@@ -231,7 +244,7 @@ static void initEEPROM()
         Serial.printf (_FX("EEPROM too large: %u > %u\n"), ee_used, ee_size);
         while(1);       // timeout
     }
-    EEPROM.begin(ee_used);      
+    EEPROM.begin(ee_size);      
     Serial.printf (_FX("EEPROM size %u + %u = %u, max %u\n"), NV_BASE, ee_used-NV_BASE, ee_used, ee_size);
 
 // #define _SHOW_EEPROM
@@ -316,7 +329,7 @@ static void nvramWriteBytes (NV_Name e, const uint8_t data[], uint8_t xbytes)
     for (uint8_t i = 0; i < e_len; i++)
         EEPROM.write (e_addr++, *data++);
     if (!EEPROM.commit())
-        Serial.println(_FX("EEPROM.commit failed"));
+        fatalError (_FX("EEPROM.commit failed"));
     // Serial.printf ("Read back cookie: 0x%02X\n", EEPROM.read(e_addr - e_len -1));
 }
 
@@ -356,10 +369,18 @@ static bool nvramReadBytes (NV_Name e, uint8_t *buf, uint8_t xbytes)
 
 void reportEESize (uint16_t &ee_used, uint16_t &ee_size)
 {
+    // start with the skipped space at front
     ee_used = NV_BASE;
+
+    // add each NV_ variable
     const unsigned n = NARRAY(nv_sizes);
     for (unsigned i = 0; i < n; i++)
-        ee_used += nv_sizes[i] + 1;      // +1 for cookie
+        ee_used += 1 + nv_sizes[i];     // +1 for cookie
+
+    // add the color tables
+    ee_used += 2*(1+CSEL_TBLSZ);        // include cookie
+
+    // size is just a constnt
     ee_size = FLASH_SECTOR_SIZE;
 }
 
@@ -460,3 +481,69 @@ bool NVReadString (NV_Name e, char *buf)
 {
     return (nvramReadBytes (e, (uint8_t*)buf, 0));
 }
+
+
+#if defined(_SUPPORT_CTSL)
+
+/* read CSEL color table i, return whether valid.
+ */
+bool NVReadColorTable (int tbl_i, uint8_t r[N_CSPR], uint8_t g[N_CSPR], uint8_t b[N_CSPR])
+{
+    // deterine starting addr
+    uint16_t e_addr;
+    if (tbl_i == 1)
+        e_addr = CSEL_SET1_ADDR;
+    else if (tbl_i == 2)
+        e_addr = CSEL_SET2_ADDR;
+    else
+        return (false);
+
+    // prep
+    resetWatchdog();
+    initEEPROM();
+
+    // check cookie
+    if (EEPROM.read(e_addr++) != NV_COOKIE)
+        return (false);
+
+    // read each color
+    for (uint8_t i = 0; i < N_CSPR; i++) {
+        r[i] = EEPROM.read(e_addr++);
+        g[i] = EEPROM.read(e_addr++);
+        b[i] = EEPROM.read(e_addr++);
+    }
+    return (true);
+}
+
+/* write CSEL color table i
+ */
+void NVWriteColorTable (int tbl_i, const uint8_t r[N_CSPR], const uint8_t g[N_CSPR], const uint8_t b[N_CSPR])
+{
+    // deterine starting addr
+    uint16_t e_addr;
+    if (tbl_i == 1)
+        e_addr = CSEL_SET1_ADDR;
+    else if (tbl_i == 2)
+        e_addr = CSEL_SET2_ADDR;
+    else
+        return;
+
+    // prep
+    resetWatchdog();
+    initEEPROM();
+
+    // write cookie
+    EEPROM.write (e_addr++, NV_COOKIE);
+
+    // write each color tuple
+    for (uint8_t i = 0; i < N_CSPR; i++) {
+        EEPROM.write (e_addr++, r[i]);
+        EEPROM.write (e_addr++, g[i]);
+        EEPROM.write (e_addr++, b[i]);
+    }
+
+    if (!EEPROM.commit())
+        fatalError (_FX("EEPROM.commit colors failed"));
+}
+
+#endif // _SUPPORT_CTSL

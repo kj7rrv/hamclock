@@ -154,11 +154,15 @@ Adafruit_RA8875::Adafruit_RA8875(uint8_t CS, uint8_t RST)
         screen_w = screen_h = 0;
 }
 
-void Adafruit_RA8875::setEarthPix (char *day_pixels, char *night_pixels)
+/* set mmap'ed location and size of day and night images, size in units of uint16_t
+ */
+void Adafruit_RA8875::setEarthPix (char *day_pixels, char *night_pixels, int width, int height)
 {
-        DEARTH_BIG = (uint16_t(*)[EARTH_BIG_H][EARTH_BIG_W]) day_pixels;
-        NEARTH_BIG = (uint16_t(*)[EARTH_BIG_H][EARTH_BIG_W]) night_pixels;
+        DEARTH_BIG = (uint16_t*) day_pixels;
+        NEARTH_BIG = (uint16_t*) night_pixels;
 
+        EARTH_BIG_W = width;
+        EARTH_BIG_H = height;
 }
 
 #if defined(_USE_X11)
@@ -1562,13 +1566,13 @@ float dlatr, float dlngr, float dlatd, float dlngd, float fract_day)
                 ey = (ey + EARTH_BIG_H) % EARTH_BIG_H;
 		uint16_t c16; 
 		if (fract_day == 0) {
-		    c16 = (*NEARTH_BIG)[ey][ex];
+		    c16 = EPIXEL(NEARTH_BIG,ey,ex);
 		} else if (fract_day == 1) {
-		    c16 = (*DEARTH_BIG)[ey][ex];
+		    c16 = EPIXEL(DEARTH_BIG,ey,ex);
 		} else {
 		    // blend from day to night
-		    uint16_t day_pix = (*DEARTH_BIG)[ey][ex];
-		    uint16_t night_pix = (*NEARTH_BIG)[ey][ex];
+		    uint16_t day_pix = EPIXEL(DEARTH_BIG,ey,ex);
+		    uint16_t night_pix = EPIXEL(NEARTH_BIG,ey,ex);
 		    uint8_t day_r = RGB565_R(day_pix);
 		    uint8_t day_g = RGB565_G(day_pix);
 		    uint8_t day_b = RGB565_B(day_pix);

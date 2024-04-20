@@ -78,7 +78,8 @@ void ll2sRobinson (const LatLong &ll, SCoord &s, int edge, int scalesz)
     float G = RobLat2G (ll.lat_d);
 
     // pixels from map center
-    float lng0_d = fmodf (ll.lng_d - getCenterLng() + 5*180, 2*180) - 180; // [-180,180]
+    float deg_pan = 360.0F*pan_zoom.pan_x/map_b.w;
+    float lng0_d = fmodf (ll.lng_d - getCenterLng() - deg_pan + 7*180, 2*180) - 180; // [-180,180]
     float dx = hw * G * lng0_d / 180;
     float dy = hh * Y;
 
@@ -86,8 +87,8 @@ void ll2sRobinson (const LatLong &ll, SCoord &s, int edge, int scalesz)
     float x0 = map_b.x + hw;
     float y0 = map_b.y + hh;
     float dx_edge = hw * G;                                     // full halfwidth at this lat
-    s.x = scalesz * CLAMPF (roundf (x0 + dx), x0-dx_edge+edge, x0+dx_edge-edge);
-    s.y = scalesz * CLAMPF (roundf (y0 - dy), y0-hh+edge, y0+hh-edge);
+    s.x = CLAMPF (roundf (scalesz*(x0 + dx)), scalesz*(x0-dx_edge+edge), scalesz*(x0+dx_edge-edge));
+    s.y = CLAMPF (roundf (scalesz*(y0 - dy)), scalesz*(y0-hh+edge), scalesz*(y0+hh-edge));
 }
 
 /* convert map_b screen coords to ll.
@@ -114,7 +115,8 @@ bool s2llRobinson (const SCoord &s, LatLong &ll)
     bool ok = fabsf (ll.lat_d) <= 90 && fabsf (ll.lng_d) <= 180;
 
     // adjust to center lng, rely on normalizeLL to handle wrap
-    ll.lng_d += getCenterLng();
+    float deg_pan = 360.0F*pan_zoom.pan_x/map_b.w;
+    ll.lng_d += getCenterLng() + deg_pan;
     normalizeLL (ll);
 
     // ok?

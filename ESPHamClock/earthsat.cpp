@@ -20,10 +20,10 @@ bool dx_info_for_sat;                   // global to indicate whether dx_info_b 
     #define FOOT_ALT60  100             // n dots for 60 deg altitude locus
 #else
     // can be sparser because we just draw lines
-    #define MAX_PATH    512             // max number of points in orbit path
-    #define FOOT_ALT0   200             // n dots for 0 deg altitude locus
-    #define FOOT_ALT30  100             // n dots for 30 deg altitude locus
-    #define FOOT_ALT60  75              // n dots for 60 deg altitude locus
+    #define MAX_PATH    512
+    #define FOOT_ALT0   200
+    #define FOOT_ALT30  100
+    #define FOOT_ALT60  75
 #define SHSATDTMAP      1               // whether to show satellite time on map
 #endif
 #define N_FOOT      3                   // number of footprint altitude loci
@@ -327,7 +327,7 @@ static void findNextPass(const char *name, time_t t, SatRiseSet &rs)
         uint8_t mo, dy, hr, mn, sc;
         t_now.gettime(yr, mo, dy, hr, mn, sc);
         Serial.printf (
-            _FX("SAT: %*s @ %04d-%02d-%02d %02d:%02d:%02d next rise in %6.3f hrs, set in %6.3f (%ld ms)\n"),
+            _FX("SAT: %*s @ %04d-%02d-%02d %02d:%02d:%02d next rise in %6.3f hrs, set in %6.3f (%u ms)\n"),
             NV_SATNAME_LEN, name, yr, mo, dy, hr, mn,sc,
             rs.rise_ok ? 24*(rs.rise_time - t_now) : 0.0F, rs.set_ok ? 24*(rs.set_time - t_now) : 0.0F,
             millis() - t0);
@@ -500,11 +500,11 @@ static void drawSatSkyDome()
 
 }
 
-/* erase full dx_info and draw name of current satellite IFF used in dx_info box
+/* draw name of current satellite IFF used in dx_info box
  */
 static void drawSatName()
 {
-    if (!sat || !obs || !SAT_NAME_IS_SET() || !dx_info_for_sat)
+    if (!sat || !obs || !SAT_NAME_IS_SET() || !dx_info_for_sat || SHOWING_PANE_0())
         return;
 
     resetWatchdog();
@@ -512,9 +512,6 @@ static void drawSatName()
     // retrieve saved name without '_'
     char user_name[NV_SATNAME_LEN];
     strncpySubChar (user_name, sat_name, ' ', '_', NV_SATNAME_LEN);
-
-    // erase
-    tft.fillRect (dx_info_b.x, dx_info_b.y+1, dx_info_b.w, dx_info_b.h-1, RA8875_BLACK);  // avoid separator
 
     // shorten until fits in satname_b
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
@@ -561,7 +558,7 @@ static void setSatMapNameLoc()
     case MAPP_ROB:              // fallthru
     case MAPP_MERCATOR: {
         // try to place somewhere over an ocean and away from sat footprint
-        SCoord sat_xy, name_xy;
+        SCoord sat_xy, name_xy = {0, 0};
         LatLong sat_ll;
         sat_xy.x = sat_path[0].x/tft.SCALESZ;
         sat_xy.y = sat_path[0].y/tft.SCALESZ;
@@ -573,10 +570,16 @@ static void setSatMapNameLoc()
             // sat in western hemi so put symbol in s indian
             ll2s (deg2rad(-20), deg2rad(50), name_xy, 0);
         }
-        map_name_b.x = CLAMPF (name_xy.x, map_b.x + 10, map_b.x + map_b.w - map_name_b.w - 10);
-        map_name_b.y = name_xy.y;
 
-        } break;
+        // beware of edges or off screen in case mercator is zoomed
+        if (name_xy.x) {
+            map_name_b.x = CLAMPF (name_xy.x, map_b.x + 10, map_b.x + map_b.w - map_name_b.w - 10);
+            map_name_b.y = name_xy.y;
+        } else
+            map_name_b.x = 0;
+
+        }
+        break;
 
     default:
         fatalError (_FX("setSatMapNameLoc() bad map_proj %d"), map_proj);
@@ -1267,6 +1270,9 @@ static bool checkSatUpToDate (bool *updated)
  */
 static void drawSatRSEvents(bool force)
 {
+    if (SHOWING_PANE_0())
+        return;
+
     float days;
 
     switch (findPassState(&days)) {
@@ -1583,8 +1589,8 @@ void drawSatPointsOnRow (uint16_t y0)
  */
 void drawSatNameOnRow(uint16_t y0)
 {
-    // done if nothing to do or name is not using row y0
-    if (dx_info_for_sat || !sat || !obs || !SAT_NAME_IS_SET())
+    // done if nothing to do or name is not using row y0 or name is off the map
+    if (dx_info_for_sat || !sat || !obs || !SAT_NAME_IS_SET() || map_name_b.x == 0)
         return;
     if (y0 != 0 && (y0 < map_name_b.y || y0 >= map_name_b.y + map_name_b.h))
         return;
@@ -1670,9 +1676,13 @@ bool checkSatNameTouch (const SCoord &s)
  */
 void drawSatPass()
 {
-    // skip if not showing
-    if (!dx_info_for_sat)
+    // skip if not showing or showing pane 0
+    if (!dx_info_for_sat || SHOWING_PANE_0())
         return;
+
+    // erase outside the box
+    tft.fillRect (dx_info_b.x-1, dx_info_b.y-1, dx_info_b.w+2, dx_info_b.h+2, RA8875_BLACK);
+    tft.drawRect (dx_info_b.x-1, dx_info_b.y-1, dx_info_b.w+2, dx_info_b.h+2, GRAY);
 
     drawSatName();
     drawSatRSEvents(true);

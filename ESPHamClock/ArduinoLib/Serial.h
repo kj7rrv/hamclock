@@ -15,6 +15,9 @@ class Serial {
     public:
 
 	void begin (int baud);
+
+	operator bool();
+
         void print (void);
 	void print (char c);
 	void print (char *s);
@@ -25,8 +28,12 @@ class Serial {
 	void println (char *s);
 	void println (const char *s);
 	void println (int i);
+
+    #if defined(__GNUC__)
+        int printf (const char *msg, ...) __attribute__ ((format (__printf__, 2, 3))); // must include _this_
+    #else
 	int printf (const char *fmt, ...);
-	operator bool();
+    #endif
 
 };
 

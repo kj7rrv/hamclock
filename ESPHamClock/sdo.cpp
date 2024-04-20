@@ -229,37 +229,36 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
 #if defined (_IS_UNIX)
     // check for movie easter egg in lower right corner
     if (s.y > box.y + 4*box.h/5 && s.x > box.x + box.w/2) {
-        const char *cmd;
+        const char *url;
         switch (sdo_choice) {
         case SDOT_COMP:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_211193171.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_211193171.mp4";
             break;
         case SDOT_HMIB:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIB.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIB.mp4";
             break;
         case SDOT_HMIIC:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIIC.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIIC.mp4";
             break;
         case SDOT_131:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0131.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0131.mp4";
             break;
         case SDOT_193:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0193.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0193.mp4";
             break;
         case SDOT_211:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0211.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0211.mp4";
             break;
         case SDOT_304:
-            cmd = "xdg-open https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0304.mp4";
+            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0304.mp4";
             break;
         default:
             fatalError ("Unknown sdo_choice: %d", sdo_choice);
             return (true);              // lint
         }
-        if (system (cmd))
-            Serial.printf (_FX("SDO: fail: %s\n"), cmd);
-        else
-            Serial.printf (_FX("SDO: ok: %s\n"), cmd);
+        openURL (url);
+
+        // ours regardless
         return (true);
     }
 #endif // _IS_UNIX

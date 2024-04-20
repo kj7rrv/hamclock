@@ -227,7 +227,7 @@ void updateBeacons (bool immediate, bool erase_too)
 
 /* update screen location for all beacons.
  */
-void updateBeaconScreenLocations()
+void updateBeaconMapLocations()
 {
     for (NCDXFBeacon *bp = blist; bp < &blist[NBEACONS]; bp++) {
         ll2s (deg2rad(bp->lat), deg2rad(bp->lng), bp->s, 3*BEACONCW);   // about max
@@ -383,7 +383,8 @@ void drawNCDXFStats (uint16_t color,
     }
 }
 
-/* common function to install pane corresponding to touch in NCDXF_b
+/* common function to install pane corresponding to touch in NCDXF_b.
+ * N.B. never use PANE_0
  */
 void doNCDXFStatsTouch (const SCoord &s, PlotChoice pcs[NCDXF_B_NFIELDS])
 {
