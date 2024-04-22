@@ -713,10 +713,10 @@ static void findDXCallPortion (const char *call, char dx_call[NV_CALLSIGN_LEN])
         if (slash2)
             rlen = slash2 - right;                  // don't count past a 2nd slash
 
-        // dx is the shorter side unless it looks like a common shorthand
+        // dx is the shorter side unless it looks like a common shorthand or seems suspicious
 
         if (rlen <= 1 || llen <= rlen || !strcmp(right,"MM") || !strcmp(right,"AM")
-                            || !strncmp (right, "QRP", 3) || strspn(right,"0123456789") == rlen)
+                || !strncmp (right, "QRP", 3) || strspn(right,"0123456789") == rlen || strchr (right, '#'))
             memcpy (dx_call, call, llen >= NV_CALLSIGN_LEN ? NV_CALLSIGN_LEN-1 : llen);
         else
             memcpy (dx_call, right, rlen >= NV_CALLSIGN_LEN ? NV_CALLSIGN_LEN-1 : rlen);
@@ -795,7 +795,7 @@ bool call2LL (const char *call, LatLong &ll)
                 // request page and skip response header
                 httpHCPGET (cty_client, backend_host, cty_page);
                 if (!httpSkipHeader (cty_client)) { 
-                    Serial.printf (_FX("%s header short\n"), cty_page);
+                    Serial.printf (_FX("CTY: %s header short\n"), cty_page);
                     goto out;
                 }
 
@@ -819,7 +819,7 @@ bool call2LL (const char *call, LatLong &ll)
 
                     // crack
                     if (sscanf (line, "%10s %f %f", cl.call, &cl.lat_d, &cl.lng_d) != 3) {
-                        Serial.printf (_FX("%s bad format: %s\n"), cty_page, line);
+                        Serial.printf (_FX("CTY: %s bad format: %s\n"), cty_page, line);
                         goto out;
                     }
 
@@ -856,11 +856,11 @@ bool call2LL (const char *call, LatLong &ll)
             if (ok) {
                 // note success
                 last_lookup = millis();
-                Serial.printf (_FX("Found %d locations, next refresh in %ld s at %ld\n"), n_cty,
+                Serial.printf (_FX("CTY: Found %d locations, next refresh in %ld s at %ld\n"), n_cty,
                                         _LOOKUP_DT/1000L, (last_lookup+_LOOKUP_DT)/1000L);
             } else {
                 // note failure and reset
-                Serial.printf (_FX("%s download failed after %d\n"), cty_page, n_cty);
+                Serial.printf (_FX("CTY: %s download failed after %d\n"), cty_page, n_cty);
                 free (cty_list);
                 cty_list = NULL;
                 n_cty = 0;
@@ -893,17 +893,16 @@ bool call2LL (const char *call, LatLong &ll)
                     }
                 }
             }
-        } else
-            fatalError (_FX("cluster radix out of range %d %d"), radix_index, _N_RADIX);
+        }
 
         if (candidate) {
             ll.lat_d = candidate->lat_d;
             ll.lng_d = candidate->lng_d;
             normalizeLL (ll);
             return (true);
+        } else {
+            // darn
+            Serial.printf (_FX("CTY: No location for %s AKA %s\n"), call, dx_call);
+            return (false);
         }
-
-        // darn
-        Serial.printf (_FX("No location for %s AKA %s in cty\n"), call, dx_call);
-        return (false);
 }

@@ -50,10 +50,14 @@ void EEPROM::begin (int s)
         // establish filename
         filename = getFilename();
 
-        // start over if called again
+        // start over if called again or force
         if (fp) {
             fclose(fp);
             fp = NULL;
+        }
+        if (rm_eeprom) {
+            (void) unlink (filename);
+            rm_eeprom = false;  // only once!
         }
         if (data_array) {
             free (data_array);

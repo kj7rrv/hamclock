@@ -324,6 +324,10 @@ bool retrieveSunSpots (float x[SSN_NV], float ssn[SSN_NV])
 
             Serial.printf (_FX("SSN: data short %d / %d\n"), ssn_i, SSN_NV);
         }
+
+    } else {
+
+        Serial.print (F("SSN: connection failed\n"));
     }
 
 out:
@@ -417,6 +421,10 @@ bool retrievSolarFlux (float x[SFLUX_NV], float sflux[SFLUX_NV])
 
             Serial.printf (_FX("SFlux: data short: %d / %d\n"), sflux_i, SFLUX_NV);
         }
+
+    } else {
+
+        Serial.print (F("SFlux: connection failed\n"));
     }
 
 out:
@@ -439,10 +447,12 @@ static bool checkSolarFlux (void)
     if (myNow() < *next_p)
         return (false);
 
-    float x[SFLUX_NV];
-    float sflux[SFLUX_NV];
+    StackMalloc x_mem (SFLUX_NV * sizeof(float));
+    StackMalloc s_mem (SFLUX_NV * sizeof(float));
+    float *x = (float *) x_mem.getMem();
+    float *s = (float *) s_mem.getMem();
 
-    bool ok = retrievSolarFlux (x, sflux);
+    bool ok = retrievSolarFlux (x, s);
     if (ok) {
 
         // schedule next
@@ -592,8 +602,10 @@ bool checkDRAP ()
     if (myNow() < *next_p)
         return (false);
 
-    float x[DRAPDATA_NPTS];
-    float y[DRAPDATA_NPTS];
+    StackMalloc x_mem (DRAPDATA_NPTS * sizeof(float));
+    StackMalloc y_mem (DRAPDATA_NPTS * sizeof(float));
+    float *x = (float *) x_mem.getMem();
+    float *y = (float *) y_mem.getMem();
 
     bool ok = retrieveDRAP (x, y);
     if (ok) {
@@ -660,6 +672,10 @@ bool retrieveKp (float kpx[KP_NV], float kp[KP_NV])
 
             Serial.printf (_FX("Kp: data short: %d of %d\n"), kp_i, KP_NV);
         }
+
+    } else {
+
+        Serial.print (F("Kp: connection failed\n"));
     }
 
 out:
@@ -682,10 +698,12 @@ static bool checkKp (void)
     if (myNow() < *next_p)
         return (false);
 
-    float kpx[KP_NV];
-    float kp[KP_NV];
+    StackMalloc x_mem (KP_NV * sizeof(float));
+    StackMalloc k_mem (KP_NV * sizeof(float));
+    float *x = (float *) x_mem.getMem();
+    float *k = (float *) k_mem.getMem();
 
-    bool ok = retrieveKp (kpx, kp);
+    bool ok = retrieveKp (x, k);
     if (ok) {
 
         // schedule next
@@ -736,7 +754,6 @@ bool retrieveXRay (float x[XRAY_NV], float lxray[XRAY_NV], float sxray[XRAY_NV])
         xray_i = 0;
         float raw_lxray = 0;
         while (xray_i < XRAY_NV && getTCPLine (xray_client, line, sizeof(line), &ll)) {
-            // Serial.println(line);
 
             if (line[0] == '2' && ll >= 56) {
 
@@ -771,6 +788,10 @@ bool retrieveXRay (float x[XRAY_NV], float lxray[XRAY_NV], float sxray[XRAY_NV])
 
             Serial.printf (_FX("XRay: data short %d of %d\n"), xray_i, XRAY_NV);
         }
+
+    } else {
+
+        Serial.print (F("XRay: connection failed\n"));
     }
 
 out:
@@ -793,11 +814,14 @@ static bool checkXRay (void)
     if (myNow() < *next_p)
         return (false);
 
-    float x[XRAY_NV];                           // x coords of plot
-    float lxray[XRAY_NV];                       // long wavelength values
-    float sxray[XRAY_NV];                       // short wavelength values
+    StackMalloc x_mem (XRAY_NV * sizeof(float));
+    StackMalloc l_mem (XRAY_NV * sizeof(float));
+    StackMalloc s_mem (XRAY_NV * sizeof(float));
+    float *x = (float *) x_mem.getMem();               // x coords of plot
+    float *l = (float *) l_mem.getMem();               // long wavelength values
+    float *s = (float *) s_mem.getMem();               // short wavelength values
 
-    bool ok = retrieveXRay (x, lxray, sxray);
+    bool ok = retrieveXRay (x, l, s);
     if (ok) {
 
         // schedule next
@@ -883,6 +907,10 @@ bool retrieveBzBt (float bzbt_hrsold[BZBT_NV], float bz[BZBT_NV], float bt[BZBT_
             else
                 Serial.printf (_FX("BZBT: data %g hrs old\n"), -bzbt_hrsold[BZBT_NV-1]);
         }
+
+    } else {
+
+        Serial.print (F("BZBT: connection failed\n"));
     }
 
 out:
@@ -905,9 +933,12 @@ static bool checkBzBt(void)
     if (myNow() < *next_p)
         return (false);
 
-    float old[BZBT_NV];
-    float bz[BZBT_NV];
-    float bt[BZBT_NV];
+    StackMalloc old_mem (BZBT_NV * sizeof(float));
+    StackMalloc bz_mem (BZBT_NV * sizeof(float));
+    StackMalloc bt_mem (BZBT_NV * sizeof(float));
+    float *old = (float *) old_mem.getMem();
+    float *bz = (float *) bz_mem.getMem();
+    float *bt = (float *) bt_mem.getMem();
 
     bool ok = retrieveBzBt (old, bz, bt);
     if (ok) {
@@ -1002,6 +1033,7 @@ int retrieveSolarWind(float x[SWIND_MAXN], float y[SWIND_MAXN])
         }
 
     } else {
+
         Serial.println (F("SolWind: connection failed"));
     }
 
@@ -1126,8 +1158,11 @@ bool retrieveNOAASWx(void)
             Serial.println (F("NOAASW: header short"));
             goto out;
         }
-    } else
+
+    } else {
+
         Serial.println (F("NOAASW: connection failed"));
+    }
 
 out:
 

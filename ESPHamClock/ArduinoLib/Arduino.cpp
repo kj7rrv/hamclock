@@ -20,6 +20,7 @@ static float max_cpu_usage = DEF_CPU_USAGE;
 
 char **our_argv;                // our argv for restarting
 std::string our_dir;            // our storage directory, including trailing /
+bool rm_eeprom;                 // set by -0 to rm eeprom to restore defaults
 
 // list of diagnostic files, newest first
 const char *diag_files[N_DIAG_FILES] = {
@@ -282,6 +283,7 @@ static void usage (const char *errfmt, ...)
             fprintf (stderr, "Version %s\n", hc_version);
             fprintf (stderr, "Built as %s\n", our_make);
             fprintf (stderr, "Options:\n");
+            fprintf (stderr, " -0   : remove eeprom file to restore all default values\n");
             fprintf (stderr, " -a l : set gimbal trace level\n");
             fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,
                                     backend_port);
@@ -328,6 +330,9 @@ static void crackArgs (int ac, char *av[])
             char *s = *av;
             while (*++s) {
                 switch (*s) {
+                case '0':
+                    rm_eeprom = true;
+                    break;
                 case 'a':
                     if (ac < 2)
                         usage ("missing trace level for -a");

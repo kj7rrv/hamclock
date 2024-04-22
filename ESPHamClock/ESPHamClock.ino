@@ -3223,7 +3223,7 @@ void getWorstMem (int *heap, int *stack)
  */
 const char *_FX_helper(const char *flash_string)
 {
-    #define N_PTRS 6
+    #define N_PTRS 10
     static char *ram_string[N_PTRS];
     static uint8_t nxt_i;
 

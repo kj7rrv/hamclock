@@ -21,7 +21,7 @@ const char *plot_names[PLOT_CH_N] = {
 };
 #undef X
 
-/* retrieve the plot choice for the given pane from NV, if set
+/* retrieve the plot choice for the given pane from NV, if set and valid
  */
 static bool getPlotChoiceNV (PlotPane new_pp, PlotChoice *new_pc)
 {
@@ -30,28 +30,28 @@ static bool getPlotChoiceNV (PlotPane new_pp, PlotChoice *new_pc)
 
     switch (new_pp) {
     case PANE_0:
-        ok = NVReadUInt8 (NV_PLOT_0, &pc);
+        // only Pane 0 can be NONE
+        ok = NVReadUInt8 (NV_PLOT_0, &pc) && (pc < PLOT_CH_N || pc == PLOT_CH_NONE);
         break;
     case PANE_1:
-        ok = NVReadUInt8 (NV_PLOT_1, &pc);
+        ok = NVReadUInt8 (NV_PLOT_1, &pc) && (pc < PLOT_CH_N);
         break;
     case PANE_2:
-        ok = NVReadUInt8 (NV_PLOT_2, &pc);
+        ok = NVReadUInt8 (NV_PLOT_2, &pc) && (pc < PLOT_CH_N);
         break;
     case PANE_3:
-        ok = NVReadUInt8 (NV_PLOT_3, &pc);
+        ok = NVReadUInt8 (NV_PLOT_3, &pc) && (pc < PLOT_CH_N);
         break;
     case PANE_N:
         break;
-    // no default in order to check coverage at compile time
-    }
 
-    // beware just bonkers
-    if (pc >= PLOT_CH_N)
-        return (false);
+    // default: no default in order to check coverage at compile time
+
+    }
 
     if (ok)
         *new_pc = (PlotChoice)pc;
+
     return (ok);
 }
 
@@ -561,6 +561,15 @@ void initPlotPanes()
     NVReadUInt32 (NV_PANE2ROTSET, &plot_rotset[PANE_2]);
     NVReadUInt32 (NV_PANE3ROTSET, &plot_rotset[PANE_3]);
 
+    // NB. since NV_PANE0ROTSET repurposes a prior NV it might contain invalid bits, 0 all if find any
+    if (plot_rotset[PANE_0] & ~((1<<PLOT_CH_DXCLUSTER) | (1<<PLOT_CH_CONTESTS) | (1<<PLOT_CH_PSK) |
+                               (1<<PLOT_CH_POTA) | (1<<PLOT_CH_SOTA))) {
+        Serial.printf (_FX("PANE: Resetting bogus Pane 0 rot set: 0x%x\n"), plot_rotset[PANE_0]);
+        plot_rotset[PANE_0] = 0;
+        plot_ch[PANE_0] = PLOT_CH_NONE;
+    }
+
+
     // rm any choice not available, including dx cluster in pane 1
     for (int i = PANE_0; i < PANE_N; i++) {
         plot_rotset[i] &= ((1 << PLOT_CH_N) - 1);        // reset any bits too high
@@ -579,8 +588,7 @@ void initPlotPanes()
 
     // if current selection not yet defined or not in rotset pick one from rotset or set a default
     for (int i = PANE_0; i < PANE_N; i++) {
-        if (!getPlotChoiceNV ((PlotPane)i, &plot_ch[i]) || plot_ch[i] >= PLOT_CH_N
-                                                        || !(plot_rotset[i] & (1 << plot_ch[i])))
+        if (!getPlotChoiceNV ((PlotPane)i, &plot_ch[i]) || !(plot_rotset[i] & (1 << plot_ch[i])))
             setDefaultPaneChoice ((PlotPane)i);
     }
 
@@ -605,12 +613,12 @@ void initPlotPanes()
         }
     }
 
-    // enforce PLOT_CH_DXCLUSTER is alone, if any
+    // enforce PLOT_CH_DXCLUSTER is alone in rotset, if any
     for (int i = PANE_0; i < PANE_N; i++) {
-        if (plot_rotset[i] & (1 << PLOT_CH_DXCLUSTER)) {
+        if ((plot_rotset[i] & (1 << PLOT_CH_DXCLUSTER)) && (plot_rotset[i] & ~(1 << PLOT_CH_DXCLUSTER))) {
             plot_rotset[i] = (1 << PLOT_CH_DXCLUSTER);
             plot_ch[i] = PLOT_CH_DXCLUSTER;
-            Serial.printf (_FX("isolating DX Cluster in pane %d\n"), i+i);
+            Serial.printf (_FX("isolating DX Cluster in pane %d\n"), i);
             break;
         }
     }

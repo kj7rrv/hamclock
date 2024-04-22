@@ -224,6 +224,8 @@ bool updateContests (const SBox &box)
         max_contests = cts_ss.max_vis;
     #else
         max_contests = cts_ss.max_vis + nMoreScrollRows();
+        if (show_date && (max_contests % 2) != 0)
+            max_contests += 1;            // yes, +1 else we drop one contest
     #endif
 
         // first line is credit
