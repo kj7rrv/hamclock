@@ -4012,7 +4012,7 @@ static void saveParams2NV()
 
     uint16_t dx_cmdmask = 0;
     for (int i = 0; i < N_DXCLCMDS; i++)
-        if (bool_pr[DXCLCMD0_BPR+1].state)
+        if (bool_pr[DXCLCMD0_BPR+i].state)
             dx_cmdmask |= (1<<i);
     NVWriteUInt16 (NV_DXCMDMASK, dx_cmdmask);
 

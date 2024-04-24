@@ -36,9 +36,9 @@ char *liveweb_openurl;                                  // a url to attempt to o
 // our public endpoint port
 int liveweb_port = LIVEWEB_PORT;                        // server port -- can be changed with -w
 
-// max allowed connections -- must be <= ws.h::MAX_CLIENTS
+// max allowed connections -- must be < ws.h::MAX_CLIENTS
 int liveweb_max = 10;
-const int liveweb_maxmax = MAX_CLIENTS;                 // max max for -help
+const int liveweb_maxmax = MAX_CLIENTS-1;               // max max for -help
 
 
 // png format is 3 bytes per pixel
@@ -733,9 +733,9 @@ void initLiveWeb (bool verbose)
 
     } else {
 
-        // insure liveweb_max <= ws.h::MAX_CLIENTS
-        if (liveweb_max > MAX_CLIENTS)
-            bye ("liveweb_max %d > %d\n", liveweb_max, MAX_CLIENTS);
+        // insure liveweb_max < ws.h::MAX_CLIENTS to allow for error page
+        if (liveweb_max >= MAX_CLIENTS)
+            bye ("liveweb_max must be %d < %d\n", liveweb_max, MAX_CLIENTS);
 
         // handle all write errors inline
         signal (SIGPIPE, SIG_IGN);

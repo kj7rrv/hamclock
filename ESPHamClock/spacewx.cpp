@@ -51,7 +51,7 @@ static int swQSF (const void *v1, const void *v2)
 /* init the slope and intercept of each space wx stat from sw_rank_page.
  * return whether successful.
  */
-static bool initSWMB(void)
+static bool initSWFit(void)
 {
     WiFiClient sw_client;
     bool ok = false;
@@ -63,6 +63,8 @@ static bool initSWMB(void)
         resetWatchdog();
         updateClocks(false);
 
+        char line[50];
+
         httpHCPGET (sw_client, backend_host, sw_rank_page);
 
         if (!httpSkipHeader (sw_client)) {
@@ -70,8 +72,12 @@ static bool initSWMB(void)
             goto out;
         }
 
-        char line[50];
-        float m[SPCWX_N], b[SPCWX_N];       // local until know all are good
+        // local until know all are good
+        StackMalloc m_mem (SPCWX_N * sizeof(float));
+        StackMalloc b_mem (SPCWX_N * sizeof(float));
+        float *m = (float *) m_mem.getMem();
+        float *b = (float *) b_mem.getMem();
+
         for (int n_c = 0; n_c < SPCWX_N; ) {
             // read line
             if (!getTCPLine (sw_client, line, sizeof(line), NULL)) {
@@ -97,10 +103,10 @@ static bool initSWMB(void)
         // all good, log and store
         Serial.println (F("RANKSW:   Coeffs Name       m       b"));
         for (int i = 0; i < SPCWX_N; i++) {
-            SpaceWeather_t &swi = space_wx[i];
-            swi.m = m[i];
-            swi.b = b[i];
-            Serial.printf (_FX("RANKSW: %13s %7g %7g\n"), plot_names[swi.pc], swi.m, swi.b);
+            SpaceWeather_t &sw_i = space_wx[i];
+            sw_i.m = m[i];
+            sw_i.b = b[i];
+            Serial.printf (_FX("RANKSW: %13s %7g %7g\n"), plot_names[sw_i.pc], sw_i.m, sw_i.b);
         }
 
         ok = true;
@@ -122,7 +128,7 @@ static void sortSpaceWx()
     static bool set_mb, mb_ok;
     if (!set_mb) {
         set_mb = true;
-        mb_ok = initSWMB();
+        mb_ok = initSWFit();
         if (!mb_ok)
             Serial.println (F("RANKSW: no ranking available -- using default"));
     }
@@ -130,18 +136,19 @@ static void sortSpaceWx()
         return;                 // use default ranking
 
     // copy space_wx and sort best first
-    SpaceWeather_t sw_sort[SPCWX_N];
-    memcpy (sw_sort, space_wx, sizeof(sw_sort));
+    StackMalloc sw_mem (sizeof(space_wx));
+    SpaceWeather_t *sw_sort = (SpaceWeather_t *) sw_mem.getMem();
+    memcpy (sw_sort, space_wx, sizeof(space_wx));
     qsort (sw_sort, SPCWX_N, sizeof(SpaceWeather_t), swQSF);
     
     // set and record rank of each entry
     Serial.println (F("RANKSW: rank      name    value score"));
     for (int i = 0; i < SPCWX_N; i++) {
-        SPCWX_t spi = sw_sort[i].sp;
-        SpaceWeather_t &swi = space_wx[spi];
-        swi.rank = i;
-        Serial.printf (_FX("RANKSW: %d %12s %8.2g %3d\n"), i, plot_names[swi.pc], swi.value,
-                                SW_RANKV(&swi));
+        SPCWX_t sp_i = sw_sort[i].sp;
+        SpaceWeather_t &sw_i = space_wx[sp_i];
+        sw_i.rank = i;
+        Serial.printf (_FX("RANKSW: %d %12s %8.2g %3d\n"), i, plot_names[sw_i.pc], sw_i.value,
+                                SW_RANKV(&sw_i));
     }
 }
 
@@ -351,10 +358,12 @@ static bool checkSunSpots (void)
     if (myNow() < *next_p)
         return (false);
 
-    float x[SSN_NV];
-    float ssn[SSN_NV];
+    StackMalloc x_mem (SSN_NV * sizeof(float));
+    StackMalloc s_mem (SSN_NV * sizeof(float));
+    float *x = (float *) x_mem.getMem();
+    float *s = (float *) s_mem.getMem();
 
-    bool ok = retrieveSunSpots (x, ssn);
+    bool ok = retrieveSunSpots (x, s);
     if (ok) {
 
         // schedule next
@@ -1057,9 +1066,10 @@ static bool checkSolarWind (void)
     if (myNow() < *next_p)
         return (false);
 
-    float x[SWIND_MAXN];                        // hours ago
-    float y[SWIND_MAXN];                        // wind
-
+    StackMalloc x_mem(SWIND_MAXN*sizeof(float));  // hours ago
+    StackMalloc y_mem(SWIND_MAXN*sizeof(float));  // wind
+    float *x = (float *) x_mem.getMem();
+    float *y = (float *) y_mem.getMem();
     int nsw = retrieveSolarWind (x, y);
     if (nsw >= SWIND_MINN) {
 
@@ -1312,9 +1322,9 @@ bool checkAurora ()
     if (myNow() < *next_p)
         return (false);
 
-    // all this work just to set space_wx[SPCWX_AURORA]
-    Aurora_t a;
-    bool ok = retrieveAurora (a);
+    StackMalloc a_mem (sizeof(Aurora_t));
+    Aurora_t *a_p = (Aurora_t *) a_mem.getMem();;
+    bool ok = retrieveAurora (*a_p);
 
     if (ok) {
 

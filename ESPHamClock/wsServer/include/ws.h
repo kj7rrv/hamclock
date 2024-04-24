@@ -41,7 +41,7 @@ extern "C" {
 	/**
 	 * @brief Max clients connected simultaneously.
 	 */
-	#define MAX_CLIENTS    100
+	#define MAX_CLIENTS    101      // so max live is a nicer 100
 
 	/**
 	 * @name Key and message configurations.
