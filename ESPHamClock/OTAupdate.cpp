@@ -17,6 +17,7 @@ static const char v_page[] PROGMEM = "/version.pl";
 #define INDENT          20                              // indent
 #define Q_Y             40                              // question y
 #define LH              30                              // line height
+#define FD              7                               // font descent
 #define BOX_Y           (Q_Y+LH)                        // yes/no boxes y
 #define INFO_Y          (BOX_Y+2*LH)                    // first info y
 
@@ -172,14 +173,18 @@ bool askOTAupdate(char *new_ver)
             goto out;
         }
 
-        // remaining lines are changes, reserce last for 'more info' message if all won't fit
+        // remaining lines are changes, allow last for 'more info' message if all won't fit
         while (getTCPLine (v_client, line, sizeof(line), NULL)) {
             liney += LH;
-            tft.setCursor (INDENT, liney);
-            if (liney >= tft.height()-LH) {
+            if (liney >= tft.height()-FD) {
+                // scrolled off -- backup and show pointer
+                liney -= LH;
+                tft.fillRect (0, liney-(LH-FD), 800, 479-(liney-(LH-FD)), RA8875_BLACK);
+                tft.setCursor (INDENT, liney);
                 tft.print(F("    for more information see clearskyinstitute.com/ham/HamClock"));
                 break;
             }
+            tft.setCursor (INDENT, liney);
             (void) maxStringW (line, tft.width()-2*INDENT);
             tft.print(line);
         }
@@ -204,13 +209,13 @@ bool askOTAupdate(char *new_ver)
 
         // switch active button if type tab or accept current if Enter or bale if esc
         char c = tft.getChar(NULL,NULL);
-        if (c == '\t') {
+        if (c == CHAR_TAB) {
             active_yes = !active_yes;
             drawStringInBox ("Yes", yes_b, active_yes, RA8875_WHITE);
             drawStringInBox ("No", no_b, !active_yes, RA8875_WHITE);
-        } else if (c == 27) {
+        } else if (c == CHAR_ESC) {
             return (false);
-        } else if (c == '\r' || c == '\n') {
+        } else if (c == CHAR_CR || c == CHAR_NL) {
             return (active_yes);
         }
 

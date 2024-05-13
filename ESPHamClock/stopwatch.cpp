@@ -1,4 +1,5 @@
-/* implement a simple stopwatch with lap timer, countdown timer, alarm clock and a pair of Big Clocks.
+/* implement a simple stopwatch with lap timer, countdown timer, daily alarm clock, a one-time
+ * alarm clock and a pair of Big Clocks.
  *
  * we maintain two separate states:
  *   SWDisplayState: a display state that indicates which page we are showing, if any.
@@ -10,27 +11,50 @@
 
 
 // set to show all boxes for debugging
-// #define _SHOW_ALL                    // remove before flight
+// #define _SHOW_ALL                    // RBF
+#if defined(_SHOW_ALL)
+#warning stopwatch _SHOW_ALL is set
+#endif
 
-#define SW_CD_BLINKHZ   2                       // LED warning blink rate
 
 
 // countdown ranges, including flashing states
 typedef enum {
-    SWCDS_OFF,                          // idle or dark
-    SWCDS_RUNOK,                        // more than SW_CD_WARNDT remaining
-    SWCDS_WARN,                         // > 0 but < SW_CD_WARNDT remaining
-    SWCDS_TIMEOUT,                      // timed out
+    SWCDS_OFF,                                  // idle or dark
+    SWCDS_RUNOK,                                // more than SW_CD_WARNDT remaining
+    SWCDS_WARN,                                 // > 0 but < SW_CD_WARNDT remaining
+    SWCDS_TIMEOUT,                              // timed out
 } SWCDState;
 
+
+// one-time alarm info
+typedef struct {
+    time_t time;                                // set time(), always in UTC
+    bool utc;                                   // user wants time in UTC, else DE
+    AlarmState state;                           // whether off, armed or ringing
+    SBox lbl_b;                                 // main control label
+    SBox time_b;                                // main time display
+    SBox bc_alarm_b;                            // bc alarm control
+} AlarmOnce;
+
+// daily alarm info
+typedef struct {
+    uint16_t hrmn;                              // time as hr*60 + min, always in DE TZ
+    AlarmState state;                           // whether off, armed or ringing
+    SBox lbl_b;                                 // main control label
+    SBox time_b;                                // main time display
+    SBox bc_alarm_b;                            // bc alarm control
+} AlarmDaily;
 
 
 /* info to manage the stopwatch blinker threads
  */
+#define SW_CD_BLINKHZ   2                       // LED warning blink rate, Hz
 static volatile ThreadBlinker sw_cd_blinker_red;
 static volatile ThreadBlinker sw_cd_blinker_grn;
 static volatile MCPPoller sw_cd_reset;
 static volatile MCPPoller sw_alarmoff;
+
 
 /* return all IO lines to benign state
  */
@@ -137,7 +161,7 @@ static void setAlarmPin (bool set)
 #define SW_BCY          SW_EXITY                // big-clock button y
 #define SW_BY           350                     // control button y
 #define SW_BW           120                     // button width
-#define SW_BH           40                      // button height
+#define SW_BH           32                      // button height
 #define SW_CX           SW_BAX                  // color scale x
 #define SW_CY           SW_EXITY                // color scale y
 #define SW_CW           (SW_BBX+SW_BW-SW_CX)    // color scale width
@@ -146,21 +170,30 @@ static void setAlarmPin (bool set)
 #define SW_HSV_V        255                     // color scale HSV value, 0..255
 
 // alarm clock params
-#define ALM_X0          180                     // alarm control button x
-#define ALM_Y0          25                      // alarm control button y
-#define ALM_W           200                     // alarm control button width
-#define ALM_EX          420                     // alarm time display box x
-#define ALM_EY          ALM_Y0                  // alarm time display box y
-#define ALM_EW          SW_CDP_W                // alarm time display box w
-#define ALM_NVARMED     (24U*60U)               // add to hrmn when stored in NV_ALARMCLOCK to indicate armed
-#define ALM_RINGTO      60000                   // alarm clock ringing timeout, millis
+#define ALM_VGAP        10                      // vertical gap between alarm controls
+#define ALM_HGAP        10                      // half central horizontal gap between alarm label and time
+#define ALMD_Y0         15                      // daily alarm buttons y
+#define ALMD_LW         300                     // daily alarm control button width
+#define ALMD_LX0        (400-ALM_HGAP-ALMD_LW)  // daily alarm label x
+#define ALMD_TX0        (400+ALM_HGAP)          // daily alarm time button x
+#define ALMD_TW         130                     // daily time control button width
+#define ALMO_Y0         (ALMD_Y0+SW_BH+ALM_VGAP)// once-alarm buttons y
+#define ALMO_LW         300                     // once-alarm control button width
+#define ALMO_LX0        (400-ALM_HGAP-ALMO_LW)  // once-alarm label x
+#define ALMO_TX0        (400+ALM_HGAP)          // once-alarm time control button x
+#define ALMO_TW         300                     // once-alarm control button width
+#define ALMO_TITY       (ALMO_Y0+SW_BH+3)       // once-alarm title Y
+#define ALMD_NVARMED    (24U*60U)               // add to hrmn when stored in NV_DAILYALARM to indicate armed
+#define ALM_RINGTO      60                      // alarm clock ringing timeout, secs; NOT EASILY CHANGED
+#define ALMO_ARMED_BIT  1                       // NV_ONCEALARMMASK bit means armed
+#define ALMO_UTC_BIT    2                       // NV_ONCEALARMMASK bit means alarm_once.time is in utc
 
 // countdown params
-#define SW_CD_X         ALM_X0                  // countdown button x
-#define SW_CD_Y         (ALM_Y0+2*SW_BH)        // countdown button y
-#define SW_CD_W         ALM_W                   // countdown button width
-#define SW_CDP_X        ALM_EX                  // countdown period display box x
-#define SW_CDP_W        ALM_W                   // countdown period display box width
+#define SW_CD_W         200                     // countdown button width
+#define SW_CD_X         (400-ALM_HGAP-SW_CD_W)  // countdown button x
+#define SW_CD_Y         (ALMO_TITY+2*ALM_VGAP)  // countdown button y
+#define SW_CDP_X        (400+ALM_HGAP)          // countdown period display box x
+#define SW_CDP_W        200                     // countdown period display box width
 #define SW_CD_WARNDT    60000                   // countdown warning time, ms
 #define SW_CD_AGEDT     30000                   // countdown aged period, ms
 
@@ -217,14 +250,18 @@ static void setAlarmPin (bool set)
 #define BCD_SSZRED      3                       // reduce seconds size by this factor
 
 // contols common to both big clock styles
-#define BC_CDP_X        2                       // countdown period x
+#define BC_CDP_X        0                       // countdown period x
 #define BC_CDP_Y        (480-SW_BH)             // countdown period y 
 #define BC_CDP_W        100                     // countdown period width 
 #define BC_CDP_H        SW_BH                   // countdown period height 
-#define BC_ALM_X        (BC_CDP_X+BC_CDP_W)     // x coord of alarm time box
-#define BC_ALM_Y        BC_CDP_Y                // y coord of alarm time box
-#define BC_ALM_W        SW_BW                   // alarm message width
-#define BC_ALM_H        SW_BH                   // alarm message height
+#define BC_ALMD_X       (BC_CDP_X+BC_CDP_W)     // x coord of daily alarm time box
+#define BC_ALMD_Y       BC_CDP_Y                // y coord of daily alarm time box
+#define BC_ALMD_W       SW_BW                   // daily alarm message width
+#define BC_ALMD_H       SW_BH                   // daily alarm message height
+#define BC_ALMO_X       0                       // x coord of one-time alarm time box
+#define BC_ALMO_Y       (BC_ALMD_Y-SW_BH)       // y coord of one-time alarm time box
+#define BC_ALMO_W       240                     // one-time alarm message width
+#define BC_ALMO_H       SW_BH                   // one-time alarm message height
 #define BC_BAD_W        200                     // bad time message width
 #define BC_BAD_H        SW_BH                   // bad time message height
 #define BC_BAD_X        (800-BC_BAD_W-2)        // x coord of bad time message
@@ -242,9 +279,19 @@ static SWDisplayState sws_display;              // what is _displaying_
 static uint32_t countdown_period;               // count down from here, ms
 static uint8_t swdigits[SW_NDIG];               // current digits
 static uint32_t start_t, stop_dt;               // millis() at start, since stop
-static uint16_t alarm_hrmn;                     // alarm time, hr*60 + min
-static time_t alarm_ringtime;                   // now() when alarm started ringing
-static AlarmState alarm_state;                  // whether off, armed or ringing
+AlarmOnce alarm_once = {
+    0, false, ALMS_OFF,
+    {ALMO_LX0, ALMO_Y0, ALMO_LW, SW_BH},
+    {ALMO_TX0, ALMO_Y0, ALMO_TW, SW_BH},
+    {BC_ALMO_X, BC_ALMO_Y, BC_ALMO_W, BC_ALMO_H},
+};
+static AlarmDaily alarm_daily = {
+    0, ALMS_OFF,
+    {ALMD_LX0, ALMD_Y0, ALMD_LW, SW_BH},
+    {ALMD_TX0, ALMD_Y0, ALMD_TW, SW_BH},
+    {BC_ALMD_X, BC_ALMD_Y, BC_ALMD_W, BC_ALMD_H},
+};
+
 
 // button labels
 static char cd_lbl[] = "Count down";
@@ -258,9 +305,9 @@ static char bigclock_lbl[] = "Big Clock";
 
 // stopwatch controls
 static SBox countdown_lbl_b = {SW_CD_X, SW_CD_Y, SW_CD_W, SW_BH};
-static SBox cdtime_dsp_b = {SW_CDP_X, SW_CD_Y, SW_CDP_W, SW_BH};
-static SBox cdtime_up_b = {SW_CDP_X, SW_CD_Y-SW_BH/2, SW_CDP_W, SW_BH};
-static SBox cdtime_dw_b = {SW_CDP_X, SW_CD_Y+SW_BH/2, SW_CDP_W, SW_BH};
+static SBox cd_time_dsp_b = {SW_CDP_X, SW_CD_Y, SW_CDP_W, SW_BH};
+static SBox cd_time_up_b = {SW_CDP_X, SW_CD_Y, SW_CDP_W, SW_BH/2};
+static SBox cd_time_dw_b = {SW_CDP_X, SW_CD_Y+SW_BH/2, SW_CDP_W, SW_BH/2};
 static SBox A_b = {SW_BAX, SW_BY, SW_BW, SW_BH};
 static SBox B_b = {SW_BBX, SW_BY, SW_BW, SW_BH};
 static SBox exit_b = {SW_EXITX, SW_EXITY, SW_BW, SW_BH};
@@ -270,32 +317,80 @@ static uint8_t sw_hue;                          // hue 0..255
 static uint16_t sw_col;                         // color pixel
 
 // big clock info
-static SBox bcdate_b = {BAC_DATEX, BAC_DATEY, BAC_DATEW, BAC_DATEH};
-static SBox bcwx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};              // weather
-static SBox bccd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, BC_CDP_H};          // countdown remaining and control
-static SBox bcalarm_b = {BC_ALM_X, BC_ALM_Y, BC_ALM_W, BC_ALM_H};       // alarm time and control
+static SBox bc_date_b = {BAC_DATEX, BAC_DATEY, BAC_DATEW, BAC_DATEH};
+static SBox bc_wx_b = {BAC_WXX, BAC_WXY, BAC_WXW, BAC_WXH};             // weather
+static SBox bc_cd_b = {BC_CDP_X, BC_CDP_Y, BC_CDP_W, BC_CDP_H};         // countdown remaining and control
 static uint16_t bc_bits;                        // see SWBCBits
 static uint32_t bc_prev_wx;                     // time of prev drawn wx, millis
 static uint32_t bc_wxdt = BAC_WXGDT;            // weather update interval, millis
 
-// alarm clock controls on main sw page
-static SBox alarm_lbl_b = {ALM_X0, ALM_Y0, ALM_W, SW_BH};
-static SBox alarm_hrmn_b = {ALM_EX, ALM_EY, ALM_EW, SW_BH};
-static SBox alarm_up_b = {ALM_EX, ALM_EY-SW_BH/2, ALM_EW, SW_BH};
-static SBox alarm_dw_b = {ALM_EX, ALM_EY+SW_BH/2, ALM_EW, SW_BH};
-
 
 /* save persistent state and log
  */
-static void saveSWNV()
+static void saveSWNV(void)
 {
     NVWriteUInt16 (NV_BCFLAGS, bc_bits);
     NVWriteUInt32 (NV_CD_PERIOD, countdown_period);
 
-    uint16_t acode = alarm_hrmn;
-    if (alarm_state != ALMS_OFF)
-        acode += ALM_NVARMED;
-    NVWriteUInt16 (NV_ALARMCLOCK, acode);
+    uint16_t acode = alarm_daily.hrmn;
+    if (alarm_daily.state != ALMS_OFF)
+        acode += ALMD_NVARMED;
+    NVWriteUInt16 (NV_DAILYALARM, acode);
+
+    uint8_t once_mask = 0;
+    if (alarm_once.state != ALMS_OFF)
+        once_mask |= ALMO_ARMED_BIT;
+    if (alarm_once.utc)
+        once_mask |= ALMO_UTC_BIT;
+    NVWriteUInt8 (NV_ONCEALARMMASK, once_mask);
+    NVWriteUInt32 (NV_ONCEALARM, (uint32_t)alarm_once.time);
+}
+
+/* load persistent values from NV
+ */
+static void loadSWNV(void)
+{
+    if (!NVReadUInt16 (NV_BCFLAGS, &bc_bits)) {
+        bc_bits = SW_BCDATEBIT | SW_BCWXBIT;
+        NVWriteUInt16 (NV_BCFLAGS, bc_bits);
+    }
+    if (!NVReadUInt32 (NV_CD_PERIOD, &countdown_period)) {
+        countdown_period = 600000;     // 10 mins default
+        NVWriteUInt32 (NV_CD_PERIOD, countdown_period);
+    }
+
+    // read and unpack daily alarm time and whether armed.
+    if (!NVReadUInt16 (NV_DAILYALARM, &alarm_daily.hrmn)) {
+        alarm_daily.hrmn = 0;
+        alarm_daily.state = ALMS_OFF;
+        NVWriteUInt16 (NV_DAILYALARM, 0);
+    }
+    if (alarm_daily.hrmn < ALMD_NVARMED) {
+        alarm_daily.state = ALMS_OFF;
+    } else {
+        alarm_daily.state = ALMS_ARMED;
+        alarm_daily.hrmn -= ALMD_NVARMED;
+    }
+
+    // read and unpack the one-time alarm
+    uint8_t once_mask;
+    if (!NVReadUInt8 (NV_ONCEALARMMASK, &once_mask)) {
+        once_mask = 0;
+        NVWriteUInt8 (NV_ONCEALARMMASK, once_mask);
+    }
+    alarm_once.state = (once_mask & ALMO_ARMED_BIT) ? ALMS_ARMED : ALMS_OFF;
+    alarm_once.utc =   (once_mask & ALMO_UTC_BIT) != 0;
+
+    uint32_t once_time;
+    if (!NVReadUInt32 (NV_ONCEALARM, &once_time)) {
+        once_time = nowWO();
+        NVWriteUInt32 (NV_ONCEALARM, once_time);
+    } else {
+        // beware past alarms
+        if (once_time < nowWO())
+            alarm_once.state = ALMS_OFF;
+    }
+    alarm_once.time = once_time;
 }
 
 /* return ms countdown time remaining, if any
@@ -326,7 +421,7 @@ static void drawSWCDPeriod()
         char buf[20];
         int mins = countdown_period/60000;
         snprintf (buf, sizeof(buf), "%d %s", mins, mins > 1 ? "mins" : "min");
-        drawStringInBox (buf, cdtime_dsp_b, false, sw_col);
+        drawStringInBox (buf, cd_time_dsp_b, false, sw_col);
     }
 }
 
@@ -583,61 +678,115 @@ static void drawSatIndicator(bool force)
     }
 }
 
-/* draw alarm_hrmn, pin and label if requested in various ways depending on sws_display
+/* erase the contest title beneath the one-time alarm time
  */
-static void drawAlarmIndicator (bool label_too)
+static void eraseContestTitle(void)
 {
-    // pin
-    setAlarmPin (alarm_state == ALMS_RINGING);
+    if (sws_display == SWD_MAIN)
+        tft.fillRect (ALMO_TX0, ALMO_TITY, ALMO_TW, 14, RA8875_BLACK);
+}
 
-    // prep
-    char buf[30];
-    selectFontStyle (BOLD_FONT, SMALL_FONT);
-    uint16_t a_hr = alarm_hrmn/60;
-    uint16_t a_mn = alarm_hrmn%60;
-
-    if (sws_display == SWD_MAIN) {
-        snprintf (buf, sizeof(buf), "DE  %02d:%02d", a_hr, a_mn);       // coord with up/down touch
-        drawStringInBox (buf, alarm_hrmn_b, false, sw_col);
-        if (label_too) {
-            const char *lbl = "?";
-            switch (alarm_state) {
-            case ALMS_OFF:     lbl = "Alarm off";   break;
-            case ALMS_ARMED:   lbl = "Alarm armed"; break;
-            case ALMS_RINGING: lbl = "Alarm!";      break;
-            }
-            drawStringInBox (lbl, alarm_lbl_b, alarm_state == ALMS_RINGING, sw_col);
-        }
-    } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
-        if (alarm_state == ALMS_OFF) {
-            if (label_too) {
-                // this is so web command set_alarm?off can actually erase the alarm box
-                fillSBox (bcalarm_b, RA8875_BLACK);
-            }
-        } else if (alarm_state == ALMS_ARMED) {
-            snprintf (buf, sizeof(buf), "A: %02d:%02d", a_hr, a_mn);
-            drawStringInBox (buf, bcalarm_b, false, sw_col);
-        } else if (alarm_state == ALMS_RINGING) {
-            drawStringInBox ("Alarm!", bcalarm_b, true, sw_col);
+/* draw the title of a contest beneath the one-time alarm if its time matches alarm_once.time
+ */
+static void drawContestTitle(void)
+{
+    if (sws_display == SWD_MAIN && alarm_once.state == ALMS_ARMED) {
+        const char *con_ttle = getAlarmedContestTitle (alarm_once.time);
+        if (con_ttle) {
+            selectFontStyle (LIGHT_FONT, FAST_FONT);
+            tft.setTextColor (sw_col);
+            tft.setCursor (ALMO_TX0 + (ALMO_TW-getTextWidth(con_ttle))/2, ALMO_TITY+2);
+            tft.print (con_ttle);
         }
     }
 }
 
-/* return whether alarm has gone off since previous call.
- * N.B. we assume this will be called more than once per minute
+/* draw alarm times, pin and label if requested in various ways depending on sws_display
  */
-static bool checkAlarm()
+static void drawAlarmIndicators (bool label_too)
 {
-    // get de time hrmn
-    time_t de_lt0 = nowWO() + de_tz.tz_secs;
-    uint16_t de_hrmn = hour(de_lt0)*60U + minute(de_lt0);
+    // pin
+    setAlarmPin (alarm_daily.state == ALMS_RINGING || alarm_once.state == ALMS_RINGING);
 
-    // wentoff unless still in same minute
-    static uint16_t prev_de_hrmn = 24*60;       // init to impossible hrmn
-    bool wentoff = de_hrmn == alarm_hrmn && de_hrmn != prev_de_hrmn;
-    prev_de_hrmn = de_hrmn;
+    // prep
+    char buf[50];
+    selectFontStyle (BOLD_FONT, SMALL_FONT);
+    uint16_t a_hr = alarm_daily.hrmn/60;
+    uint16_t a_mn = alarm_daily.hrmn%60;
 
-    return (wentoff);
+    if (sws_display == SWD_MAIN) {
+
+        // N.B. coordinate with alarm_daily.time_b touch control locations
+        snprintf (buf, sizeof(buf), "DE   %02d:%02d",  a_hr, a_mn);
+        drawStringInBox (buf, alarm_daily.time_b, false, sw_col);
+
+        if (label_too) {
+            const char *lbl = "?";
+            switch (alarm_daily.state) {
+            case ALMS_OFF:     lbl = "Daily Alarm off";   break;
+            case ALMS_ARMED:   lbl = "Daily Alarm armed"; break;
+            case ALMS_RINGING: lbl = "Daily Alarm!";      break;
+            }
+            drawStringInBox (lbl, alarm_daily.lbl_b, alarm_daily.state == ALMS_RINGING, sw_col);
+        }
+
+        // N.B. coordinate with alarm_once.time_b touch control locations
+        tmElements_t tm;
+        time_t t = alarm_once.time;
+        if (!alarm_once.utc)
+            t += de_tz.tz_secs;
+        breakTime (t, tm);
+        snprintf (buf, sizeof(buf), "%s %04d-%02d-%02d %02d:%02d", alarm_once.utc ? "UTC" : "DE  ",
+                                        tm.Year+1970, tm.Month, tm.Day, tm.Hour, tm.Minute);
+        drawStringInBox (buf, alarm_once.time_b, false, sw_col);
+
+        if (label_too) {
+            const char *lbl = "?";
+            switch (alarm_once.state) {
+            case ALMS_OFF:     lbl = "One-Time Alarm off";   break;
+            case ALMS_ARMED:   lbl = "One-Time Alarm armed"; break;
+            case ALMS_RINGING: lbl = "One-Time Alarm!";      break;
+            }
+            drawStringInBox (lbl, alarm_once.lbl_b, alarm_once.state == ALMS_RINGING, sw_col);
+        }
+
+        // erase contest title then draw if set
+        // N.B. do this after label_too because drawContestTitle calls selectFontStyle()
+        eraseContestTitle();
+        drawContestTitle();
+
+    } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
+
+        if (alarm_daily.state == ALMS_OFF) {
+            if (label_too) {
+                // this is so web command set_alarm?off can actually erase the alarm box
+                fillSBox (alarm_daily.bc_alarm_b, RA8875_BLACK);
+            }
+        } else if (alarm_daily.state == ALMS_ARMED) {
+            snprintf (buf, sizeof(buf), "A:%02d:%02d", a_hr, a_mn);
+            drawStringInBox (buf, alarm_daily.bc_alarm_b, false, sw_col);
+        } else if (alarm_daily.state == ALMS_RINGING) {
+            drawStringInBox ("Alarm!", alarm_daily.bc_alarm_b, true, sw_col);
+        }
+
+        if (alarm_once.state == ALMS_OFF) {
+            if (label_too) {
+                // this is so web command set_alarm?off can actually erase the alarm box
+                fillSBox (alarm_once.bc_alarm_b, RA8875_BLACK);
+            }
+        } else if (alarm_once.state == ALMS_ARMED) {
+            tmElements_t tm;
+            time_t t = alarm_once.time;
+            if (!alarm_once.utc)
+                t += de_tz.tz_secs;
+            breakTime (t, tm);
+            snprintf (buf, sizeof(buf), "A:%04d-%02d-%02d %02d:%02d", tm.Year+1970, tm.Month, tm.Day,
+                                                                                tm.Hour, tm.Minute);
+            drawStringInBox (buf, alarm_once.bc_alarm_b, false, sw_col);
+        } else if (alarm_once.state == ALMS_RINGING) {
+            drawStringInBox ("One-time Alarm!", alarm_once.bc_alarm_b, true, sw_col);
+        }
+    }
 }
 
 /* draw remaining count down time and manage the state of the count down button and LED.
@@ -756,7 +905,7 @@ static void drawCDTimeRemaining(bool force)
         } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
 
             selectFontStyle (BOLD_FONT, SMALL_FONT);
-            drawStringInBox (buf, bccd_b, false, color);
+            drawStringInBox (buf, bc_cd_b, false, color);
 
         }
 
@@ -810,27 +959,27 @@ static void drawBCAwareness (bool force)
 }
 
 
-/* refresh detailed date info in bcdate_b.
- * N.B. we never erase because Wednesday overlays clock
+/* refresh detailed date info in bc_date_b.
+ * N.B. we never erase because Wednesday overlaps clock
  */
 static void drawBCDateInfo (int hr, int dy, int wd, int mo)
 {
     // day
     selectFontStyle (BOLD_FONT, LARGE_FONT);
     tft.setTextColor (BAC_FCOL);
-    tft.setCursor (bcdate_b.x, bcdate_b.y + 50);
+    tft.setCursor (bc_date_b.x, bc_date_b.y + 50);
     tft.print (dayStr(wd));
 
     // month
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
-    tft.setCursor (bcdate_b.x, bcdate_b.y + 90);
+    tft.setCursor (bc_date_b.x, bc_date_b.y + 90);
     if (getDateFormat() == DF_MDY || getDateFormat() == DF_YMD)
         tft.printf (_FX("%s %d"), monthStr(mo), dy);
     else
         tft.printf (_FX("%d %s"), dy, monthStr(mo));
 
     // AM/PM/UTC
-    tft.setCursor (bcdate_b.x, bcdate_b.y + 125);
+    tft.setCursor (bc_date_b.x, bc_date_b.y + 125);
     if (sws_display == SWD_BCANALOG || (bc_bits & (SW_DB12HBIT|SW_LSTBIT|SW_UTCBIT)) == SW_DB12HBIT) {
         // AM/PM always for analog or 12 hour digital
         tft.print (hr < 12 ? "AM" : "PM");
@@ -846,7 +995,7 @@ static void drawBCDateInfo (int hr, int dy, int wd, int mo)
     }
 }
 
-/* refresh DE weather in bcwx_b, return whether successful
+/* refresh DE weather in bc_wx_b, return whether successful
  */
 static bool drawBCDEWxInfo(void)
 {
@@ -854,12 +1003,12 @@ static bool drawBCDEWxInfo(void)
     char ynot[100];
     bool ok = getCurrentWX (de_ll, true, &wi, ynot);
     if (ok)
-        plotWX (bcwx_b, BAC_FCOL, wi);
+        plotWX (bc_wx_b, BAC_FCOL, wi);
     else
-        plotMessage (bcwx_b, RA8875_RED, ynot);
+        plotMessage (bc_wx_b, RA8875_RED, ynot);
 
     // undo border
-    drawSBox (bcwx_b, RA8875_BLACK);
+    drawSBox (bc_wx_b, RA8875_BLACK);
 
     return (ok);
 }
@@ -877,9 +1026,10 @@ static void drawBCSpaceWxInfo (bool all)
 static void drawBCShowAll()
 {
     #if defined(_SHOW_ALL)
-        drawSBox (bccd_b, RA8875_RED);
-        drawSBox (bcalarm_b, RA8875_RED);
-        drawSBox (bcdate_b, RA8875_RED);
+        drawSBox (bc_cd_b, RA8875_RED);
+        drawSBox (alarm_daily.bc_alarm_b, RA8875_RED);
+        drawSBox (alarm_once.bc_alarm_b, RA8875_RED);
+        drawSBox (bc_date_b, RA8875_RED);
         tft.drawRect (BC_BAD_X, BC_BAD_Y, BC_BAD_W, BC_BAD_H, RA8875_RED);
         tft.drawRect (BC_SAT_X, BC_SAT_Y, BC_SAT_W, BC_SAT_H, RA8875_RED);
     #endif
@@ -1062,7 +1212,7 @@ static void drawDigitalBigClock (bool all)
     // init countdown if first call
     if (all) {
         drawCDTimeRemaining(true);
-        drawAlarmIndicator(false);
+        drawAlarmIndicators(false);
     }
 
     // update DE weather if desired and all or new
@@ -1180,7 +1330,7 @@ static void drawAnalogBigClock (bool all)
     int mo = month(lt0);
     bool am = hr < 12;
 
-    // face geometry, smaller if showing sat or digital too
+    // face geometry, smaller if showing sat or analog+digital
     bool add_digital = (bc_bits & SW_ANWDBIT) != 0;
     bool shrink = (bc_bits & SW_BCSATBIT) != 0 || add_digital;
     int bac_y0    = shrink ? BACD_Y0   : BAC_Y0;
@@ -1384,7 +1534,7 @@ static void drawAnalogBigClock (bool all)
     // init countdown if first call
     if (all) {
         drawCDTimeRemaining(true);
-        drawAlarmIndicator(false);
+        drawAlarmIndicators(false);
     }
 
     // numeric time too if desired
@@ -1448,7 +1598,7 @@ static void drawSWState()
             break;
         }
 
-        drawAlarmIndicator  (true);
+        drawAlarmIndicators  (true);
 
         break;
 
@@ -1514,11 +1664,12 @@ static void drawSWMainPage()
     drawColorScale();
 }
 
-/* function just for waitForTap to detect whether external pin or web server command turned alarm off.
+/* function just for waitForUser to detect whether external pin or web server command turned alarm off.
  */
 static bool checkExternalTurnOff()
 {
-    return (alarmSwitchIsTrue() || alarm_state != ALMS_RINGING);
+    // TODO?
+    return (alarmSwitchIsTrue() || (alarm_daily.state != ALMS_RINGING && alarm_once.state != ALMS_RINGING));
 }
 
 /* called to indicate the alarm has gone off.
@@ -1536,7 +1687,8 @@ static void showAlarmRinging()
         // show icon
         drawMainPageStopwatch (true);
 
-        // overwrite pane, wait here until dismiss, refresh pane
+        // overwrite center pane, wait here until dismiss, refresh original pane
+
         const PlotPane alarm_pane = PANE_2;
         const SBox &b = plot_b[alarm_pane];
 
@@ -1549,14 +1701,29 @@ static void showAlarmRinging()
         // prep
         prepPlotBox (b);
 
-        // alarm!
-        const char *astr = "Alarm!";
-        selectFontStyle (BOLD_FONT, SMALL_FONT);
-        tft.setCursor (b.x + (b.w-getTextWidth(astr))/2, b.y + b.h/3);
-        tft.setTextColor (RA8875_RED);
-        tft.print (astr);
+        // tag, if present
+        const char *con_ttle = getAlarmedContestTitle (alarm_once.time);
+        if (con_ttle) {
+            char *title_copy = strdup (con_ttle);   // for use by scrubContestTitleLine()
+            selectFontStyle (LIGHT_FONT, FAST_FONT);
+            scrubContestTitleLine (title_copy, b);
+            tft.setTextColor (RA8875_WHITE);
+            tft.setCursor (b.x + (b.w-getTextWidth(title_copy))/2, b.y + b.h/9);
+            tft.print (title_copy);
+            free (title_copy);
+        }
 
-        // show a dismiss button
+        // alarm!
+        const char *astr1 = alarm_daily.state == ALMS_RINGING ? "Daily" : "One-time";
+        const char *astr2 = "Alarm!";
+        selectFontStyle (BOLD_FONT, SMALL_FONT);
+        tft.setTextColor (RA8875_RED);
+        tft.setCursor (b.x + (b.w-getTextWidth(astr1))/2, b.y + b.h/3);
+        tft.print (astr1);
+        tft.setCursor (b.x + (b.w-getTextWidth(astr2))/2, b.y + b.h/3 + 30);
+        tft.print (astr2);
+
+        // show a dismiss button even though tapping anywhere dismisses the waitForUser()
         SBox dismiss_b;
         dismiss_b.x = b.x + 30;
         dismiss_b.y = b.y + 2*b.h/3;
@@ -1572,15 +1739,25 @@ static void showAlarmRinging()
             b,
             checkExternalTurnOff,
             false,
-            ALM_RINGTO,
+            ALM_RINGTO * 1000,                  // wants ms
             true,
             s,
             c,
+            false,
+            false
         };
         (void) waitForUser (ui);
 
-        // off
-        alarm_state = ALMS_ARMED;
+        // return daily to ALMS_ARMED if that's the one ringing
+        if (alarm_daily.state == ALMS_RINGING)
+            alarm_daily.state = ALMS_ARMED;
+
+        // turn off once-only if that's the one ringing
+        if (alarm_once.state == ALMS_RINGING)
+            alarm_once.state = ALMS_OFF;
+
+        // save and refresh state
+        saveSWNV();
         drawMainPageStopwatch (true);
         setAlarmPin (false);
 
@@ -1592,7 +1769,7 @@ static void showAlarmRinging()
 
     } else {
 
-        drawAlarmIndicator(true);
+        drawAlarmIndicators(true);
     }
 }
 
@@ -1618,7 +1795,8 @@ static void runBCMenu (const SCoord &s)
             MI_ALL_SEC,
             MI_ALL_SDT,
             MI_ALL_CDW,
-            MI_ALL_ALM,
+            MI_ALL_ALMD,
+            MI_ALL_ALMO,
             MI_ALL_SAT,
             MI_ALL_SWX,
             MI_ALL_SPW,
@@ -1648,14 +1826,15 @@ static void runBCMenu (const SCoord &s)
             {MENU_TOGGLE, !(bc_bits & SW_NOSECBIT), 4, SEC_INDENT, "Seconds"},
             {MENU_TOGGLE, !!(bc_bits & SW_BCDATEBIT), 5, SEC_INDENT, "Date info"},
             {MENU_TOGGLE, sws_engine == SWE_COUNTDOWN, 6, SEC_INDENT, "Count down"},
-            {MENU_TOGGLE, alarm_state != ALMS_OFF, 7, SEC_INDENT, "Alarm"},
+            {MENU_TOGGLE, alarm_daily.state != ALMS_OFF, 7, SEC_INDENT, "Daily Alarm"},
+            {MENU_TOGGLE, alarm_once.state != ALMS_OFF, 8, SEC_INDENT, "Once Alarm"},
             {isSatDefined() ? MENU_TOGGLE : MENU_IGNORE, !!(bc_bits & SW_BCSATBIT),
-                                8, SEC_INDENT, "Satellite"},
-            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 9, SEC_INDENT, "DE WX"},
-            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 9, SEC_INDENT, "Space WX"},
-        {MENU_BLANK, false, 9, PRI_INDENT, NULL},
-        {MENU_TOGGLE, false, 10, PRI_INDENT, "Exit Big Clock"},
+                                9, SEC_INDENT, "Satellite"},
+            {MENU_01OFN, !!(bc_bits & SW_BCWXBIT), 10, SEC_INDENT, "DE WX"},
+            {MENU_01OFN, !!(bc_bits & SW_BCSPWXBIT), 10, SEC_INDENT, "Space WX"},
         {MENU_BLANK, false, 11, PRI_INDENT, NULL},
+        {MENU_TOGGLE, false, 12, PRI_INDENT, "Exit Big Clock"},
+        {MENU_BLANK, false, 13, PRI_INDENT, NULL},
     };
 
     // box for menu anchored at s
@@ -1727,10 +1906,15 @@ static void runBCMenu (const SCoord &s)
         start_t = millis();
     }
 
-    if (alarm_state == ALMS_OFF && menu.items[MI_ALL_ALM].set)
-        alarm_state = ALMS_ARMED;
-    if (alarm_state != ALMS_OFF && !menu.items[MI_ALL_ALM].set)
-        alarm_state = ALMS_OFF;
+    if (alarm_daily.state == ALMS_OFF && menu.items[MI_ALL_ALMD].set)
+        alarm_daily.state = ALMS_ARMED;
+    if (alarm_daily.state != ALMS_OFF && !menu.items[MI_ALL_ALMD].set)
+        alarm_daily.state = ALMS_OFF;
+
+    if (alarm_once.state == ALMS_OFF && menu.items[MI_ALL_ALMO].set)
+        alarm_once.state = ALMS_ARMED;
+    if (alarm_once.state != ALMS_OFF && !menu.items[MI_ALL_ALMO].set)
+        alarm_once.state = ALMS_OFF;
 
     if (menu.items[MI_ALL_SWX].set)
         bc_bits |= SW_BCWXBIT;
@@ -1757,6 +1941,55 @@ static void runBCMenu (const SCoord &s)
 
 }
 
+/* update alarm_once.time depending on location within the box.
+ * N.B. we assume s is within alarm_once.time_b
+ * N.B. coordinate with drawing locations
+ * N.B. alarm_once.time is always UTC regardless of alarm_once.utc
+ * N.B. we enforce alarm_once.time always ends up in the future
+ */
+static void updateOnceAlarmTouch (SCoord &s)
+{
+    // we use the UNIX time funcs because it renormalizes the struct tm, makeTime() does not
+    struct tm tm;
+    tm = *gmtime (&alarm_once.time);
+
+    // set to debug tap locations
+    const bool mark_taps = false;               // RBF
+
+    int direction = s.y < alarm_once.time_b.y + alarm_once.time_b.h/2 ? 1 : -1;
+    uint16_t x = alarm_once.time_b.x;
+
+    if (s.x < (x += 70)) {
+        alarm_once.utc = !alarm_once.utc;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    } else if (s.x < (x += 60)) {
+        tm.tm_year += direction;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    } else if (s.x < (x += 40)) {
+        tm.tm_mon += direction;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    } else if (s.x < (x += 40)) {
+        tm.tm_mday += direction;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    } else if (s.x < (x += 40)) {
+        tm.tm_hour += direction;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    } else if (s.x < (x += 40)) {
+        tm.tm_min += direction;
+        if (mark_taps)  tft.drawLine (x, alarm_once.time_b.y, x, alarm_once.time_b.y + alarm_once.time_b.h, RA8875_RED);
+    }
+    
+    if (mark_taps) wdDelay (1000);
+
+    // always 0 out seconds
+    tm.tm_sec = 0;
+
+    // set
+    setenv ("TZ", "0", 1);              // tell mktime to use UTC
+    tzset();
+    alarm_once.time = mktime (&tm);
+}
+
 
 /* check our touch controls, update state.
  * works for all stopwatch pages: main and either big clock
@@ -1781,7 +2014,7 @@ static void checkSWPageTouch()
             // start countdown timer regardless of current state
             setSWEngineState (SWE_COUNTDOWN, countdown_period);
 
-        } else if (inBox (s, cdtime_up_b)) {
+        } else if (inBox (s, cd_time_up_b)) {
 
             // increment countdown period
             countdown_period += 60000;
@@ -1792,7 +2025,7 @@ static void checkSWPageTouch()
             else
                 drawSWCDPeriod();                                       // just display new value
 
-        } else if (inBox (s, cdtime_dw_b)) {
+        } else if (inBox (s, cd_time_dw_b)) {
 
             // decrement countdown period
             if (countdown_period >= 2*60000) {                          // 1 minute minimum
@@ -1805,58 +2038,100 @@ static void checkSWPageTouch()
                     drawSWCDPeriod();                                   // just display new value
             }
 
-        } else if (inBox (s, alarm_up_b)) {
+        } else if (inBox (s, alarm_daily.lbl_b)) {
 
-            // increase alarm hour or minute
-            uint16_t a_hr = alarm_hrmn/60;
-            uint16_t a_mn = alarm_hrmn%60;
-            if (s.x < alarm_up_b.x + 7*alarm_up_b.w/12) {                // coordinate with drawAlarmIndicator
-                a_hr = (a_hr + 1) % 24;
-            } else {
-                if (++a_mn == 60) {
-                    if (++a_hr == 24)
-                        a_hr = 0;
-                    a_mn = 0;
-                }
-            }
-            alarm_hrmn = a_hr*60 + a_mn;
-            saveSWNV();
-            drawAlarmIndicator (false);
-
-        } else if (inBox (s, alarm_dw_b)) {
-
-            // decresae alarm hour or minute
-            uint16_t a_hr = alarm_hrmn/60;
-            uint16_t a_mn = alarm_hrmn%60;
-            if (s.x < alarm_up_b.x + 7*alarm_up_b.w/12) {                // coordinate with drawAlarmIndicator
-                a_hr = (a_hr + 23) % 24;
-            } else {
-                if (a_mn == 0) {
-                    a_mn = 59;
-                    a_hr = (a_hr + 23) % 24;
-                } else {
-                    a_mn -= 1;
-                }
-            }
-            alarm_hrmn = a_hr*60 + a_mn;
-            saveSWNV();
-            drawAlarmIndicator (false);
-
-        } else if (inBox (s, alarm_lbl_b)) {
-
-            // control alarm clock mode
-            switch (alarm_state) {
+            // cycle daily alarm clock mode
+            switch (alarm_daily.state) {
             case ALMS_OFF:
-                alarm_state = ALMS_ARMED;
+                alarm_daily.state = ALMS_ARMED;
                 break;
             case ALMS_ARMED:
-                alarm_state = ALMS_OFF;
+                alarm_daily.state = ALMS_OFF;
                 break;
             case ALMS_RINGING:
-                alarm_state = ALMS_ARMED;
+                alarm_daily.state = ALMS_ARMED;
                 break;
             }
-            drawAlarmIndicator  (true);
+
+            drawAlarmIndicators (true);
+            saveSWNV();
+
+        } else if (inBox (s, alarm_daily.time_b)) {
+
+            // N.B. coordinate with drawing locations
+
+            uint16_t t_left  = alarm_daily.time_b.x + alarm_daily.time_b.w/2;
+            uint16_t t_mid   = alarm_daily.time_b.x + 3*alarm_daily.time_b.w/4;
+
+            if (s.x > t_left) {
+
+                uint16_t a_hr = alarm_daily.hrmn/60;
+                uint16_t a_mn = alarm_daily.hrmn%60;
+
+                if (s.y < alarm_daily.time_b.y + alarm_daily.time_b.h/2) {
+                    // increase daily alarm hour or minute
+                    if (s.x < t_mid)
+                        a_hr = (a_hr + 1) % 24;
+                    else {
+                        if (++a_mn == 60) {
+                            if (++a_hr == 24)
+                                a_hr = 0;
+                            a_mn = 0;
+                        }
+                    }
+                } else {
+                    // decrease daily alarm hour or minute
+                    if (s.x < t_mid)
+                        a_hr = (a_hr + 23) % 24;
+                    else {
+                        if (a_mn == 0) {
+                            a_mn = 59;
+                            a_hr = (a_hr + 23) % 24;
+                        } else {
+                            a_mn -= 1;
+                        }
+                    }
+                }
+
+                alarm_daily.hrmn = a_hr*60 + a_mn;
+            }
+
+            drawAlarmIndicators (false);
+            saveSWNV();
+
+        } else if (inBox (s, alarm_once.lbl_b)) {
+
+            // cycle one-time alarm clock mode
+            switch (alarm_once.state) {
+            case ALMS_OFF:
+                // don't allow arming if time is in the past
+                if (alarm_once.time < nowWO()) {
+                    drawStringInBox ("Time is in the past", alarm_once.lbl_b, false, RA8875_RED);
+                    wdDelay (3000);
+                } else
+                    alarm_once.state = ALMS_ARMED;
+                break;
+            case ALMS_ARMED:
+                alarm_once.state = ALMS_OFF;
+                break;
+            case ALMS_RINGING:
+                // turn off because time will be too old after ringing
+                alarm_once.state = ALMS_OFF;
+                break;
+            }
+
+            drawAlarmIndicators  (true);
+            saveSWNV();
+
+        } else if (inBox (s, alarm_once.time_b)) {
+
+            updateOnceAlarmTouch(s);
+
+            // erase contest title since it likely no longer matches
+            eraseContestTitle();
+            drawContestTitle();
+
+            drawAlarmIndicators (false);
             saveSWNV();
         
         } else if (inBox (s, A_b)) {
@@ -1948,14 +2223,20 @@ static void checkSWPageTouch()
     } else if (sws_display == SWD_BCDIGITAL || sws_display == SWD_BCANALOG) {
 
         // first check the optional display controls
-        if (sws_engine == SWE_COUNTDOWN && inBox (s, bccd_b)) {
+        if (sws_engine == SWE_COUNTDOWN && inBox (s, bc_cd_b)) {
             // reset cd time but stay in SWE_COUNTDOWN state
             start_t = millis();
-        } else if (alarm_state != ALMS_OFF && inBox (s, bcalarm_b)) {
-            // don't run menu if click alarm even if not ringing
-            if (alarm_state == ALMS_RINGING) {
-                alarm_state = ALMS_ARMED;
-                drawAlarmIndicator(false);
+        } else if (alarm_daily.state != ALMS_OFF && inBox (s, alarm_daily.bc_alarm_b)) {
+            // don't run menu if click daily alarm even if not ringing
+            if (alarm_daily.state == ALMS_RINGING) {
+                alarm_daily.state = ALMS_ARMED;
+                drawAlarmIndicators(false);
+            }
+        } else if (alarm_once.state != ALMS_OFF && inBox (s, alarm_once.bc_alarm_b)) {
+            // don't run menu if click once-only alarm even if not ringing
+            if (alarm_once.state == ALMS_RINGING) {
+                alarm_once.state = ALMS_OFF;    // off because time will now be too late
+                drawAlarmIndicators(false);
             }
         } else {
             // show menu and redraw to engage any changes even if cancelled just to erase menu
@@ -1972,30 +2253,111 @@ static void checkSWPageTouch()
     }
 }
 
+/* check whether the the daily alarm is armed and just went off.
+ * if so set alarm_daily.state to ALMS_RINGING and return true, else do nothing and return false.
+ * N.B. we assume we are called at least once every ALM_RINGTO period.
+ */
+static bool dailyAlarmWentOff(void)
+{
+    static bool reported_this_period;           // presist whether already reported this period
+    bool just_went_off = false;
+
+    if (alarm_daily.state == ALMS_ARMED) {
+
+        // find hr mn now
+        time_t t = nowWO() + de_tz.tz_secs;
+        int t_hr = hour(t);
+        int t_mn = minute(t);
+
+        // compare to alarm_daily.hrmn
+        int a_hr = alarm_daily.hrmn / 60;
+        int a_mn = alarm_daily.hrmn % 60;
+        bool is_on_now = t_hr == a_hr && t_mn == a_mn;          // N.B. this assumes ALM_RINGTO == 60
+
+        // check wheter just went off first time this period
+        if (is_on_now) {
+            if (!reported_this_period) {
+                alarm_daily.state = ALMS_RINGING;
+                just_went_off = true;
+                reported_this_period = true;
+            }
+        } else
+            reported_this_period = false;
+    }
+
+    return (just_went_off);
+}
+
+/* return whether the daily alarm is now over.
+ * N.B. we assume we are called with alarm_daily.state == ALMS_RINGING
+ * N.B. we assume we are called at least once every ALM_RINGTO period.
+ */
+static bool dailyAlarmIsOver(void)
+{
+    // find hr mn now
+    time_t t = nowWO() + de_tz.tz_secs;
+    int t_hr = hour(t);
+    int t_mn = minute(t);
+
+    // compare to alarm_daily.hrmn
+    int a_hr = alarm_daily.hrmn / 60;
+    int a_mn = alarm_daily.hrmn % 60;
+    return (t_hr != a_hr || t_mn != a_mn);
+}
+
+/* check whether the one-time alarm is armed and just went off.
+ * if so set alarm_once.state to ALMS_RINGING and return true, else do nothing and return false.
+ * we also check if alarm_once.time is old (such as first call after booting) and disarm if so.
+ * N.B. we assume we are called at least once every ALM_RINGTO period.
+ */
+static bool onetimeAlarmWentOff(void)
+{
+    static bool reported_this_period;           // presist whether already reported this period
+    bool just_went_off = false;
+
+    if (alarm_once.state == ALMS_ARMED) {
+
+        // user's idea of UTC
+        time_t t = nowWO();
+
+        // check for old or ringing now
+        bool is_old = alarm_once.time < t;
+        if (is_old) {
+            alarm_once.state = ALMS_OFF;
+            reported_this_period = true;
+        } else {
+            bool is_on_now = t >= alarm_once.time && t < alarm_once.time + ALM_RINGTO;
+            if (is_on_now) {
+                if (!reported_this_period) {
+                    // alarm just went off first time this period
+                    alarm_once.state = ALMS_RINGING;
+                    just_went_off = true;
+                    reported_this_period = true;
+                }
+            } else
+                reported_this_period = false;
+        }
+    }
+
+    return (just_went_off);
+}
+
+/* return whether the one-time alarm is now over.
+ * N.B. we assume we are called with alarm_once.state == ALMS_RINGING
+ * N.B. we assume we are called at least once every ALM_RINGTO period.
+ */
+static bool onetimeAlarmIsOver(void)
+{
+    time_t t = nowWO();
+    return (t < alarm_once.time || t > alarm_once.time + ALM_RINGTO);
+}
+
 /* one-time prep
  */
 void initStopwatch()
 {
     // read values from NV
-    if (!NVReadUInt16 (NV_BCFLAGS, &bc_bits)) {
-        bc_bits = SW_BCDATEBIT | SW_BCWXBIT;
-        NVWriteUInt16 (NV_BCFLAGS, bc_bits);
-    }
-    if (!NVReadUInt32 (NV_CD_PERIOD, &countdown_period)) {
-        countdown_period = 600000;     // 10 mins default
-        NVWriteUInt32 (NV_CD_PERIOD, countdown_period);
-    }
-
-    // read and unpack alarm time and whether active
-    if (!NVReadUInt16 (NV_ALARMCLOCK, &alarm_hrmn)) {
-        alarm_hrmn = 0;
-        alarm_state = ALMS_OFF;
-        NVWriteUInt16 (NV_ALARMCLOCK, 0);
-    }
-    if (alarm_hrmn >= ALM_NVARMED) {
-        alarm_hrmn = alarm_hrmn % ALM_NVARMED;
-        alarm_state = ALMS_ARMED;
-    }
+    loadSWNV();
 
     // init pins
     mcp.pinMode (SW_ALARMOUT_PIN, OUTPUT);
@@ -2035,8 +2397,8 @@ void drawMainPageStopwatch (bool force)
         uint16_t yc = stopwatch_b.y + stopwatch_b.h/2;
         uint16_t dx = roundf(br*cosf(deg2rad(45)));
 
-        // body color depends on whether alarm is armed
-        uint16_t body_c = alarm_state != ALMS_OFF ? RA8875_GREEN : GRAY;
+        // body color depends on whether either alarm is armed
+        uint16_t body_c = alarm_daily.state != ALMS_OFF || alarm_once.state != ALMS_OFF ? RA8875_GREEN : GRAY;
 
         // watch
         tft.fillCircle (xc, yc, br, body_c);
@@ -2056,7 +2418,7 @@ void drawMainPageStopwatch (bool force)
         tft.drawLine (xc, yc, xc+3*br/6, yc, RA8875_WHITE);
 
         // add "vibration" if ringing
-        if (alarm_state == ALMS_RINGING) {
+        if (alarm_daily.state == ALMS_RINGING || alarm_once.state == ALMS_RINGING) {
             float vr = 1.4F*br;
             uint16_t vdx1 = roundf(vr*cosf(deg2rad(5)));
             uint16_t vdy1 = roundf(vr*sinf(deg2rad(5)));
@@ -2111,28 +2473,41 @@ bool runStopwatch()
     if (countdownSwitchIsTrue())
         setSWEngineState (SWE_COUNTDOWN, countdown_period);
 
-    // check for aged countdown runout
+    // always check for completed countdown runout
     if (sws_engine == SWE_COUNTDOWN && getCountdownLeft() == 0
                                 && millis()-start_t > countdown_period + SW_CD_AGEDT)
         setSWEngineState (SWE_RESET, 0);
 
-    // always check alarm clock regardless of display state
-    if (alarm_state == ALMS_ARMED && checkAlarm()) {
-        // record time and indicate alarm has just gone off
-        alarm_ringtime = myNow();
-        alarm_state = ALMS_RINGING;
-        showAlarmRinging();
-    }
-    if (alarm_state == ALMS_RINGING) {
-        if (alarmSwitchIsTrue() || myNow() - alarm_ringtime >= ALM_RINGTO/1000) {
+
+    // always check alarms regardless of display state
+
+    if (dailyAlarmWentOff())
+        showAlarmRinging();                             // might channge alarm_daily.state to ALMS_RINGING
+    if (alarm_daily.state == ALMS_RINGING) {
+        if (alarmSwitchIsTrue() || dailyAlarmIsOver()) {
             // op hit the cancel pin or timed out
-            alarm_state = ALMS_ARMED;
+            alarm_daily.state = ALMS_ARMED;
             if (sws_display == SWD_NONE)
                 drawMainPageStopwatch (true);
             else
-                drawAlarmIndicator (true);
+                drawAlarmIndicators (true);
         }
     }
+
+    if (onetimeAlarmWentOff())
+        showAlarmRinging();                             // might channge alarm_daily.state to ALMS_RINGING
+    if (alarm_once.state == ALMS_RINGING) {
+        if (alarmSwitchIsTrue() || onetimeAlarmIsOver()) {
+            // op hit the cancel pin or timed out
+            alarm_once.state = ALMS_OFF;                // off because time will now be too late
+            if (sws_display == SWD_NONE)
+                drawMainPageStopwatch (true);
+            else
+                drawAlarmIndicators (true);
+        }
+    }
+
+
 
     if (sws_display != SWD_NONE) {
 
@@ -2284,27 +2659,27 @@ SWDisplayState getSWDisplayState()
     return (sws_display);
 }
 
-/* return alarm state and time 
+/* return daily alarm state and time, always in DE TZ
  */
-void getAlarmState (AlarmState &as, uint16_t &hr, uint16_t &mn)
+void getDailyAlarmState (AlarmState &as, uint16_t &de_hr, uint16_t &de_mn)
 {
-    as = alarm_state;
-    hr = alarm_hrmn / 60;
-    mn = alarm_hrmn % 60;
+    as = alarm_daily.state;
+    de_hr = alarm_daily.hrmn / 60;
+    de_mn = alarm_daily.hrmn % 60;
 }
 
-/* set a new alarm state from a web command.
+/* set a new daily alarm state from a web command, always in DE TZ
  * N.B. we do no error checking
  */
-void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn)
+void setDailyAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn)
 {
     if (as == ALMS_OFF) {
         // minimal state downgrade, leave time unchanged
-        alarm_state = alarm_state == ALMS_RINGING ? ALMS_ARMED : ALMS_OFF;
+        alarm_daily.state = alarm_daily.state == ALMS_RINGING ? ALMS_ARMED : ALMS_OFF;
     } else {
         // set new state and time
-        alarm_state = as;
-        alarm_hrmn = hr*60U + mn;
+        alarm_daily.state = as;
+        alarm_daily.hrmn = hr*60U + mn;
     }
     saveSWNV();
 
@@ -2312,7 +2687,102 @@ void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn)
     if (sws_display == SWD_NONE)
         drawMainPageStopwatch (true);
     else
-        drawAlarmIndicator (true);
+        drawAlarmIndicators (true);
+}
+
+/* return the one-time alarm info.
+ *   t_utc: always in UTC
+ *   utc:   whether user wants to see it in DE's TZ
+ *   str:   time as user wants to see it
+ */
+void getOneTimeAlarmState (AlarmState &as, time_t &t_utc, bool &utc, char str[], size_t str_l)
+{
+    as = alarm_once.state;
+    t_utc = alarm_once.time;
+    utc = alarm_once.utc;
+
+    tmElements_t tm;
+    time_t t = alarm_once.time;
+    if (!alarm_once.utc)
+        t += de_tz.tz_secs;
+    breakTime (alarm_once.time, tm);
+    snprintf (str, str_l, "%s %04d-%02d-%02d %02d:%02d", alarm_once.utc ? "UTC" : "DE  ",
+                                        tm.Year+1970, tm.Month, tm.Day, tm.Hour, tm.Minute);
+}
+
+/* set the one-time alarm state and time from the given ISO8601 string.
+ *   as:  desired state
+ *   utc: whether user expects to see time as UTC else DE's TZ
+ *   str: time as ISO8601 as user expects to see it; final :SS is optional
+ * return whether succussful, eg, fails if bogus str format or time is in the past.
+ */
+bool setOneTimeAlarmState (AlarmState as, bool utc, const char time_str[])
+{
+    if (as == ALMS_OFF) {
+        alarm_once.state = ALMS_OFF;
+        eraseContestTitle();
+    } else {
+        // crack time str
+        time_t user_t = crackISO8601 (time_str);
+        if (user_t)
+            user_t -= (user_t % 60);                                    // always store in whole minutes
+        else {
+            // try adding :00 because caller is not required to include :SS
+            int new_len = strlen (time_str) + 4;                        // +4 for ":SS\0"
+            char *with_secs = (char *) malloc (new_len);
+            snprintf (with_secs, new_len, "%s:00", time_str);
+            user_t = crackISO8601 (with_secs);
+            free (with_secs);
+        }
+        if (!alarm_once.utc)
+            user_t -= de_tz.tz_secs;                                    // DE -> UTC
+        if (user_t <= nowWO())
+            return (false);
+
+        // all good, ok to save
+        alarm_once.state = as;
+        alarm_once.time = user_t;                                       // now UTC
+        alarm_once.utc = utc;
+    }
+    saveSWNV();
+
+    // update display
+    if (sws_display == SWD_NONE)
+        drawMainPageStopwatch (true);
+    else
+        drawAlarmIndicators (true);
+
+    return (true);
+}
+
+/* set the one-time alarm state and time.
+ *   as:    desired state
+ *   utc:   whether user expects to see time as UTC else DE's TZ
+ *   t_utc: new time, always in UTC
+ * return whether succussful, eg, fails if time is in the past.
+ */
+bool setOneTimeAlarmState (AlarmState as, bool utc, time_t t_utc)
+{
+    if (as == ALMS_OFF) {
+        alarm_once.state = ALMS_OFF;
+        eraseContestTitle();
+    } else {
+        t_utc -= (t_utc % 60);                          // always store in whole minutes
+        if (t_utc <= nowWO())
+            return (false);
+        alarm_once.state = as;
+        alarm_once.time = t_utc;
+        alarm_once.utc = utc;
+    }
+    saveSWNV();
+
+    // update display
+    if (sws_display == SWD_NONE)
+        drawMainPageStopwatch (true);
+    else
+        drawAlarmIndicators (true);
+
+    return (true);
 }
 
 SWBCBits getBigClockBits(void)

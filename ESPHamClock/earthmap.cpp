@@ -321,26 +321,12 @@ static void drawMapPopup(void)
     Serial.printf (_FX("POPUP before: pan_x %d pan_y %d zoom %d\n"), pan_zoom.pan_x, pan_zoom.pan_y,
                                 pan_zoom.zoom);
 
-#if defined (_IS_ESP8266)
-
-    // ESP can only set DX/DE but it does set the default using the old tap/hold paradigm
-    bool zoom_ok = false;
-    bool zoom_in_ok  = false;
-    bool zoom_out_ok = false;
-    bool pan_ok = false;
-    bool set_de = map_popup.tt == TT_HOLD;
-    bool set_dx = map_popup.tt == TT_TAP;
-
-#else
-
     bool zoom_ok = map_proj == MAPP_MERCATOR;
     bool zoom_in_ok  = zoom_ok && pan_zoom.zoom < MAX_ZOOM;
     bool zoom_out_ok = zoom_ok && pan_zoom.zoom > MIN_ZOOM;
     bool pan_ok = map_proj == MAPP_MERCATOR || map_proj == MAPP_ROB;
-    bool set_de = map_popup.tt == TT_HOLD;              // preserve old style semantic
-    bool set_dx = false;                                // TT_TAP is now too common to presume setting DX
-
-#endif // !_IS_ESP8266
+    bool set_de = false;
+    bool set_dx = false;
 
     bool reset_ok = pan_zoom.zoom > MIN_ZOOM || pan_zoom.pan_x != 0 || pan_zoom.pan_y != 0;
     MenuFieldType zi_type = zoom_in_ok  ? (zoom_out_ok ? MENU_01OFN : MENU_TOGGLE) : MENU_IGNORE;

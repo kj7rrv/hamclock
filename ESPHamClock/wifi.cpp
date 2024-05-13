@@ -470,8 +470,10 @@ void initSys()
             NVWriteFloat (NV_DE_LAT, de_ll.lat_d);
             NVWriteFloat (NV_DE_LNG, de_ll.lng_d);
             setNVMaidenhead(NV_DE_GRID, de_ll);
-            de_tz.tz_secs = getTZ (de_ll);
-            NVWriteInt32(NV_DE_TZ, de_tz.tz_secs);
+
+            // leave user's tz offset
+            // de_tz.tz_secs = getTZ (de_ll);
+            // NVWriteInt32(NV_DE_TZ, de_tz.tz_secs);
 
             tftMsg (true, 0, _FX("GPSD: %.2f%c %.2f%c"),
                                 fabsf(de_ll.lat_d), de_ll.lat_d < 0 ? 'S' : 'N',
@@ -1732,7 +1734,7 @@ void sendUserAgent (WiFiClient &client)
         // alarm clock
         AlarmState as;
         uint16_t hr, mn;
-        getAlarmState (as, hr, mn);
+        getDailyAlarmState (as, hr, mn);
 
         // encode plot options
         // prior to V2.67: value was either plot_ch or 99

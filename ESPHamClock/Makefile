@@ -42,11 +42,9 @@ OBJS = \
 	P13.o \
 	adif.o \
 	asknewpos.o \
-	askpasswd.o \
 	astro.o \
 	blinker.o \
 	brightness.o \
-	calibrate.o \
 	clocks.o \
 	cities.o \
 	color.o \
@@ -70,6 +68,7 @@ OBJS = \
 	ncdxf.o \
 	nvram.o \
 	ontheair.o \
+	passwd.o \
 	plot.o \
 	plotmap.o \
 	plotmgmnt.o \
@@ -86,6 +85,7 @@ OBJS = \
 	spacewx.o \
 	sphere.o \
 	stopwatch.o \
+	string.o \
 	touch.o \
 	tz.o \
 	webserver.o \

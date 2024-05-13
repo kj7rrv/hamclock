@@ -193,7 +193,8 @@ File LittleFS::open (const char *fname, const char *how)
                 (void) !fchown (fileno(f.fp), getuid(), getgid());
         } else {
             f.errstr = strerror(errno);
-            printf ("fopen(%s, %s): %s\n", path, how, f.errstr.c_str());
+            if (errno != ENOENT)        // not existing is a common occurance
+                printf ("fopen(%s, %s): %s\n", path, how, f.errstr.c_str());
         }
 
         return (f);

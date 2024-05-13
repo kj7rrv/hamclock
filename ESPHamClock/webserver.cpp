@@ -588,16 +588,6 @@ static bool getWiFiCaptureBMP(WiFiClient &client, char *unused_line, size_t line
         bufl += 2;
 
         if (bufl == sizeof(buf) || i == npix-1) {
-
-            #if defined (_IS_ESP8266)
-                // ESP outgoing data can deadlock if incoming buffer fills, so freshen any pending arrivals.
-                if (isDXClusterConnected()) {
-                    PlotPane pp = findPaneChoiceNow (PLOT_CH_DXCLUSTER);
-                    if (pp != PANE_NONE)
-                        updateDXCluster(plot_b[pp]);
-                }
-            #endif
-
             client.write ((uint8_t*)buf, bufl);
             bufl = 0;
             resetWatchdog();
@@ -951,8 +941,9 @@ static bool getWiFiContests (WiFiClient &client, char *unused_line, size_t line_
     (void)(unused_line);
     (void)(line_len);
 
-    char *credp, **conpp;
-    int n_con = getContests (&credp, &conpp);
+    const char *credp;
+    const ContestEntry *cep;
+    int n_con = getContests (&credp, &cep);
 
     // start reply
     startPlainText (client);
@@ -960,8 +951,12 @@ static bool getWiFiContests (WiFiClient &client, char *unused_line, size_t line_
     if (n_con > 0) {
         FWIFIPR (client, F("# "));
         client.println (credp);
-        for (int i = 0; i < n_con; i++)
-            client.println (conpp[i]);
+        for (int i = 0; i < n_con; i++) {
+            const ContestEntry &ce = cep[i];
+            client.println (ce.title);
+            client.println (ce.date_str);
+            client.println (ce.url);
+        }
     } else {
         client.print (F("no contests until pane opened\n"));
     }
@@ -1088,23 +1083,44 @@ static bool getWiFiConfig (WiFiClient &client, char *unused_line, size_t line_le
         FWIFIPRLN (client, not_sup);
 
 
-    // report alarm
+    // report daily alarm
     FWIFIPR (client, F("Alarm     "));
-    AlarmState as;
-    uint16_t hr, mn;
-    getAlarmState (as, hr, mn);
-    switch (as) {
+    AlarmState d_as;
+    uint16_t d_dehr, d_demn;
+    getDailyAlarmState (d_as, d_dehr, d_demn);
+    switch (d_as) {
     case ALMS_OFF:
-        snprintf (buf, sizeof(buf), _FX("Off (%02d:%02d)\n"), hr, mn);
+        snprintf (buf, sizeof(buf), _FX("Off (DE %02d:%02d)\n"), d_dehr, d_demn);
         break;
     case ALMS_ARMED:
-        snprintf (buf, sizeof(buf), _FX("Armed for %02d:%02d\n"), hr, mn);
+        snprintf (buf, sizeof(buf), _FX("Armed for DE %02d:%02d\n"), d_dehr, d_demn);
         break;
     case ALMS_RINGING:
-        snprintf (buf, sizeof(buf), _FX("Ringing since %02d:%02d\n"), hr, mn);
+        snprintf (buf, sizeof(buf), _FX("Ringing since DE %02d:%02d\n"), d_dehr, d_demn);
         break;
     }
     client.print (buf);
+
+    // report once-only alarm
+    FWIFIPR (client, F("One Alarm "));
+    AlarmState wo_as;
+    time_t wo_t;
+    bool wo_utc;
+    char wo_str[50];
+    getOneTimeAlarmState (wo_as, wo_t, wo_utc, wo_str, sizeof(wo_str));
+    switch (wo_as) {
+    case ALMS_OFF:
+        snprintf (buf, sizeof(buf), _FX("Off (%s)\n"), wo_str);
+        break;
+    case ALMS_ARMED:
+        snprintf (buf, sizeof(buf), _FX("Armed for %s\n"), wo_str);
+        break;
+    case ALMS_RINGING:
+        snprintf (buf, sizeof(buf), _FX("Ringing since %s\n"), wo_str);
+        break;
+    }
+    client.print (buf);
+
 
 
     // report stopwatch
@@ -1548,23 +1564,6 @@ static bool getWiFiSys (WiFiClient &client, char *unused_line, size_t line_len)
     FWIFIPR (client, F("BEPort   ")); client.println (backend_port);
     FWIFIPR (client, F("MACaddr  ")); client.println (WiFi.macAddress().c_str());
     FWIFIPR (client, F("S/N      ")); client.println (ESP.getChipId());
-#if defined(_IS_ESP8266)
-    FWIFIPR (client, F("MinHeap  ")); client.println (worst_heap);
-    FWIFIPR (client, F("FreeNow  ")); client.println (ESP.getFreeHeap());
-    FWIFIPR (client, F("MaxBlock ")); client.println (ESP.getMaxFreeBlockSize());
-    FWIFIPR (client, F("HeapFrag ")); client.println (ESP.getHeapFragmentation());
-    FWIFIPR (client, F("SketchSz ")); client.println (ESP.getSketchSize());
-    FWIFIPR (client, F("FreeSkSz ")); client.println (ESP.getFreeSketchSpace());
-    FWIFIPR (client, F("FlashSiz ")); client.println (ESP.getFlashChipRealSize());
-    FWIFIPR (client, F("CPUMHz   ")); client.println (ESP.getCpuFreqMHz());
-    FWIFIPR (client, F("CoreVer  ")); client.println (ESP.getCoreVersion());
-    // #if defined __has_include                        should work but doesn't
-        // #if __has_include (<lwip-git-hash.h>)        should work but doesn't either
-            // #include <lwip-git-hash.h>
-            // FWIFIPR (client, F("lwipVer  ")); client.println (LWIP_HASH_STR);
-        // #endif
-    // #endif
-#endif
 
     // show EEPROM used
     uint16_t ee_used, ee_size;
@@ -2004,7 +2003,7 @@ static bool setWiFiCluster (WiFiClient &client, char line[], size_t line_len)
 }
 
 
-/* remote command to set up alarm clock
+/* remote command to set up daily alarm clock
  *   state=off|armed&time=HR:MN
  */
 static bool setWiFiAlarm (WiFiClient &client, char line[], size_t line_len)
@@ -2026,7 +2025,7 @@ static bool setWiFiAlarm (WiFiClient &client, char line[], size_t line_len)
     // get current state
     AlarmState as;
     uint16_t hr16, mn16;
-    getAlarmState (as, hr16, mn16);
+    getDailyAlarmState (as, hr16, mn16);
 
     // crack new state
     if (state) {
@@ -2046,7 +2045,7 @@ static bool setWiFiAlarm (WiFiClient &client, char line[], size_t line_len)
     // crack new time spec if given
     if (timespec) {
         if (as == ALMS_OFF) {
-            strcpy (line, _FX("can set time only if armed"));
+            strcpy (line, _FX("may set time only if armed"));
             return(false);
         }
         int hr = 0, mn = 0;
@@ -2059,20 +2058,104 @@ static bool setWiFiAlarm (WiFiClient &client, char line[], size_t line_len)
     }
 
     // engage
-    setAlarmState (as, hr16, mn16);
+    setDailyAlarmState (as, hr16, mn16);
 
     // ack
     startPlainText (client);
     if (as == ALMS_OFF)
         client.print (_FX("alarm off\n"));
     else {
-        char buf[30];
+        char buf[50];
         snprintf (buf, sizeof(buf), _FX("armed at %02d:%02d\n"), hr16, mn16);
         client.print (buf);
     }
 
     return (true);
 }
+
+/* remote command to set the once-only alarm
+ *  state=off|armed&time=YYYY-MM-DDTHR:MN&tz=DE|UTC
+ */
+static bool setWiFiOnceAlarm (WiFiClient &client, char line[], size_t line_len)
+{
+    // define all possible args
+    WebArgs wa;
+    wa.nargs = 0;
+    wa.name[wa.nargs++] = "state";
+    wa.name[wa.nargs++] = "time";
+    wa.name[wa.nargs++] = "tz";
+
+    // parse
+    if (!parseWebCommand (wa, line, line_len))
+        return (false);
+
+    // handy
+    const char *state = wa.value[0];
+    const char *timespec = wa.value[1];
+    const char *tz = wa.value[2];
+
+    // get current state
+    AlarmState as;
+    time_t a_t;
+    bool utc;
+    char str[50];
+    getOneTimeAlarmState (as, a_t, utc, str, sizeof(str));
+
+    // crack new state
+    if (state) {
+        if (strcmp (state, _FX("off")) == 0)
+            as = ALMS_OFF;
+        else if (strcmp (state, _FX("armed")) == 0)
+            as = ALMS_ARMED;
+        else {
+            strcpy (line, _FX("unknown state"));
+            return (false);
+        }
+    } else {
+        strcpy (line, _FX("state is required"));
+        return (false);
+    }
+
+    // crack tz if given
+    if (tz) {
+        if (strcmp (tz, "DE") == 0)
+            utc = false;
+        else if (strcmp (tz, "UTC") == 0)
+            utc = true;
+        else {
+            strcpy (line, _FX("unknown tz"));
+            return (false);
+        }
+    }
+
+    // use new time spec if given
+    if (timespec) {
+        if (as == ALMS_OFF) {
+            strcpy (line, _FX("may set time only if armed"));
+            return(false);
+        }
+        snprintf (str, sizeof(str), "%s", timespec);
+    }
+
+    // engage
+    if (!setOneTimeAlarmState (as, utc, str)) {
+        strcpy (line, _FX("time garbled or too old"));
+        return (false);
+    }
+
+    // ack
+    startPlainText (client);
+    if (as == ALMS_OFF)
+        FWIFIPRLN (client, F("alarm off"));
+    else {
+        FWIFIPR (client, F("armed for "));
+        client.print (utc ? _FX("UTC ") : _FX("DE "));
+        FWIFIPRLN (client, str);
+    }
+
+    return (true);
+}
+
 
 /* remote command to set the aux time format
  */
@@ -2907,31 +2990,32 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
     // define all possible args
     WebArgs wa;
     wa.nargs = 0;
-    wa.name[wa.nargs++] = "reset";
-    wa.name[wa.nargs++] = "add";
-    wa.name[wa.nargs++] = "file";
-    wa.name[wa.nargs++] = "network";
-    wa.name[wa.nargs++] = "interval";
-    wa.name[wa.nargs++] = "on";
-    wa.name[wa.nargs++] = "off";
+    wa.name[wa.nargs++] = "reset";              // 0
+    wa.name[wa.nargs++] = "add";                // 1
+    wa.name[wa.nargs++] = "file";               // 2
+    wa.name[wa.nargs++] = "network";            // 3
+    wa.name[wa.nargs++] = "interval";           // 4
+    wa.name[wa.nargs++] = "on";                 // 5
+    wa.name[wa.nargs++] = "off";                // 6
 
     // parse
     if (!parseWebCommand (wa, line, line_len))
         return (false);
 
     int n_titles, n_max;
-    char buf[150];
 
-    // check args -- full buf with suitable message
+    // send ok unless set first
+    char buf[150] = "ok\n";
+
     if (wa.found[3] && wa.value[3] == NULL) {
         // restore normal rss network queries
         (void) setRSSTitle (NULL, n_titles, n_max);
-        strcpy (buf, _FX("Restored RSS network feeds\n"));
+        snprintf (buf, sizeof(buf), "Restored RSS network feeds\n");
 
     } else if (wa.found[0] && wa.value[0] == NULL) {
         // turn off network and empty local list
         (void) setRSSTitle ("", n_titles, n_max);
-        buf[0] = '\0';                                  // use default reply
+        snprintf (buf, sizeof(buf), "List is reset\n");
 
     } else if (wa.found[1] && wa.value[1] != NULL) {
         // turn off network and add title to local list if room
@@ -2939,7 +3023,7 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
             snprintf (line, line_len, _FX("List is full -- max %d"), n_max);
             return (false);
         }
-        buf[0] = '\0';                                  // use default reply
+        snprintf (buf, sizeof(buf), "List now contains %d titles\n", n_titles);
 
     } else if (wa.found[2] && wa.value[2] == NULL) {
         // titles follow header
@@ -2948,10 +3032,11 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
         uint16_t ll = 0;                                // each line length
 
         // use content_length to avoid waiting for time out after last line
+        char line[150];
         while ((!content_length || (nr += ll+1) < content_length)
-                                && getTCPLine (client, buf, sizeof(buf), &ll))
-            (void) setRSSTitle (buf, n_titles, n_max);
-        buf[0] = '\0';                                  // use default reply
+                                && getTCPLine (client, line, sizeof(line), &ll))
+            (void) setRSSTitle (line, n_titles, n_max);
+        snprintf (buf, sizeof(buf), "List now contains %d titles\n", n_titles);
 
     } else if (wa.found[4] && wa.value[4] != NULL) {
         int new_i;
@@ -2960,7 +3045,7 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
             snprintf (buf, sizeof(buf), _FX("RSS interval now %d secs\n"), rss_interval);
             NVWriteUInt8 (NV_RSS_INTERVAL, rss_interval);
         } else {
-            snprintf (line, line_len, _FX("Min interval %d seconds"), RSS_MIN_INT);
+            snprintf (line, line_len, _FX("Min interval is %d seconds"), RSS_MIN_INT);
             return (false);
         }
 
@@ -2982,10 +3067,6 @@ static bool setWiFiRSS (WiFiClient &client, char line[], size_t line_len)
         strcpy_P (line, garbcmd);
         return (false);
     }
-
-    // create default reply if buf empty
-    if (buf[0] == '\0')
-        snprintf (buf, sizeof(buf), _FX("Now %d of %d local titles are defined\n"), n_titles, n_max);
 
     // ack
     startPlainText (client);
@@ -3310,7 +3391,8 @@ static bool setWiFiTime (WiFiClient &client, char line[], size_t line_len)
     return (true);
 }
 
-/* perform a touch screen action based on coordinates received via wifi GET
+/* perform a touch screen action based on coordinates received via wifi GET.
+ * doesn nothing if coords are within map_b.
  * return whether all ok.
  */
 static bool setWiFiTouch (WiFiClient &client, char line[], size_t line_len)
@@ -3320,7 +3402,6 @@ static bool setWiFiTouch (WiFiClient &client, char line[], size_t line_len)
     wa.nargs = 0;
     wa.name[wa.nargs++] = "x";
     wa.name[wa.nargs++] = "y";
-    wa.name[wa.nargs++] = "hold";
 
     // parse
     if (!parseWebCommand (wa, line, line_len))
@@ -3334,22 +3415,22 @@ static bool setWiFiTouch (WiFiClient &client, char line[], size_t line_len)
         return (false);
     }
 
-    // hold is optional but must be valid if given
-    int h = 0;
-    if (wa.found[2] && (!atoiOnly(wa.value[2],&h) || (h != 0 && h != 1))) {
-        strcpy (line, _FX("hold must be 0 or 1"));
+    // require x and y outside map_b
+    SCoord s = {(uint16_t)x, (uint16_t)y};
+    if (inBox (s, map_b)) {
+        snprintf (line, line_len, "touch coords must be outside the map");
         return (false);
     }
 
     // inform checkTouch() to use wifi_tt_s; it will reset
     wifi_tt_s.x = x;
     wifi_tt_s.y = y;
-    wifi_tt = h ? TT_HOLD : TT_TAP;
+    wifi_tt = TT_TAP;
 
     // ack
     startPlainText (client);
     char buf[100];
-    snprintf (buf, sizeof(buf), _FX("Touch %d %d %s\n"), x, y, h ? "hold" : "tap");
+    snprintf (buf, sizeof(buf), _FX("Web touch %d %d\n"), x, y);
     client.print(buf);
 
     // ok
@@ -3766,11 +3847,6 @@ static bool setWiFiLiveSpots (WiFiClient &client, char line[], size_t line_len)
 }
 
 
-
-
-
-#if defined(_IS_UNIX)
-
 /* report current Live Spots list, if active
  */
 static bool getWiFiLiveSpots (WiFiClient &client, char *line, size_t line_len)
@@ -3805,8 +3881,7 @@ static bool getWiFiLiveSpots (WiFiClient &client, char *line, size_t line_len)
     return (true);
 }
 
-/* exit -- makes no sense on ESP
- * UNIX only
+/* exit
  */
 static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
 {
@@ -3825,9 +3900,6 @@ static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
 }
 
 
-#endif // defined(_IS_UNIX)
-
-
 
 /* table of command strings, its implementing function and additional info for help.
  * functions are called with user input string beginning just after the command and sans HTTP.
@@ -3836,7 +3908,6 @@ static bool doWiFiExit (WiFiClient &client, char *unused_line, size_t line_len)
  *      command[]'s without ? shall include trailing space to detect and prevent trailing garbage.
  *      table is located down here in this file so all handlers are already conveniently defined above.
  *      last N_UNDOC_CMD entries are not shown with help
- * the whole table uses arrays so strings are in ESP FLASH too.
  */
 #define CT_MAX_CMD      20                              // max command string length, w/EOS
 #define CT_MAX_HELP     60                              // max help string length, w/EOS
@@ -3854,9 +3925,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "get_de.txt ",        getWiFiDEInfo,         "get DE info" },
     { "get_dx.txt ",        getWiFiDXInfo,         "get DX info" },
     { "get_dxspots.txt ",   getWiFiDXSpots,        "get DX spots" },
-#if defined(_IS_UNIX)
     { "get_livespots.txt ", getWiFiLiveSpots,      "get live spots list" },
-#endif // _IS_UNIX
     { "get_livestats.txt ", getWiFiLiveStats,      "get live spots statistics" },
     { "get_ontheair.txt ",  getWiFiOnTheAir,       "get POTA/SOTA activators" },
     { "get_satellite.txt ", getWiFiSatellite,      "get current sat info" },
@@ -3881,6 +3950,7 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_mapview?",       setWiFiMapView,        "Style=S&Grid=G&Projection=P&RSS=on|off&Night=on|off" },
     { "set_newde?",         setWiFiNewDE,          "grid=AB12&lat=X&lng=Y&TZ=local-utc?call=AA0XYZ" },
     { "set_newdx?",         setWiFiNewDX,          "grid=AB12&lat=X&lng=Y&TZ=local-utc" },
+    { "set_once_alarm?",    setWiFiOnceAlarm,      "state=off|armed&time=YYYY-MM-DDTHR:MN&tz=DE|UTC" },
     { "set_pane?",          setWiFiPane,           "Pane[0123]=X,Y,Z... any from:" },
     { "set_rotator?",       setWiFiRotator,        "state=[un]stop|[un]auto&az=X&el=X" },
     { "set_rss?",           setWiFiRSS,            "reset|add=X|network|interval=secs|on|off|file POST" },
@@ -3893,11 +3963,9 @@ static const CmdTble command_table[] PROGMEM = {
     { "set_time?",          setWiFiTime,           "Now" },
     { "set_time?",          setWiFiTime,           "unix=secs_since_1970" },
     { "set_title?",         setWiFiTitle,          "msg=hello&fg=R,G,B&bg=R,G,B|rainbow" },
-    { "set_touch?",         setWiFiTouch,          "x=X&y=Y&hold=0|1" },
+    { "set_touch?",         setWiFiTouch,          "x=X&y=Y" },
     { "set_voacap?",        setWiFiVOACAP,         "band=X&power=W&tz=DE|UTC&mode=X&map=X&TOA=X" },
-#if defined(_IS_UNIX)
     { "exit ",              doWiFiExit,            "exit HamClock" },
-#endif // _IS_UNIX
     { "restart ",           doWiFiReboot,          "restart HamClock" },
     { "updateVersion ",     doWiFiUpdate,          "update to latest version"},
 
@@ -3913,7 +3981,8 @@ static const CmdTble command_table[] PROGMEM = {
 static bool roCommandOk (const char *cmd)
 {
     return (strncmp (cmd, "get_", 4) == 0
-                    || strncmp_P (cmd, PSTR("set_alarm"), 9) == 0
+                    || strncmp_P (cmd, PSTR("set_daily_alarm"), 15) == 0
+                    || strncmp_P (cmd, PSTR("set_once_alarm"), 14) == 0
                     || strncmp_P (cmd, PSTR("set_stopwatch"), 13) == 0
                     || strncmp_P (cmd, PSTR("set_touch"), 9) == 0
                     || strncmp_P (cmd, PSTR("set_screenlock"), 14) == 0);
@@ -4019,12 +4088,14 @@ static void serveRemote(WiFiClient &client, bool ro)
 
     // if get here, command was not found but client is still open to list help
     startPlainText(client);
-#if defined(_IS_UNIX)
-    if (liveweb_port > 0) {
-        snprintf (line, line_mem.getSize(), "HamClock Live is on port %d\r\n\r\n", liveweb_port);
+    if (liveweb_rw_port > 0) {
+        snprintf (line, line_mem.getSize(), "HamClock Live is R/W on port %d\r\n\r\n", liveweb_rw_port);
         client.print (line);
     }
-#endif
+    if (liveweb_ro_port > 0) {
+        snprintf (line, line_mem.getSize(), "HamClock Live is R/O on port %d\r\n\r\n", liveweb_ro_port);
+        client.print (line);
+    }
     for (uint8_t i = 0; i < N_CMDTABLE-N_UNDOC_CMD; i++) {
         const CmdTble *ctp = &command_table[i];
 
@@ -4094,15 +4165,9 @@ void initWebServer()
 
 
     restful_server = new WiFiServer(restful_port);
-
-    #if defined(_IS_ESP8266)
-        // Arduino version returns void
-        restful_server->begin();
-    #else
-        char ynot[100];
-        if (!restful_server->begin(ynot))
-            fatalError ("Failed to start RESTful server on port %d: %s", restful_port, ynot);
-    #endif
+    char ynot[100];
+    if (!restful_server->begin(ynot))
+        fatalError ("Failed to start RESTful server on port %d: %s", restful_port, ynot);
 
     tftMsg (true, 0, "RESTful API server on port %d", restful_port);
 
@@ -4139,18 +4204,13 @@ void runNextDemoCommand()
     if (!getDemoMode())
         return;
 
-    // wait for :15 or :45 unless previous was slow on ESP, and beware checking again during same second
+    // wait for :15 or :45
     static bool prev_slow;
     static time_t prev_t0;
     time_t t0 = nowWO();
     int t060 = t0 % 60;
-    #if defined(_IS_ESP8266)
-        if ( t0 == prev_t0 || ! (t060 == 15 || (t060 == 45 && !prev_slow)) )
-            return;
-    #else
-        if ( t0 == prev_t0 || ! (t060 == 15 || t060 == 45) )
-            return;
-    #endif
+    if ( t0 == prev_t0 || ! (t060 == 15 || t060 == 45) )
+        return;
     prev_t0 = t0;
 
     // list of probabilities for each DemoChoice, must sum to 100

@@ -807,7 +807,7 @@ static bool isRPiDSI()
 #endif
 
 
-#if !defined(_WEB_ONLY) && (defined(_IS_UNIX) || defined(_IS_LINUX_RPI))
+#if !defined(_WEB_ONLY) && !defined(_USE_FB0) && (defined(_IS_UNIX) || defined(_IS_LINUX_RPI))
 /* try to determine whether an X connection is local or remote.
  */
 static bool localX()

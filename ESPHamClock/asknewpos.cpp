@@ -446,7 +446,9 @@ bool askNewPos (const SBox &b, LatLong &op_ll, char op_grid[MAID_CHARLEN])
         NP_TIMEOUT,
         false,
         s,
-        kbc
+        kbc,
+        false,
+        false
     };
     do {
 

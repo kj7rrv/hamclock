@@ -221,7 +221,7 @@ static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const 
     // search in desired direction
     switch (kbchar) {
 
-    case 'h':
+    case 'h': case CHAR_LEFT:
         // next field left, if any
         for (int i = 1; i <= menu.n_items; i++) {
             int ii = (m_index + i) % menu.n_items;
@@ -241,7 +241,7 @@ static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const 
         }
         break;
 
-    case 'j':
+    case 'j': case CHAR_DOWN:
         // next field down, if any
         for (int i = 1; i <= menu.n_items; i++) {
             int ii = (m_index + i) % menu.n_items;
@@ -261,7 +261,7 @@ static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const 
         }
         break;
 
-    case 'k':
+    case 'k': case CHAR_UP:
         // next field up, if any
         for (int i = 1; i <= menu.n_items; i++) {
             int ii = (m_index + i) % menu.n_items;
@@ -281,7 +281,7 @@ static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const 
         }
         break;
 
-    case 'l':
+    case 'l': case CHAR_RIGHT:
         // next field right, if any
         for (int i = 1; i <= menu.n_items; i++) {
             int ii = (m_index + i) % menu.n_items;
@@ -301,7 +301,7 @@ static int checkKBControl (MenuInfo &menu, SBox *pick_boxes, int m_index, const 
         }
         break;
 
-    case ' ':
+    case CHAR_SPACE:
         // activate this location
         updateMenu (menu, pick_boxes, m_index, true);
         break;
@@ -464,6 +464,8 @@ bool runMenu (MenuInfo &menu)
         menu.update_clocks,
         tap,
         kbchar,
+        false,
+        false
     };
 
     // run
@@ -472,13 +474,13 @@ bool runMenu (MenuInfo &menu)
     while (waitForUser (ui)) {
 
         // check for Enter or tap in ok
-        if (kbchar == '\r' || kbchar == '\n' || inBox (tap, menu.ok_b)) {
+        if (kbchar == CHAR_CR || kbchar == CHAR_NL || inBox (tap, menu.ok_b)) {
             ok = true;
             break;
         }
 
         // check for ESC tap or tap in optional cancel
-        if (kbchar == 27 || (!menu.no_cancel && inBox (tap, cancel_b))) {
+        if (kbchar == CHAR_ESC || (!menu.no_cancel && inBox (tap, cancel_b))) {
             break;
         }
 
@@ -505,6 +507,20 @@ bool runMenu (MenuInfo &menu)
 
     return (ok);
 }
+
+/* show a brief message in the given color in the given box, generally a box that had been used for a menu
+ */
+void menuMsg (const SBox &box, uint16_t color, const char *msg)
+{
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    tft.setCursor (box.x + (box.w - getTextWidth(msg))/2, box.y + box.h/3);
+    tft.setTextColor (color);
+    drawSBox (box, RA8875_WHITE);
+    tft.print (msg);
+    wdDelay(2000);
+    fillSBox (box, RA8875_BLACK);
+}
+
 
 /* redraw the given ok box in the given visual state.
  * used to allow caller to provide busy or error feedback.
@@ -541,7 +557,7 @@ void menuRedrawOk (SBox &ok_b, MenuOkState oks)
 
 /* wait until:
  *   a tap occurs inside inbox:                      set tap location and type and return true.
- *   a char is typed:                                set kbchar and return true.
+ *   a char is typed:                                set kbchar/ctrl/shift and return true.
  *   (*fp)() (IFF fp != NULL) returns true:          set fp_true to true and return false.
  *   to_ms is > 0 and nothing happens for that long: return false.
  * while waiting we optionally update clocks and allow some web server commands.
@@ -567,7 +583,7 @@ bool waitForUser (UserInput &ui)
             t0 = millis();
         }
 
-        ui.kbchar = tft.getChar(NULL,NULL);
+        ui.kbchar = tft.getChar (&ui.ctrl, &ui.shift);
         if (ui.kbchar)
             return (true);
 

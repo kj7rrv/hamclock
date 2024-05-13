@@ -562,11 +562,16 @@ void initPlotPanes()
     NVReadUInt32 (NV_PANE3ROTSET, &plot_rotset[PANE_3]);
 
     // NB. since NV_PANE0ROTSET repurposes a prior NV it might contain invalid bits, 0 all if find any
-    if (plot_rotset[PANE_0] & ~((1<<PLOT_CH_DXCLUSTER) | (1<<PLOT_CH_CONTESTS) | (1<<PLOT_CH_PSK) |
+    if (plot_rotset[PANE_0] & ~((1<<PLOT_CH_DXCLUSTER) | (1<<PLOT_CH_CONTESTS) | (1<<PLOT_CH_ADIF) |
                                (1<<PLOT_CH_POTA) | (1<<PLOT_CH_SOTA))) {
+
         Serial.printf (_FX("PANE: Resetting bogus Pane 0 rot set: 0x%x\n"), plot_rotset[PANE_0]);
         plot_rotset[PANE_0] = 0;
         plot_ch[PANE_0] = PLOT_CH_NONE;
+
+        // save scrubbed values
+        NVWriteUInt32 (NV_PANE0ROTSET, plot_rotset[PANE_0]);
+        NVWriteUInt8 (NV_PLOT_0, plot_ch[PANE_0]);
     }
 
 

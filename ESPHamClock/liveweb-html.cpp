@@ -35,9 +35,9 @@ char live_html[] =  R"_raw_html_(
         // config
         const UPDATE_MS = 100;          // update interval
         const MOUSE_JITTER = 5;         // allow this much mouse motion for a touch
-        const MOUSE_HOLD_MS = 3000;     // mouse down duration to implement hold action
         const APP_W = 800;              // app coord system width
-        const nonan_chars = ['Tab', 'Enter', 'Space', 'Escape', 'Backspace'];    // supported non-alnum chars
+        const nonan_chars =             // supported non-alnum chars
+          ['Tab', 'Enter', 'Space', 'Escape', 'Backspace', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'ArrowRight'];
         const RELOAD_KEY = "reload";    // sessionStorage key to manage reloads
 
         // state
@@ -48,7 +48,6 @@ char live_html[] =  R"_raw_html_(
         var event_verbose = 0;          // > 0 for more info about keyboard or pointer activity
         var prev_regnhdr;               // for erasing if drawing_verbose > 1
         var app_scale = 0;              // size factor -- set for real when get first whole image
-        var pointerdown_ms = 0;         // Date.now when pointerdown event
         var pointerdown_x = 0;          // location of pointerdown event
         var pointerdown_y = 0;          // location of pointerdown event
         var pointermove_ms = 0;         // Date.now when pointermove event
@@ -229,39 +228,31 @@ char live_html[] =  R"_raw_html_(
             }
         }
 
-        // send the given key to the hamclock
-        function sendKey (k) {
+        // send the given key and optionl control and shift modifier codes to the hamclock
+        function sendKey (k, c, s) {
             if (event_verbose)
                 console.log('sending ' + k);
-            sendWSMsg ('set_char?char=' + k);
+            var msg = 'set_char?char=' + k + '&mod=';
+            if (c)
+                msg += 'C';
+            if (s)
+                msg += 'S';
+            sendWSMsg (msg);
         }
 
 
         // connect keydown to send character to hamclock, beware ctrl keys and browser interactions
         window.addEventListener('keydown', function(event) {
-            // check if user wants to go full screen
+
+            // now that user has done something check if they want to go full screen
             checkFullScreen();
 
-            // get char name or map arrow keys to vi
-            var key;
-            switch (event.key) {
-            case 'ArrowLeft':  key = 'h'; break;
-            case 'ArrowDown':  key = 'j'; break;
-            case 'ArrowUp':    key = 'k'; break;
-            case 'ArrowRight': key = 'l'; break;
-            default:           key = event.key;
-            }
+            // local copy for possible modification
+            var key = event.key;
 
             // a real space would send 'char= ' which doesn't parse so we invent Space name
             if (key === ' ')
                 key = 'Space';
-
-            // ignore if modified
-            if (event.metaKey || event.ctrlKey || event.altKey) {
-                if (event_verbose)
-                    console.log('ignoring modifier ' + key);
-                return;
-            }
 
             // accept only certain non-alphanumeric keys
             if (key.length > 1 && !nonan_chars.find (e => { if (e == key) return true; })) {
@@ -277,7 +268,7 @@ char live_html[] =  R"_raw_html_(
                 event.preventDefault();
             }
 
-            sendKey (key);
+            sendKey (key, event.ctrlKey, event.shiftKey);
         });
 
         // respond to mobile device being rotated. resize seems to work better than orientationchange
@@ -289,6 +280,20 @@ char live_html[] =  R"_raw_html_(
             runSoon (getFullImage);
         });
 
+        // show _one_ simple stand-alone message
+        var msg_drawn;
+        function drawMsgOnce (msg) {
+            if (!msg_drawn) {
+                ctx.fillStyle = "black";
+                ctx.fillRect (0, 0, 1000, 1000);
+                ctx.fillStyle = "orange";
+                ctx.font = "25px sans-serif";
+                ctx.fillText (msg, 50, 50);
+                msg_drawn = 1;
+            }
+        }
+
+
         // reload this page a few times, presumably hamclock was restarted but don't try forever
         function reloadThisPage() {
 
@@ -299,12 +304,7 @@ char live_html[] =  R"_raw_html_(
 
                 // already loaded once, just report without restart but remove key to allow manual reloading
                 sessionStorage.removeItem (RELOAD_KEY);
-
-                ctx.fillStyle = "black";
-                ctx.fillRect (0, 0, 1000, 1000);
-                ctx.fillStyle = "orange";
-                ctx.font = "30px sans-serif";
-                ctx.fillText ("No connection", 50, 50);
+                drawMsgOnce ("No connection");
 
             } else {
 
@@ -417,6 +417,9 @@ char live_html[] =  R"_raw_html_(
                             console.log ("Failed to open ", url);
                     }
 
+                    else
+                        drawMsgOnce (e.data);
+
                 } else {
                     console.log ("Unknown WS data: ", e.data);
                 }
@@ -442,7 +445,6 @@ char live_html[] =  R"_raw_html_(
                     return;
                 }
 
-                pointerdown_ms = Date.now();
                 pointerdown_x = m.x;
                 pointerdown_y = m.y;
                 if (event_verbose)
@@ -459,7 +461,7 @@ char live_html[] =  R"_raw_html_(
 
             });
 
-            // pointerup: send touch, hold depending on duration since pointerdown
+            // pointerup: send set_touch
             cvs.addEventListener ('pointerup', function(event) {
                 // all ours
                 event.preventDefault();
@@ -478,13 +480,8 @@ char live_html[] =  R"_raw_html_(
                     return;
                 }
 
-                // decide whether hold
-                let pointer_dt = pointerdown_ms ? Date.now() - pointerdown_ms : 0;
-                let hold = pointer_dt >= MOUSE_HOLD_MS;
-                pointerdown_ms = 0;
-
                 // compose and send
-                let msg = 'set_touch?x=' + m.x + '&y=' + m.y + (hold ? '&hold=1' : '&hold=0');
+                let msg = 'set_touch?x=' + m.x + '&y=' + m.y;
                 sendWSMsg (msg);
             });
 

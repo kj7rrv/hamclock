@@ -25,7 +25,7 @@ typedef struct {
 
 // N.B. files must match order in SDOImgType
 // N.B. file names depend on build size
-static const SDOName sdo_names[SDOT_N] PROGMEM = {
+static const SDOName sdo_names[SDOT_N] = {
     #if defined(_CLOCK_1600x960) 
         {"Composite",   "/SDO/f_211_193_171_340.bmp"},
         {"Magnetogram", "/SDO/latest_340_HMIB.bmp"},
@@ -95,14 +95,7 @@ static void loadSDOChoice (void)
 static bool drawSDOImage (const SBox &box)
 {
     // get corresponding file name
-#if defined (_IS_ESP8266)
-    // must copy to ram
-    char fn_ram[sizeof(sdo_names[0].file_name)];
-    strcpy_P (fn_ram, sdo_names[sdo_choice].file_name);
-    char *fn = fn_ram;
-#else
     const char *fn = sdo_names[sdo_choice].file_name;;
-#endif
 
     // show file
     return (drawHTTPBMP (fn, box, SDO_COLOR));
@@ -211,8 +204,45 @@ bool updateSDOPane (const SBox &box, bool image_too)
     return (ok);
 }
 
-/* check for touch in the given pane box.
+/* attempt to show the movie for sdo_choice
+ */
+static void showSDOmovie (void)
+{
+    const char *url = NULL;
+
+    switch ((SDOImgType)sdo_choice) {
+    case SDOT_COMP:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_211193171.mp4";
+        break;
+    case SDOT_HMIB:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIB.mp4";
+        break;
+    case SDOT_HMIIC:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIIC.mp4";
+        break;
+    case SDOT_131:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0131.mp4";
+        break;
+    case SDOT_193:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0193.mp4";
+        break;
+    case SDOT_211:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0211.mp4";
+        break;
+    case SDOT_304:
+        url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0304.mp4";
+        break;
+    case SDOT_N:
+        break;
+    }
+
+    if (url)
+        openURL (url);
+}
+
+/* check for our touch in the given pane box.
  * return whether we should stay on this pane, else give user choice of new panes.
+ * N.B. we assume s is within box
  */
 bool checkSDOTouch (const SCoord &s, const SBox &box)
 {
@@ -220,80 +250,60 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
     if (s.y < box.y + PANETITLE_H)
         return (false);
 
-    #define SM_INDENT 5
-    #define SDOT_ROTATE SDOT_N
-
     // insure current values
     loadSDOChoice();
 
-#if defined (_IS_UNIX)
-    // check for movie easter egg in lower right corner
-    if (s.y > box.y + 4*box.h/5 && s.x > box.x + box.w/2) {
-        const char *url;
-        switch (sdo_choice) {
-        case SDOT_COMP:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_211193171.mp4";
-            break;
-        case SDOT_HMIB:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIB.mp4";
-            break;
-        case SDOT_HMIIC:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_HMIIC.mp4";
-            break;
-        case SDOT_131:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0131.mp4";
-            break;
-        case SDOT_193:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0193.mp4";
-            break;
-        case SDOT_211:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0211.mp4";
-            break;
-        case SDOT_304:
-            url = "https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0304.mp4";
-            break;
-        default:
-            fatalError ("Unknown sdo_choice: %d", sdo_choice);
-            return (true);              // lint
-        }
-        openURL (url);
+    // show menu of SDOT_N images options + rotate option + show grayline + show movie
 
-        // ours regardless
-        return (true);
-    }
-#endif // _IS_UNIX
+    #define SM_INDENT 5
 
-    // check for grayline rise/set in lower left corner
-    if (s.y > box.y + 4*box.h/5 && s.x < box.x + box.w/2) {
-        plotGrayline();
-        initEarthMap();
-        return (true);
-    }
+    // handy indices to extra menu items
+    enum {
+        SDOM_ROTATE = SDOT_N,
+        SDOM_GAP,
+        SDOM_GRAYLINE,
+        SDOM_SHOWWEB,
+        SDOM_NMENU
+    };
 
-    // show menu of SDO images + rotate option
+    MenuItem mitems[SDOM_NMENU];
 
-    MenuItem mitems[SDOT_N+1];                                  // +1 for rotate option
-    char names[SDOT_N][sizeof(sdo_names[0].menu_name)];         // really just for ESP
+    // set first SDOT_N to name collection
     for (int i = 0; i < SDOT_N; i++) {
-        strcpy_P (names[i], sdo_names[i].menu_name);
-        mitems[i] = {MENU_1OFN, !sdo_rotating && i == sdo_choice, 1, SM_INDENT, names[i]};
+        mitems[i] = {MENU_1OFN, !sdo_rotating && i == sdo_choice, 1, SM_INDENT, sdo_names[i].menu_name};
     }
-    mitems[SDOT_ROTATE] = {MENU_1OFN, (bool)sdo_rotating, 1, SM_INDENT, "Rotate"};
+
+    // set whether rotating
+    mitems[SDOM_ROTATE] = {MENU_1OFN, (bool)sdo_rotating, 1, SM_INDENT, "Rotate"};
+
+    // nice gap
+    mitems[SDOM_GAP] = {MENU_BLANK, false, 0, 0, NULL};
+
+    // set grayline option
+    mitems[SDOM_GRAYLINE] = {MENU_TOGGLE, false, 2, SM_INDENT, "Grayline tool"};
+
+    // set show web page option, but not on fb0
+#if defined(_USE_FB0)
+    mitems[SDOM_SHOWWEB] = {MENU_IGNORE, false, 0, 0, NULL};
+#else
+    mitems[SDOM_SHOWWEB] = {MENU_TOGGLE, false, 3, SM_INDENT, "Show movie"};
+#endif
 
     SBox menu_b = box;          // copy, not ref
     menu_b.x += box.w/4;
-    menu_b.y += 20;
+    menu_b.y += 5;
     menu_b.w = 0;               // shrink wrap
     SBox ok_b;
 
-    MenuInfo menu = {menu_b, ok_b, true, false, 1, SDOT_N+1, mitems};
+    MenuInfo menu = {menu_b, ok_b, true, false, 1, SDOM_NMENU, mitems};
     bool ok = runMenu (menu);
 
     // change to new option unless cancelled
+    bool refresh_pane = true;
     if (ok) {
 
-        // find new selection unless rotating
-        sdo_rotating = mitems[SDOT_ROTATE].set;
+        // set new selection unless rotating
+        sdo_rotating = mitems[SDOM_ROTATE].set;
         if (!sdo_rotating) {
             for (int i = 0; i < SDOT_N; i++) {
                 if (mitems[i].set) {
@@ -306,15 +316,28 @@ bool checkSDOTouch (const SCoord &s, const SBox &box)
         // save
         saveSDOChoice();
 
+        // check for movie
+        if (mitems[SDOM_SHOWWEB].set)
+            showSDOmovie ();
+
+        // gray line must 1) fix hole in pane 2) show grayline then 3) fix map on return
+        if (mitems[SDOM_GRAYLINE].set) {
+            updateSDOPane (box, true);
+            plotGrayline();
+            initEarthMap();
+            refresh_pane = false;
+        }
+
     } else if (sdo_rotating) {
 
-        // cancelled: this kludge effectively causes updateSDO to show the same image
+        // cancelled but this kludge effectively causes updateSDO to show the same image
         sdo_choice = (sdo_choice + SDOT_N - 1) % SDOT_N;
         saveSDOChoice();
     }
 
-    // always show image, even if cancelled just to erase the menu
-    scheduleNewPlot(PLOT_CH_SDO);
+    // show image unless already done so, even if cancelled just to erase the menu
+    if (refresh_pane)
+        scheduleNewPlot(PLOT_CH_SDO);
 
     // ours
     return (true);

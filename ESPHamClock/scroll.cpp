@@ -40,7 +40,7 @@
 
 
 // control layout geometry
-#define SCR_DX          20                      // x offset back from box right to center of scroll arrows
+#define SCR_DX          24                      // x offset back from box right to center of scroll arrows
 #define SCRUP_DY        9                       // y offset from box top to center of up arrow
 #define SCRDW_DY        23                      // y offset from box top to center of down arrow
 #define SCR_W           6                       // scroll arrow width
@@ -267,30 +267,3 @@ int ScrollState::getDisplayRow (int array_index) const
 
     return (i);
 }
-
-
-
-
-/*******************************
- * what are these doing here??
- *******************************/
-
-
-/* convert any upper case letter in str to lower case IN PLACE
- */
-void strtolower (char *str)
-{
-        for (char c = *str; c != '\0'; c = *++str)
-            if (isupper(c))
-                *str = tolower(c);
-}
-
-/* convert any lower case letter in str to upper case IN PLACE
- */
-void strtoupper (char *str)
-{
-        for (char c = *str; c != '\0'; c = *++str)
-            if (islower(c))
-                *str = toupper(c);
-}
-

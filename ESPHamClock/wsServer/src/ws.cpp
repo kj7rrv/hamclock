@@ -49,6 +49,14 @@ typedef int socklen_t;
 #include "ws.h"
 
 /**
+ * pass sock and port to ws_accept()
+ */
+struct ws_accept_info {
+    int sock;
+    int port;
+};
+
+/**
  * @dir src/
  * @brief wsServer source code
  *
@@ -60,35 +68,6 @@ typedef int socklen_t;
  * @brief Websocket events.
  */
 static struct ws_events cli_events;
-
-/**
- * @brief Client socks.
- */
-struct ws_connection
-{
-	int client_sock; /**< Client socket FD.        */
-	int state;       /**< WebSocket current state. */
-
-	/* Timeout thread and locks. */
-	pthread_mutex_t mtx_state;
-	pthread_cond_t cnd_state_close;
-	pthread_t thrd_tout;
-	bool close_thrd;
-
-        /* malloced http header down through and including blank line */
-        char *header;
-
-	/* Send lock. */
-	pthread_mutex_t mtx_snd;
-
-	/* IP address. */
-	char ip[INET6_ADDRSTRLEN];
-
-	/* Ping/Pong IDs and locks. */
-	int32_t last_pong_id;
-	int32_t current_ping_id;
-	pthread_mutex_t mtx_ping;
-};
 
 /**
  * @brief Clients list.
@@ -1504,9 +1483,9 @@ closed:
 /**
  * @brief Main loop that keeps accepting new connections.
  *
- * @param data Server socket.
+ * @param data pointer to malloced ws_accept_info
  *
- * @return Returns @p data.
+ * @return Returns NULL but should never.
  *
  * @note This may be run on a different thread.
  *
@@ -1518,18 +1497,21 @@ static void *ws_accept(void *data)
 	struct sockaddr_in client; /* Client.                */
 	pthread_t client_thread;   /* Client thread.         */
 	struct timeval time;       /* Client socket timeout. */
+        struct ws_accept_info info;/* passed in sock and port*/
 	int new_sock;              /* New opened connection. */
-	int sock;                  /* Server sock.           */
 	int len;                   /* Length of sockaddr.    */
 	int i;                     /* Loop index.            */
 
-	sock = *(int *)data;
+        // get args
+	memcpy (&info, data, sizeof(struct ws_accept_info));
+        free (data);
+
 	len = sizeof(struct sockaddr_in);
 
 	while (1)
 	{
 		/* Accept. */
-		new_sock = accept(sock, (struct sockaddr *)&client, (socklen_t *)&len);
+		new_sock = accept(info.sock, (struct sockaddr *)&client, (socklen_t *)&len);
 		if (new_sock < 0) {
                     printf ("Accept() failed: %s\n", strerror(errno));
                     usleep (1000000);
@@ -1564,6 +1546,7 @@ static void *ws_accept(void *data)
 				client_socks[i].close_thrd = false;
 				client_socks[i].last_pong_id = -1;
 				client_socks[i].current_ping_id = -1;
+				client_socks[i].port = info.port;
 				set_client_address(&client_socks[i]);
 
 				if (pthread_mutex_init(&client_socks[i].mtx_state, NULL))
@@ -1619,18 +1602,13 @@ int ws_socket(struct ws_events *evs, uint16_t port, int thread_loop,
 	struct sockaddr_in server; /* Server.                */
 	pthread_t accept_thread;   /* Accept thread.         */
 	int reuse;                 /* Socket option.         */
-	int *sock;                 /* Client sock.           */
+	int sock;                  /* Client sock.           */
 
 	timeout = timeout_ms;
 
 	/* Checks if the event list is a valid pointer. */
 	if (evs == NULL)
 		panic("Invalid event list!");
-
-	/* Allocates our sock data. */
-	sock = (int *) malloc(sizeof(*sock));
-	if (!sock)
-		panic("Unable to allocate sock, out of memory!\n");
 
 	/* Copy events. */
 	memcpy(&cli_events, evs, sizeof(struct ws_events));
@@ -1654,13 +1632,13 @@ int ws_socket(struct ws_events *evs, uint16_t port, int thread_loop,
 #endif
 
 	/* Create socket. */
-	*sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (*sock < 0)
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
 		panic("Could not create socket");
 
 	/* Reuse previous address. */
 	reuse = 1;
-	if (setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse,
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse,
 			sizeof(reuse)) < 0)
 	{
 		panic("setsockopt(SO_REUSEADDR) failed");
@@ -1672,22 +1650,27 @@ int ws_socket(struct ws_events *evs, uint16_t port, int thread_loop,
 	server.sin_port = htons(port);
 
 	/* Bind. */
-	if (bind(*sock, (struct sockaddr *)&server, sizeof(server)) < 0)
+	if (bind(sock, (struct sockaddr *)&server, sizeof(server)) < 0)
 		panic("Bind failed");
 
 	/* Listen. */
-	listen(*sock, MAX_CLIENTS);
+	listen(sock, MAX_CLIENTS);
 
 	/* Wait for incoming connections. */
 	// printf("Waiting for incoming connections...\n");
 	memset(client_socks, -1, sizeof(client_socks));
 
+        /* malloc arg for ws_accept() who can then free */
+        struct ws_accept_info *info_p = (struct ws_accept_info *) malloc (sizeof(struct ws_accept_info));
+        info_p->sock = sock;
+        info_p->port = port;
+
 	/* Accept connections. */
 	if (!thread_loop)
-		ws_accept((void *)sock);
+		ws_accept((void *)info_p);
 	else
 	{
-		if (pthread_create(&accept_thread, NULL, ws_accept, (void *)sock))
+		if (pthread_create(&accept_thread, NULL, ws_accept, (void *)info_p))
 			panic("Could not create the client thread!");
 		pthread_detach(accept_thread);
 	}

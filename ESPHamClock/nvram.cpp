@@ -129,7 +129,7 @@ static const uint8_t nv_sizes[NV_N] = {
 
     4,                          // NV_PANE3ROTSET
     1,                          // NV_AUX_TIME
-    2,                          // NV_ALARMCLOCK
+    2,                          // NV_DAILYALARM
     1,                          // NV_BC_UTCTIMELINE
     1,                          // NV_RSS_INTERVAL
 
@@ -215,6 +215,12 @@ static const uint8_t nv_sizes[NV_N] = {
     1,                          // NV_ZOOM
     2,                          // NV_PANX
     2,                          // NV_PANY
+    1,                          // NV_SPOTAWLISTMASK
+
+    NV_SPOTAWLIST_LEN,          // NV_SPOTAWLIST
+    4,                          // NV_ONCEALARM
+    1,                          // NV_ONCEALARMMASK
+
 
 };
 
@@ -483,8 +489,6 @@ bool NVReadString (NV_Name e, char *buf)
 }
 
 
-#if defined(_SUPPORT_CTSL)
-
 /* read CSEL color table i, return whether valid.
  */
 bool NVReadColorTable (int tbl_i, uint8_t r[N_CSPR], uint8_t g[N_CSPR], uint8_t b[N_CSPR])
@@ -545,5 +549,3 @@ void NVWriteColorTable (int tbl_i, const uint8_t r[N_CSPR], const uint8_t g[N_CS
     if (!EEPROM.commit())
         fatalError (_FX("EEPROM.commit colors failed"));
 }
-
-#endif // _SUPPORT_CTSL

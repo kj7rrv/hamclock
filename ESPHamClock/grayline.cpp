@@ -284,6 +284,8 @@ void plotGrayline()
         true,
         s,
         c,
+        false,
+        false
     };
 
     while (waitForUser(ui)) {

@@ -2103,6 +2103,8 @@ static void showNextSatEvents ()
         false,
         s_tap,
         typed_char,
+        false,
+        false
     };
     waitForUser (ui);
 

@@ -696,7 +696,7 @@ bool ll2Prefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1])
 /* if call contains / copy the most likely dx half (not home call) to dx_call.
  * else just copy complete call to dx_call.
  */
-static void findDXCallPortion (const char *call, char dx_call[NV_CALLSIGN_LEN])
+void findDXCallPortion (const char *call, char dx_call[NV_CALLSIGN_LEN])
 {
     // init dx_call
     memset (dx_call, 0, NV_CALLSIGN_LEN);

@@ -110,19 +110,6 @@ Adafruit_RA8875_R tft(RA8875_CS, RA8875_RESET);
 Adafruit_MCP23X17 mcp;
 bool found_mcp;
 
-// manage the great circle path through DE and DX points
-// ESP must use points in order to selectively erase, UNIX never needs to erase
-
-#if defined(_IS_ESP8266)
-#define USE_GPATH
-#endif
-
-#if defined(USE_GPATH)
-#define MAX_GPATH               1500            // max number of points to draw in great circle path
-static SCoord *gpath;                           // malloced path points
-static uint16_t n_gpath;                        // actual number in use
-#endif // USE_GPATH
-
 static uint32_t gpath_time;                     // millis() when great path was drawn, else 0
 static SBox prefix_b;                           // where to show DX prefix text
 
@@ -133,7 +120,7 @@ static char dx_override_prefix[MAX_PREF_LEN];
 // longest interval between calls to resetWatchdog(), ms
 uint32_t max_wd_dt;
 
-// whether flash crc is ok
+// whether flash crc is ok -- from old ESP days
 uint8_t flash_crc_ok;
 
 // name of each DETIME setting, for menu and set_defmt
@@ -147,13 +134,6 @@ const char *detime_names[DETIME_N] = {
  */
 void setDXPathInvalid()
 {
-#if defined(USE_GPATH)
-    if (gpath) {
-        free (gpath);
-        gpath = NULL;
-    }
-    n_gpath = 0;
-#endif // USE_GPATH
     gpath_time = 0;
 }
 
@@ -169,13 +149,9 @@ static void drawRainbow (SBox &box);
 static void drawDXCursorPrefix (void);
 static void setDXPrefixOverride (const char *ovprefix);
 static void unsetDXPrefixOverride (void);
-static void shutdown(void);
+static void runShutdownMenu(void);
 
 
-
-/* UNIX-only recovery attempts
- */
-#if defined(_IS_UNIX)
 
 /* try to restore pi to somewhat normal config
  */
@@ -192,18 +168,12 @@ static void defaultState()
 }
 
 
-#endif // _IS_UNIX
-
 
 /* print setting of several compile-time #defines
  */
 static void showDefines(void)
 {
     #define _PR_MAC(m)   Serial.printf (_FX("#define %s\n"), #m)
-
-    #if defined(_IS_ESP8266)
-        _PR_MAC(_IS_ESP8266);
-    #endif
 
     #if defined(_IS_UNIX)
         _PR_MAC(_IS_UNIX);
@@ -257,10 +227,6 @@ static void showDefines(void)
         _PR_MAC(_SUPPORT_NATIVE_GPIO);
     #endif
 
-    #if defined(_SUPPORT_FLIP)
-        _PR_MAC(_SUPPORT_FLIP);
-    #endif
-
     #if defined(_SUPPORT_KX3)
         _PR_MAC(_SUPPORT_KX3);
     #endif
@@ -306,20 +272,6 @@ void setup()
     stack_start = &stack;
 
 
-
-    #if defined(_IS_ESP8266)
-
-    // show life
-    pinMode(LIFE_LED, OUTPUT);
-    digitalWrite (LIFE_LED, HIGH);
-
-    // skip first line for debugger
-    Serial.println(_FX(""));
-
-    #endif // _IS_ESP8266
-
-
-
     // this just reset the soft timeout, the hard timeout is still 6 seconds
     ESP.wdtDisable();
 
@@ -333,12 +285,6 @@ void setup()
 
     // show config
     showDefines();
-
-    // record whether our FLASH CRC is correct -- takes about half a second
-    flash_crc_ok = ESP.checkFlashCRC();
-#ifdef _IS_ESP8266
-    Serial.printf(_FX("FLASH crc ok: %d\n"), flash_crc_ok);
-#endif
 
     // random seed, not critical
     randomSeed(micros());
@@ -711,12 +657,6 @@ void setup()
     // check for saved satellite
     dx_info_for_sat = initSatSelection();
 
-    // show locked if web-only and -c
-#if defined(_WEB_ONLY)
-    if (no_web_touch)
-        setScreenLock (true);
-#endif
-
     // perform inital screen layout
     initScreen();
 
@@ -922,31 +862,9 @@ static void checkTouch()
         }
     }
 
-    // if get here TT is either TAP or HOLD
-
     // check lock first
-    if (inBox (s, lkscrn_b)) {
-        if (screenIsLocked()) {
-            // if locked all you can do is unlock with a tap
-            if (tt == TT_TAP && askPasswd(_FX("unlock"), true))
-                toggleLockScreen();
-        } else {
-            // if unlocked HOLD always means shutdown else toggle
-            if (tt == TT_HOLD) {
-                shutdown();
-            } else {
-                if (getDemoMode())
-                    setDemoMode (false);
-                else
-                    toggleLockScreen();
-            }
-        }
-
-        // nothing else
-        drawScreenLock();
-        drainTouch();
-        return;
-    }
+    if (inBox (s, lkscrn_b))
+        runShutdownMenu();
     if (screenIsLocked())
         return;
 
@@ -968,7 +886,6 @@ static void checkTouch()
         map_popup.pending = true;
         map_popup.s = s;
         map_popup.ll = ll;
-        map_popup.tt = tt;
     } else if (!SHOWING_PANE_0() && inBox (s, de_title_b)) {
         drawDEFormatMenu();
     } else if (inBox (s, stopwatch_b)) {
@@ -1361,22 +1278,6 @@ static void eraseDXMarker()
  */
 static void eraseDXPath()
 {
-#if defined(USE_GPATH)
-    // get out fast if nothing to do
-    if (!n_gpath)
-        return;
-
-    // erase the prefix box
-    for (uint16_t dy = 0; dy < prefix_b.h; dy++)
-        for (uint16_t dx = 0; dx < prefix_b.w; dx++)
-            drawMapCoord (prefix_b.x + dx, prefix_b.y + dy);
-
-    // erase the great path
-    for (uint16_t i = 0; i < n_gpath; i++)
-        drawMapCoord (gpath[i]);
-
-#endif // USE_GPATH
-
     // mark no longer active
     setDXPathInvalid();
 }
@@ -1443,40 +1344,6 @@ void drawDXPath ()
     float dist, bear;
     propDEPath (false, dx_ll, &dist, &bear);
 
-#if defined(USE_GPATH)
-
-    // start with max nnumber of points, then reduce
-    gpath = (SCoord *) realloc (gpath, MAX_GPATH * sizeof(SCoord));
-    if (!gpath)
-        fatalError ("gpath %d", MAX_GPATH); // no _FX if alloc failing
-
-    // walk great circle path from DE through DX, storing each point allowing for optinally dashed
-    float ca, B;
-    SCoord s;
-    n_gpath = 0;
-    uint16_t short_col = getMapColor(SHORTPATH_CSPR);
-    uint16_t long_col = getMapColor(LONGPATH_CSPR);
-    bool sp_dashed = getColorDashed(SHORTPATH_CSPR);
-    bool lp_dashed = getColorDashed(LONGPATH_CSPR);
-    int pix_i = 0;
-    for (float b = 0; b < 2*M_PIF; b += 2*M_PIF/MAX_GPATH, pix_i++) {
-        solveSphere (bear, b, sdelat, cdelat, &ca, &B);
-        ll2s (asinf(ca), fmodf(de_ll.lng+B+5*M_PIF,2*M_PIF)-M_PIF, s, 1);
-        bool show = b < dist ? (!sp_dashed || (pix_i % 20) < 10) : (!lp_dashed || (pix_i % 20) < 10);
-        if (show && (n_gpath == 0 || memcmp (&s, &gpath[n_gpath-1], sizeof(SCoord))) && overMap(s)) {
-            gpath[n_gpath++] = s;
-            tft.drawPixel (s.x, s.y, b < dist ? short_col : long_col);
-        }
-    }
-
-    // reduce to actual number of points used
-    // Serial.printf (_FX("n_gpath %u -> %u\n"), MAX_GPATH, n_gpath);
-    gpath = (SCoord *) realloc (gpath, n_gpath * sizeof(SCoord));
-    if (!gpath && n_gpath > 0)
-        fatalError(_FX("realloc gpath: %d"), n_gpath);
-
-#else // UNIX
-
     // walk great circle path from DE through DX with segment lengths PATH_SEGLEN
     float ca, B;
     SCoord s0 = {0, 0}, s1;
@@ -1500,8 +1367,6 @@ void drawDXPath ()
         s0 = s1;
         dash_toggle = !dash_toggle;
     }
-
-#endif // USE_GPATH
 }
 
 /* return whether we are waiting for a DX path to linger.
@@ -2604,24 +2469,10 @@ void eraseScreen()
     tft.drawPR();
 }
 
+/* holdover from ESP days
+ */
 void resetWatchdog()
 {
-#if defined(_IS_ESP8266)
-    // record longest wd feed interval so far in max_wd_dt
-    static uint32_t prev_ms;
-    uint32_t ms = millis();
-    uint32_t dt = ms - prev_ms;         // works ok if millis rolls over
-    if (dt > 1000) { // ignore crazy fast
-        if ((dt > max_wd_dt || dt > 5000) && prev_ms > 0) {
-            // Serial.printf (_FX("max WD %u\n"), dt);
-            max_wd_dt = dt;
-        }
-        prev_ms = ms;
-
-        ESP.wdtFeed();
-        yield();
-    }
-#endif // _IS_ESP8266
 }
 
 /* like delay() but breaks into small chunks so we can call resetWatchdog() and update live web
@@ -2657,16 +2508,15 @@ bool timesUp (uint32_t *prev, uint32_t atleast_dt)
 
 
 
-#if defined (_IS_UNIX)
-
 
 /* called to post our diagnostics files to the server for later analysis.
  * include the ip in the name which identifies us using our public IP address.
+ * return whether all ok.
  */
-static void postDiags (void)
+static bool postDiags (void)
 {
     WiFiClient pd_client;
-    const char *rsp_msg;
+    bool ok = false;
 
     // build a unique filename relative to hamclock server root dir and id
     char fn[300];
@@ -2714,23 +2564,17 @@ static void postDiags (void)
         }
         
         pd_client.stop();
-        rsp_msg = _FX("Success");
+        ok = true;
 
     } else {
 
         Serial.printf (_FX("postDiags() failed to connect to %s:%d\n"), backend_host, backend_port);
-        rsp_msg  = _FX("Fail -- please try again");
+        ok = false;
     }
 
-    // show ack or err
-    eraseScreen();
-    uint16_t ml = getTextWidth(rsp_msg);
-    tft.setCursor ((800-ml)/2, 200);
-    tft.print (rsp_msg);
-    wdDelay(2000);
+    // ok?
+    return (ok);
 }
-
-#endif // _IS_UNIX
 
 /* attempt to open the given web page in a new browser tab.
  * use xdg-open to engage a local browser and set liveweb_openurl for our instance.
@@ -2740,8 +2584,6 @@ static void postDiags (void)
  */
 void openURL (const char *url)
 {
-#if defined(_IS_UNIX)
-
 #if !defined(_WEB_ONLY)
     // try running xdg-open
     StackMalloc cmd_mem(strlen(url) + 50);
@@ -2756,260 +2598,155 @@ void openURL (const char *url)
     // try telling our own page -- liveweb will free() once it has been sent
     if (!liveweb_openurl)
         liveweb_openurl = strdup (url);
-
-#endif // _IS_UNIX
 }
 
-
-/* shutdown helper that asks Are You Sure in the given box.
- * hl_color is BLACK unless we know keyboard action got us here.
- * return answer.
+/* ask Are You Sure for the given question.
+ * return whether yes
  */
-static bool shutdownRUS (const SBox &b, uint16_t txt_color, uint16_t hl_color)
+static bool RUSure (SBox &box, const char *q)
 {
-    // cursor y
-    uint16_t cur_y = b.y + 7*b.h/10;
-
-    // erase and print query
-    tft.fillRect (b.x+1, b.y+1, b.w-2, b.h-2, RA8875_BLACK);    // erase but avoid boundary
-    tft.setCursor (b.x+50, cur_y);
-    tft.setTextColor(txt_color);
-    tft.print (F("Are you sure? "));
-
-    // define yes/no boxes
-    SBox y_b;
-    y_b.x = tft.getCursorX();
-    y_b.y = b.y;
-    y_b.w = 60;
-    y_b.h = b.h;
-    tft.setCursor (y_b.x+10, cur_y);
-    tft.print (F("Yes"));
-
-    SBox n_b = y_b;
-    n_b.x += y_b.w+30;
-    tft.setCursor (n_b.x+15, cur_y);
-    tft.print (F("No"));
-
-    // keyboard code considers Yes to be box 0, No to be box 1
-    int kb_sel = hl_color == RA8875_BLACK ? -1 : 0;
-
-    // wait for one to be tapped
-    SCoord tap_s;
-    char type_c;
-    UserInput ui = {
-        b,
-        NULL,
-        false,
-        0,
-        false,
-        tap_s,
-        type_c
+    selectFontStyle (LIGHT_FONT, FAST_FONT);
+    const char *r = "Are you sure?";
+    uint8_t q_indent = (box.w - getTextWidth(q))/2 - 2;         // - MENU_RM in menu.cpp
+    uint8_t r_indent = (box.w - getTextWidth(r))/2 - 2;         //            "
+    MenuItem mitems[] = {
+        {MENU_BLANK, false, 0, 0, NULL},
+        {MENU_LABEL, false, 0, q_indent, q},
+        {MENU_BLANK, false, 0, 0, NULL},
+        {MENU_LABEL, false, 0, r_indent, r},
+        {MENU_BLANK, false, 0, 0, NULL},
     };
-    for (;;) {
+    const int n_rusm = NARRAY(mitems);
 
-        tft.drawRect (y_b.x+3, y_b.y+3, y_b.w-6, y_b.h-6, kb_sel == 0 ? hl_color : RA8875_BLACK);
-        tft.drawRect (n_b.x+3, n_b.y+3, n_b.w-6, n_b.h-6, kb_sel == 1 ? hl_color : RA8875_BLACK);
+    SBox ok_b;
 
-        (void) waitForUser (ui);
-
-        if (type_c) {
-            if (type_c == '\r' || type_c == '\n' || type_c == ' ')
-                return (kb_sel == 0);
-            if (type_c == 'h' && kb_sel == 1)
-                kb_sel = 0;
-            if (type_c == 'l' && kb_sel == 0)
-                kb_sel = 1;
-        } else {
-            if (inBox (tap_s, y_b))
-                return (true);
-            if (inBox (tap_s, n_b))
-                return (false);
-        }
-    }
+    MenuInfo menu = {box, ok_b, false, false, 1, n_rusm, mitems};
+    return (runMenu (menu));
 }
 
-/* offer power down, restart etc depending on platform.
+/* offer power down, restart etc 
  */
-static void shutdown(void)
+static void runShutdownMenu(void)
 {
     closeDXCluster();       // prevent inbound msgs from clogging network
     closeGimbal();          // avoid dangling connection
 
-    eraseScreen();
+    // if screen is locked, the only menu option is to unlock
+    bool locked = screenIsLocked();
 
-    // prep
-    selectFontStyle (BOLD_FONT, SMALL_FONT);
-    const uint16_t x0 = tft.width()/4;
-    const uint16_t w = tft.width()/2;
-    const uint16_t h = 50;
-    uint16_t y = tft.height()/6;
-
-    // define each possibility -- set depends on platform
-    typedef struct {
-        const char *prompt;
-        SBox box;
-        uint16_t color;
-    } ShutDownCtrl;
-    enum {
-        _SDC_RESUME,
-        _SDC_RESTART,
-        _SDC_EXIT,
-        _SDC_POSTDIAGS,
-        _SDC_REBOOT,
-        _SDC_SHUTDOWN
+    const int SHM_INDENT = 3;
+    MenuItem mitems[] = {
+        {MENU_TOGGLE,                        locked,        1, SHM_INDENT, "Lock screen "},     // 0
+        {locked ? MENU_IGNORE : MENU_TOGGLE, getDemoMode(), 2, SHM_INDENT, "Demo mode"},        // 1
+        {locked ? MENU_IGNORE : MENU_01OFN,  false,         3, SHM_INDENT, "Post diagnostics"}, // 2
+        {locked ? MENU_IGNORE : MENU_01OFN,  false,         3, SHM_INDENT, "Restart HamClock"}, // 3
+        {locked ? MENU_IGNORE : MENU_01OFN,  false,         3, SHM_INDENT, "Exit HamClock"},    // 4
+        {locked ? MENU_IGNORE : MENU_01OFN,  false,         3, SHM_INDENT, "Reboot computer"},  // 5
+        {locked ? MENU_IGNORE : MENU_01OFN,  false,         3, SHM_INDENT, "Shutdown computer"},// 6
     };
-    ShutDownCtrl sdctl[] = {            // N.B. must be in order of _SDC_* enum
-        {"Disregard -- resume",         {x0, y,                 w, h}, RA8875_GREEN},
-        {"Restart HamClock",            {x0, (uint16_t)(y+1*h), w, h}, RA8875_YELLOW},
-        #if defined(_IS_UNIX)
-            {"Exit HamClock",           {x0, (uint16_t)(y+2*h), w, h}, RA8875_MAGENTA},
-            {"Post diagnostics",        {x0, (uint16_t)(y+3*h), w, h}, RGB565(100,100,255)},
-            {"Reboot host",             {x0, (uint16_t)(y+4*h), w, h}, RA8875_RED},
-            {"Shutdown host",           {x0, (uint16_t)(y+5*h), w, h}, RGB565(255,125,0)},
-        #endif // _IS_UNIX
-    };
+    const int n_shm = NARRAY(mitems);
 
-    // kb managements
-    #define _SDC_KBC     RA8875_GREEN   // selected color
-    int sdc_kbd = -1;                   // index of selected item via keyboard
+    // boxes
+    uint16_t menu_x = locked ? 150 : 114;       // just one entry if locked
+    uint16_t menu_y = locked ? 120 : 54;        // just one entry if locked
+    SBox menu_b = {menu_x, menu_y, 0, 0};       // shrink wrap size
+    SBox ok_b;
 
-    // number of options
-    #if defined(_IS_UNIX)
-        // os control only when full screen
-        int n_sdctl = getX11FullScreen() ? NARRAY(sdctl) : NARRAY(sdctl)-2;
-    #else
-        // only restart makes sense
-        int n_sdctl = NARRAY(sdctl);
-    #endif
+    // run menu
+    bool do_full_init = false;
+    MenuInfo menu = {menu_b, ok_b, false, false, 1, n_shm, mitems};
+    if (runMenu(menu)) {
 
-    // main loop that displays choices until one is confirmed
-    int selection = -1;
-    do {
+        // engage each selection
 
-        // wait for a selection
-        for (selection = -1; selection < 0; ) {
+        if (mitems[0].set) {
+            // anyone can lock
+            setScreenLock (true);
+        } else if (locked) {
+            // can only unlock if have pw (or no pw)
+            if (askPasswd(_FX("unlock"), true))
+                setScreenLock (false);
+        }
 
-            // display all
-            for (int i = 0; i < n_sdctl; i++) {
-                ShutDownCtrl &sdc = sdctl[i];
-                drawStringInBox (sdc.prompt, sdc.box, false, sdc.color);
-                if (i == sdc_kbd)
-                    tft.drawRect (sdc.box.x+5, sdc.box.y+5, sdc.box.w-10, sdc.box.h-10, _SDC_KBC);
+        setDemoMode (mitems[1].set);
+
+        if (mitems[2].set) {
+            bool ok = postDiags();
+            const char *str = ok ? "Success" : "Fail";
+            menuMsg (menu_b, ok ? RA8875_GREEN : RA8875_RED, str);
+        }
+
+        if (mitems[3].set) {
+            if (RUSure (menu_b, mitems[3].label) && askPasswd (_FX("restart"), true)) {
+                Serial.print (_FX("Restarting\n"));
+                eraseScreen();  // fast touch feedback
+                doReboot();
             }
+        }
 
-            // wait forever for user
-            SBox screen_b;
-            screen_b.x = 0;
-            screen_b.y = 0;
-            screen_b.w = tft.width();
-            screen_b.h = tft.height();
-            SCoord tap_s;
-            char type_c;
-            UserInput ui = {
-                screen_b,
-                NULL,
-                false,
-                0,
-                false,
-                tap_s,
-                type_c
-            };
-            (void) waitForUser (ui);
+        if (mitems[4].set) {
+            if (RUSure (menu_b, mitems[4].label) && askPasswd (_FX("exit"), true)) {
+                Serial.print (_FX("Exiting\n"));
+                doExit();
+            }
+        }
 
-            // check user input
-            if (type_c) {
-
-                switch (type_c) {
-                case '\r':
-                case '\n':
-                case ' ':
-                    selection = sdc_kbd;
-                    break;
-                case 'j':
-                    sdc_kbd = (sdc_kbd + 1) % n_sdctl;
-                    break;
-                case 'k':
-                    sdc_kbd = (n_sdctl + sdc_kbd - 1) % n_sdctl;
-                    break;
-                default:
-                    break;
-                }
-
-            } else {
-
-                // check mouse
-                for (int i = 0; i < n_sdctl; i++) {
-                    if (inBox (tap_s, sdctl[i].box)) {
-                        selection = i;
-                        break;
-                    }
+        if (mitems[5].set) {
+            if (RUSure (menu_b, mitems[5].label) && askPasswd (_FX("reboot"), true)) {
+                Serial.print (_FX("Rebooting\n"));
+                eraseScreen();
+                selectFontStyle (BOLD_FONT, SMALL_FONT);
+                tft.setCursor (350, 200);
+                tft.print (F("Rebooting..."));
+                wdDelay (1000);
+                int x = system (_FX("/sbin/reboot || /usr/sbin/reboot"));
+                if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
+                    doExit();
+                else {
+                    eraseScreen();
+                    tft.setCursor (350, 200);
+                    tft.print (F("Reboot failed"));
+                    wdDelay (1000);
+                    Serial.printf (_FX("system(reboot) returns %d\n"), x);
+                    do_full_init = true;
                 }
             }
         }
 
-    } while (selection > 0 && !shutdownRUS (sdctl[selection].box, sdctl[selection].color,
-                                            sdc_kbd >= 0 ? _SDC_KBC : RA8875_BLACK));
+        if (mitems[6].set) {
+            if (RUSure (menu_b, mitems[6].label) && askPasswd (_FX("shutdown"), true)) {
+                Serial.print (_FX("Shutting down\n"));
+                eraseScreen();
+                selectFontStyle (BOLD_FONT, SMALL_FONT);
+                tft.setCursor (350, 200);
+                tft.print (F("Shutting down..."));
+                wdDelay (1000);
+                int x = system (_FX("/sbin/poweroff || /usr/sbin/poweroff || /sbin/halt || /usr/sbin/halt"));
+                if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
+                    doExit();
+                else {
+                    eraseScreen();
+                    tft.setCursor (350, 200);
+                    tft.print (F("Shutdown failed"));
+                    wdDelay (1000);
+                    Serial.printf (_FX("system(poweroff) returns %d\n"), x);
+                    do_full_init = true;
+                }
+            }
+        }
+    }
 
-    // engage selection action
-    switch (selection) {
-    case _SDC_RESUME:
+    // redraw stuff nearby regardless to remove menu
+    if (do_full_init) {
+        // need full screen redo
         initScreen();
-        break;
-    case _SDC_RESTART:
-        if (askPasswd (_FX("restart"), true)) {
-            Serial.print (_FX("Restarting\n"));
-            eraseScreen();  // fast touch feedback
-            doReboot();
-        }
-        // resume normal ops
-        break;
- #if defined(_IS_UNIX)
-    case _SDC_EXIT:
-        if (askPasswd (_FX("exit"), true)) {
-            Serial.print (_FX("Exiting\n"));
-            doExit();
-        }
-        // resume normal ops
-        break;
-    case _SDC_POSTDIAGS:
-        postDiags();
-        initScreen();
-        break;
-    case _SDC_REBOOT:
-        if (askPasswd (_FX("reboot"), true)) {
-            eraseScreen();
-            selectFontStyle (BOLD_FONT, SMALL_FONT);
-            drawStringInBox (_FX("Rebooting..."), sdctl[3].box, true, sdctl[3].color);
-            tft.drawPR();                                       // forces immediate effect
-            Serial.print (_FX("Rebooting\n"));
-            int x = system (_FX("/usr/sbin/reboot"));           // presumes suid root
-            if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
-                doExit();
-            else
-                Serial.printf (_FX("system(reboot) returns %d\n"), x);
-        }
-        // resume normal ops
-        break;
-    case _SDC_SHUTDOWN:
-        if (askPasswd (_FX("shutdown"), true)) {
-            eraseScreen();
-            selectFontStyle (BOLD_FONT, SMALL_FONT);
-            drawStringInBox (_FX("Shutting down..."), sdctl[4].box, true, sdctl[4].color);
-            tft.drawPR();            // forces immediate effect
-            Serial.print (_FX("Shutting down\n"));
-            int x = system (_FX("/usr/sbin/poweroff || /usr/sbin/halt"));           // presumes suid root
-            if (WIFEXITED(x) && WEXITSTATUS(x) == 0)
-                doExit();
-            else
-                Serial.printf (_FX("system(poweroff) returns %d\n"), x);
-        }
-        // resume normal ops
-        break;
- #endif // _IS_UNIX
-    default:
-        fatalError (_FX("Shutdown choice: %d"), selection);
-        return;
-
+    } else {
+        // just need updating in upper corner
+        showClocks();
+        updateClocks(true);
+        drawMainPageStopwatch(true);
+        drawScreenLock();
+        drawVersion(true);
     }
 }
 
@@ -3018,9 +2755,7 @@ static void shutdown(void)
  */
 void doReboot()
 {
-    #if defined(_IS_UNIX)
-        defaultState();
-    #endif
+    defaultState();
     ESP.restart();
     for(;;);
 }
@@ -3029,18 +2764,13 @@ void doReboot()
  */
 void doExit()
 {
-    #if defined(_IS_ESP8266)
-        // all we can do
-        doReboot();
-    #else
-        Serial.printf (_FX("doExit()\n"));
-        defaultState();
-        #if defined(_USE_FB0)
-            // X11 calls doExit on window close, so drawing would be recursive back to that thread
-            eraseScreen();
-        #endif
-        _exit(0);
+    Serial.printf (_FX("doExit()\n"));
+    defaultState();
+    #if defined(_USE_FB0)
+        // X11 calls doExit on window close, so drawing would be recursive back to that thread
+        eraseScreen();
     #endif
+    _exit(0);
 }
 
 /* call to display one final message, never returns
@@ -3113,90 +2843,66 @@ void fatalError (const char *fmt, ...)
         // button font
         selectFontStyle (LIGHT_FONT, SMALL_FONT);
 
-        #if defined(_IS_ESP8266)
+        // draw boxes and wait for click in either
+        SBox screen_b;
+        screen_b.x = 0;
+        screen_b.y = 0;
+        screen_b.w = tft.width();
+        screen_b.h = tft.height();
+        SBox r_b = {250, 400, 100, 50};
+        SBox x_b = {450, 400, 100, 50};
+        const char r_msg[] = "Restart";
+        const char x_msg[] = "Exit";
+        drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
+        drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
+        int kb_sel = -1;    // 0 if kb chose Restart, 1 if Exit
+        drainTouch();
 
-            // draw box and wait for click
-            SBox r_b = {350, 400, 100, 50};
-            const char r_msg[] = "Restart";
-            drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
-            drainTouch();
+        SCoord s;
+        char kbc;
+        UserInput ui = {
+            screen_b,
+            NULL,
+            false,
+            0,
+            false,
+            s,
+            kbc,
+            false,
+            false
+        };
 
-            for(;;) {
+        for(;;) {
 
-                SCoord s;
-                while (readCalTouchWS (s) == TT_NONE)
-                    wdDelay(20);
+            tft.drawRect (r_b.x+3, r_b.y+3, r_b.w-6, r_b.h-6, kb_sel == 0 ? RA8875_GREEN : RA8875_BLACK);
+            tft.drawRect (x_b.x+3, x_b.y+3, x_b.w-6, x_b.h-6, kb_sel == 1 ? RA8875_GREEN : RA8875_BLACK);
 
-                if (inBox (s, r_b)) {
-                    drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
-                    Serial.print (_FX("Fatal error rebooting\n"));
-                    doReboot();
-                }
+            (void) waitForUser(ui);
+
+            bool kb_go = false;
+            if (kbc) {
+                if (kb_sel < 0)
+                    kb_sel = 0;
+                if (kbc == '\r' || kbc == '\n' || kbc == ' ')
+                    kb_go = true;
+                else if (kbc == 'h' && kb_sel == 1)
+                    kb_sel = 0;
+                else if (kbc == 'l' && kb_sel == 0)
+                    kb_sel = 1;
             }
 
-        #else
-
-            // draw boxes and wait for click in either
-            SBox screen_b;
-            screen_b.x = 0;
-            screen_b.y = 0;
-            screen_b.w = tft.width();
-            screen_b.h = tft.height();
-            SBox r_b = {250, 400, 100, 50};
-            SBox x_b = {450, 400, 100, 50};
-            const char r_msg[] = "Restart";
-            const char x_msg[] = "Exit";
-            drawStringInBox (r_msg, r_b, false, RA8875_WHITE);
-            drawStringInBox (x_msg, x_b, false, RA8875_WHITE);
-            int kb_sel = -1;    // 0 if kb chose Restart, 1 if Exit
-            drainTouch();
-
-            SCoord s;
-            char kbc;
-            UserInput ui = {
-                screen_b,
-                NULL,
-                false,
-                0,
-                false,
-                s,
-                kbc
-            };
-
-            for(;;) {
-
-                tft.drawRect (r_b.x+3, r_b.y+3, r_b.w-6, r_b.h-6, kb_sel == 0 ? RA8875_GREEN : RA8875_BLACK);
-                tft.drawRect (x_b.x+3, x_b.y+3, x_b.w-6, x_b.h-6, kb_sel == 1 ? RA8875_GREEN : RA8875_BLACK);
-
-                (void) waitForUser(ui);
-
-                bool kb_go = false;
-                if (kbc) {
-                    if (kb_sel < 0)
-                        kb_sel = 0;
-                    if (kbc == '\r' || kbc == '\n' || kbc == ' ')
-                        kb_go = true;
-                    else if (kbc == 'h' && kb_sel == 1)
-                        kb_sel = 0;
-                    else if (kbc == 'l' && kb_sel == 0)
-                        kb_sel = 1;
-                }
-
-                if ((kb_go && kb_sel == 0) || inBox (s, r_b)) {
-                    drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
-                    Serial.print (_FX("Fatal error: rebooting\n"));
-                    doReboot();
-                }
-
-                if ((kb_go && kb_sel == 1) || inBox (s, x_b)) {
-                    drawStringInBox (x_msg, x_b, true, RA8875_WHITE);
-                    Serial.print (_FX("Fatal error: exiting\n"));
-                    doExit();
-                }
+            if ((kb_go && kb_sel == 0) || inBox (s, r_b)) {
+                drawStringInBox (r_msg, r_b, true, RA8875_WHITE);
+                Serial.print (_FX("Fatal error: rebooting\n"));
+                doReboot();
             }
 
-        #endif
-
+            if ((kb_go && kb_sel == 1) || inBox (s, x_b)) {
+                drawStringInBox (x_msg, x_b, true, RA8875_WHITE);
+                Serial.print (_FX("Fatal error: exiting\n"));
+                doExit();
+            }
+        }
     }
 
     // bye bye
@@ -3214,29 +2920,6 @@ void getWorstMem (int *heap, int *stack)
     *heap = worst_heap;
     *stack = worst_stack;
 }
-
-#if defined (_IS_ESP8266)
-
-/* call with FLASH string, return pointer to RAM heap string.
- * used to save a lot of RAM for calls that only accept RAM strings, eg, printf's format 
- * N.B. we accommodate nesting these pointers only a few deep then they are reused.
- */
-const char *_FX_helper(const char *flash_string)
-{
-    #define N_PTRS 10
-    static char *ram_string[N_PTRS];
-    static uint8_t nxt_i;
-
-    // get next available pointer
-    char **sp = &ram_string[nxt_i];
-    nxt_i = (nxt_i + 1) % N_PTRS;
-
-    // convert and copy 
-    return strcpy_P (*sp = (char *) realloc (*sp, strlen_P(flash_string)+1),   flash_string);
-}
-
-#endif
-
 
 /* log current heap and stack usage, record worst offenders
  */

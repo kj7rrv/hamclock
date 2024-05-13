@@ -180,6 +180,8 @@ out:
             true,
             s,
             c,
+            false,
+            false
         };
         (void) waitForUser(ui);
 

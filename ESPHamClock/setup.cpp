@@ -10,19 +10,11 @@
 #define DEF_SSID        "FiOS-9QRT4-Guest"
 #define DEF_PASS        "Veritium2017"
 
+#include <string.h>
+#include <errno.h>
+#define _WIFI_ASK
 
-// ESP always needs wifi setup, linux with known wpa format is up to user, others never
-#if defined(_IS_ESP8266)
-    #define _WIFI_ALWAYS
-#elif defined(_IS_LINUX)
-    #include <string.h>
-    #include <errno.h>
-    #define _WIFI_ASK
-#else
-    #define _WIFI_NEVER
-#endif
 static bool good_wpa;
-
 
 // debugs: force all on just for visual testing, and show bounds
 // #define _SHOW_ALL                    // RBF
@@ -34,13 +26,11 @@ static bool good_wpa;
     #undef _WIFI_NEVER
     #undef _WIFI_ASK
     #define _WIFI_ALWAYS
-    #define _SUPPORT_FLIP
     #define _SUPPORT_KX3 
     #define _SUPPORT_NATIVE_GPIO
     #define _SUPPORT_ADIFILE
     #define _SUPPORT_SPOTPATH
     #define _SUPPORT_SCROLLLEN
-    #define _SUPPORT_CTSL
 #endif // _SHOW_ALL
 
 
@@ -65,6 +55,7 @@ static int16_t alt_center_lng;
 static bool alt_center_lng_set;
 static char dxcl_cmds[N_DXCLCMDS][NV_DXCLCMD_LEN];
 static char dx_wlist[NV_DXWLIST_LEN];
+static char spota_wlist[NV_SPOTAWLIST_LEN];
 static char adif_fn[NV_ADIFFN_LEN];
 static char i2c_fn[NV_I2CFN_LEN];
 
@@ -77,8 +68,8 @@ static char i2c_fn[NV_I2CFN_LEN];
 #define KB_SPC_Y        (KB_Y0+NQR*KB_CHAR_H)   // top edge of special keyboard chars
 #define KB_SPC_H        35                      // heights of special keyboard chars
 #define KB_INDENT       16                      // keyboard indent
-#define SBAR_X          (KB_INDENT+3*KB_CHAR_W/2)// space bar x coord
-#define SBAR_W          (KB_CHAR_W*10)          // space bar width
+#define SBAR_X          (KB_INDENT+5*KB_CHAR_W/2)// space bar x coord
+#define SBAR_W          (KB_CHAR_W*8)           // space bar width
 #define F_DESCENT       5                       // font descent below baseline
 #define TF_INDENT       10                      // top row font indent within square
 #define BF_INDENT       30                      // bottom font indent within square
@@ -195,7 +186,7 @@ typedef struct {
     const char *p_str;                          // prompt string
     char *v_str;                                // value string
     uint8_t v_len;                              // size of v_str including EOS
-    uint16_t v_cx;                              // x coord of cursor
+    uint8_t v_ci;                               // v_str index of cursor: insert here, delete char before
 } StringPrompt;
 
 
@@ -237,6 +228,7 @@ typedef enum {
     FLRIGHOST_SPR,
     NTPHOST_SPR,
     ADIFFN_SPR,
+    SPOTAWL_SPR,
 
     // page "4"
     CENTERLNG_SPR,
@@ -267,7 +259,7 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 2" -- index 1
 
-    {1, {135, R2Y(1), 0, PR_H},  {135, R2Y(1), 210, PR_H}, NULL, dx_wlist, NV_DXWLIST_LEN, 0},
+    {1, {135, R2Y(1),  0, PR_H}, {135, R2Y(1), 210, PR_H}, NULL, dx_wlist, NV_DXWLIST_LEN, 0},
     {1, { 15, R2Y(2), 70, PR_H}, { 85, R2Y(2),  85, PR_H}, "port:", NULL, 0, 0},               // shadowed
     {1, { 15, R2Y(3), 70, PR_H}, { 85, R2Y(3), 260, PR_H}, "host:", dx_host, NV_DXHOST_LEN, 0},
     {1, { 15, R2Y(4), 70, PR_H}, { 85, R2Y(4), 260, PR_H}, "login:", dx_login, NV_DXLOGIN_LEN, 0},
@@ -292,15 +284,17 @@ static StringPrompt string_pr[N_SPR] = {
 
     // "page 3" -- index 2
 
-    {2, {150, R2Y(0), 60, PR_H}, {210, R2Y(0),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(0), 60, PR_H}, {350, R2Y(0), 310, PR_H}, "host:", rig_host, NV_RIGHOST_LEN, 0},
-    {2, {150, R2Y(1), 60, PR_H}, {210, R2Y(1),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(1), 60, PR_H}, {350, R2Y(1), 440, PR_H}, "host:", rot_host, NV_ROTHOST_LEN, 0},
-    {2, {150, R2Y(2), 60, PR_H}, {210, R2Y(2),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
-    {2, {290, R2Y(2), 60, PR_H}, {350, R2Y(2), 440, PR_H}, "host:", flrig_host, NV_FLRIGHOST_LEN, 0},
+    {2, {160, R2Y(0), 60, PR_H}, {220, R2Y(0),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {300, R2Y(0), 60, PR_H}, {360, R2Y(0), 300, PR_H}, "host:", rig_host, NV_RIGHOST_LEN, 0},
+    {2, {160, R2Y(1), 60, PR_H}, {220, R2Y(1),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {300, R2Y(1), 60, PR_H}, {360, R2Y(1), 300, PR_H}, "host:", rot_host, NV_ROTHOST_LEN, 0},
+    {2, {160, R2Y(2), 60, PR_H}, {220, R2Y(2),  80, PR_H}, "port:", NULL, 0, 0},               // shadowed
+    {2, {300, R2Y(2), 60, PR_H}, {360, R2Y(2), 300, PR_H}, "host:", flrig_host, NV_FLRIGHOST_LEN, 0},
 
-    {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 330, PR_H}, "host:", ntp_host, NV_NTPHOST_LEN, 0},
-    {2, {100, R2Y(5), 60, PR_H}, {160, R2Y(5), 330, PR_H}, "file:", adif_fn, NV_ADIFFN_LEN, 0},
+    {2, {100, R2Y(3), 60, PR_H}, {160, R2Y(3), 350, PR_H}, "host:", ntp_host, NV_NTPHOST_LEN, 0},
+    {2, {100, R2Y(4), 60, PR_H}, {160, R2Y(4), 350, PR_H}, "file:", adif_fn, NV_ADIFFN_LEN, 0},
+
+    {2, {210, R2Y(5),  0, PR_H}, {210, R2Y(5), 350, PR_H}, NULL, spota_wlist, NV_SPOTAWLIST_LEN, 0},
 
 
     // "page 4" -- index 3
@@ -368,6 +362,8 @@ typedef enum {
     FLRIGUSE_BPR,
     NTPSET_BPR,
     ADIFSET_BPR,
+    SPOTAWLISTA_BPR,
+    SPOTAWLISTB_BPR,
 
     // page "4"
     GPIOOK_BPR,
@@ -394,7 +390,6 @@ typedef enum {
     SCROLLBIG_BPR,
     WEB_FULLSCRN_BPR,
     X11_FULLSCRN_BPR,
-    FLIP_BPR,
 
     N_BPR,
     NOMATE                                      // flag for ent_mate
@@ -466,13 +461,18 @@ static BoolPrompt bool_pr[N_BPR] = {
 
     // "page 3" -- index 2
 
-    {2, {10,  R2Y(0), 100, PR_H},  {100, R2Y(0),  50, PR_H}, false, "rigctld?", "No", "Yes", NOMATE},
-    {2, {10,  R2Y(1), 100, PR_H},  {100, R2Y(1),  50, PR_H}, false, "rotctld?", "No", "Yes", NOMATE},
-    {2, {10,  R2Y(2), 100, PR_H},  {100, R2Y(2),  50, PR_H}, false, "flrig?",   "No", "Yes", NOMATE},
+    {2, {10,  R2Y(0),  90, PR_H},  {100, R2Y(0),  60, PR_H}, false, "rigctld?", "No", "Yes", NOMATE},
+    {2, {10,  R2Y(1),  90, PR_H},  {100, R2Y(1),  60, PR_H}, false, "rotctld?", "No", "Yes", NOMATE},
+    {2, {10,  R2Y(2),  90, PR_H},  {100, R2Y(2),  60, PR_H}, false, "flrig?",   "No", "Yes", NOMATE},
 
-    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "NTP?", "Use default set of servers",
-                                                                                                0, NOMATE},
-    {2, {10,  R2Y(5),  90, PR_H},  {100, R2Y(5), 300, PR_H}, false, "ADIF?", "No", NULL, NOMATE},
+    {2, {10,  R2Y(3),  90, PR_H},  {100, R2Y(3), 300, PR_H}, false, "NTP?", "Use default set of servers",
+                                                                                                NULL, NOMATE},
+    {2, {10,  R2Y(4),  90, PR_H},  {100, R2Y(4), 300, PR_H}, false, "ADIF?", "No", NULL, NOMATE},
+
+
+    {2, {10,  R2Y(5), 150, PR_H},  {160, R2Y(5),  50, PR_H}, false, "S/P/A watch:", "Off", NULL, SPOTAWLISTB_BPR},
+    {2, {10,  R2Y(5), 150, PR_H},  {160, R2Y(5),  50, PR_H}, false, NULL, "On", "Only", SPOTAWLISTA_BPR},
+                                                // 3x entangled: Off: FX  On: TF  Only: TT
 
 
     // "page 4" -- index 3
@@ -540,10 +540,6 @@ static BoolPrompt bool_pr[N_BPR] = {
 
 
 
-    {4, {10,  R2Y(7), 170, PR_H}, {180, R2Y(7), 150, PR_H}, false, "Flip U/D?", "No", "Yes", NOMATE},
-
-
-
     // "page 6" -- index 5
 
     // color scale
@@ -575,15 +571,22 @@ typedef struct {
 #define ALLBOOLS_PAGE   4                       // 0-based counting
 #define COLOR_PAGE      5                       // 0-based counting
 #define ONOFF_PAGE      6                       // 0-based counting
-#define N_PAGES         (HAVE_ONOFF() ? 7 : 6)  // last page is on/off
+#define KBPAGE_FIRST    0                       // first in a series of pages that need a keyboard
+#define KBPAGE_LAST     3                       // last in a series of pages that need a keyboard
+#define MAX_PAGES       7                       // max number of possible pages
+#define N_PAGES         (HAVE_ONOFF() ? MAX_PAGES : (MAX_PAGES-1))      // last page only if on/off
+
+static Focus cur_focus[MAX_PAGES];              // retain focus for each page
+static int cur_page;                            // 0-based 0 .. N_PAGES-1
+
+
+// dx cluster layout
 #define SPIDER_TX       480                     // title x
 #define SPIDER_TY       (R2Y(2) - PR_D)         // title y
 #define SPIDER_BX       345                     // border x
 #define SPIDER_BY       (SPIDER_TY - PR_A - 1)  // border y
 #define SPIDER_BRX      799                     // border right x
 #define SPIDER_BBY      (R2Y(6))                // border bottom y
-static Focus cur_focus;
-static int cur_page;
 
 /* color selector information.
  * since mouse is required it does not participate in tabbing or Focus.
@@ -640,16 +643,11 @@ static ColSelPrompt csel_pr[N_CSPR] = {
             false, RGB565(44,42,99), NV_GRIDCOLOR, "Map grid",
             {0, 0, 0, 0}, false, 0, 0, 0},
 
-#if defined(_IS_UNIX)
-
-    // only UNIX supports drawing rotator direction on main map
     {{CSEL_COL1X+CSEL_PDX, R2Y(5), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(5)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
             {CSEL_COL1X+CSEL_DDX, R2Y(5)+CSEL_DDY, CSEL_DW, CSEL_DH},
             false, RA8875_WHITE, NV_ROTCOLOR, "Rotator",
             {0, 0, 0, 0}, false, 0, 0, 0},
-
-#endif // _IS_UNIX
 
     {{CSEL_COL1X+CSEL_PDX, R2Y(6), CSEL_PW, PR_H},
             {CSEL_COL1X, R2Y(6)+CSEL_TBDY, CSEL_TBSZ, CSEL_TBSZ},
@@ -734,7 +732,6 @@ static const SBox csel_ctl_b = {CSEL_SCX, CSEL_SCY, CSEL_SCW+CSEL_VDX+CSEL_NW, 3
 #define V2X(v)  (CSEL_SCX+(CSEL_SCW-1)*(v)/255)
 
 
-#if defined(_SUPPORT_CTSL)
 // save/load controls
 static const SBox ctsl_save1_b = {CTSL_SA_X, CTSL_Y, CTSL_SA_W, KB_SPC_H};
 static const SBox ctsl_save2_b = {CTSL_SB_X, CTSL_Y, CTSL_SB_W, KB_SPC_H};
@@ -742,14 +739,13 @@ static const SBox ctsl_load1_b = {CTSL_LA_X, CTSL_Y, CTSL_LA_W, KB_SPC_H};
 static const SBox ctsl_load2_b = {CTSL_LB_X, CTSL_Y, CTSL_LB_W, KB_SPC_H};
 static const SBox ctsl_loadp_b = {CTSL_LP_X, CTSL_Y, CTSL_LP_W, KB_SPC_H};
 static const SBox ctsl_loadd_b = {CTSL_LD_X, CTSL_Y, CTSL_LD_W, KB_SPC_H};
-#endif // _SUPPORT_CTSL
 
 
 // virtual qwerty keyboard
 typedef struct {
     char normal, shifted;                               // normal and shifted char
-} Key;
-static const Key qwerty[NQR][NQC] PROGMEM = {
+} OneKBKey;
+static const OneKBKey qwerty[NQR][NQC] = {
     { {'`', '~'}, {'1', '!'}, {'2', '@'}, {'3', '#'}, {'4', '$'}, {'5', '%'}, {'6', '^'},
       {'7', '&'}, {'8', '*'}, {'9', '('}, {'0', ')'}, {'-', '_'}, {'=', '+'}
     },
@@ -774,10 +770,12 @@ static const uint8_t qroff[NQR] = {
 };
 
 // special virtual keyboard chars
-static const SBox delete_b  = {KB_INDENT, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
-static const SBox space_b   = {SBAR_X, KB_SPC_Y, SBAR_W, KB_SPC_H};
-static const SBox done_b    = {SBAR_X+SBAR_W, KB_SPC_Y, SBAR_X-KB_INDENT+1, KB_SPC_H};
-static const SBox page_b    = {800-PAGE_W-KB_INDENT-1, 1, PAGE_W, PAGE_H};
+static const SBox space_b  = {SBAR_X, KB_SPC_Y, SBAR_W, KB_SPC_H};
+static const SBox page_b   = {800-PAGE_W-KB_INDENT-1, 1, PAGE_W, PAGE_H};
+static const SBox delete_b = {KB_INDENT+12*KB_CHAR_W, KB_Y0+2*KB_CHAR_H, KB_CHAR_W, KB_CHAR_H};
+static const SBox done_b   = {KB_INDENT+23*KB_CHAR_W/2, KB_Y0+3*KB_CHAR_H, 3*KB_CHAR_W/2, KB_CHAR_H};
+static const SBox left_b   = {SBAR_X+SBAR_W, KB_SPC_Y, 5*KB_CHAR_W/4, KB_SPC_H};
+static const SBox right_b  = {SBAR_X+SBAR_W+5*KB_CHAR_W/4, KB_SPC_Y, 5*KB_CHAR_W/4, KB_SPC_H};
 
 // note whether ll edited
 static bool ll_edited;
@@ -1093,11 +1091,6 @@ static bool boolIsRelevant (BoolPrompt *bp)
         return (false);
 #endif
 
-#if defined(_IS_ESP8266)
-    if (bp == &bool_pr[WEB_FULLSCRN_BPR])
-        return (false);
-#endif
-
     if (bp == &bool_pr[WIFI_BPR]) {
         #if defined(_WIFI_ALWAYS) || defined(_WIFI_NEVER)
             return (false);
@@ -1132,12 +1125,6 @@ static bool boolIsRelevant (BoolPrompt *bp)
         int cmd_page = atoi (getEntangledValue (&bool_pr[DXCLCMDPGA_BPR], &bool_pr[DXCLCMDPGB_BPR]));
         if (cmd_page != pr_page || !bool_pr[CLUSTER_BPR].state || bool_pr[CLISWSJTX_BPR].state)
             return (false);
-    }
-
-    if (bp == &bool_pr[FLIP_BPR]) {
-        #if !defined(_SUPPORT_FLIP)
-            return (false);
-        #endif
     }
 
     if (bp == &bool_pr[KX3ON_BPR]) {
@@ -1299,13 +1286,10 @@ static bool stringIsRelevant (StringPrompt *sp)
     return (true);
 }
 
-/* move cur_focus to the next tab position.
- * ESP does not know about keyboard input
+/* move cur_focus[cur_page] to the next tab position.
  */
-static void nextTabFocus()
+static void nextTabFocus (bool backwards)
 {
-#if defined(_IS_UNIX)
-
     /* table of ordered fields for moving to next focus with each tab.
      * N.B. group and order within to their respective pages
      */
@@ -1374,6 +1358,8 @@ static void nextTabFocus()
         {       &string_pr[NTPHOST_SPR], NULL},
         { NULL, &bool_pr[ADIFSET_BPR] },
         {       &string_pr[ADIFFN_SPR], NULL},
+        { NULL, &bool_pr[SPOTAWLISTA_BPR] },
+        {       &string_pr[SPOTAWL_SPR], NULL},
 
         // page 4
 
@@ -1405,53 +1391,58 @@ static void nextTabFocus()
         { NULL, &bool_pr[SCROLLLEN_BPR] },
         { NULL, &bool_pr[WEB_FULLSCRN_BPR] },
         { NULL, &bool_pr[X11_FULLSCRN_BPR] },
-        { NULL, &bool_pr[FLIP_BPR] },
     };
     #define N_TAB_FIELDS    NARRAY(tab_fields)
 
     // find current position in table
-    unsigned f;
-    for (f = 0; f < N_TAB_FIELDS; f++)
-        if (memcmp (&cur_focus, &tab_fields[f], sizeof(cur_focus)) == 0)
+    int tab_pos;
+    for (tab_pos = 0; tab_pos < N_TAB_FIELDS; tab_pos++)
+        if (memcmp (&cur_focus[cur_page], &tab_fields[tab_pos], sizeof(Focus)) == 0)
             break;
-    if (f == N_TAB_FIELDS) {
-        Serial.printf (_FX("cur_focus not found\n"));
+    if (tab_pos == N_TAB_FIELDS) {
+        Serial.printf (_FX("cur_focus[%d] not found\n"), cur_page);
         return;
     }
 
-    // move to next relevant field, wrapping if necessary
-    for (unsigned i = 1; i <= N_TAB_FIELDS; i++) {
-        const Focus *fp = &tab_fields[(f+i)%N_TAB_FIELDS];
+    // set step direction multiplier
+    int step_dir = backwards ? -1 : 1;
+
+    // search up or down from tab_pos for next relevant field
+    for (int i = 1; i < N_TAB_FIELDS; i++) {
+        const Focus *fp = &tab_fields[(tab_pos + step_dir*i + N_TAB_FIELDS)%N_TAB_FIELDS];
         if (fp->sp) {
             if (stringIsRelevant(fp->sp)) {
-                cur_focus = *fp;
+                cur_focus[cur_page] = *fp;
                 return;
             }
         } else {
             if (boolIsRelevant(fp->bp)) {
-                cur_focus = *fp;
+                cur_focus[cur_page] = *fp;
                 return;
             }
         }
     }
-    Serial.printf (_FX("new focus not found\n"));
 
-#endif // _IS_UNIX
+    Serial.printf (_FX("new focus not found\n"));
 }
 
-/* set focus to the given string or bool prompt, opposite assumed to be NULL.
+/* set focus on cur_page to the given string or bool prompt, opposite assumed to be NULL.
  * N.B. effect of setting both is undefined
  */
 static void setFocus (StringPrompt *sp, BoolPrompt *bp)
 {
-    cur_focus.sp = sp;
-    cur_focus.bp = bp;
+    cur_focus[cur_page].sp = sp;
+    cur_focus[cur_page].bp = bp;
 }
 
-/* set focus to the first relevant prompt in the current page, if any
+/* set focus to the first relevant prompt in the current page, unless already set
  */
 static void setInitialFocus()
 {
+    // skip if already set
+    if (cur_focus[cur_page].sp || cur_focus[cur_page].bp)
+        return;
+
     StringPrompt *sp0 = NULL;
     BoolPrompt *bp0 = NULL;
 
@@ -1482,19 +1473,28 @@ static void setInitialFocus()
     setFocus (sp0, bp0);
 }
 
-/* draw cursor for cur_focus
+/* find pixel offset to beginning of the ith character within str
+ */
+static uint16_t getStringXi (const char *str, int i)
+{
+    char copy[100];
+    snprintf (copy, sizeof(copy), "%.*s", i, str);
+    return (getTextWidth (copy));
+}
+
+/* draw cursor for cur_focus[cur_page]
  */
 static void drawCursor()
 {
     uint16_t y, x1, x2;
 
-    if (cur_focus.sp) {
-        StringPrompt *sp = cur_focus.sp;
+    if (cur_focus[cur_page].sp) {
+        StringPrompt *sp = cur_focus[cur_page].sp;
         y = sp->v_box.y+sp->v_box.h-CURSOR_DROP;
-        x1 = sp->v_cx;
-        x2 = sp->v_cx+PR_W;
-    } else if (cur_focus.bp) {
-        BoolPrompt *bp = cur_focus.bp;
+        x1 = sp->v_box.x + getStringXi (sp->v_str, sp->v_ci);
+        x2 = x1+PR_W;
+    } else if (cur_focus[cur_page].bp) {
+        BoolPrompt *bp = cur_focus[cur_page].bp;
         y = bp->p_box.y+bp->p_box.h-CURSOR_DROP;
         if (bp->p_str) {
             // cursor in prompt
@@ -1513,19 +1513,19 @@ static void drawCursor()
     tft.drawLine (x1, y+1, x2, y+1, CURSOR_C);
 }
 
-/* erase cursor for cur_focus
+/* erase cursor for cur_focus[cur_page]
  */
 static void eraseCursor()
 {
     uint16_t y, x1, x2;
 
-    if (cur_focus.sp) {
-        StringPrompt *sp = cur_focus.sp;
+    if (cur_focus[cur_page].sp) {
+        StringPrompt *sp = cur_focus[cur_page].sp;
         y = sp->v_box.y+sp->v_box.h-CURSOR_DROP;
-        x1 = sp->v_cx;
-        x2 = sp->v_cx+PR_W;
-    } else if (cur_focus.bp) {
-        BoolPrompt *bp = cur_focus.bp;
+        x1 = sp->v_box.x + getStringXi (sp->v_str, sp->v_ci);
+        x2 = x1+PR_W;
+    } else if (cur_focus[cur_page].bp) {
+        BoolPrompt *bp = cur_focus[cur_page].bp;
         y = bp->p_box.y+bp->p_box.h-CURSOR_DROP;
         x1 = bp->p_box.x;
         x2 = bp->p_box.x+PR_W;
@@ -1565,8 +1565,9 @@ static void eraseSPValue (const StringPrompt *sp)
     fillSBox (sp->v_box, BG_C);
 }
 
-/* draw the value of the given StringPrompt and set v_cx (but don't draw cursor here)
- * N.B. we will shorten v_str to insure it fits within v_box
+/* draw the value of the given StringPrompt.
+ * also init v_ci if 0 but v_str is longer than 0.
+ * N.B. we may shorten v_str to insure it fits within v_box.
  */
 static void drawSPValue (StringPrompt *sp)
 {
@@ -1574,26 +1575,23 @@ static void drawSPValue (StringPrompt *sp)
     tft.setTextColor (TX_C);
     tft.setCursor (sp->v_box.x, sp->v_box.y+sp->v_box.h-PR_D);
 
-    // insure value string fits within box, shortening if necessary
+    // insure value string and final cursor fits within box, shortening if necessary
     size_t vl0 = strlen (sp->v_str);
-    (void) maxStringW (sp->v_str, sp->v_box.w);
+    (void) maxStringW (sp->v_str, sp->v_box.w-PR_W);
     size_t vl1 = strlen (sp->v_str);
 
     if (vl1 < vl0) {
         // string was shortened to fit, show cursor under last character
         eraseSPValue (sp);                              // start over
-        tft.printf (_FX("%.*s"), vl1 - 1, sp->v_str);   // show all but last char
-        sp->v_cx = tft.getCursorX();                    // cursor goes here
-        tft.print(sp->v_str[vl1-1]);                    // draw last char over cursor
+        tft.printf (_FX("%.*s"), vl1, sp->v_str);       // show chars that fit
     } else {
         // more room available, cursor follows string
         tft.print(sp->v_str);
-        sp->v_cx = tft.getCursorX();
     }
 
-    // insure cursor remains within box
-    if (sp->v_cx + PR_W > sp->v_box.x + sp->v_box.w)
-        sp->v_cx = sp->v_box.x + sp->v_box.w - PR_W;
+    // insure v_ci is still within range
+    if (sp->v_ci > vl1)
+        sp->v_ci = vl1;
 
 #ifdef _MARK_BOUNDS
     drawSBox (sp->v_box, GRAY);
@@ -1710,16 +1708,16 @@ static void drawKeyboard()
     for (int r = 0; r < NQR; r++) {
         resetWatchdog();
         uint16_t y = r * KB_CHAR_H + KB_Y0 + KB_CHAR_H;
-        const Key *row = qwerty[r];
+        const OneKBKey *row = qwerty[r];
         for (int c = 0; c < NQC; c++) {
-            const Key *kp = &row[c];
-            char n = (char)pgm_read_byte(&kp->normal);
+            const OneKBKey *kp = &row[c];
+            char n = kp->normal;
             if (n) {
                 uint16_t x = qroff[r] + c * KB_CHAR_W;
 
                 // shifted char above left
                 tft.setCursor (x+TF_INDENT, y-KB_CHAR_H/2-F_DESCENT);
-                tft.print((char)pgm_read_byte(&kp->shifted));
+                tft.print((char)kp->shifted);
 
                 // non-shifted below right
                 tft.setCursor (x+BF_INDENT, y-F_DESCENT);
@@ -1732,13 +1730,14 @@ static void drawKeyboard()
     }
 
     drawStringInBox ("", space_b, false, KF_C);
-    drawStringInBox (_FX("Delete"), delete_b, false, DEL_C);
+    drawStringInBox (_FX("Del"), delete_b, false, DEL_C);
+    drawStringInBox (_FX("<=="), left_b, false, DEL_C);
+    drawStringInBox (_FX("==>"), right_b, false, DEL_C);
 }
 
 
 
 /* convert a screen coord on the virtual keyboard to its char value, if any.
- * N.B. this does NOT handle Delete or Done.
  */
 static bool s2char (SCoord &s, char &kbchar)
 {
@@ -1750,26 +1749,43 @@ static bool s2char (SCoord &s, char &kbchar)
     if (s.y >= KB_Y0) {
         uint16_t kb_y = s.y - KB_Y0;
         uint8_t row = kb_y/KB_CHAR_H;
-        if (row < NQR) {
+        if (row < NQR && s.x > qroff[row]) {
             uint8_t col = (s.x-qroff[row])/KB_CHAR_W;
             if (col < NQC) {
-                const Key *kp = &qwerty[row][col];
-                char n = (char)pgm_read_byte(&kp->normal);
-                if (n) {
-                    // use shifted char if in top half
+                const OneKBKey *kp = &qwerty[row][col];
+                char norm_char = kp->normal;
+                if (norm_char) {
+                    // actually use shifted char if in top half
                     if (s.y < KB_Y0+row*KB_CHAR_H+KB_CHAR_H/2)
-                        kbchar = (char)pgm_read_byte(&kp->shifted);
+                        kbchar = kp->shifted;
                     else
-                        kbchar = n;
+                        kbchar = norm_char;
                     return (true);
                 }
             }
         }
     }
 
-    // check space bar
+    // check a few more special boxes
+
     if (inBox (s, space_b)) {
-        kbchar = ' ';
+        kbchar = CHAR_SPACE;
+        return (true);
+    }
+    if (inBox (s, delete_b)) {
+        kbchar = CHAR_DEL;
+        return (true);
+    }
+    if (inBox (s, left_b)) {
+        kbchar = CHAR_LEFT;
+        return (true);
+    }
+    if (inBox (s, right_b)) {
+        kbchar = CHAR_RIGHT;
+        return (true);
+    }
+    if (inBox (s, done_b)) {
+        kbchar = CHAR_NL;
         return (true);
     }
 
@@ -2079,8 +2095,6 @@ static void drawCSelInitGUI()
             drawCSelPromptColor (p);
     }
 
-#if defined (_SUPPORT_CTSL)
-
     // draw Save controls
     tft.setTextColor (TX_C);
     tft.setCursor (CTSL_SL_X, CTSL_Y + PR_A);
@@ -2096,11 +2110,8 @@ static void drawCSelInitGUI()
     drawStringInBox (_FX(" B "), ctsl_load2_b, false, BUTTON_C);
     drawStringInBox (_FX("pskreporter"), ctsl_loadp_b, false, BUTTON_C);
     drawStringInBox (_FX("default"), ctsl_loadd_b, false, BUTTON_C);
-#endif // _SUPPORT_CTSL
 }
 
-
-#if defined(_SUPPORT_CTSL)
 
 static void colorTableAck (const char *prompt, const SBox &box)
 {
@@ -2208,8 +2219,6 @@ static void loadDefaultColorTable (void)
     drawCSelInitGUI();
 }
 
-#endif // _SUPPORT_CTSL
-
 
 /* handle a possible touch event while on the color selection page.
  * return whether ours
@@ -2269,7 +2278,6 @@ static bool handleCSelTouch (SCoord &s)
         }
     }
 
-#if defined (_SUPPORT_CTSL)
     // else check for save/load buttons
     if (!ours) {
         ours = true;
@@ -2288,7 +2296,6 @@ static bool handleCSelTouch (SCoord &s)
         else
             ours = false;
     }
-#endif // _SUPPORT_CTSL
 
     return (ours);
 }
@@ -2546,14 +2553,13 @@ static void changePage (int new_page)
         setInitialFocus ();
 
     } else {
-        // new page is 0-3 which all use a keyboard
-        if (prev_page >= 0 && prev_page <= 3) {
+        if (prev_page >= KBPAGE_FIRST && prev_page <= KBPAGE_LAST) {
             // just refresh top portion, keyboard already ok
             tft.fillRect (0, 0, tft.width(), KB_Y0-1, BG_C);
             drawPageButton();
             drawCurrentPageFields();
         } else {
-            // full refresh
+            // full refresh to insure no keyboard
             eraseScreen();
             drawPageButton();
             drawCurrentPageFields();
@@ -2620,20 +2626,18 @@ static bool I2CFnOk(void)
 {
     bool ok = strncmp (i2c_fn, _FX("/dev/"), 5) == 0 && strlen (i2c_fn) > 5;
 
-    #if defined(_IS_UNIX)
-        // on linux actually try to open and lock the same as Wire will do
-        if (ok) {
-            int fd = open (i2c_fn, O_RDWR);
-            if (fd < 0) {
-                Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, strerror(errno));
-                ok = false;
-            } else {
-                ok = ::flock (fd, LOCK_EX|LOCK_NB) == 0;
-                Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, ok ? "ok" : strerror(errno));
-                close (fd);
-            }
+    // try to open and lock the same as Wire will do
+    if (ok) {
+        int fd = open (i2c_fn, O_RDWR);
+        if (fd < 0) {
+            Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, strerror(errno));
+            ok = false;
+        } else {
+            ok = ::flock (fd, LOCK_EX|LOCK_NB) == 0;
+            Serial.printf (_FX("I2C: %s: %s\n"), i2c_fn, ok ? "ok" : strerror(errno));
+            close (fd);
         }
-    #endif
+    }
 
     return (ok);
 }
@@ -2699,6 +2703,14 @@ static bool validateStringPrompts (bool show_errors)
             if (strlen(string_pr[DXWLIST_SPR].v_str) == 0)
                 badsids[n_badsids++] = DXWLIST_SPR;
         }
+    }
+
+    // SPOTA watch list must not be blank if being used
+    const char *v = getEntangledValue (&bool_pr[SPOTAWLISTA_BPR], &bool_pr[SPOTAWLISTB_BPR]);
+    if (strcmp (v, bool_pr[SPOTAWLISTA_BPR].f_str)) {  // not Off
+        trim(string_pr[SPOTAWL_SPR].v_str);
+        if (strlen(string_pr[SPOTAWL_SPR].v_str) == 0)
+            badsids[n_badsids++] = SPOTAWL_SPR;
     }
 
     // check rig_host and port if used
@@ -3104,6 +3116,7 @@ static void initSetup()
         dx_port = 0;
         NVWriteUInt16(NV_DXPORT, dx_port);
     }
+
     if (!NVReadString(NV_DXWLIST, dx_wlist)) {
         memset (dx_wlist, 0, sizeof(dx_wlist));
         NVWriteString(NV_DXWLIST, dx_wlist);
@@ -3115,6 +3128,18 @@ static void initSetup()
     }
     bool_pr[DXWLISTA_BPR].state = (dxwlist_mask & 1) == 1;
     bool_pr[DXWLISTB_BPR].state = (dxwlist_mask & 2) == 2;
+
+    if (!NVReadString(NV_SPOTAWLIST, spota_wlist)) {
+        memset (spota_wlist, 0, sizeof(spota_wlist));
+        NVWriteString(NV_SPOTAWLIST, spota_wlist);
+    }
+    uint8_t spotawlist_mask;
+    if (!NVReadUInt8(NV_SPOTAWLISTMASK, &spotawlist_mask)) {
+        spotawlist_mask = 0;
+        NVWriteUInt8(NV_SPOTAWLISTMASK, spotawlist_mask);
+    }
+    bool_pr[SPOTAWLISTA_BPR].state = (spotawlist_mask & 1) == 1;
+    bool_pr[SPOTAWLISTB_BPR].state = (spotawlist_mask & 2) == 2;
 
     if (!NVReadString(NV_DXCMD0, dxcl_cmds[0])) {
         memset (dxcl_cmds[0], 0, sizeof(dxcl_cmds[0]));
@@ -3283,22 +3308,6 @@ static void initSetup()
     for (int i = 0; i < N_CSPR; i++)
         csel_pr[i].a_state = (dashed & (1 << i)) ? true : false;
 
-#if defined (_IS_ESP8266)
-    // ESP does not support paths period, let alone dashed paths
-    NODASH (csel_pr[BAND160_CSPR]);
-    NODASH (csel_pr[BAND80_CSPR]);
-    NODASH (csel_pr[BAND60_CSPR]);
-    NODASH (csel_pr[BAND40_CSPR]);
-    NODASH (csel_pr[BAND30_CSPR]);
-    NODASH (csel_pr[BAND20_CSPR]);
-    NODASH (csel_pr[BAND17_CSPR]);
-    NODASH (csel_pr[BAND15_CSPR]);
-    NODASH (csel_pr[BAND12_CSPR]);
-    NODASH (csel_pr[BAND10_CSPR]);
-    NODASH (csel_pr[BAND6_CSPR]);
-    NODASH (csel_pr[BAND2_CSPR]);
-#endif
-
 
     // X11 flags, engage immediately if defined or sensible thing to do
     uint16_t x11flags;
@@ -3366,13 +3375,6 @@ static void initSetup()
         NVWriteUInt8 (NV_LOGUSAGE, logok);
     }
     bool_pr[LOGUSAGE_BPR].state = (logok != 0);
-
-    uint8_t rot;
-    if (!NVReadUInt8 (NV_ROTATE_SCRN, &rot)) {
-        rot = 0;
-        NVWriteUInt8 (NV_ROTATE_SCRN, rot);
-    }
-    bool_pr[FLIP_BPR].state = (rot != 0);
 
     uint8_t met;
     if (!NVReadUInt8 (NV_METRIC_ON, &met)) {
@@ -3514,11 +3516,7 @@ static bool askRun()
     tft.setCursor (tft.width()/6, tft.height()/5);
 
     // appropriate prompt
-#if defined(_IS_ESP8266)
-    tft.print (F("Tap anywhere to enter Setup ... "));
-#else
     tft.print (F("Click anywhere to enter Setup ... "));
-#endif // _IS_ESP8266
 
     int16_t x = tft.getCursorX();
     int16_t y = tft.getCursorY();
@@ -3571,6 +3569,11 @@ static void initDisplay()
     strcpy (wifi_pw, _FX("mywifipassword"));
 #endif
 
+    // set all v_ci to right ends
+    for (int i = 0; i < N_SPR; i++)
+        string_pr[i].v_ci = strlen (string_pr[i].v_str);
+        
+
     // force drawing first page
     cur_page = -1;
     changePage(0);
@@ -3606,23 +3609,28 @@ static void runSetup()
     SCoord s;
     char c;
     UserInput ui = {
-        screen,
-        NULL,
-        false,
-        0,
-        false,
-        s,
-        c,
+        screen,         // bounding box
+        NULL,           // no aux function
+        false,          // don't care
+        0,              // wait forever
+        false,          // no clocks
+        s,              // AKA ui.tap
+        c,              // AKA ui.kbchar
+        false,          // whether ctrl with kbchar
+        false           // whether shift with kbchar
     };
 
     do {
         StringPrompt *sp;
         BoolPrompt *bp = NULL;
 
-        // wait for next tap or character input
+        // wait forever for next tap or character input
+        ui.ctrl = ui.shift = false;             // reset modifier keys before each call
         (void) waitForUser(ui);
-        if (!ui.kbchar)
-            (void) s2char (ui.tap, ui.kbchar);
+        if (!ui.kbchar) {
+            if (!s2char (ui.tap, ui.kbchar))
+                ui.kbchar = 0;
+        }
 
         // process special cases first
 
@@ -3636,7 +3644,7 @@ static void runSetup()
             continue;
         }
 
-        if (c == 27) {              // esc
+        if (c == CHAR_ESC) {              // esc
 
             // show next page
             changePage ((cur_page+1)%N_PAGES);
@@ -3657,26 +3665,50 @@ static void runSetup()
 
         // proceed with normal fields processing
 
-        if (c == '\t') {
+        if (c == CHAR_TAB) {
 
-            // move focus to next tab position
+            // move focus to next or prior tab position depending on shift modified
             eraseCursor();
-            nextTabFocus();
+            nextTabFocus(ui.shift);
             drawCursor();
 
-        } else if (cur_focus.sp && (inBox (s, delete_b) || c == '\b' || c == 127)) {
+        } else if (cur_focus[cur_page].sp && c == CHAR_LEFT) {
 
-            // tapped Delete or kb equiv while focus is string: remove one char
+            // move cursor one left, if possible
 
-            StringPrompt *sp = cur_focus.sp;
-            size_t vl = strlen (sp->v_str);
-            if (vl > 0) {
-
-                // erase cursor, shorten string, find new width, erase to end, redraw
+            StringPrompt *sp = cur_focus[cur_page].sp;
+            if (sp->v_ci > 0) {
                 eraseCursor ();
-                sp->v_str[vl-1] = '\0';
-                uint16_t sw = getTextWidth (sp->v_str);
-                tft.fillRect (sp->v_box.x+sw, sp->v_box.y, sp->v_box.w-sw, sp->v_box.h, BG_C);
+                sp->v_ci -= 1;
+                drawCursor ();
+            }
+
+        } else if (cur_focus[cur_page].sp && c == CHAR_RIGHT) {
+
+            // move cursor one right, if there is more to the string
+
+            StringPrompt *sp = cur_focus[cur_page].sp;
+            if (sp->v_ci < strlen(sp->v_str)) {
+                eraseCursor ();
+                sp->v_ci += 1;
+                drawCursor ();
+            }
+
+        } else if (cur_focus[cur_page].sp && (c == CHAR_DEL || c == CHAR_BS)) {
+
+            // tapped Delete while focus is string
+
+            StringPrompt *sp = cur_focus[cur_page].sp;
+            size_t vl = strlen (sp->v_str);
+            if (vl > 0 && sp->v_ci > 0) {
+
+                eraseCursor ();
+                eraseSPValue (sp);
+
+                // remove v_str[v_ci-1]
+                memmove (&sp->v_str[sp->v_ci-1], &sp->v_str[sp->v_ci], vl - sp->v_ci + 1); // w/ EOS
+                sp->v_ci -= 1;
+
                 drawSPValue (sp);
                 drawCursor ();
 
@@ -3684,20 +3716,23 @@ static void runSetup()
             }
 
 
-        } else if (cur_focus.sp && isprint(c)) {
+        } else if (cur_focus[cur_page].sp && isprint(c)) {
 
-            // received a new char for string in focus
+            // received a new char for inserting into string with focus
 
-            StringPrompt *sp = cur_focus.sp;
+            StringPrompt *sp = cur_focus[cur_page].sp;
 
-            // append c if room, else ignore
+            // insert c at v_ci if room, else ignore
             size_t vl = strlen (sp->v_str);
             if (vl < sp->v_len-1U) {
 
                 eraseCursor ();
+                eraseSPValue (sp);
 
-                sp->v_str[vl++] = c;
-                sp->v_str[vl] = '\0';
+                // make room by shifting right
+                memmove (&sp->v_str[sp->v_ci+1], &sp->v_str[sp->v_ci], vl - sp->v_ci);
+                sp->v_str[sp->v_ci++] = c;
+                sp->v_str[++vl] = '\0';
 
                 drawSPValue (sp);
                 drawCursor ();
@@ -3705,11 +3740,11 @@ static void runSetup()
                 checkLLGEdit(sp);
             }
 
-        } else if (tappedBool (s, &bp) || (c == ' ' && cur_focus.bp)) {
+        } else if (tappedBool (s, &bp) || (c == CHAR_SPACE && cur_focus[cur_page].bp)) {
 
             // typing space applies to focus bool
-            if (c == ' ')
-                bp = cur_focus.bp;
+            if (c == CHAR_SPACE)
+                bp = cur_focus[cur_page].bp;
 
             // ignore tapping on bools not being shown
             if (!bp || !boolIsRelevant(bp))
@@ -3928,21 +3963,23 @@ static void runSetup()
           #endif // _SUPPORT_KX3
 
             else if (bp == &bool_pr[DXCLCMDPGA_BPR] || bp == &bool_pr[DXCLCMDPGB_BPR]) {
-                // redraw showing next command page
+
+                // redraw showing next page of commands.
+                // TODO: just draw the commands to avoid moving focus back to the beginning
                 changePage (cur_page);
             }
 
         } else if (tappedStringPrompt (s, &sp) && stringIsRelevant (sp)) {
 
             // move focus here unless already there
-            if (cur_focus.sp != sp) {
+            if (cur_focus[cur_page].sp != sp) {
                 eraseCursor ();
                 setFocus (sp, NULL);
                 drawCursor ();
             }
         }
 
-    } while (!(inBox (s, done_b) || c == '\r' || c == '\n') || !validateStringPrompts(true));
+    } while (!(c == CHAR_CR || c == CHAR_NL) || !validateStringPrompts(true));
 
     drawDoneButton(true);
 
@@ -3976,7 +4013,6 @@ static void saveParams2NV()
 #endif
 
     NVWriteString(NV_CALLSIGN, call_sign);
-    NVWriteUInt8 (NV_ROTATE_SCRN, bool_pr[FLIP_BPR].state);
     NVWriteUInt8 (NV_METRIC_ON, bool_pr[UNITS_BPR].state);
     NVWriteUInt8 (NV_WEEKMON, bool_pr[WEEKDAY1MON_BPR].state);
     NVWriteUInt8 (NV_BEAR_MAG, bool_pr[BEARING_BPR].state);
@@ -3995,6 +4031,8 @@ static void saveParams2NV()
     NVWriteString (NV_DXHOST, dx_host);
     NVWriteString (NV_DXWLIST, dx_wlist);
     NVWriteUInt8 (NV_DXWLISTMASK, bool_pr[DXWLISTA_BPR].state | (bool_pr[DXWLISTB_BPR].state << 1));
+    NVWriteString (NV_SPOTAWLIST, spota_wlist);
+    NVWriteUInt8 (NV_SPOTAWLISTMASK, bool_pr[SPOTAWLISTA_BPR].state | (bool_pr[SPOTAWLISTB_BPR].state << 1));
 
     // N.B. these are NOT contiguous so can not look through N_DXCLCMDS
     NVWriteString (NV_DXCMD0, dxcl_cmds[0]);
@@ -4079,6 +4117,34 @@ static void saveParams2NV()
     }
 }
 
+/* return whether the given call is on the given watch list.
+ * watch is a list of calls or prefixes separated by spaces or commas.
+ * if call contains a slash, it is first cracked open to find the likely dx portion.
+ * call is considered to be in the list if its first chars match any of the calls or prefixes.
+ */
+static bool onWatchList (const char *watch, int wlen, const char *call)
+{
+    // extract likely dx portion
+    char dx_call[NV_CALLSIGN_LEN];
+    findDXCallPortion (call, dx_call);
+
+    // copy watch for strtok
+    StackMalloc watched(wlen);
+    char *wl = (char *) watched.getMem();
+    strcpy (wl, watch);
+
+    // separators
+    const char *sep = ", ";
+    
+    // scan for match
+    for (char *prefix = strtok (wl, sep); prefix; prefix = strtok (NULL, sep))
+        if (strncasecmp (dx_call, prefix, strlen(prefix)) == 0)
+            return (true);
+
+    // no match
+    return (false);
+}
+
 /* draw the given string with border centered inside the given box using the current font.
  */
 void drawStringInBox (const char str[], const SBox &b, bool inverted, uint16_t color)
@@ -4101,9 +4167,6 @@ void drawStringInBox (const char str[], const SBox &b, bool inverted, uint16_t c
  */
 void clockSetup()
 {
-    // must start with a calibrated screen
-    calibrateTouch(false);
-
     // set font used throughout, could use BOLD if not for long wifi password
     selectFontStyle (LIGHT_FONT, SMALL_FONT);
 
@@ -4124,20 +4187,11 @@ void clockSetup()
         if (!str_ok)
             validateStringPrompts (true);
 
-        // get current rotation state so we can tell whether it changes
-        bool rotated = rotateScreen();
-
         // main interaction loop
         runSetup();
 
         // save
         saveParams2NV();
-
-        // must recalibrate if rotating screen
-        if (rotated != rotateScreen()) {
-            tft.setRotation(rotateScreen() ? 2 : 0);
-            calibrateTouch(true);
-        }
     }
 
     // log and clean up shadowed params
@@ -4285,13 +4339,6 @@ bool useDXCluster()
     return (bool_pr[CLUSTER_BPR].state);
 }
 
-/* return whether to rotate the screen
- */
-bool rotateScreen()
-{
-    return (bool_pr[FLIP_BPR].state);
-}
-
 /* return whether to use metric units
  */
 bool useMetricUnits()
@@ -4383,12 +4430,7 @@ bool useLocalNTPHost()
  */
 bool useOSTime()
 {
-#if defined(_IS_ESP8266)
-    // there is no OS
-    return (false);
-#else
     return (bool_pr[NTPSET_BPR].state && strcmp (ntp_host, "OS") == 0);
-#endif
 }
 
 /* return desired date format
@@ -4700,32 +4742,16 @@ const char *getI2CFilename(void)
     return (bool_pr[I2CON_BPR].state ? i2c_fn : NULL);
 }
 
+
+
 /* return whether the given call is on the dx cluster watch list
  */
 bool onDXWatchList (const char *call)
 {
-    // dx_wlist is a list of calls or prefixes separated by spaces or commas.
-    // call is considered to be in the list if its first chars match any of the calls or prefixes.
-    // TODO: use the dx prefix of portable calls
-
-    // copy for strtok
-    StackMalloc watched(sizeof(dx_wlist));
-    char *wl = (char *) watched.getMem();
-    strcpy (wl, dx_wlist);
-
-    // separators
-    const char *sep = ", ";
-    
-    // scan for match
-    for (char *prefix = strtok (wl, sep); prefix; prefix = strtok (NULL, sep))
-        if (strncasecmp (call, prefix, strlen(prefix)) == 0)
-            return (true);
-
-    // no match
-    return (false);
+    return (onWatchList (dx_wlist, NV_DXWLIST_LEN, call));
 }
 
-/* return whether to display only calls in the watch list
+/* return whether to display only calls in the DX watch list
  */
 bool showOnlyOnDXWatchList()
 {
@@ -4733,12 +4759,32 @@ bool showOnlyOnDXWatchList()
     return (strcmp (v, bool_pr[DXWLISTB_BPR].t_str) == 0);
 }
 
+
+
+/* return whether the given call is on the spota watch list
+ */
+bool onSPOTAWatchList (const char *call)
+{
+    return (onWatchList (spota_wlist, NV_SPOTAWLIST_LEN, call));
+}
+
+/* return whether to display only calls in the SPOTA watch list
+ */
+bool showOnlyOnSPOTAWatchList()
+{
+    const char *v = getEntangledValue (&bool_pr[SPOTAWLISTA_BPR], &bool_pr[SPOTAWLISTB_BPR]);
+    return (strcmp (v, bool_pr[SPOTAWLISTB_BPR].t_str) == 0);
+}
+
+
+
 /* return whether scolling panes should show the newest entry on top, else newest on bottom
  */
 bool scrollTopToBottom(void)
 {
     return (bool_pr[SCROLLDIR_BPR].state);
 }
+
 
 /* return number of ADDITIONAL scroll rows
  */

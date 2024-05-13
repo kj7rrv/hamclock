@@ -202,8 +202,8 @@ class Adafruit_RA8875 {
 	int SCALESZ;
 
         // put and get next keyboard character
-        void putChar (char c);
-        char getChar(bool *control, bool *shift);
+        void putChar (char c, bool ctrl, bool shift);
+        char getChar(bool *ctrl, bool *shift);
 
         // set and get current mouse position
         bool getMouse (uint16_t *x, uint16_t *y);

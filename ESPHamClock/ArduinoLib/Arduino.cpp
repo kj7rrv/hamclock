@@ -287,7 +287,6 @@ static void usage (const char *errfmt, ...)
             fprintf (stderr, " -a l : set gimbal trace level\n");
             fprintf (stderr, " -b h : set backend host:port to h; default is %s:%d\n", backend_host,
                                     backend_port);
-            fprintf (stderr, " -c   : disable all touch events from web interface\n");
             fprintf (stderr, " -d d : set working directory to d; default is %s\n", defaultAppDir().c_str());
             fprintf (stderr, " -e p : set RESTful web server port to p or -1 to disable; default is %d\n",
                                     RESTFUL_PORT);
@@ -302,11 +301,13 @@ static void usage (const char *errfmt, ...)
                                     defaultAppDir().c_str());
             fprintf (stderr, " -p f : require passwords in file f formatted as lines of \"category password\"\n");
             fprintf (stderr, "        categories: changeUTC exit newde newdx reboot restart setup shutdown unlock upgrade\n");
+            fprintf (stderr, " -r p : set read-only live web server port to p or -1 to disable; default %d\n",
+                                    LIVEWEB_RO_PORT);
             fprintf (stderr, " -s d : start time as if UTC now is d formatted as YYYY-MM-DDTHH:MM:SS\n");
             fprintf (stderr, " -t p : throttle max cpu to p percent; default is %.0f\n", DEF_CPU_USAGE*100);
             fprintf (stderr, " -v   : show version info then exit\n");
-            fprintf (stderr, " -w p : set live web server port to p or -1 to disable; default %d\n",
-                                    LIVEWEB_PORT);
+            fprintf (stderr, " -w p : set read-write live web server port to p or -1 to disable; default %d\n",
+                                    LIVEWEB_RW_PORT);
             fprintf (stderr, " -x n : set n max live web connections; max %d; default %d\n", liveweb_maxmax,
                                     liveweb_max);
             fprintf (stderr, " -y   : activate keyboard cursor control arrows/hjkl/Return -- beware stuck keys!\n");
@@ -354,9 +355,6 @@ static void crackArgs (int ac, char *av[])
                         ac--;
                     }
                     break;
-                case 'c':
-                    no_web_touch = true;
-                    break;
                 case 'd':
                     if (ac < 2)
                         usage ("missing directory path for -d");
@@ -367,8 +365,6 @@ static void crackArgs (int ac, char *av[])
                     if (ac < 2)
                         usage ("missing RESTful port number for -e");
                     restful_port = atoi(*++av);
-                    if (restful_port != -1 && (restful_port < 1 || restful_port > 65535))
-                        usage ("-e port must be -1 or [1,65355]");
                     ac--;
                     break;
                 case 'f':
@@ -422,6 +418,12 @@ static void crackArgs (int ac, char *av[])
                     pw_file = *++av;
                     ac--;
                     break;
+                case 'r':
+                    if (ac < 2)
+                        usage ("missing R/O web port number for -r");
+                    liveweb_ro_port = atoi(*++av);
+                    ac--;
+                    break;
                 case 's':
                     if (ac < 2)
                         usage ("missing date/time for -s");
@@ -442,10 +444,8 @@ static void crackArgs (int ac, char *av[])
                     break;      // lint
                 case 'w':
                     if (ac < 2)
-                        usage ("missing web port number for -w");
-                    liveweb_port = atoi(*++av);
-                    if (liveweb_port != -1 && (liveweb_port < 1 || liveweb_port > 65535))
-                        usage ("-w port must be -1 or [1,65535]");
+                        usage ("missing R/W web port number for -w");
+                    liveweb_rw_port = atoi(*++av);
                     ac--;
                     break;
                 case 'x':
@@ -476,8 +476,18 @@ static void crackArgs (int ac, char *av[])
             usage ("-i requires -k");
         if (cl_set && !skip_skip)
             usage ("-l requires -k");
-        if (liveweb_port == restful_port && liveweb_port > 0 && restful_port > 0)
-            usage ("Live web and RESTful ports may not be equal: %d %d", liveweb_port, restful_port);
+        if (liveweb_rw_port != -1 && (liveweb_rw_port < 1 || liveweb_rw_port > 65535))
+            usage ("-w port must be -1 or [1,65535]");
+        if (liveweb_ro_port != -1 && (liveweb_ro_port < 1 || liveweb_ro_port > 65535))
+            usage ("-r port must be -1 or [1,65535]");
+        if (restful_port != -1 && (restful_port < 1 || restful_port > 65535))
+            usage ("-e port must be -1 or [1,65355]");
+        if (liveweb_rw_port > 0 && liveweb_ro_port > 0 && liveweb_rw_port == liveweb_ro_port)
+            usage ("Live web R/W and R/O ports must not be equal: %d %d", liveweb_rw_port, liveweb_ro_port);
+        if (liveweb_rw_port > 0 && restful_port > 0 && liveweb_rw_port == restful_port)
+            usage ("Live web R/W and RESTful ports must not be equal: %d %d", liveweb_rw_port, restful_port);
+        if (liveweb_ro_port > 0 && restful_port > 0 && liveweb_ro_port == restful_port)
+            usage ("Live web R/O and RESTful ports must not be equal: %d %d", liveweb_ro_port, restful_port);
 
         // change liveweb_max if set here
         if (max_lw > 0)

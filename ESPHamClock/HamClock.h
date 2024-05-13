@@ -30,11 +30,6 @@
   #define _SUPPORT_NATIVE_GPIO
 #endif
 
-// Flip screen only on ESP
-#if defined(_IS_ESP8266)
-  #define _SUPPORT_FLIP
-#endif
-
 // kx3 on any system with NATIVE_GPIO
 #if defined(_SUPPORT_NATIVE_GPIO)
   #define _SUPPORT_KX3
@@ -76,11 +71,6 @@
 // whether to even look for DSI touchscreen
 #if !defined(_WEB_ONLY) && (defined(_IS_LINUX_RPI) || defined(_USE_FB0))
     #define _SUPPORT_DSI
-#endif
-
-// whether to support saving color tables
-#if !defined(_IS_ESP8266)
-    #define _SUPPORT_CTSL
 #endif
 
 
@@ -162,7 +152,6 @@ typedef struct {
 #include "Adafruit_MCP23X17.h"
 
 // HamClock modules
-#include "calibrate.h"
 #include "version.h"
 #include "P13.h"
 
@@ -510,7 +499,6 @@ extern char *stack_start;               // used to estimate stack usage
 typedef enum {
     TT_NONE,                            // no touch event
     TT_TAP,                             // brief touch event
-    TT_HOLD,                            // at least TOUCH_HOLDT
 } TouchType;
 
 
@@ -661,12 +649,6 @@ extern void drawADIFSpotsOnMap (void);
 extern int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], int n_ynot);
 extern bool getClosestADIFSpot (const LatLong &ll, DXClusterSpot *sp, LatLong *llp);
 extern void checkADIF(void);
-
-#if defined(_IS_ESP8266)
-extern bool overAnyADIFSpots(const SCoord &s);
-#endif
-
-
 
 
 
@@ -878,10 +860,18 @@ extern uint16_t HSV_2_RGB565 (uint8_t h, uint8_t s, uint8_t v);
  *
  */
 
+typedef struct {
+    time_t start_t;                             // start time for alarm, always UTC
+    char *date_str;                             // malloced date string as user wants to see it
+    char *title;                                // malloced title
+    char *url;                                  // malloced web page URL
+} ContestEntry;
+
 extern bool updateContests (const SBox &box);
 extern bool checkContestsTouch (const SCoord &s, const SBox &box);
-extern int getContests (char **credp, char ***conppp);
-
+extern int getContests (const char **credp, const ContestEntry **cepp);
+extern void scrubContestTitleLine (char *line, const SBox &box);
+extern const char* getAlarmedContestTitle (time_t t);
 
 
 
@@ -908,9 +898,9 @@ extern bool getClosestDXC (const DXClusterSpot *list, int n_list, const LatLong 
     DXClusterSpot *sp, LatLong *llp);
 extern void setDXCSpotPosition (DXClusterSpot &s);
 extern void getRawSpotSizes (uint16_t &lwRaw, uint16_t &mkRaw);
-extern void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row);
+extern void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row, uint16_t bg_color);
 extern void drawDXPathOnMap (const DXClusterSpot &spot);
-extern bool onDXWatchList (const char *call);
+
 
 
 
@@ -944,7 +934,6 @@ extern PanZoom pan_zoom;
 
 typedef struct {
     LatLong ll;                         // proposed location
-    TouchType tt;                       // tapped or hold
     SCoord s;                           // tap location
     bool pending;                       // whether to engage at proper map drawing time
 } MapPopup;
@@ -1298,10 +1287,6 @@ class ScrollState {
 };
 
 
-extern void strtolower (char *str);
-extern void strtoupper (char *str);
-
-
 
 /*********************************************************************************************
  *
@@ -1329,9 +1314,7 @@ typedef enum {
     SATPATH_CSPR,
     SATFOOT_CSPR,
     GRID_CSPR,
-#if defined(_IS_UNIX)
     ROTATOR_CSPR,
-#endif
     // N.B. see loadPSKColorTable()
     BAND160_CSPR,
     BAND80_CSPR,
@@ -1368,7 +1351,6 @@ extern bool useGPSDLoc(void);
 extern bool labelSpots(void);
 extern bool dotSpots(void);
 extern bool plotSpotCallsigns(void);
-extern bool rotateScreen(void);
 extern float getBMETempCorr(int i);
 extern float getBMEPresCorr(int i);
 extern bool setBMETempCorr(BMEIndex i, float delta);
@@ -1408,7 +1390,10 @@ extern const char *getADIFilename(void);
 extern bool scrollTopToBottom(void);
 extern int nMoreScrollRows(void);
 extern bool useOSTime (void);
+extern bool onDXWatchList (const char *call);
 extern bool showOnlyOnDXWatchList(void);
+extern bool onSPOTAWatchList (const char *call);
+extern bool showOnlyOnSPOTAWatchList();
 extern bool rankSpaceWx(void);
 extern bool showNewDXDEWx(void);
 
@@ -1416,6 +1401,17 @@ extern bool showNewDXDEWx(void);
 
 
 
+
+
+/*********************************************************************************************
+ *
+ * string.cpp
+ *
+ */
+
+extern uint32_t stringHash (const char *str);
+extern void strtolower (char *str);
+extern void strtoupper (char *str);
 
 
 
@@ -1565,6 +1561,7 @@ typedef struct {
 } MenuInfo;
 
 extern bool runMenu (MenuInfo &menu);
+extern void menuMsg (const SBox &box, uint16_t color, const char *msg);
 extern void menuRedrawOk (SBox &ok_b, MenuOkState oks);
 
 
@@ -1576,6 +1573,7 @@ typedef struct {
     bool update_clocks;                         // whether to update clocks while waiting
     SCoord &tap;                                // tap location or ...
     char &kbchar;                               // keyboard char code
+    bool ctrl, shift;                           // set if kbchar was accommpanied by modifier keys
 } UserInput;
 
 extern bool waitForUser (UserInput &ui);
@@ -1680,7 +1678,7 @@ typedef enum {
     NV_METRIC_ON,               // whether to use metric or imperical values
     NV_LKSCRN_ON,               // whether screen lock is on
     NV_MAPPROJ,                 // 0: merc 1: azim 2: azim 1
-    NV_ROTATE_SCRN,             // whether to flip screen
+    NV_ROTATE_SCRN,             // deprecated after removing ESP
 
     NV_WIFI_SSID,               // WIFI SSID
     NV_WIFI_PASSWD_OLD,         // deprecated
@@ -1744,7 +1742,7 @@ typedef enum {
 
     NV_PANE3ROTSET,             // PlotChoice bitmask of pane 3 rotation choices
     NV_AUX_TIME,                // 0=date, DOY, JD, MJD, LST, UNIX
-    NV_ALARMCLOCK,              // DE alarm time 60*hr + min, + 60*24 if armed
+    NV_DAILYALARM,              // daily alarm time 60*hr + min, + 60*24 if armed; always DE TZ
     NV_BC_UTCTIMELINE,          // band conditions timeline labeled in UTC else DE
     NV_RSS_INTERVAL,            // RSS update interval, seconds
 
@@ -1800,7 +1798,7 @@ typedef enum {
     NV_ONTASSOTA,               // SOTA sort 0-3: Band Call ID Age
     NV_BRB_ROTSET,              // Beacon box mode bit mask
     NV_ROTCOLOR,                // rotator map color
-    NV_CONTESTS,                // 1 to show date
+    NV_CONTESTS,                // bit 1 to show date, bit use DE timezone
 
     NV_BCTOA,                   // VOACAP take off angle, degs
     NV_ADIFFN,                  // ADIF file name, if any
@@ -1830,6 +1828,11 @@ typedef enum {
     NV_ZOOM,                    // integral zoom factor
     NV_PANX,                    // center x from 0 center, + right, @ zoom 1
     NV_PANY,                    // center y from 0 center, + up, @ zoom 1
+    NV_SPOTAWLISTMASK,          // 0: on, 2: off, 3: only
+
+    NV_SPOTAWLIST,              // S/POTA watch list
+    NV_ONCEALARM,               // one-time alarm time(). always in UTC
+    NV_ONCEALARMMASK,           // bit 1 = armed, 2 = user wants UTC (else DE TZ)
 
     NV_N
 
@@ -1856,6 +1859,7 @@ typedef enum {
 #define NV_DXCLCMD_LEN          35
 #define NV_ADIFFN_LEN           30
 #define NV_I2CFN_LEN            30
+#define NV_SPOTAWLIST_LEN       26
 
 
 
@@ -2030,6 +2034,8 @@ extern void restoreNormPANE0(void);
 extern bool ll2Prefix (const LatLong &ll, char prefix[MAX_PREF_LEN+1]);
 extern bool call2LL (const char *call, LatLong &ll);
 extern void findCallPrefix (const char *call, char prefix[MAX_PREF_LEN]);
+extern void findDXCallPortion (const char *call, char dx_call[NV_CALLSIGN_LEN]);
+
 
 
 
@@ -2366,7 +2372,6 @@ extern float simpleSphereDist (const LatLong &ll1, const LatLong &ll2);
  *
  */
 
-extern void calibrateTouch(bool force);
 extern void drainTouch(void);
 extern TouchType readCalTouch (SCoord &s);
 extern TouchType checkKBWarp (SCoord &s);
@@ -2433,10 +2438,14 @@ extern void drawMainPageStopwatch (bool force);
 extern bool setSWEngineState (SWEngineState nsws, uint32_t ms);
 extern SWEngineState getSWEngineState (uint32_t *sw_timer, uint32_t *cd_period);
 extern SWDisplayState getSWDisplayState (void);
-extern void getAlarmState (AlarmState &as, uint16_t &hr, uint16_t &mn);
-extern void setAlarmState (const AlarmState &as, uint16_t hr, uint16_t mn);
+extern void getDailyAlarmState (AlarmState &as, uint16_t &de_hr, uint16_t &de_mn);
+extern void setDailyAlarmState (const AlarmState &as, uint16_t de_hr, uint16_t de_mn);
+extern void getOneTimeAlarmState (AlarmState &as, time_t &t, bool &utc, char str[], size_t str_l);
+extern bool setOneTimeAlarmState (AlarmState as, bool utc, const char time_str[]);
+extern bool setOneTimeAlarmState (AlarmState as, bool utc, time_t t);
 extern SWBCBits getBigClockBits(void);
 extern void SWresetIO(void);
+
 
 
 

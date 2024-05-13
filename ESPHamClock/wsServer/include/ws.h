@@ -34,6 +34,10 @@ extern "C" {
 	#include <stdint.h>
 	#include <inttypes.h>
 
+        #include <arpa/inet.h>
+        #include <sys/socket.h>
+        #include <netinet/in.h>
+
 	/**
 	 * @name Global configurations
 	 */
@@ -218,7 +222,37 @@ extern "C" {
 	#define SEND(client,buf,len) send_all((client), (buf), (len), MSG_NOSIGNAL)
 	#define RECV(fd,buf,len) recv((fd)->client_sock, (buf), (len), 0)
 
-	/* Opaque client connection type. */
+        /**
+         * @brief Client socks.
+         */
+        struct ws_connection
+        {
+                int client_sock; /**< Client socket FD.        */
+                int state;       /**< WebSocket current state. */
+
+                /* Timeout thread and locks. */
+                pthread_mutex_t mtx_state;
+                pthread_cond_t cnd_state_close;
+                pthread_t thrd_tout;
+                bool close_thrd;
+
+                /* malloced http header down through and including blank line */
+                char *header;
+
+                /* Send lock. */
+                pthread_mutex_t mtx_snd;
+
+                /* IP address and port. */
+                char ip[INET6_ADDRSTRLEN];
+                int port;
+
+                /* Ping/Pong IDs and locks. */
+                int32_t last_pong_id;
+                int32_t current_ping_id;
+                pthread_mutex_t mtx_ping;
+        };
+
+	/* handy client connection type. */
 	typedef struct ws_connection ws_cli_conn_t;
 
 	/**

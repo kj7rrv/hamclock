@@ -531,6 +531,8 @@ void drawMoonElPlot()
             true,
             s,
             c,
+            false,
+            false
         };
         while (waitForUser(ui)) {
 

@@ -208,6 +208,10 @@ static void drawONTAVisSpots (const SBox &box, const ONTAState *osp)
             // set y location
             uint16_t y = y0 + osp->ss.getDisplayRow(i) * ONTA_ROWDY;
 
+            // highlight overall bg if on watch list
+            if (onSPOTAWatchList (spot.dx_call))
+                tft.fillRect (x, y-1, box.w-2, ONTA_ROWDY-3, RA8875_RED);
+
             // show freq with proper band map color background
             uint16_t bg_col = getBandColor ((long)(spot.kHz*1000));           // wants Hz
             uint16_t txt_col = getGoodTextColor (bg_col);
@@ -440,6 +444,12 @@ bool updateOnTheAir (const SBox &box, ONTAProgram whoami)
             // ignore GHz spots because they are too wide to print
             if (hz >= 1000000000) {
                 Serial.printf (_FX("ONTA: ignoring freq >= 1 GHz: %s\n"), line);
+                continue;
+            }
+
+            // add unless not on exclusive watch list
+            if (showOnlyOnSPOTAWatchList() && !onSPOTAWatchList(dxcall)) {
+                Serial.printf (_FX("ONTA: %s not on watch list\n"), dxcall);
                 continue;
             }
 

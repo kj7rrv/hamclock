@@ -1641,7 +1641,7 @@ void Adafruit_RA8875::drawPR(void)
 
 /* return a typed character and current modifier keys if interested (may be NULL), else 0
  */
-char Adafruit_RA8875::getChar(bool *control_set, bool *shift_set)
+char Adafruit_RA8875::getChar (bool *control_set, bool *shift_set)
 {
     char c = 0;
     pthread_mutex_lock (&kb_lock);
@@ -1654,7 +1654,6 @@ char Adafruit_RA8875::getChar(bool *control_set, bool *shift_set)
                 *shift_set = ks.shift;
             if (++kb_qhead == KB_N)
                 kb_qhead = 0;
-            // printf ("getChar= 0x%x %c\n", c, c);
         }
     pthread_mutex_unlock (&kb_lock);
     return (c);
@@ -1662,13 +1661,13 @@ char Adafruit_RA8875::getChar(bool *control_set, bool *shift_set)
 
 /* insert a character into the kb queue
  */
-void Adafruit_RA8875::putChar (char c)
+void Adafruit_RA8875::putChar (char c, bool ctrl, bool shift)
 {
     pthread_mutex_lock (&kb_lock);
         KBState &ks = kb_q[kb_qtail];
         ks.c = c;
-        ks.control = false;
-        ks.shift = false;
+        ks.control = ctrl;
+        ks.shift = shift;
         if (++kb_qtail == KB_N)
             kb_qtail = 0;
     pthread_mutex_unlock (&kb_lock);
@@ -1835,7 +1834,7 @@ void Adafruit_RA8875::captureSelection()
 
             // inject selection into kb q
             for (unsigned i = 0; i < ressize; i++)
-                putChar (result[i]);
+                putChar (result[i], false, false);
 
             XFree(result);
         }
@@ -1850,19 +1849,16 @@ void Adafruit_RA8875::encodeKeyEvent (XKeyEvent *event)
         // check a few values of interest
         KeySym ks = XLookupKeysym (event, 0);
         switch (ks) {
-        case XK_Left:           // convert to vi's h
-            c = 'h';
-            break;
-        case XK_Down:           // convert to vi's j
-            c = 'j';
-            break;
-        case XK_Up:             // convert to vi's k
-            c = 'k';
-            break;
-        case XK_Right:          // convert to vi's l
-            c = 'l';
-            break;
-        case XK_v:              // might be paste
+        case XK_Left:      c = CHAR_LEFT;  break;
+        case XK_Down:      c = CHAR_DOWN;  break;
+        case XK_Up:        c = CHAR_UP;    break;
+        case XK_Right:     c = CHAR_RIGHT; break;
+        case XK_BackSpace: c = CHAR_BS;    break;
+        case XK_Tab:       c = CHAR_TAB;   break;
+        case XK_Return:    c = CHAR_NL;    break;
+        case XK_Escape:    c = CHAR_ESC;   break;
+        case XK_Delete:    c = CHAR_DEL;   break;
+        case XK_v:         // might be paste
             if (requestSelection (XK_v, event->state))
                 return;
             break;
@@ -1882,7 +1878,6 @@ void Adafruit_RA8875::encodeKeyEvent (XKeyEvent *event)
             if (++kb_qtail == KB_N)
                 kb_qtail = 0;
             pthread_mutex_unlock (&kb_lock);
-            // printf ("encode key= 0x%x %c\n", c, c);
         }
 }
 
@@ -2180,10 +2175,10 @@ bool Adafruit_RA8875::warpCursor (char dir, unsigned n, int *xp, int *yp)
 
         // move by n app positions
         switch (dir) {
-        case 'h': new_x = win_x-n*SCALESZ; break;       // left
-        case 'j': new_y = win_y+n*SCALESZ; break;       // down
-        case 'k': new_y = win_y-n*SCALESZ; break;       // up
-        case 'l': new_x = win_x+n*SCALESZ; break;       // right
+        case CHAR_LEFT:  new_x = win_x-n*SCALESZ; break;
+        case CHAR_DOWN:  new_y = win_y+n*SCALESZ; break;
+        case CHAR_UP:    new_y = win_y-n*SCALESZ; break;
+        case CHAR_RIGHT: new_x = win_x+n*SCALESZ; break;
         default: break;
         }
 
@@ -2562,10 +2557,10 @@ bool Adafruit_RA8875::warpCursor (char dir, unsigned n, int *xp, int *yp)
 
         // move by n app positions
         switch (dir) {
-        case 'h': new_x = mouse_x-n*SCALESZ; break;       // left
-        case 'j': new_y = mouse_y+n*SCALESZ; break;       // down
-        case 'k': new_y = mouse_y-n*SCALESZ; break;       // up
-        case 'l': new_x = mouse_x+n*SCALESZ; break;       // right
+        case CHAR_LEFT:  new_x = mouse_x-n*SCALESZ; break;
+        case CHAR_DOWN:  new_y = mouse_y+n*SCALESZ; break;
+        case CHAR_UP:    new_y = mouse_y-n*SCALESZ; break;
+        case CHAR_RIGHT: new_x = mouse_x+n*SCALESZ; break;
         default: break;
         }
 
@@ -2621,27 +2616,19 @@ void Adafruit_RA8875::kbThread ()
             // read next char, beware trouble
 	    int nr = read (kb_fd, buf, 1);
 	    if (nr == 1) {
-		pthread_mutex_lock (&kb_lock);
-                    printf ("KB: %d %c\n", buf[0], buf[0]);
-                    KBState &ks = kb_q[kb_qtail];
-                    if (isupper(buf[0])) {
-                        ks.c = tolower(buf[0]);
-                        ks.control = false;
-                        ks.shift = true;
-                    } else if (buf[0] == '\10' || buf[0] == '\13' || buf[0] == '\14') {
-                        // one of ^hkl for keyboard cursor control; but not ^j because that's Enter
-                        ks.c = buf[0] + 96;     // convert to lower case printable char...
-                        ks.control = true;      // ... with control set
-                        ks.shift = false;
-                    } else {
+                // arrow keys need a state machine to parse ESC [ A/B/C/D, plus non-block for normal ESC
+                printf ("KB: %d %c\n", buf[0], buf[0]);
+                if (isprint(buf[0])) {
+                    pthread_mutex_lock (&kb_lock);
+                        KBState &ks = kb_q[kb_qtail];
                         ks.c = buf[0];
                         ks.control = false;
                         ks.shift = false;
-                    }
-                    if (++kb_qtail == KB_N)
-                        kb_qtail = 0;
-		    fb_dirty = true;
-		pthread_mutex_unlock (&kb_lock);
+                        if (++kb_qtail == KB_N)
+                            kb_qtail = 0;
+                        fb_dirty = true;
+                    pthread_mutex_unlock (&kb_lock);
+                }
 	    } else {
                 if (nr < 0)
                     printf ("KB: %s\n", strerror(errno));

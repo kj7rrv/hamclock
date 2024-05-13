@@ -77,8 +77,11 @@ static void drawAllVisDXCSpots (const SBox &box)
 {
     int min_i, max_i;
     if (dxc_ss.getVisIndices (min_i, max_i) > 0) {
-        for (int i = min_i; i <= max_i; i++)
-            drawSpotOnList (box, dx_spots[i], dxc_ss.getDisplayRow(i));
+        for (int i = min_i; i <= max_i; i++) {
+            DXClusterSpot &spot = dx_spots[i];
+            uint16_t bg_col = onDXWatchList (spot.dx_call) ? RA8875_RED : RA8875_BLACK;
+            drawSpotOnList (box, spot, dxc_ss.getDisplayRow(i), bg_col);
+        }
     }
 
     dxc_ss.drawScrollDownControl (box, DXC_COLOR);
@@ -745,6 +748,8 @@ bool sendDXClusterDELLGrid()
     return (false);
 }
 
+/* prepare a fresh box but preserve any existing spots
+ */
 static void initDXGUI (const SBox &box)
 {
     // prep
@@ -972,7 +977,7 @@ bool updateDXCluster(const SBox &box)
     // just update ages occasionally if nothing new
     if (any_new)
         last_draw = millis();
-    else if (timesUp (&last_draw, 60000))
+    else if (timesUp (&last_draw, 1000))
         drawAllVisDXCSpots (box);
 
     // didn't break
@@ -1018,8 +1023,9 @@ bool checkDXClusterTouch (const SCoord &s, const SBox &box)
 
         // clear control?
         if (s.x < box.x + CLRBOX_DX+2*CLRBOX_R) {
-            showHost (box, RA8875_GREEN);
+            dxc_ss.n_data = 0;
             initDXGUI(box);
+            showHost (box, RA8875_GREEN);
             return (true);
         }
 
@@ -1307,18 +1313,14 @@ void drawDXPathOnMap (const DXClusterSpot &spot)
     #endif // _SUPPORT_SPOTPATH 
 }
 
-/* draw the given spot in the given pane row, known to be visible.
+/* draw the given spot in the given pane row with given bg color, known to be visible.
  */
-void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row)
+void drawSpotOnList (const SBox &box, const DXClusterSpot &spot, int row, uint16_t bg_col)
 {
     selectFontStyle (LIGHT_FONT, FAST_FONT);
     char line[50];
 
-    // overall background color depends on whether spot is on watch list
-    const bool watched = onDXWatchList (spot.dx_call);
-    const uint16_t bg_col = watched ? RA8875_RED : RA8875_BLACK;
-
-    // erase entire row
+    // set entire row to bg_col
     const uint16_t x = box.x+4;
     const uint16_t y = box.y + LISTING_Y0 + row*LISTING_DY;
     const uint16_t h = LISTING_DY - 2;

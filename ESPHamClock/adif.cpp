@@ -1,7 +1,6 @@
 /* support for the ADIF file pane and mapping.
  * based on https://www.adif.org/314/ADIF_314.htm
  * pane layout and operations are the same as dxcluster.
- * ESP does not support files, it can only show a few QSOs via set_adif REST command.
  */
 
 #include "HamClock.h"
@@ -14,9 +13,9 @@ bool from_set_adif;                                     // set when spots are lo
 #define LISTING_Y0      47                              // first entry y down from box top 
 #define LISTING_DY      14                              // listing row separation
 #define FILENM_Y0       32                              // file name down from box top
+#define MAX_SPOTS       1000                            // max n spots to keep
 
 static DXClusterSpot *adif_spots;                       // malloced list
-static int max_spots;                                   // max adif_spots
 static ScrollState adif_ss;                             // scroll controller
 
 typedef uint8_t crc_t;                                  // CRC data type
@@ -542,8 +541,11 @@ static void drawAllVisADIFSpots (const SBox &box)
     // show all visible adif_spots
     int min_i, max_i;
     if (adif_ss.getVisIndices (min_i, max_i) > 0) {
-        for (int i = min_i; i <= max_i; i++)
-            drawSpotOnList (box, adif_spots[i], adif_ss.getDisplayRow(i));
+        for (int i = min_i; i <= max_i; i++) {
+            const DXClusterSpot &spot = adif_spots[i];
+            uint16_t bg_col = onSPOTAWatchList (spot.dx_call) ? RA8875_RED : RA8875_BLACK;
+            drawSpotOnList (box, spot, adif_ss.getDisplayRow(i), bg_col);
+        }
     }
 
     // show scroll controls
@@ -623,7 +625,7 @@ static void addADIFSpot (const DXClusterSpot &spot)
     #endif
 
     // if already full, just discard spot if older than oldest
-    if (adif_ss.n_data == max_spots && spot.spotted < adif_spots[0].spotted)
+    if (adif_ss.n_data == MAX_SPOTS && spot.spotted < adif_spots[0].spotted)
         return;
 
     // assuming file probably has oldest entries first then each spot is probably newer than any so far,
@@ -632,13 +634,13 @@ static void addADIFSpot (const DXClusterSpot &spot)
     for (new_i = adif_ss.n_data; --new_i >= 0 && spot.spotted < adif_spots[new_i].spotted; )
         continue;
 
-    if (adif_ss.n_data == max_spots) {
+    if (adif_ss.n_data == MAX_SPOTS) {
         // adif_spots is already full: make room by shifting out the oldest up through new_i
         memmove (adif_spots, &adif_spots[1], new_i * sizeof(DXClusterSpot));
     } else {
         // make room by moving existing entries newer than new_i
         memmove (&adif_spots[new_i+2], &adif_spots[new_i+1], (adif_ss.n_data-new_i-1)*sizeof(DXClusterSpot));
-        adif_ss.n_data += 1;                   // we've made room for spot
+        adif_ss.n_data += 1;                    // we've made room for spot
         new_i += 1;                             // put it 1 past the older entry 
     }
 
@@ -664,13 +666,13 @@ static void addADIFSpot (const DXClusterSpot &spot)
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we clear from_set_adif.
  * N.B. caller must close fp
- * N.B. silently trucated to newest max_spots
+ * N.B. silently trucated to newest MAX_SPOTS
  * N.B. errors only reported for broken adif, not missing fields
  */
 static int readADIFile (FILE *fp, char ynot[], int n_ynot)
 {
     // restart list at full capacity
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, max_spots * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
     adif_ss.n_data = 0;
@@ -678,7 +680,7 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
 
-    // crack entire file, but keep only up to max_spots newest
+    // crack entire file, but keep only up to MAX_SPOTS newest
     DXClusterSpot spot;
     ADIFParser adif;
     adif.ps = ADIFPS_STARTFILE;
@@ -687,8 +689,10 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
             resetADIFSpots();
             return (-1);
         }
-        if (adif.ps == ADIFPS_FINISHED)
-            addADIFSpot (spot);
+        if (adif.ps == ADIFPS_FINISHED) {
+            if (!showOnlyOnSPOTAWatchList() || onSPOTAWatchList(spot.dx_call))
+                addADIFSpot (spot);
+        }
     }
 
     // gettimeofday (&t1, NULL);
@@ -717,13 +721,13 @@ static int readADIFile (FILE *fp, char ynot[], int n_ynot)
  * return new count else -1 with short reason in ynot[] and adif_spots reset.
  * N.B. we set from_set_adif.
  * N.B. caller must close connection.
- * N.B. silently trucated to newest max_spots
+ * N.B. silently trucated to newest MAX_SPOTS
  * N.B. errors only reported for broken adif, not missing fields
  */
 int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], int n_ynot)
 {
     // restart list at full capacity
-    adif_spots = (DXClusterSpot *) realloc (adif_spots, max_spots * sizeof(DXClusterSpot));
+    adif_spots = (DXClusterSpot *) realloc (adif_spots, MAX_SPOTS * sizeof(DXClusterSpot));
     if (!adif_spots)
         fatalError (_FX("ADIF: no memory for new spots\n"));
     adif_ss.n_data = 0;
@@ -731,7 +735,7 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
     // struct timeval t0, t1;
     // gettimeofday (&t0, NULL);
 
-    // crack entire stream, but keep only a max of the max_spots newest
+    // crack entire stream, but keep only a max of the MAX_SPOTS newest
     DXClusterSpot spot;
     ADIFParser adif;
     adif.ps = ADIFPS_STARTFILE;
@@ -741,8 +745,10 @@ int readADIFWiFiClient (WiFiClient &client, long content_length, char ynot[], in
             resetADIFSpots();
             return (-1);
         }
-        if (adif.ps == ADIFPS_FINISHED)
-            addADIFSpot (spot);
+        if (adif.ps == ADIFPS_FINISHED) {
+            if (!showOnlyOnSPOTAWatchList() || onSPOTAWatchList(spot.dx_call))
+                addADIFSpot (spot);
+        }
     }
 
     // gettimeofday (&t1, NULL);
@@ -779,7 +785,6 @@ void updateADIF (const SBox &box)
         adif_ss.top_vis = 0;
     }
     adif_ss.n_data = 0;
-    max_spots = adif_ss.max_vis + nMoreScrollRows();
 
     // get full file name, or show web hint
     const char *fn = getADIFilename();
@@ -796,9 +801,6 @@ void updateADIF (const SBox &box)
 
     // read file unless spots are from_set_adif
     bool showing_errmsg = false;
-
-#if !defined(_IS_ESP8266)
-    // ESP can not read files, it can only have spots via set_adif REST
     if (!from_set_adif) {
         char errmsg[100];
         FILE *fp = fopen (fn_exp, "r");
@@ -823,7 +825,6 @@ void updateADIF (const SBox &box)
             fclose (fp);
         }
     }
-#endif // !_IS_ESP8266
 
     // draw spots unless we are showing an err msg
     if (!showing_errmsg)
@@ -846,30 +847,6 @@ void drawADIFSpotsOnMap()
         drawDXCLabelOnMap (si);
     }
 }
-
-#if defined (_IS_ESP8266)
-
-/* return whether the given screen coord lies over any spot label.
- * N.B. we assume map_s are set
- * ESP only
- */
-bool overAnyADIFSpots(const SCoord &s)
-{
-        // false for sure if not being used
-        if (findPaneForChoice(PLOT_CH_ADIF) == PANE_NONE)
-            return (false);
-
-        for (uint8_t i = 0; i < adif_ss.n_data; i++)
-            // N.B. inCircle works even though map_c is in Raw coords because on ESP they equal canonical
-            if (labelSpots() ? inBox (s, adif_spots[i].dx_map.map_b)
-                             : (dotSpots() ? inCircle (s, adif_spots[i].dx_map.map_c) : false))
-                return (true);
-
-        return (false);
-}
-
-#endif // _IS_ESP8266
-
 
 /* check for touch at s in the ADIF pane located in the given box.
  * return true if touch is for us else false so mean user wants to change pane selection.
@@ -894,14 +871,34 @@ bool checkADIFTouch (const SCoord &s, const SBox &box)
         return (false);
     }
 
-    // tap in body means reread the file, if one is set
-    if (getADIFilename()) {
-        from_set_adif = false;
-        scheduleNewPlot(PLOT_CH_ADIF);
+    else if (s.y < box.y + FILENM_Y0 + 10) {
+
+        // tap file name to force immediate re-read
+        if (getADIFilename()) {
+            from_set_adif = false;
+            scheduleNewPlot(PLOT_CH_ADIF);
+        }
+
+        // our touch regardless of file success
+        return (true);
     }
 
-    // ours
-    return (true);
+    else {
+
+        // tapped entry to set DX
+
+        int row_i = (s.y - box.y - LISTING_Y0)/LISTING_DY;
+        int data_i;
+        if (adif_ss.findDataIndex (row_i, data_i)) {
+            LatLong ll;
+            ll.lat_d = rad2deg(adif_spots[data_i].dx_lat);
+            ll.lng_d = rad2deg(adif_spots[data_i].dx_lng);
+            newDX (ll, NULL, adif_spots[data_i].dx_call);       // normalizes
+        }
+
+        // our touch regardless of whether row was occupied
+        return (true);
+    }
 }
 
 /* find closest spot and location on either end to given ll, if any.

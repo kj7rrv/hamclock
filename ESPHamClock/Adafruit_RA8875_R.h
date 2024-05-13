@@ -1,6 +1,5 @@
-/* this is the same interface as Adafruit_RA8875 with two differences:
- *   on ESP8266 it implements rotation correctly.
- *   on UNIX systems it can draw on X11 or RPi /dev/fb0.
+/* this is the same interface as Adafruit_RA8875 with a few additions so 
+ * on UNIX systems it can draw on X11 or RPi /dev/fb0.
  *
  * N.B. we only remimplented the functions we use, we don't claim this works with everything.
  */
@@ -78,12 +77,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		x1 = width()  - 1 - x1;
 		y1 = height() - 1 - y1;
 	    }
-            #if defined (_IS_ESP8266)
-                (void)thickness;
-                Adafruit_RA8875::drawLine(x0, y0, x1, y1, color);
-            #else
-                Adafruit_RA8875::drawLine(x0, y0, x1, y1, thickness, color);
-            #endif
+            Adafruit_RA8875::drawLine(x0, y0, x1, y1, thickness, color);
 	}
 
         // non-standard
@@ -95,12 +89,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		x1 = width()  - 1 - x1;
 		y1 = height() - 1 - y1;
 	    }
-            #if defined (_IS_ESP8266)
-                (void)thickness;
-                Adafruit_RA8875::drawLine(x0, y0, x1, y1, color);
-            #else
-                Adafruit_RA8875::drawLineRaw (x0, y0, x1, y1, thickness, color);
-            #endif
+            Adafruit_RA8875::drawLineRaw (x0, y0, x1, y1, thickness, color);
 	}
 
 	void drawRect (int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
@@ -121,11 +110,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		x0 = width() - 1 - x0;
 		y0 = height() - 1 - y0;
 	    }
-            #if defined (_IS_ESP8266)
-                Adafruit_RA8875::drawRect(x0, y0, w, h, color);
-            #else
-                Adafruit_RA8875::drawRectRaw (x0, y0, w, h, color);
-            #endif
+            Adafruit_RA8875::drawRectRaw (x0, y0, w, h, color);
 	}
 
 	void fillRect(int16_t x0, int16_t y0, int16_t w, int16_t h, uint16_t color)
@@ -148,11 +133,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		w = -w;
 		h = -h;
 	    }
-            #if defined (_IS_ESP8266)
-                Adafruit_RA8875::fillRect(x0, y0, w, h, color);
-            #else
-                Adafruit_RA8875::fillRectRaw (x0, y0, w, h, color);
-            #endif
+            Adafruit_RA8875::fillRectRaw (x0, y0, w, h, color);
 	}
 
 	void drawCircle(int16_t x0, int16_t y0, int16_t r, uint16_t color)
@@ -171,11 +152,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		x0 = width() - 1 - x0;
 		y0 = height() - 1 - y0;
 	    }
-            #if defined (_IS_ESP8266)
-                Adafruit_RA8875::drawCircle(x0, y0, r, color);
-            #else
-                Adafruit_RA8875::drawCircleRaw (x0, y0, r, color);
-            #endif
+            Adafruit_RA8875::drawCircleRaw (x0, y0, r, color);
 	}
 
 	void fillCircle(int16_t x0, int16_t y0, int16_t r, uint16_t color)
@@ -194,11 +171,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 		x0 = width() - 1 - x0;
 		y0 = height() - 1 - y0;
 	    }
-            #if defined (_IS_ESP8266)
-                Adafruit_RA8875::fillCircle(x0, y0, r, color);
-            #else
-                Adafruit_RA8875::fillCircleRaw (x0, y0, r, color);
-            #endif
+            Adafruit_RA8875::fillCircleRaw (x0, y0, r, color);
 	}
 
 	void drawTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color)
@@ -229,11 +202,7 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
 
         void setTextWrap (bool on)
         {
-            #if defined (_IS_ESP8266)
-                Adafruit_RA8875::setTextWrap(on);
-            #else
-                (void) on;      // not used
-            #endif
+            (void) on;      // not used
         }
 
         // non-standard
@@ -269,47 +238,6 @@ class Adafruit_RA8875_R : public Adafruit_RA8875 {
                 Adafruit_RA8875::drawLine (poly[n_poly-1].x, poly[n_poly-1].y, poly[0].x, poly[0].y, color);
             }
         }
-
-
-#if defined (_IS_ESP8266)
-
-        // stubs for ESP Arduino
-
-        void setPR (uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
-            (void)(x);
-            (void)(y);
-            (void)(w);
-            (void)(h);
-        }
-        void drawPR(void) {}
-        void X11OptionsEngageNow (bool fullscreen) {
-            (void)(fullscreen);
-        }
-        void getScreenSize (int *w, int *h) {
-            *w = 800;
-            *h = 480;
-        }
-        bool displayReady() {
-            return (true);
-        }
-        char getChar(bool *, bool *) {
-            return (0);
-        }
-        void putChar (char c) {
-            (void)(c);
-        }
-        bool getMouse (uint16_t *, uint16_t *) {
-            return (false);
-        }
-        bool warpCursor (char, unsigned, int *, int *) {
-            return (false);
-        }
-        int SCALESZ = 1;
-	void drawPixelRaw(int16_t x, int16_t y, uint16_t color) {
-            drawPixel(x, y, color);
-        }
-
-#endif
 
 };
 
